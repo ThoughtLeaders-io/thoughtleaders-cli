@@ -7,10 +7,10 @@ from tl_cli.auth.login import login
 from tl_cli.auth.token_store import clear_tokens, load_tokens
 
 app = typer.Typer(help="Authentication commands")
-err = Console(stderr=True)
+console = Console(stderr=True)
 
 
-@app.command()
+@app.command("login", help="Log in to ThoughtLeaders via browser.")
 def login_cmd() -> None:
     """Log in to ThoughtLeaders via browser."""
     login()
@@ -20,7 +20,7 @@ def login_cmd() -> None:
 def logout_cmd() -> None:
     """Clear stored authentication tokens."""
     clear_tokens()
-    err.print("[green]Logged out successfully.[/green]")
+    console.print("[green]Logged out successfully.[/green]")
 
 
 @app.command("status")
@@ -28,12 +28,12 @@ def status_cmd() -> None:
     """Show current authentication status."""
     tokens = load_tokens()
     if not tokens:
-        err.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
+        console.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
         raise SystemExit(2)
 
     if tokens.is_expired:
-        err.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
-        err.print("Run: tl auth login")
+        console.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
+        console.print("Run: tl auth login")
         raise SystemExit(2)
 
-    err.print(f"[green]Authenticated[/green] as: {tokens.email or 'unknown'}")
+    console.print(f"[green]Authenticated[/green] as: {tokens.email or 'unknown'}")

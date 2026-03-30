@@ -47,6 +47,12 @@ def main(
     """ThoughtLeaders CLI."""
 
 
+# System
+app.add_typer(auth_app, name="auth")
+app.add_typer(setup_app, name="setup")
+app.add_typer(balance_app, name="balance")
+app.add_typer(doctor_app, name="doctor")
+
 # Data commands (primary interface)
 app.add_typer(deals_app, name="deals")
 app.add_typer(uploads_app, name="uploads")
@@ -61,12 +67,6 @@ app.add_typer(describe_app, name="describe")
 
 # AI fallback
 app.add_typer(ask_app, name="ask")
-
-# System
-app.add_typer(auth_app, name="auth")
-app.add_typer(setup_app, name="setup")
-app.add_typer(balance_app, name="balance")
-app.add_typer(doctor_app, name="doctor")
 
 
 if __name__ == "__main__":

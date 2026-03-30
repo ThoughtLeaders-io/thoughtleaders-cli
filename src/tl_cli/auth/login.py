@@ -16,7 +16,7 @@ from tl_cli.auth.pkce import generate_pkce_pair
 from tl_cli.auth.token_store import StoredTokens, save_tokens
 from tl_cli.config import get_config
 
-err = Console(stderr=True)
+console = Console(stderr=True)
 
 
 @dataclass
@@ -61,8 +61,8 @@ def login() -> StoredTokens:
     }
     auth_url = f"https://{config.auth0_domain}/authorize?{urllib.parse.urlencode(params)}"
 
-    err.print("[bold]Opening browser for login...[/bold]")
-    err.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
+    console.print("[bold]Opening browser for login...[/bold]")
+    console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
     webbrowser.open(auth_url)
 
     # Wait for callback (timeout after 120 seconds)
@@ -70,18 +70,18 @@ def login() -> StoredTokens:
     while result.code is None and result.error is None:
         if time.time() > deadline:
             server.shutdown()
-            err.print("[red]Login timed out. Please try again.[/red]")
+            console.print("[red]Login timed out. Please try again.[/red]")
             raise SystemExit(1)
         time.sleep(0.1)
 
     server.shutdown()
 
     if result.error:
-        err.print(f"[red]Login failed: {result.error}[/red]")
+        console.print(f"[red]Login failed: {result.error}[/red]")
         raise SystemExit(1)
 
     # Exchange code for tokens
-    err.print("[dim]Exchanging authorization code...[/dim]")
+    console.print("[dim]Exchanging authorization code...[/dim]")
     tokens = _exchange_code(
         code=result.code,
         code_verifier=code_verifier,
@@ -90,7 +90,7 @@ def login() -> StoredTokens:
     )
 
     save_tokens(tokens)
-    err.print(f"[green]Logged in as {tokens.email or 'unknown'}[/green]")
+    console.print(f"[green]Logged in as {tokens.email or 'unknown'}[/green]")
     return tokens
 
 
@@ -108,7 +108,7 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
     )
 
     if response.status_code != 200:
-        err.print("[red]Token refresh failed. Please run: tl auth login[/red]")
+        console.print("[red]Token refresh failed. Please run: tl auth login[/red]")
         raise SystemExit(2)
 
     data = response.json()
@@ -141,7 +141,7 @@ def _exchange_code(
     )
 
     if response.status_code != 200:
-        err.print(f"[red]Token exchange failed: {response.text}[/red]")
+        console.print(f"[red]Token exchange failed: {response.text}[/red]")
         raise SystemExit(1)
 
     data = response.json()
