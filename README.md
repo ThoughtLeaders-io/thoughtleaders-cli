@@ -72,4 +72,6 @@ tl balance                     # Your credit balance
 
 ## Documentation
 
-Full docs: https://docs.thoughtleaders.io/cli
+- [Architecture & Design](docs/architecture.md) — full design doc covering commands, data scoping, credit metering, and server-side API
+- `tl describe` — discover available resources, fields, filters, and credit costs from the CLI itself
+- `tl <command> --help` — detailed help for any command
