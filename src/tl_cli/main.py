@@ -5,7 +5,9 @@ Query sponsorship data, channels, brands, and intelligence.
 
 import json
 import sys
+from typing import Optional
 
+import click
 import typer
 
 from tl_cli import __version__
@@ -67,6 +69,30 @@ app.add_typer(describe_app, name="describe")
 
 # AI fallback
 app.add_typer(ask_app, name="ask")
+
+
+@app.command(name="help", hidden=True)
+def help_command(
+    ctx: typer.Context,
+    command: Optional[str] = typer.Argument(None, help="Command to show help for"),
+) -> None:
+    """Show help for the CLI or a specific command."""
+    root_ctx = ctx.parent
+    root_cmd = root_ctx.command
+
+    if command is None:
+        click.echo(root_cmd.get_help(root_ctx))
+        raise typer.Exit()
+
+    # Look up the subcommand
+    sub_cmd = root_cmd.get_command(root_ctx, command)
+    if sub_cmd is None:
+        click.echo(f"Unknown command: {command}", err=True)
+        raise typer.Exit(1)
+
+    sub_ctx = click.Context(sub_cmd, info_name=command, parent=root_ctx)
+    click.echo(sub_cmd.get_help(sub_ctx))
+    raise typer.Exit()
 
 
 if __name__ == "__main__":

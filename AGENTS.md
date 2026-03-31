@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## Project Overview
 
-**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (deals, channels, brands, uploads, snapshots, reports). Built with Typer + Rich + httpx. Designed as an "agent-first dumb tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
+**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (deals, channels, brands, uploads, snapshots, reports). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
 
 ## Development Commands
 
