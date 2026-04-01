@@ -38,7 +38,7 @@ Customer's machine                    TL Infrastructure
 | `tl matches [filters...]` | Shortcut: possible brand-channel pairings (`status:match`) |
 | `tl proposals [filters...]` | Shortcut: matches proposed to both sides (`status:proposal`) |
 | `tl uploads [filters...]` | List video uploads (ES) |
-| `tl uploads <id>` | Show upload detail |
+| `tl upload <id> [<id>...]` | Show upload detail(s) by ID |
 | `tl channels [filters...]` | Search channels |
 | `tl channels <id>` | Show channel detail |
 | `tl brands <brand>` | Brand intelligence report |
@@ -278,7 +278,8 @@ tl-cli/
 │   │   ├── deals.py                  # tl deals (shortcut: status:deal)
 │   │   ├── matches.py                # tl matches (shortcut: status:match)
 │   │   ├── proposals.py              # tl proposals (shortcut: status:proposal)
-│   │   ├── uploads.py                # tl uploads (list/show)
+│   │   ├── uploads.py                # tl uploads (list)
+│   │   ├── upload.py                 # tl upload (detail by ID)
 │   │   ├── channels.py              # tl channels (search/show)
 │   │   ├── brands.py                # tl brands (brand intelligence)
 │   │   ├── snapshots.py             # tl snapshots (Firebolt metrics)

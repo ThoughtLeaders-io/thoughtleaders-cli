@@ -31,6 +31,7 @@ from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
 from tl_cli.commands.setup import app as setup_app
 from tl_cli.commands.snapshots import app as snapshots_app
+from tl_cli.commands.upload import app as upload_app
 from tl_cli.commands.uploads import app as uploads_app
 from tl_cli.commands.whoami import app as whoami_app
 
@@ -72,6 +73,7 @@ app.add_typer(matches_app, name="matches")
 app.add_typer(proposals_app, name="proposals")
 app.add_typer(deals_app, name="deals")
 app.add_typer(uploads_app, name="uploads")
+app.add_typer(upload_app, name="upload")
 app.add_typer(channels_app, name="channels")
 app.add_typer(brands_app, name="brands")
 app.add_typer(snapshots_app, name="snapshots")
