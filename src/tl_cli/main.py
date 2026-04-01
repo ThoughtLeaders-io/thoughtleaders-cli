@@ -65,15 +65,12 @@ def main(
 # System
 app.add_typer(auth_app, name="auth")
 app.add_typer(setup_app, name="setup")
-app.add_typer(balance_app, name="balance")
-app.add_typer(doctor_app, name="doctor")
-app.add_typer(whoami_app, name="whoami")
 
 # Data commands (primary interface)
 app.add_typer(sponsorships_app, name="sponsorships")
-app.add_typer(deals_app, name="deals")
 app.add_typer(matches_app, name="matches")
 app.add_typer(proposals_app, name="proposals")
+app.add_typer(deals_app, name="deals")
 app.add_typer(uploads_app, name="uploads")
 app.add_typer(channels_app, name="channels")
 app.add_typer(brands_app, name="brands")
@@ -83,6 +80,9 @@ app.add_typer(comments_app, name="comments")
 
 # Discoverability
 app.add_typer(describe_app, name="describe")
+app.add_typer(balance_app, name="balance")
+app.add_typer(doctor_app, name="doctor")
+app.add_typer(whoami_app, name="whoami")
 
 # AI fallback
 app.add_typer(ask_app, name="ask")
@@ -125,7 +125,9 @@ def help_command(
         click.echo(root_cmd.get_help(root_ctx))
         terminology = _get_terminology()
         if terminology:
-            console = Console()
+            import shutil
+            term_width = shutil.get_terminal_size().columns
+            console = Console(width=int(term_width * 0.9))
             console.print(Markdown(terminology))
             console.print()
         raise typer.Exit()
