@@ -1,5 +1,5 @@
 ---
-name: tl-data-analyst
+name: tl
 description: Query ThoughtLeaders sponsorship data using the tl CLI. Triggers on questions about deals, sponsorships, channels, brands, uploads, videos, metrics, pipeline, revenue, or any business data questions. Use structured tl commands — you ARE the AI layer, not tl ask.
 ---
 
