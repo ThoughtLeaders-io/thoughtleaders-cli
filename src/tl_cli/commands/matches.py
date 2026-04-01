@@ -1,17 +1,25 @@
 """tl matches — Shortcut for matched sponsorships."""
 
+from typing import Optional
+
 import typer
 
-from tl_cli.commands.sponsorships import create_sponsorship, list_or_show
+from tl_cli.commands.sponsorships import do_create, do_list, do_show
 from tl_cli.output.formatter import detect_format
 
 app = typer.Typer(help="Matches — possible brand-channel pairings (shortcut for sponsorships status:match)")
 
 
 @app.callback(invoke_without_command=True)
-def matches(
-    ctx: typer.Context,
-    args: list[str] = typer.Argument(None, help="ID or filters (key:value pairs)"),
+def matches(ctx: typer.Context) -> None:
+    """Matches — possible brand-channel pairings."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(list_cmd)
+
+
+@app.command("list")
+def list_cmd(
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
@@ -19,21 +27,43 @@ def matches(
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
-    """List matches (possible brand-channel pairings) or show one by ID.
+    """List matches with optional filters.
 
     Examples:
-        tl matches                        # List recent matches
-        tl matches 12345                  # Show match #12345
-        tl matches brand:"Nike"           # Filter matches
-        tl matches create --channel 1 --brand 2  # Create a match
+        tl matches list                       # List recent matches
+        tl matches list brand:"Nike"          # Filter matches
     """
-    if ctx.invoked_subcommand is not None:
-        return
-
-    args = args or []
-    if args and args[0] == "create":
-        create_sponsorship(args[1:], status="matched")
-        return
-
     fmt = detect_format(json_output, csv_output, md_output, quiet)
-    list_or_show(args, fmt, limit, offset, default_status="match", title="Matches")
+    do_list(args or [], fmt, limit, offset, default_status="match", title="Matches")
+
+
+@app.command("show")
+def show_cmd(
+    item_id: str = typer.Argument(..., help="Sponsorship ID"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
+) -> None:
+    """Show match detail by ID.
+
+    Examples:
+        tl matches show 12345
+    """
+    fmt = detect_format(json_output, False, False, quiet)
+    do_show(item_id, fmt)
+
+
+@app.command("create")
+def create_cmd(
+    channel: int = typer.Option(..., "--channel", "-c", help="Channel ID"),
+    brand: int = typer.Option(..., "--brand", "-b", help="Brand ID"),
+    price: Optional[float] = typer.Option(None, "--price", "-p", help="Deal price"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
+) -> None:
+    """Create a new match (free, no credits charged).
+
+    Examples:
+        tl matches create --channel 1 --brand 2
+    """
+    fmt = detect_format(json_output, False, False, quiet)
+    do_create(channel, brand, price, fmt, status="matched")

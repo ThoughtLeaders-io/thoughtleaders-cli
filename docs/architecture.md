@@ -29,32 +29,39 @@ Customer's machine                    TL Infrastructure
 
 ### Structured commands (primary interface)
 
+All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Running a command with no subcommand defaults to `list`.
+
 | Command | Description |
 |---------|-------------|
-| `tl sponsorships [filters...]` | List sponsorships (join adlink + adspot + channel + brand) |
-| `tl sponsorships <id>` | Show sponsorship detail |
+| `tl sponsorships list [filters...]` | List sponsorships (adlink + adspot + channel + brand) |
+| `tl sponsorships show <id>` | Show sponsorship detail |
 | `tl sponsorships create --channel <id> --brand <id>` | Create a proposal (free, no credits) |
-| `tl deals [filters...]` | Shortcut: agreed-upon sponsorships (`status:deal`) |
-| `tl matches [filters...]` | Shortcut: possible brand-channel pairings (`status:match`) |
-| `tl proposals [filters...]` | Shortcut: matches proposed to both sides (`status:proposal`) |
-| `tl uploads [filters...]` | List video uploads (ES) |
-| `tl upload <id> [<id>...]` | Show upload detail(s) by ID |
-| `tl channels [filters...]` | Search channels |
-| `tl channels <id>` | Show channel detail |
+| `tl deals list [filters...]` | Shortcut: agreed-upon sponsorships (`status:deal`) |
+| `tl deals show <id>` | Show deal detail |
+| `tl matches list [filters...]` | Shortcut: possible brand-channel pairings (`status:match`) |
+| `tl matches show <id>` | Show match detail |
+| `tl matches create --channel <id> --brand <id>` | Create a match (free) |
+| `tl proposals list [filters...]` | Shortcut: matches proposed to both sides (`status:proposal`) |
+| `tl proposals show <id>` | Show proposal detail |
+| `tl proposals create --channel <id> --brand <id>` | Create a proposal (free) |
+| `tl uploads list [filters...]` | List video uploads (ES) |
+| `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
+| `tl channels list [filters...]` | Search channels |
+| `tl channels show <id>` | Show channel detail |
 | `tl brands <brand>` | Brand intelligence report |
 | `tl brands <brand> --channel <id>` | Brand mentions on a specific channel |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
 | `tl snapshots video <id> --channel <id>` | Video view curve (Firebolt article_metrics, --channel required) |
-| `tl comments <adlink-id>` | List comments on a deal (free) |
+| `tl comments list <adlink-id>` | List comments on a sponsorship (free) |
 | `tl comments add <adlink-id> "message"` | Add a comment (free) |
 
 ### Flexible filtering (all list commands)
-Filters are passed as `key:value` pairs:
+Filters are passed as `key:value` pairs after `list`:
 ```bash
-tl sponsorships status:sold brand:"Nike" since:2026-01
-tl sponsorships status:pending owner:emma limit:20
-tl uploads channel:12345 type:longform since:2026-03
-tl channels category:cooking min-subs:100k language:en
+tl sponsorships list status:sold brand:"Nike" since:2026-01
+tl sponsorships list status:pending owner:emma limit:20
+tl uploads list channel:12345 type:longform since:2026-03
+tl channels list category:cooking min-subs:100k language:en
 ```
 
 Date filters (`since`, `until`, `send-date`, `send-date-before`, `publish-date`, `publish-date-before`) accept `today`, `yesterday`, and `tomorrow` as keywords — resolved to ISO dates on the CLI before sending to the server.
@@ -274,13 +281,12 @@ tl-cli/
 │   │   └── breadcrumbs.py            # Next-command hints + usage display
 │   ├── commands/
 │   │   ├── __init__.py
-│   │   ├── sponsorships.py            # tl sponsorships (list/show/create) + shared list_or_show()
+│   │   ├── sponsorships.py            # tl sponsorships (list/show/create) + shared do_list/do_show/do_create
 │   │   ├── deals.py                  # tl deals (shortcut: status:deal)
 │   │   ├── matches.py                # tl matches (shortcut: status:match)
 │   │   ├── proposals.py              # tl proposals (shortcut: status:proposal)
-│   │   ├── uploads.py                # tl uploads (list)
-│   │   ├── upload.py                 # tl upload (detail by ID)
-│   │   ├── channels.py              # tl channels (search/show)
+│   │   ├── uploads.py                # tl uploads (list/show)
+│   │   ├── channels.py              # tl channels (list/show)
 │   │   ├── brands.py                # tl brands (brand intelligence)
 │   │   ├── snapshots.py             # tl snapshots (Firebolt metrics)
 │   │   ├── reports.py               # tl reports / tl reports run
@@ -524,14 +530,14 @@ Build each command + its server endpoint together:
 4. `tl auth login` completes Auth0 PKCE flow
 5. `tl auth status` shows user + credit balance
 6. `tl balance` shows detailed usage
-7. `tl sponsorships status:sold limit:5` — filter parsing + data returns
-8. `tl sponsorships --json | jq '.results[0]'` — piping works
-9. `tl channels 12345` shows detail view (5 credits deducted)
+7. `tl sponsorships list status:sold limit:5` — filter parsing + data returns
+8. `tl sponsorships list --json | jq '.results[0]'` — piping works
+9. `tl channels show 12345` shows detail view (5 credits deducted)
 10. `tl snapshots channel 12345` returns Firebolt time-series
 11. `tl snapshots video abc --channel 12345` returns view curve
 12. `tl reports` lists saved reports (free)
 13. `tl reports run 789` executes saved report (credits based on results)
-14. `tl comments 12345` lists comments (free)
+14. `tl comments list 12345` lists comments (free)
 15. `tl sponsorships create --channel 1 --brand 2` creates proposal (free)
 16. `tl setup claude` installs plugin
 17. Claude Code skill triggers on data questions, uses `tl describe` for discovery

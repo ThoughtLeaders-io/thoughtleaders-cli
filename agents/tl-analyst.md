@@ -22,12 +22,12 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 ### Multi-step research
 "Find channels similar to the ones Nike sponsors and compare their pricing"
 1. `tl brands Nike --json` → extract channel IDs from mentions
-2. `tl channels <id> --json` for top channels → get pricing data
+2. `tl channels show <id> --json` for top channels → get pricing data
 3. Compile comparison table
 
 ### Cross-resource analysis
 "Show me deal slippage this month"
-1. `tl sponsorships status:pending send-date-before:2026-03-31 --json`
+1. `tl sponsorships list status:pending send-date-before:2026-03-31 --json`
 2. Identify sponsorships with past send dates that aren't sold
 3. Present findings, suggest `tl comments add` for each
 
@@ -40,16 +40,16 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 
 ### Discovery workflows
 "What's our best performing brand this quarter?"
-1. `tl deals since:2026-01-01 --json` → aggregate revenue by brand
+1. `tl deals list since:2026-01-01 --json` → aggregate revenue by brand
 2. `tl brands <top_brand> --json` → sponsorship intelligence
 3. `tl snapshots channel <id> --json` → performance metrics for top channels
 
 ### Channel deep dive
 "Give me a full picture of channel 12345"
-1. `tl channels 12345 --json` → profile and scores
+1. `tl channels show 12345 --json` → profile and scores
 2. `tl snapshots channel 12345 --json` → growth over time
-3. `tl deals channel:12345 --json` → deal history
-4. `tl uploads channel:12345 --json` → recent content
+3. `tl deals list channel:12345 --json` → deal history
+4. `tl uploads list channel:12345 --json` → recent content
 
 ## Rules
 

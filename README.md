@@ -31,25 +31,38 @@ uv tool install tl-cli
 tl auth login
 
 # Query sponsorships
-tl sponsorships status:sold brand:"Nike" since:2026-01
+tl sponsorships list status:sold brand:"Nike" since:2026-01
 
 # Shortcut commands for sponsorship types
-tl deals brand:"Nike"                     # Agreed-upon sponsorships
-tl deals since:today                      # Deals from today (date keywords: today, yesterday, tomorrow)
-tl matches                                # Possible brand-channel pairings
-tl proposals                              # Matches proposed to both sides
+tl deals list brand:"Nike"                    # Agreed-upon sponsorships
+tl deals list since:today                     # Deals from today (date keywords: today, yesterday, tomorrow)
+tl matches list                               # Possible brand-channel pairings
+tl proposals list                             # Matches proposed to both sides
+
+# Show a specific sponsorship
+tl sponsorships show 12345
 
 # Search videos (note: this only shows "your" videos)
- tl uploads --csv q:code
+tl uploads list q:code --csv
+
+# Show upload details (supports colon-containing IDs)
+tl uploads show 1174310:0BehkmVa7ak
 
 # Search channels
-tl channels category:cooking min-subs:100k
+tl channels list category:cooking min-subs:100k
+
+# Show channel detail
+tl channels show 12345
 
 # Brand intelligence
 tl brands Nike
 
 # Run a saved report
 tl reports run 42
+
+# Comments on a sponsorship
+tl comments list 12345
+tl comments add 12345 "Looks good"
 
 # Show information about the logged-in user
 tl whoami
@@ -107,10 +120,10 @@ Then just talk naturally:
 By default, output is a styled table in the terminal and JSON when piped.
 
 ```bash
-tl sponsorships status:sold                          # Pretty table
-tl sponsorships status:sold --json                   # JSON
-tl sponsorships status:sold --csv > sponsorships.csv # CSV
-tl sponsorships status:sold --json | jq '.results'   # Pipe to jq
+tl sponsorships list status:sold                          # Pretty table
+tl sponsorships list status:sold --json                   # JSON
+tl sponsorships list status:sold --csv > sponsorships.csv # CSV
+tl sponsorships list status:sold --json | jq '.results'   # Pipe to jq
 ```
 
 ## Documentation

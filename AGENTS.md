@@ -38,20 +38,20 @@ Ruff config: Python 3.10 target, 100-char line length.
 
 ### Command Pattern (all data commands follow this)
 
-Every command in `src/tl_cli/commands/` follows the same structure:
-1. Accept positional args (optional ID + `key:value` filters)
-2. `split_id_and_filters(args)` separates ID from filter dict
-3. `get_client()` gets an authenticated `TLClient`
-4. If ID: `GET /endpoint/{id}` → `output_single()`. If filters: `GET /endpoint?params` → `output()`
-5. `handle_api_error(e)` on failure (maps HTTP status to exit codes)
+Every data command in `src/tl_cli/commands/` uses explicit Typer subcommands:
+- `list` — list/search with `key:value` filters as positional args
+- `show` — detail view by ID
+- `create` / `add` — create new records (where applicable)
 
-When adding a new command, copy an existing one (e.g., `sponsorships.py`) and follow the pattern.
+Running a command with no subcommand defaults to `list`. Shared logic for sponsorship commands lives in `sponsorships.py` (`do_list`, `do_show`, `do_create`).
 
-`deals`, `matches`, and `proposals` are shortcut commands that delegate to `sponsorships` with a pre-set status filter. They share `list_or_show()` from `sponsorships.py` and reject explicit `status:` filters — users should use `tl sponsorships` for finer-grained status filtering.
+When adding a new data command, follow this pattern. See `sponsorships.py` for the reference implementation.
+
+`deals`, `matches`, and `proposals` are shortcut commands that delegate to sponsorships' `do_list`/`do_show`/`do_create` with a pre-set status filter. They reject explicit `status:` filters — users should use `tl sponsorships list` for finer-grained status filtering.
 
 ### Filter Parsing (`filters.py`)
 
-`parse_filters()` handles `key:value` and `key:"quoted value"` syntax. Returns `dict[str, str]` passed as query params.
+`parse_filters()` handles `key:value` and `key:"quoted value"` syntax. Returns `dict[str, str]` passed as query params. Date filter keys (`since`, `until`, `send-date`, etc.) accept keywords `today`, `yesterday`, `tomorrow`.
 
 ### Auth Flow (`auth/`)
 
