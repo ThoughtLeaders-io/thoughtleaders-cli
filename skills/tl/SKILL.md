@@ -13,7 +13,7 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 ## Workflow
 
-1. **Discover first**: Run `tl describe <resource> --json` to learn available fields, filters, and credit costs before querying
+1. **Discover first**: Run `tl describe show <resource> --json` to learn available fields, filters, and credit costs before querying
 2. **Check saved reports**: Run `tl reports --json` to see if the user has a saved report that already answers their question
 3. **Check credits**: Run `tl balance --quiet` before expensive queries. Warn the user if a query will cost many credits.
 4. **Query with filters**: Use `key:value` filter syntax for structured queries
@@ -39,8 +39,8 @@ tl uploads list [filters...]           # Video uploads from ES (1 credit/result)
 tl uploads show <id>                   # Upload detail (2 credits)
 tl channels list [filters...]          # Channel search (3 credits/result, 5/detail)
 tl channels show <id>                  # Channel detail
-tl brands <query>                      # Brand intelligence (5 credits/result, 8/detail)
-tl brands <query> --channel <id>       # Brand mentions on specific channel
+tl brands show <query>                 # Brand intelligence (5 credits/result, 8/detail)
+tl brands show <query> --channel <id>  # Brand mentions on specific channel
 tl snapshots channel <id>              # Channel metrics over time (1 credit/point)
 tl snapshots video <id> --channel <id> # Video view curve (1 credit/point, --channel required!)
 tl reports                             # List saved reports (free)
@@ -51,8 +51,8 @@ tl comments add <adlink-id> "msg"      # Add comment (free)
 
 ### Discovery & system
 ```bash
-tl describe                        # List all resources with credit costs (free)
-tl describe <resource> --json      # Fields, filters, credit rates (free)
+tl describe                            # List all resources with credit costs (free)
+tl describe show <resource> --json     # Fields, filters, credit rates (free)
 tl balance --quiet                 # Credit balance (free)
 tl whoami                          # Current user, org, brands (free)
 tl auth status                     # Auth check (free)
@@ -79,7 +79,7 @@ Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
 ## Credit Awareness
 
 Every query costs credits. Before running expensive queries:
-1. Check the credit rate: `tl describe <resource> --json | jq '.credits'`
+1. Check the credit rate: `tl describe show <resource> --json | jq '.credits'`
 2. Estimate cost: results × rate
 3. If estimated cost > 100 credits, tell the user before running
 
@@ -104,7 +104,7 @@ tl deals list since:2026-01-01 --json
 
 "What channels does Nike sponsor?":
 ```bash
-tl brands Nike --json
+tl brands show Nike --json
 ```
 
 "Compare view curves for two videos":

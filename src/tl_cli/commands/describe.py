@@ -1,7 +1,6 @@
 """tl describe — Schema and filter discovery for resources."""
 
 import json
-import sys
 
 import typer
 from rich.console import Console
@@ -16,35 +15,61 @@ console = Console()
 
 
 @app.callback(invoke_without_command=True)
-def describe(
-    ctx: typer.Context,
-    resource: str | None = typer.Argument(None, help="Resource name (sponsorships, channels, etc.)"),
+def describe(ctx: typer.Context) -> None:
+    """Discover resources, fields, filters, and credit costs (free)."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(list_cmd, json_output=False, quiet=False)
+
+
+@app.command("list")
+def list_cmd(
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
+) -> None:
+    """List all available resources with credit costs.
+
+    Examples:
+        tl describe list
+        tl describe list --json
+    """
+    fmt = detect_format(json_output, False, False, quiet)
+
+    client = get_client()
+    try:
+        data = client.get("/describe")
+
+        if fmt in ("json", "quiet"):
+            print(json.dumps(data, indent=2, default=str))
+            return
+
+        _print_resource_list(data)
+
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("show")
+def show_cmd(
+    resource: str = typer.Argument(..., help="Resource name (sponsorships, channels, etc.)"),
     filters_only: bool = typer.Option(False, "--filters", help="Show only available filters"),
     fields_only: bool = typer.Option(False, "--fields", help="Show only available fields"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
-    """Discover resources, fields, filters, and credit costs.
-
-    Free, no credits charged.
+    """Show fields, filters, and credit costs for a specific resource.
 
     Examples:
-        tl describe                       # List all resources
-        tl describe sponsorships                 # Fields + filters for sponsorships
-        tl describe sponsorships --filters       # Just the filters
-        tl describe sponsorships --json          # Machine-readable (for agents)
+        tl describe show sponsorships
+        tl describe show sponsorships --filters
+        tl describe show sponsorships --json
     """
-    if ctx.invoked_subcommand is not None:
-        return
-
     fmt = detect_format(json_output, False, False, quiet)
 
     client = get_client()
     try:
-        if resource:
-            data = client.get(f"/describe/{resource}")
-        else:
-            data = client.get("/describe")
+        data = client.get(f"/describe/{resource}")
 
         if fmt in ("json", "quiet"):
             target = data
@@ -55,10 +80,7 @@ def describe(
             print(json.dumps(target, indent=2, default=str))
             return
 
-        if resource:
-            _print_resource_detail(data, filters_only, fields_only)
-        else:
-            _print_resource_list(data)
+        _print_resource_detail(data, filters_only, fields_only)
 
     except ApiError as e:
         handle_api_error(e)

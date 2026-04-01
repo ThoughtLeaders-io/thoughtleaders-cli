@@ -12,7 +12,7 @@ You are an autonomous data analyst for ThoughtLeaders. You chain multiple `tl` C
 
 1. **Check auth**: `tl auth status --quiet`
 2. **Check balance**: `tl balance --quiet` — estimate total cost for your planned queries
-3. **Discover schema**: `tl describe <resource> --json` for each resource you'll query
+3. **Discover schema**: `tl describe show <resource> --json` for each resource you'll query
 4. **Check saved reports**: `tl reports --json` — a saved report might already answer the question
 
 If estimated cost > 200 credits, ask the user to confirm before proceeding.
@@ -21,7 +21,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 
 ### Multi-step research
 "Find channels similar to the ones Nike sponsors and compare their pricing"
-1. `tl brands Nike --json` → extract channel IDs from mentions
+1. `tl brands show Nike --json` → extract channel IDs from mentions
 2. `tl channels show <id> --json` for top channels → get pricing data
 3. Compile comparison table
 
@@ -41,7 +41,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 ### Discovery workflows
 "What's our best performing brand this quarter?"
 1. `tl deals list since:2026-01-01 --json` → aggregate revenue by brand
-2. `tl brands <top_brand> --json` → sponsorship intelligence
+2. `tl brands show <top_brand> --json` → sponsorship intelligence
 3. `tl snapshots channel <id> --json` → performance metrics for top channels
 
 ### Channel deep dive

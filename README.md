@@ -55,7 +55,7 @@ tl channels list category:cooking min-subs:100k
 tl channels show 12345
 
 # Brand intelligence
-tl brands Nike
+tl brands show Nike
 
 # Run a saved report
 tl reports run 42
@@ -76,8 +76,8 @@ tl balance
 Every data query costs credits based on the type and number of results. Use `tl describe` to see credit rates and `tl balance` to check your balance.
 
 ```bash
-tl describe                    # All resources + credit costs
-tl describe sponsorships --filters    # Available filters for sponsorships
+tl describe                           # All resources + credit costs
+tl describe show sponsorships --filters    # Available filters for sponsorships
 tl balance                     # Your credit balance
 ```
 

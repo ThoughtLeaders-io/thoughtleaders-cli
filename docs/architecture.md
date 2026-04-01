@@ -48,8 +48,8 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
 | `tl channels list [filters...]` | Search channels |
 | `tl channels show <id>` | Show channel detail |
-| `tl brands <brand>` | Brand intelligence report |
-| `tl brands <brand> --channel <id>` | Brand mentions on a specific channel |
+| `tl brands show <brand>` | Brand intelligence report |
+| `tl brands show <brand> --channel <id>` | Brand mentions on a specific channel |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
 | `tl snapshots video <id> --channel <id>` | Video view curve (Firebolt article_metrics, --channel required) |
 | `tl comments list <adlink-id>` | List comments on a sponsorship (free) |
@@ -125,7 +125,7 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 | `/tl-balance` | Check credit balance and recent usage |
 
 Each slash command's markdown file instructs Claude to:
-1. Run `tl describe <resource> --json` to discover available filters
+1. Run `tl describe show <resource> --json` to discover available filters
 2. Translate the user's natural language into the right `tl` command with filters
 3. Execute the command and present results
 4. Show breadcrumbs for follow-up actions
@@ -134,7 +134,7 @@ Each slash command's markdown file instructs Claude to:
 Teaches Claude how to use the CLI effectively. Triggers on data questions about sponsorships, channels, brands, uploads, metrics.
 
 Key instructions in the skill:
-- Always run `tl describe <resource> --json` first to discover fields, filters, and credit costs
+- Always run `tl describe show <resource> --json` first to discover fields, filters, and credit costs
 - Use structured commands, not `tl ask` (the user's Claude IS the AI layer)
 - Check `tl balance --json` before expensive queries and warn the user about credit cost
 - Use `--json` output for parsing, `--quiet` for clean data
@@ -153,10 +153,10 @@ tools: [Bash, Read]
 ```
 
 What the agent does:
-- **Multi-step research**: "Find channels similar to the ones Nike sponsors and compare their pricing" → `tl brands Nike --json` → extract channel IDs → `tl channels <id> --json` for each → compile comparison table
+- **Multi-step research**: "Find channels similar to the ones Nike sponsors and compare their pricing" → `tl brands show Nike --json` → extract channel IDs → `tl channels show <id> --json` for each → compile comparison table
 - **Cross-resource analysis**: "Show me deal slippage and add comments" → `tl sponsorships status:pending send-date:2026-03 --json` → identify slipping sponsorships → `tl comments add <id> "flagged for slippage"` for each
 - **Report comparison**: "Compare my Q1 report to Q4" → `tl reports run <id> --since 2026-01 --until 2026-03 --json` → `tl reports run <id> --since 2025-10 --until 2025-12 --json` → synthesize
-- **Discovery workflows**: "What's my best performing brand this quarter" → `tl sponsorships status:sold since:2026-01 --json` → aggregate by brand → `tl brands <top_brand> --json` → full picture
+- **Discovery workflows**: "What's my best performing brand this quarter" → `tl sponsorships status:sold since:2026-01 --json` → aggregate by brand → `tl brands show <top_brand> --json` → full picture
 - **Credit-aware**: checks balance before multi-query workflows, estimates total cost, asks user to confirm if expensive
 
 #### Hooks
@@ -287,11 +287,11 @@ tl-cli/
 │   │   ├── proposals.py              # tl proposals (shortcut: status:proposal)
 │   │   ├── uploads.py                # tl uploads (list/show)
 │   │   ├── channels.py              # tl channels (list/show)
-│   │   ├── brands.py                # tl brands (brand intelligence)
+│   │   ├── brands.py                # tl brands show (brand intelligence)
 │   │   ├── snapshots.py             # tl snapshots (Firebolt metrics)
 │   │   ├── reports.py               # tl reports / tl reports run
 │   │   ├── comments.py              # tl comments (list/add)
-│   │   ├── describe.py              # tl describe (schema/filter/pricing discovery)
+│   │   ├── describe.py              # tl describe list/show (schema/filter/pricing discovery)
 │   │   ├── ask.py                   # tl ask (optional AI fallback)
 │   │   ├── setup.py                 # tl setup claude
 │   │   ├── balance.py               # tl balance
