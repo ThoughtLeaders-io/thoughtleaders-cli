@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## Project Overview
 
-**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (deals, channels, brands, uploads, snapshots, reports). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
+**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (sponsorships, channels, brands, uploads, snapshots, reports). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
 
 ## Development Commands
 
@@ -45,7 +45,7 @@ Every command in `src/tl_cli/commands/` follows the same structure:
 4. If ID: `GET /endpoint/{id}` → `output_single()`. If filters: `GET /endpoint?params` → `output()`
 5. `handle_api_error(e)` on failure (maps HTTP status to exit codes)
 
-When adding a new command, copy an existing one (e.g., `deals.py`) and follow the pattern.
+When adding a new command, copy an existing one (e.g., `sponsorships.py`) and follow the pattern.
 
 ### Filter Parsing (`filters.py`)
 
@@ -76,7 +76,7 @@ TTY-aware: Rich tables in terminal, JSON when piped. Flags: `--json`, `--csv`, `
 
 The CLI doubles as a Claude Code plugin:
 - `.claude-plugin/plugin.json` — plugin manifest
-- `commands/*.md` — slash commands (`/tl`, `/tl-deals`, `/tl-channels`, `/tl-brands`, `/tl-reports`, `/tl-balance`)
+- `commands/*.md` — slash commands (`/tl`, `/tl-sponsorships`, `/tl-channels`, `/tl-brands`, `/tl-reports`, `/tl-balance`)
 - `skills/tl/SKILL.md` — skill definition teaching Claude the CLI workflow
 - `agents/tl-analyst.md` — autonomous multi-step analysis agent
 - `hooks/` — PreToolUse (auth check, limit guard) and PostToolUse (low balance warning) on `tl` commands

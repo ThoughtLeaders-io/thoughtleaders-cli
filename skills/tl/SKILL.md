@@ -24,9 +24,9 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 ### Data queries
 ```bash
-tl deals [filters...]              # Sponsorship deals (2 credits/result, 3/detail)
-tl deals <id>                      # Deal detail
-tl deals create --channel <id> --brand <id>  # Create proposal (free)
+tl sponsorships [filters...]       # Sponsorships (2 credits/result, 3/detail)
+tl sponsorships <id>               # Sponsorship detail
+tl sponsorships create --channel <id> --brand <id>  # Create proposal (free)
 tl uploads [filters...]            # Video uploads from ES (1 credit/result)
 tl uploads <id>                    # Upload detail (2 credits)
 tl channels [filters...]           # Channel search (3 credits/result, 5/detail)
@@ -52,7 +52,7 @@ tl auth status                     # Auth check (free)
 ### Filter syntax
 All list commands accept `key:value` filters:
 ```bash
-tl deals status:sold brand:"Nike" since:2026-01
+tl sponsorships status:sold brand:"Nike" since:2026-01
 tl uploads channel:12345 type:longform
 tl channels category:cooking min-subs:100k language:en
 ```
@@ -86,9 +86,9 @@ Users only see data their plan allows:
 
 ## Examples
 
-"Show me my sold deals this quarter":
+"Show me my sold sponsorships this quarter":
 ```bash
-tl deals status:sold since:2026-01-01 --json
+tl sponsorships status:sold since:2026-01-01 --json
 ```
 
 "What channels does Nike sponsor?":

@@ -18,7 +18,7 @@ console = Console()
 @app.callback(invoke_without_command=True)
 def describe(
     ctx: typer.Context,
-    resource: str | None = typer.Argument(None, help="Resource name (deals, channels, etc.)"),
+    resource: str | None = typer.Argument(None, help="Resource name (sponsorships, channels, etc.)"),
     filters_only: bool = typer.Option(False, "--filters", help="Show only available filters"),
     fields_only: bool = typer.Option(False, "--fields", help="Show only available fields"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
@@ -30,9 +30,9 @@ def describe(
 
     Examples:
         tl describe                       # List all resources
-        tl describe deals                 # Fields + filters for deals
-        tl describe deals --filters       # Just the filters
-        tl describe deals --json          # Machine-readable (for agents)
+        tl describe sponsorships                 # Fields + filters for sponsorships
+        tl describe sponsorships --filters       # Just the filters
+        tl describe sponsorships --json          # Machine-readable (for agents)
     """
     if ctx.invoked_subcommand is not None:
         return

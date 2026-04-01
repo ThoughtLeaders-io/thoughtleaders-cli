@@ -1,4 +1,4 @@
-"""tl comments — List and add comments on deals."""
+"""tl comments — List and add comments on sponsorships."""
 
 import typer
 
@@ -6,7 +6,7 @@ from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Comments on deals (free, no credits)")
+app = typer.Typer(help="Comments on sponsorships (free, no credits)")
 
 
 @app.callback(invoke_without_command=True)

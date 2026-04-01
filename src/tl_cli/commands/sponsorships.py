@@ -1,4 +1,4 @@
-"""tl deals — List, show, and create sponsorship deals."""
+"""tl sponsorships — List, show, and create sponsorships."""
 
 from typing import Optional
 
@@ -9,11 +9,11 @@ from tl_cli.client.http import get_client
 from tl_cli.filters import split_id_and_filters
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Sponsorship deals (adlinks + adspot + channel + brand)")
+app = typer.Typer(help="Sponsorships (deals, matches, proposals)")
 
 
 @app.callback(invoke_without_command=True)
-def deals(
+def sponsorships(
     ctx: typer.Context,
     args: list[str] = typer.Argument(None, help="ID or filters (key:value pairs)"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
@@ -23,12 +23,12 @@ def deals(
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
-    """List deals or show a single deal by ID.
+    """List sponsorships or show a single sponsorship by ID.
 
     Examples:
-        tl deals                              # List recent deals
-        tl deals 12345                        # Show deal #12345
-        tl deals status:sold brand:"Nike"     # Filter deals
+        tl sponsorships                              # List recent sponsorships
+        tl sponsorships 12345                        # Show sponsorship #12345
+        tl sponsorships status:sold brand:"Nike"     # Filter sponsorships
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -40,16 +40,16 @@ def deals(
     client = get_client()
     try:
         if deal_id:
-            data = client.get(f"/deals/{deal_id}")
+            data = client.get(f"/sponsorships/{deal_id}")
             output_single(data, fmt)
         else:
             params = {**filters, "limit": str(limit), "offset": str(offset)}
-            data = client.get("/deals", params=params)
+            data = client.get("/sponsorships", params=params)
             output(
                 data,
                 fmt,
                 columns=["id", "brand", "channel", "status", "price", "send_date", "owner"],
-                title="Deals",
+                title="Sponsorships",
             )
     except ApiError as e:
         handle_api_error(e)
@@ -65,7 +65,7 @@ def create(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
-    """Create a new deal proposal (free, no credits charged)."""
+    """Create a new sponsorship proposal (free, no credits charged)."""
     fmt = detect_format(json_output, False, False, quiet)
     body = {"channel_id": channel, "brand_id": brand}
     if price is not None:
@@ -73,7 +73,7 @@ def create(
 
     client = get_client()
     try:
-        data = client.post("/deals", json_body=body)
+        data = client.post("/sponsorships", json_body=body)
         output_single(data, fmt)
     except ApiError as e:
         handle_api_error(e)
