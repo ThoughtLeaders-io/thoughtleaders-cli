@@ -3,14 +3,16 @@
 Query sponsorship data, channels, brands, and intelligence.
 """
 
-import json
+import re
 import sys
 import traceback
+from pathlib import Path
 from typing import Optional
 
 import click
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
 
 from tl_cli import __version__
 from tl_cli import config as tl_config
@@ -78,6 +80,30 @@ app.add_typer(describe_app, name="describe")
 app.add_typer(ask_app, name="ask")
 
 
+def _get_terminology() -> str | None:
+    """Extract the Terminology section from README.md.
+
+    Tries to locate README.md relative to the package source first,
+    then falls back to importlib.metadata.
+    """
+    try:
+        text = None
+        readme = Path(__file__).resolve().parent.parent.parent / "README.md"
+        if readme.is_file():
+            text = readme.read_text()
+        else:
+            from importlib.metadata import metadata
+            text = metadata("tl-cli").get_payload()
+        if not text:
+            return None
+        match = re.search(r"^# Terminology\s*\n(.+?)(?=\n# |\Z)", text, re.DOTALL | re.MULTILINE)
+        if not match:
+            return None
+        return match.group(1).strip()
+    except Exception:
+        return None
+
+
 @app.command(name="help", hidden=True)
 def help_command(
     ctx: typer.Context,
@@ -89,6 +115,11 @@ def help_command(
 
     if command is None:
         click.echo(root_cmd.get_help(root_ctx))
+        terminology = _get_terminology()
+        if terminology:
+            console = Console()
+            console.print(Markdown(terminology))
+            console.print()
         raise typer.Exit()
 
     # Look up the subcommand
