@@ -83,19 +83,28 @@ def _render_whoami(data: dict) -> None:
             )
         console.print(table)
 
-    # --- Brands ---
+    # --- Brands (grouped by brand, emails comma-separated) ---
     if brands:
+        grouped: dict[int, dict] = {}
+        for b in brands:
+            bid = b.get("id")
+            if bid not in grouped:
+                grouped[bid] = {"id": bid, "name": b.get("name", ""), "website": b.get("website", ""), "emails": []}
+            email = b.get("profile_email", "")
+            if email and email not in grouped[bid]["emails"]:
+                grouped[bid]["emails"].append(email)
+
         table = Table(title="Brands in Organization", border_style="dim", show_lines=False)
         table.add_column("ID", style="dim")
         table.add_column("Name", style="bold yellow")
         table.add_column("Website")
-        table.add_column("Profile Email", style="dim")
-        for b in brands:
+        table.add_column("Profile Emails", style="dim")
+        for g in grouped.values():
             table.add_row(
-                str(b.get("id", "")),
-                b.get("name", ""),
-                b.get("website", ""),
-                b.get("profile_email", ""),
+                str(g["id"]),
+                g["name"],
+                g["website"],
+                ", ".join(g["emails"]),
             )
         console.print(table)
 
