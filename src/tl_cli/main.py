@@ -32,6 +32,7 @@ from tl_cli.commands.reports import app as reports_app
 from tl_cli.commands.setup import app as setup_app
 from tl_cli.commands.snapshots import app as snapshots_app
 from tl_cli.commands.uploads import app as uploads_app
+from tl_cli.commands.whoami import app as whoami_app
 
 app = typer.Typer(
     name="tl",
@@ -66,6 +67,7 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(setup_app, name="setup")
 app.add_typer(balance_app, name="balance")
 app.add_typer(doctor_app, name="doctor")
+app.add_typer(whoami_app, name="whoami")
 
 # Data commands (primary interface)
 app.add_typer(sponsorships_app, name="sponsorships")

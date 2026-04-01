@@ -91,6 +91,7 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 | `tl auth status` | Show auth state + credit balance |
 | `tl setup claude` | Install Claude Code plugin |
 | `tl doctor` | Health check (auth, connectivity, version, balance) |
+| `tl whoami` | Show current user, profile, org, and brands (free) |
 | `tl balance` | Show credit balance and recent usage |
 
 ### Global flags (all commands)
@@ -287,7 +288,8 @@ tl-cli/
 │   │   ├── ask.py                   # tl ask (optional AI fallback)
 │   │   ├── setup.py                 # tl setup claude
 │   │   ├── balance.py               # tl balance
-│   │   └── doctor.py                # tl doctor
+│   │   ├── doctor.py                # tl doctor
+│   │   └── whoami.py                # tl whoami
 │   ├── filters.py                    # key:value filter parser (parsing only)
 │   └── _completions.py              # Shell completion helpers
 ├── .claude-plugin/
@@ -361,6 +363,7 @@ Most CLI endpoints can reuse existing views/utilities rather than being built fr
 | **`GET /api/cli/v1/reports/<id>/run`** | `api/campaigns/<id>` detail + the view's existing data loading via `load_campaign_data()` in `data_api_utils.py` — campaigns store their filter config, which gets passed to the appropriate data view (SponsorshipsView, ArticlesView, ThoughtleadersView) | Load campaign config → dispatch to appropriate existing view → wrap results |
 | **`GET /api/cli/v1/comments/<adlink_id>`** | `api/comments/adlink/<id>` (`CommentsView` GET) — already paginated with read status | Add CLI envelope |
 | **`POST /api/cli/v1/comments/<adlink_id>`** | `api/comments/adlink/<id>` (`CommentsView` POST) — creates comment | Pass through |
+| **`GET /api/cli/v1/whoami`** | New — reads Profile, Organization, brands M2M | New (joins Profile → User, Organization → Plan, Profile.brands → ChannelList) |
 | **`GET /api/cli/v1/balance`** | New — reads `CliCreditAccount` | New (simple model read) |
 | **`GET /api/cli/v1/describe`** | New — static metadata | New (hardcoded resource definitions) |
 | **`POST /api/cli/v1/ask`** | New — LLM integration | New (but uses existing views for data execution) |

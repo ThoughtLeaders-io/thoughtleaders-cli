@@ -48,6 +48,9 @@ tl brands Nike
 # Run a saved report
 tl reports run 42
 
+# Show information about the logged-in user
+tl whoami
+
 # Check credits
 tl balance
 ```
