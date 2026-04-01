@@ -47,6 +47,8 @@ Every command in `src/tl_cli/commands/` follows the same structure:
 
 When adding a new command, copy an existing one (e.g., `sponsorships.py`) and follow the pattern.
 
+`deals`, `matches`, and `proposals` are shortcut commands that delegate to `sponsorships` with a pre-set status filter. They share `list_or_show()` from `sponsorships.py` and reject explicit `status:` filters — users should use `tl sponsorships` for finer-grained status filtering.
+
 ### Filter Parsing (`filters.py`)
 
 `parse_filters()` handles `key:value` and `key:"quoted value"` syntax. Returns `dict[str, str]` passed as query params.

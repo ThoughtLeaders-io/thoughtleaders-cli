@@ -27,6 +27,9 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 tl sponsorships [filters...]       # Sponsorships (2 credits/result, 3/detail)
 tl sponsorships <id>               # Sponsorship detail
 tl sponsorships create --channel <id> --brand <id>  # Create proposal (free)
+tl deals [filters...]              # Shortcut: agreed-upon sponsorships (status:deal)
+tl matches [filters...]            # Shortcut: possible brand-channel pairings (status:match)
+tl proposals [filters...]          # Shortcut: proposed matches (status:proposal)
 tl uploads [filters...]            # Video uploads from ES (1 credit/result)
 tl uploads <id>                    # Upload detail (2 credits)
 tl channels [filters...]           # Channel search (3 credits/result, 5/detail)

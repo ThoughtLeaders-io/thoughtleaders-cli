@@ -40,7 +40,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 
 ### Discovery workflows
 "What's our best performing brand this quarter?"
-1. `tl sponsorships status:sold since:2026-01-01 --json` → aggregate revenue by brand
+1. `tl deals since:2026-01-01 --json` → aggregate revenue by brand
 2. `tl brands <top_brand> --json` → sponsorship intelligence
 3. `tl snapshots channel <id> --json` → performance metrics for top channels
 
@@ -48,7 +48,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 "Give me a full picture of channel 12345"
 1. `tl channels 12345 --json` → profile and scores
 2. `tl snapshots channel 12345 --json` → growth over time
-3. `tl sponsorships channel:12345 --json` → sponsorship history
+3. `tl deals channel:12345 --json` → deal history
 4. `tl uploads channel:12345 --json` → recent content
 
 ## Rules

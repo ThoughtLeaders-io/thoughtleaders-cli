@@ -22,6 +22,9 @@ from tl_cli.commands.balance import app as balance_app
 from tl_cli.commands.brands import app as brands_app
 from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.comments import app as comments_app
+from tl_cli.commands.deals import app as deals_app
+from tl_cli.commands.matches import app as matches_app
+from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.sponsorships import app as sponsorships_app
 from tl_cli.commands.describe import app as describe_app
 from tl_cli.commands.doctor import app as doctor_app
@@ -66,6 +69,9 @@ app.add_typer(doctor_app, name="doctor")
 
 # Data commands (primary interface)
 app.add_typer(sponsorships_app, name="sponsorships")
+app.add_typer(deals_app, name="deals")
+app.add_typer(matches_app, name="matches")
+app.add_typer(proposals_app, name="proposals")
 app.add_typer(uploads_app, name="uploads")
 app.add_typer(channels_app, name="channels")
 app.add_typer(brands_app, name="brands")

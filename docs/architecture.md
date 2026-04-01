@@ -34,6 +34,9 @@ Customer's machine                    TL Infrastructure
 | `tl sponsorships [filters...]` | List sponsorships (adlink + adspot + channel + brand) |
 | `tl sponsorships <id>` | Show sponsorship detail |
 | `tl sponsorships create --channel <id> --brand <id>` | Create a proposal (free, no credits) |
+| `tl deals [filters...]` | Shortcut: agreed-upon sponsorships (`status:deal`) |
+| `tl matches [filters...]` | Shortcut: possible brand-channel pairings (`status:match`) |
+| `tl proposals [filters...]` | Shortcut: matches proposed to both sides (`status:proposal`) |
 | `tl uploads [filters...]` | List video uploads (ES) |
 | `tl uploads <id>` | Show upload detail |
 | `tl channels [filters...]` | Search channels |
@@ -53,6 +56,8 @@ tl sponsorships status:pending owner:emma limit:20
 tl uploads channel:12345 type:longform since:2026-03
 tl channels category:cooking min-subs:100k language:en
 ```
+
+Date filters (`since`, `until`, `send-date`, `send-date-before`, `publish-date`, `publish-date-before`) accept `today`, `yesterday`, and `tomorrow` as keywords — resolved to ISO dates on the CLI before sending to the server.
 
 ### Discoverability
 | Command | Description |
@@ -268,7 +273,10 @@ tl-cli/
 │   │   └── breadcrumbs.py            # Next-command hints + usage display
 │   ├── commands/
 │   │   ├── __init__.py
-│   │   ├── sponsorships.py            # tl sponsorships (list/show/create)
+│   │   ├── sponsorships.py            # tl sponsorships (list/show/create) + shared list_or_show()
+│   │   ├── deals.py                  # tl deals (shortcut: status:deal)
+│   │   ├── matches.py                # tl matches (shortcut: status:match)
+│   │   ├── proposals.py              # tl proposals (shortcut: status:proposal)
 │   │   ├── uploads.py                # tl uploads (list/show)
 │   │   ├── channels.py              # tl channels (search/show)
 │   │   ├── brands.py                # tl brands (brand intelligence)

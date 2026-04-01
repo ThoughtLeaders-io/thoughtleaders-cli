@@ -33,6 +33,12 @@ tl auth login
 # Query sponsorships
 tl sponsorships status:sold brand:"Nike" since:2026-01
 
+# Shortcut commands for sponsorship types
+tl deals brand:"Nike"                     # Agreed-upon sponsorships
+tl deals since:today                      # Deals from today (date keywords: today, yesterday, tomorrow)
+tl matches                                # Possible brand-channel pairings
+tl proposals                              # Matches proposed to both sides
+
 # Search channels
 tl channels category:cooking min-subs:100k
 
