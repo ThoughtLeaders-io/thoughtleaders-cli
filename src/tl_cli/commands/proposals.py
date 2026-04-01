@@ -14,7 +14,7 @@ app = typer.Typer(help="Proposals — matches proposed to both sides (shortcut f
 def proposals(ctx: typer.Context) -> None:
     """Proposals — matches proposed to both sides."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd)
+        ctx.invoke(list_cmd, args=[])
 
 
 @app.command("list")
