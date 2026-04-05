@@ -20,7 +20,13 @@ pipx install git+https://github.com/ThoughtLeaders-io/tl-cli.git
 # or
 uv tool install git+https://github.com/ThoughtLeaders-io/tl-cli.git
 # or (but try to avoid it because just "pip" will not create a new venv for the product - only "uv" and "pipx" will do that)
-pip install tl-cli
+pip install git+https://github.com/ThoughtLeaders-io/tl-cli.git
+```
+
+Then set up:
+```bash
+tl auth login          # authenticate with ThoughtLeaders
+tl setup claude        # install Claude Code plugin (optional)
 ```
 
 ## Quick Start

@@ -61,6 +61,16 @@ def main(
     """ThoughtLeaders CLI."""
     tl_config.debug = debug
 
+    # First-run hint
+    from tl_cli.auth.token_store import load_tokens
+    tokens = load_tokens()
+    if not tokens:
+        err = Console(stderr=True)
+        err.print("[dim]Welcome to tl-cli! Get started:[/dim]")
+        err.print("[dim]  tl auth login          # authenticate[/dim]")
+        err.print("[dim]  tl setup claude        # install Claude Code plugin[/dim]")
+        err.print()
+
     from tl_cli.commands.setup import check_plugin_version
     plugin_warn = check_plugin_version()
     if plugin_warn:
