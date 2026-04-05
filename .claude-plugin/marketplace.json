@@ -1,0 +1,17 @@
+{
+  "name": "thoughtleaders-plugins",
+  "owner": {
+    "name": "ThoughtLeaders",
+    "email": "dev@thoughtleaders.io"
+  },
+  "metadata": {
+    "description": "ThoughtLeaders CLI plugin for Claude Code — query sponsorship data from the terminal"
+  },
+  "plugins": [
+    {
+      "name": "tl-cli",
+      "source": ".",
+      "description": "ThoughtLeaders CLI — query sponsorship deals, channels, brands, uploads, and intelligence"
+    }
+  ]
+}

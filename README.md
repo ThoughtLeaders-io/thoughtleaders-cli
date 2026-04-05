@@ -108,11 +108,32 @@ If you use Claude Code, install the plugin for natural language access:
 tl setup claude
 ```
 
-Then just talk naturally:
+This registers the ThoughtLeaders marketplace, installs the plugin, and copies skills to `~/.claude/` for short `/tl` invocation. If the `claude` binary isn't on PATH, it still installs the standalone skills and prints manual instructions for the plugin.
+
+### Using the skills
+
+Talk naturally in Claude Code:
+
 ```
 /tl sold sponsorships for Nike in Q1
+/tl show me pending proposals with send dates in April
+/tl what channels does Nike sponsor?
+/tl check my balance
+```
+
+Resource-specific slash commands:
+```
+/tl-sponsorships pending with send dates in April
 /tl-channels cooking channels over 100k subscribers
 /tl-brands Nike
+/tl-reports run my Q1 pipeline
+/tl-balance
+```
+
+### Updating
+
+```bash
+tl setup claude                    # re-installs skills and updates plugin
 ```
 
 ## Output Formats
