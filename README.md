@@ -19,9 +19,9 @@ pip install -e .
 git clone ...
 pipx install tl-cli
 # or
-pip install tl-cli
-# or
 uv tool install tl-cli
+# or (but try to avoid it because just "pip" will not create a new venv for the product - only "uv" and "pipx" will do that)
+pip install tl-cli
 ```
 
 ## Quick Start

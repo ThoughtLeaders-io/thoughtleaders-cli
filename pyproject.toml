@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tl-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence"
 readme = "README.md"
 license = "MIT"
@@ -42,6 +42,13 @@ Documentation = "https://github.com/ThoughtLeaders-io/tl-cli/blob/main/docs/arch
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tl_cli"]
+
+[tool.hatch.build.targets.wheel.force-include]
+".claude-plugin" = "tl_cli/_plugin/.claude-plugin"
+"commands" = "tl_cli/_plugin/commands"
+"skills" = "tl_cli/_plugin/skills"
+"agents" = "tl_cli/_plugin/agents"
+"hooks" = "tl_cli/_plugin/hooks"
 
 [tool.ruff]
 target-version = "py310"

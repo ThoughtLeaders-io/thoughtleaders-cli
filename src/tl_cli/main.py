@@ -61,6 +61,11 @@ def main(
     """ThoughtLeaders CLI."""
     tl_config.debug = debug
 
+    from tl_cli.commands.setup import check_plugin_version
+    plugin_warn = check_plugin_version()
+    if plugin_warn:
+        Console(stderr=True).print(f"[yellow]{plugin_warn}[/yellow]")
+
 
 # System
 app.add_typer(auth_app, name="auth")

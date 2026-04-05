@@ -53,8 +53,17 @@ def doctor(ctx: typer.Context) -> None:
     else:
         console.print("  API:    [dim]skipped (not authenticated)[/dim]")
 
+    # Plugin version
+    from tl_cli.commands.setup import check_plugin_version
+    plugin_warn = check_plugin_version()
+    if plugin_warn:
+        console.print(f"  Plugin: [yellow]{plugin_warn}[/yellow]")
+        all_ok = False
+    else:
+        console.print("  Plugin: [green]ok[/green]")
+
     console.print()
     if all_ok:
         console.print("[green]Everything looks good.[/green]")
     else:
-        console.print("[yellow]Issues found. Run 'tl auth login' to authenticate.[/yellow]")
+        console.print("[yellow]Issues found.[/yellow]")
