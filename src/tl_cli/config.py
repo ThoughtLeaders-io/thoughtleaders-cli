@@ -11,6 +11,7 @@ DEFAULT_API_URL = "https://app.thoughtleaders.io"
 DEFAULT_AUTH0_DOMAIN = "dev-mq73b7zhdhwvgae1.us.auth0.com"
 DEFAULT_AUTH0_CLIENT_ID = "BWTaMBWRP0wxWjPXbSa9FHhbz7RKfURu" # Set when Auth0 app is created, not secret
 DEFAULT_AUTH0_AUDIENCE = "https://app.thoughtleaders.io/mcp" # No relation to the MCP API, just uses the same OAuth0 "audience" config
+DEFAULT_AUTH0_CALLBACK_PORT = 8484  # Fixed port — must match Auth0 allowed callback URLs
 
 # Config directory
 CONFIG_DIR = Path.home() / ".config" / "tl"

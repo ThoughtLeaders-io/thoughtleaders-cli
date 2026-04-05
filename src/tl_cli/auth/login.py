@@ -42,8 +42,9 @@ def login_browser() -> StoredTokens:
     state = secrets.token_urlsafe(32)
     result = _CallbackResult()
 
-    # Start callback server on a random port
-    server, port = _start_callback_server(result, state)
+    # Start callback server on the fixed port (must match Auth0 allowed callback URLs)
+    from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT
+    server, port = _start_callback_server(result, state, DEFAULT_AUTH0_CALLBACK_PORT)
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -266,7 +267,7 @@ def _extract_email_from_jwt(token: str) -> str | None:
 
 
 def _start_callback_server(
-    result: _CallbackResult, expected_state: str
+    result: _CallbackResult, expected_state: str, port: int = 0
 ) -> tuple[http.server.HTTPServer, int]:
     """Start a temporary HTTP server to receive the OAuth callback."""
 
@@ -318,8 +319,7 @@ def _start_callback_server(
         def log_message(self, format, *args):
             pass  # Suppress HTTP logs
 
-    # Find a free port
-    server = http.server.HTTPServer(("127.0.0.1", 0), CallbackHandler)
+    server = http.server.HTTPServer(("127.0.0.1", port), CallbackHandler)
     port = server.server_address[1]
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
