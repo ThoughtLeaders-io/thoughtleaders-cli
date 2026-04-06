@@ -97,6 +97,7 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 | `tl auth logout` | Clear stored tokens |
 | `tl auth status` | Show auth state + credit balance |
 | `tl setup claude` | Install Claude Code plugin |
+| `tl setup opencode` | Install OpenCode skill |
 | `tl doctor` | Health check (auth, connectivity, version, balance) |
 | `tl whoami` | Show current user, profile, org, and brands (free) |
 | `tl balance` | Show credit balance and recent usage |
@@ -107,9 +108,9 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 ### Agent support flag
 `--help --agent` returns structured JSON help (flags, gotchas, subcommands) for any command — optimized for AI agents to parse.
 
-## Claude Code Plugin
+## AI Agent Integration
 
-`tl setup claude` installs the plugin to `~/.claude/plugins/tl-cli/`. Zero AI in the plugin — Claude brings the intelligence, the CLI is just a tool.
+`tl setup claude` registers the marketplace, installs the plugin, and copies skills to `~/.claude/` for short `/tl` invocation. `tl setup opencode` copies the skill to `~/.config/opencode/skills/`. Zero AI in the plugin — the agent brings the intelligence, the CLI is just a tool.
 
 ### Plugin components
 
@@ -293,7 +294,7 @@ tl-cli/
 │   │   ├── comments.py              # tl comments (list/add)
 │   │   ├── describe.py              # tl describe list/show (schema/filter/pricing discovery)
 │   │   ├── ask.py                   # tl ask (optional AI fallback)
-│   │   ├── setup.py                 # tl setup claude
+│   │   ├── setup.py                 # tl setup claude / tl setup opencode
 │   │   ├── balance.py               # tl balance
 │   │   ├── doctor.py                # tl doctor
 │   │   └── whoami.py                # tl whoami

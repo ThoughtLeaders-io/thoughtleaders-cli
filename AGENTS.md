@@ -74,16 +74,20 @@ Exit codes: 1 (forbidden/not-found), 2 (auth required), 3 (rate-limit/server-err
 
 TTY-aware: Rich tables in terminal, JSON when piped. Flags: `--json`, `--csv`, `--md`, `--quiet`. Usage footer (credits charged + balance) goes to stderr. Breadcrumbs suggest next commands.
 
-### Claude Code Plugin Integration
+### AI Agent Integration
 
-The CLI doubles as a Claude Code plugin:
-- `.claude-plugin/plugin.json` — plugin manifest
+The CLI integrates with AI coding agents via skills, commands, agents, and hooks.
+
+**Claude Code** (`tl setup claude`):
+- `.claude-plugin/plugin.json` — plugin manifest + marketplace
 - `commands/*.md` — slash commands (`/tl`, `/tl-sponsorships`, `/tl-channels`, `/tl-brands`, `/tl-reports`, `/tl-balance`)
 - `skills/tl/SKILL.md` — skill definition teaching Claude the CLI workflow
 - `agents/tl-analyst.md` — autonomous multi-step analysis agent
 - `hooks/` — PreToolUse (auth check, limit guard) and PostToolUse (low balance warning) on `tl` commands
 
-Install with `tl setup claude`.
+**OpenCode** (`tl setup opencode`):
+- `skills/tl/SKILL.md` — same skill file, copied to `~/.config/opencode/skills/tl/`
+- OpenCode's agent discovers and invokes it automatically for data questions
 
 ### API Response Envelope
 

@@ -10,7 +10,7 @@ from rich.console import Console
 
 from tl_cli import __version__
 
-app = typer.Typer(help="Set up integrations (Claude Code plugin)")
+app = typer.Typer(help="Set up integrations (Claude Code, OpenCode)")
 console = Console(stderr=True)
 
 MARKETPLACE_SOURCE = "ThoughtLeaders-io/tl-cli"
@@ -22,6 +22,8 @@ CLAUDE_HOME = Path.home() / ".claude"
 CLAUDE_PLUGINS_DIR = CLAUDE_HOME / "plugins"
 CLAUDE_SKILLS_DIR = CLAUDE_HOME / "skills"
 CLAUDE_COMMANDS_DIR = CLAUDE_HOME / "commands"
+
+OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
 
 
 def _find_plugin_root() -> Path | None:
@@ -292,3 +294,91 @@ def _setup_noninteractive() -> None:
 
     result["status"] = "ok"
     print(json.dumps(result, indent=2))
+
+
+# --- OpenCode setup ---
+
+
+def _install_opencode_skills(plugin_root: Path) -> int:
+    """Copy skills to ~/.config/opencode/skills/ for OpenCode discovery.
+
+    Returns the number of skills installed.
+    """
+    count = 0
+    skills_src = plugin_root / "skills"
+    if skills_src.is_dir():
+        for skill_dir in skills_src.iterdir():
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
+                dst = OPENCODE_SKILLS_DIR / skill_dir.name
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(skill_dir, dst)
+                count += 1
+    return count
+
+
+@app.command("opencode")
+def setup_opencode(
+    json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+) -> None:
+    """Install the TL CLI skills for OpenCode.
+
+    Copies skill files to ~/.config/opencode/skills/ so OpenCode's
+    agent can discover and use them automatically.
+
+    Examples:
+        tl setup opencode
+        tl setup opencode --json
+    """
+    if json_output:
+        result = {"cli_version": __version__}
+        plugin_root = _find_plugin_root()
+        if plugin_root is None:
+            result["status"] = "error"
+            result["error"] = "Plugin assets not found"
+            print(json.dumps(result, indent=2))
+            raise SystemExit(1)
+        count = _install_opencode_skills(plugin_root)
+        result["skills_installed"] = count
+        result["status"] = "ok"
+        print(json.dumps(result, indent=2))
+        return
+
+    console.print()
+    console.print(f"[bold]tl-cli[/bold] v{__version__} — OpenCode Setup")
+    console.print()
+
+    # Check tl is on PATH
+    tl_bin = shutil.which("tl")
+    if tl_bin:
+        console.print(f"  [green]✓[/green] tl CLI found: {tl_bin}")
+    else:
+        console.print("  [red]✗[/red] tl CLI not found on PATH")
+        console.print("    OpenCode's Bash tool won't be able to run tl commands.")
+        console.print("    Install with: [cyan]pipx install git+https://github.com/ThoughtLeaders-io/tl-cli.git[/cyan]")
+
+    # Find plugin assets
+    plugin_root = _find_plugin_root()
+    if plugin_root is None:
+        console.print("  [red]✗[/red] Plugin assets not found")
+        console.print("    Try reinstalling: [cyan]pipx install --force git+https://github.com/ThoughtLeaders-io/tl-cli.git[/cyan]")
+        raise SystemExit(1)
+    console.print(f"  [green]✓[/green] Plugin assets found: {plugin_root}")
+    console.print()
+
+    # Install skills
+    console.print("[bold]Installing skills...[/bold]")
+    count = _install_opencode_skills(plugin_root)
+    if count > 0:
+        console.print(f"  [green]✓[/green] Installed {count} skill(s) to {OPENCODE_SKILLS_DIR}/")
+    else:
+        console.print("  [yellow]![/yellow] No skills found to install")
+        raise SystemExit(1)
+
+    console.print()
+    console.print("[green]Setup complete![/green]")
+    console.print()
+    console.print("OpenCode will automatically discover the tl skill.")
+    console.print("The agent can use it when you ask about sponsorships, deals, channels, or brands.")
+    console.print()
+    console.print("[dim]To update, run: tl setup opencode[/dim]")

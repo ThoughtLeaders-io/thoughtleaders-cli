@@ -27,6 +27,7 @@ Then set up:
 ```bash
 tl auth login          # authenticate with ThoughtLeaders
 tl setup claude        # install Claude Code plugin (optional)
+tl setup opencode      # install OpenCode skill (optional)
 ```
 
 ## Quick Start
@@ -141,6 +142,14 @@ Resource-specific slash commands:
 ```bash
 tl setup claude                    # re-installs skills and updates plugin
 ```
+
+## OpenCode Integration
+
+```bash
+tl setup opencode
+```
+
+This copies the tl skill to `~/.config/opencode/skills/` where OpenCode discovers it automatically. The agent will use it when you ask about sponsorships, deals, channels, or brands.
 
 ## Output Formats
 
