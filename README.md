@@ -167,3 +167,7 @@ tl sponsorships list status:sold --json | jq '.results'   # Pipe to jq
 - [Architecture & Design](docs/architecture.md) — full design doc covering commands, data scoping, credit metering, and server-side API
 - `tl describe` — discover available resources, fields, filters, and credit costs from the CLI itself
 - `tl <command> --help` — detailed help for any command
+
+# Notes
+
+* Tested with OpenCode and the `nemotron-cascade-2-30b-a3b-i1` local model.
