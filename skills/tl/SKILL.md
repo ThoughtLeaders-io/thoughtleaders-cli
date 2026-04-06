@@ -47,6 +47,7 @@ At the start of session, run a `tl whoami` command to find out what you have acc
 4. **Query with filters**: Use `key:value` filter syntax for structured queries
 5. **Always use --json**: Parse JSON output for multi-step analysis. Use `--quiet` for raw data only.
 6. **Chain commands**: For complex questions, chain multiple `tl` commands
+7. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers.
 
 ## Available Commands
 
