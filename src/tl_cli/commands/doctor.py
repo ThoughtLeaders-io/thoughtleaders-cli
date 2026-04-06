@@ -53,11 +53,12 @@ def doctor(ctx: typer.Context) -> None:
     else:
         console.print("  API:    [dim]skipped (not authenticated)[/dim]")
 
-    # Plugin version
+    # Plugin/skill versions
     from tl_cli.commands.setup import check_plugin_version
-    plugin_warn = check_plugin_version()
-    if plugin_warn:
-        console.print(f"  Plugin: [yellow]{plugin_warn}[/yellow]")
+    warnings = check_plugin_version()
+    if warnings:
+        for warn in warnings:
+            console.print(f"  Plugin: [yellow]{warn}[/yellow]")
         all_ok = False
     else:
         console.print("  Plugin: [green]ok[/green]")

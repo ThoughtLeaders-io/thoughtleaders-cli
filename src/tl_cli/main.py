@@ -76,9 +76,8 @@ def main(
             err.print()
 
         from tl_cli.commands.setup import check_plugin_version
-        plugin_warn = check_plugin_version()
-        if plugin_warn:
-            Console(stderr=True).print(f"[yellow]{plugin_warn}[/yellow]")
+        for warn in check_plugin_version():
+            Console(stderr=True).print(f"[yellow]{warn}[/yellow]")
 
 
 # System

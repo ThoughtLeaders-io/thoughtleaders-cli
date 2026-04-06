@@ -76,17 +76,28 @@ def _get_installed_plugin_version() -> str | None:
     return None
 
 
-def check_plugin_version() -> str | None:
-    """Check if installed plugin version matches CLI version.
+def check_plugin_version() -> list[str]:
+    """Check if installed plugin versions match CLI version.
 
-    Returns a warning message if mismatched, None if OK or not installed.
+    Returns a list of warning messages for outdated installs. Empty if all OK.
     """
-    installed = _get_installed_plugin_version()
-    if installed is None:
-        return None
-    if installed != __version__:
-        return f"Claude Code plugin is outdated (v{installed} vs CLI v{__version__}). Run 'tl setup claude' to update."
-    return None
+    warnings = []
+
+    # Claude Code
+    claude_version_file = CLAUDE_PLUGINS_DIR / "tl-cli" / ".version"
+    if claude_version_file.exists():
+        installed = claude_version_file.read_text().strip()
+        if installed != __version__:
+            warnings.append(f"Claude Code plugin is outdated (v{installed} vs CLI v{__version__}). Run 'tl setup claude' to update.")
+
+    # OpenCode
+    opencode_version_file = OPENCODE_SKILLS_DIR / ".tl-version"
+    if opencode_version_file.exists():
+        installed = opencode_version_file.read_text().strip()
+        if installed != __version__:
+            warnings.append(f"OpenCode skill is outdated (v{installed} vs CLI v{__version__}). Run 'tl setup opencode' to update.")
+
+    return warnings
 
 
 def _install_standalone_skills(plugin_root: Path) -> int:
@@ -339,6 +350,8 @@ def setup_opencode(
             print(json.dumps(result, indent=2))
             raise SystemExit(1)
         count = _install_opencode_skills(plugin_root)
+        OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+        (OPENCODE_SKILLS_DIR / ".tl-version").write_text(__version__)
         result["skills_installed"] = count
         result["status"] = "ok"
         print(json.dumps(result, indent=2))
@@ -374,6 +387,10 @@ def setup_opencode(
     else:
         console.print("  [yellow]![/yellow] No skills found to install")
         raise SystemExit(1)
+
+    # Write version stamp
+    OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    (OPENCODE_SKILLS_DIR / ".tl-version").write_text(__version__)
 
     console.print()
     console.print("[green]Setup complete![/green]")
