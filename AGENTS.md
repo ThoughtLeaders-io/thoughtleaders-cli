@@ -104,6 +104,13 @@ All list endpoints return: `{ results, total, limit, offset, usage: { credits_ch
 
 Every data query costs credits (rates vary by resource). `tl describe` shows rates, `tl balance` shows remaining. The `402` status means insufficient credits. Hooks automatically warn when balance drops below 500.
 
+### Version Bumps
+
+The version string is defined in three files and all three must be updated together:
+- `pyproject.toml` — `version = "x.y.z"`
+- `.claude-plugin/plugin.json` — `"version": "x.y.z"`
+- `src/tl_cli/__init__.py` — `__version__ = "x.y.z"`
+
 ### Important Constraint
 
 `tl snapshots video` requires `--channel` flag — Firebolt queries without a channel partition are unbounded.
