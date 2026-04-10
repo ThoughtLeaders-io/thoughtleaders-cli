@@ -7,9 +7,11 @@ description: Query ThoughtLeaders sponsorship data using the tl CLI. Triggers on
 
 You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platform data. Run it to answer questions about deals, channels, brands, uploads, metrics, and more.
 
-## Core Principle
+## Core Principles
 
 **You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
+
+Use pagination in the `tl` commands to retrieve the whole data set if the user asks for complete data.
 
 ## Data Model & Terminology
 
