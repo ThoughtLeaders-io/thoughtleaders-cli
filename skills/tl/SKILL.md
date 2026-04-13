@@ -74,6 +74,7 @@ tl uploads list [filters...]           # Video uploads from ES (1 credit/result)
 tl uploads show <id>                   # Upload detail (2 credits)
 tl channels list [filters...]          # Channel search (3 credits/result, 5/detail)
 tl channels show <id>                  # Channel detail
+tl brands list [filters...]            # Search/browse brands
 tl brands show <query>                 # Brand intelligence (5 credits/result, 8/detail)
 tl brands show <query> --channel <id>  # Brand mentions on specific channel
 tl snapshots channel <id>              # Channel metrics over time (1 credit/point)
