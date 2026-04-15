@@ -22,7 +22,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 ### Multi-step research
 "Find channels similar to the ones Nike sponsors and compare their pricing"
 1. `tl brands show Nike --json` → extract channel IDs from mentions
-2. `tl channels show <id> --json` for top channels → get pricing data
+2. `tl channels show <id> --json` for top channels → read current price/cost/CPM from each channel's adspot list
 3. Compile comparison table
 
 ### Cross-resource analysis

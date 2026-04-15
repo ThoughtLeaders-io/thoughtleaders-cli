@@ -25,6 +25,10 @@ class TestParseFilters:
     def test_hyphenated_key(self):
         assert parse_filters(["send-date-start:2026-01"]) == {"send-date-start": "2026-01"}
 
+    def test_empty_value(self):
+        # Empty value is valid — endpoints interpret it (e.g. owner-sales: = unassigned)
+        assert parse_filters(["owner-sales:"]) == {"owner-sales": ""}
+
     def test_invalid_filter_exits(self):
         with pytest.raises(SystemExit):
             parse_filters(["not_a_filter"])

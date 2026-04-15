@@ -56,14 +56,16 @@ def list_cmd(
 def show_cmd(
     channel_id: int = typer.Argument(..., help="Channel ID"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output (flattens adspots: one row per adspot)"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
-    """Show channel detail by ID.
+    """Show channel detail by ID (includes active adspots).
 
     Examples:
         tl channels show 12345
+        tl channels show 12345 --csv > channel.csv
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, csv_output, False, quiet)
 
     client = get_client()
     try:

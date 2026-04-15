@@ -97,7 +97,7 @@ ThoughtLeaders has its internal terminology that's exposed throughout this tool.
     * *Deals* - Contractually agreed-upon sponsorships. AKA sold sponsorships. They can be either in a production pipeline or already published / live.
     * *Matches* - Possible matches between brands and channels, i.e. all pairings that ThoughtLeaders thinks could possibly be right for each other.
     * *Proposals* - Matches that are actually proposed to both sides to consider.
-* **Send date** - The expected publication date for a sponsored video
+- **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and computed CPM.
 
 Sponsorships are the centre of attention in ThoughtLeaders - all other analytics and operations serve to produce or optimise sponsorships.
 Note that the term "Sponsorship" is wide, and can encompass deals that yet need to be approved by either side. There is a funnel of

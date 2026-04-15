@@ -31,11 +31,13 @@ Other key concepts:
 - **Snapshots** — historical time-series metrics for channels and videos (Firebolt)
 - **Reports** — saved report configurations that can be re-run
 - **Comments** — notes attached to sponsorships
+- **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and computed CPM.
+- **`impression`** (on channels) — projected views per video on that channel. Used as the denominator for CPM calculations on adspots. May be null when not yet computed for a channel.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
-  - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made)
+  - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
   - **`send_date`** — the date the video is/was expected to be published (scheduled)
-  - **`publish_date`** — the date the video was actually published
+  - **`publish_date`** — the date the video was actually published; These make up live ads.
 - **Credits** — every data query costs credits; use `tl describe` to see rates
 
 Users see data scoped by their organization and plan:
@@ -60,6 +62,8 @@ Unless the user specifically asks for running a specific report or showing the r
 5. **Always use --json**: Parse JSON output for multi-step analysis. Use `--quiet` for raw data only.
 6. **Chain commands**: For complex questions, chain multiple `tl` commands
 7. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers.
+
+Prefer writing Python code that fetches or analysises large sets of data, instead of using `jq` or analysing it yourself. Create temporary files in `/tmp` that can be analysed later in different ways.
 
 ## Available Commands
 

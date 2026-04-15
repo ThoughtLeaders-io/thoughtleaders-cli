@@ -81,7 +81,12 @@ def output(
 
 
 def output_single(data: dict, fmt: str) -> None:
-    """Format and print a single record (detail view)."""
+    """Format and print a single record (detail view).
+
+    Nested list-of-dict values (e.g. `adspots`) are rendered as indented
+    sub-tables in table/md mode, and as a flattened cross-product in csv mode
+    (one row per nested item with parent fields repeated).
+    """
     results = data.get("results", data)
     usage = data.get("usage")
     breadcrumbs = data.get("_breadcrumbs", [])
@@ -91,13 +96,16 @@ def output_single(data: dict, fmt: str) -> None:
         print(json.dumps(target, indent=2, default=str))
         return
 
-    # For table/md mode, show as key-value pairs
-    if isinstance(results, dict):
-        _output_detail(results)
-    elif isinstance(results, list) and len(results) == 1:
-        _output_detail(results[0])
-    else:
+    # Unwrap single-item list
+    record = results[0] if isinstance(results, list) and len(results) == 1 else results
+    if not isinstance(record, dict):
         print(json.dumps(results, indent=2, default=str))
+        return
+
+    if fmt == "csv":
+        _output_detail_csv(record)
+    else:
+        _output_detail(record)
 
     _print_usage(usage)
     _print_breadcrumbs(breadcrumbs)
@@ -160,13 +168,96 @@ def _output_markdown(results: list[dict], columns: list[str]) -> None:
         print("| " + " | ".join(values) + " |")
 
 
+_RIGHT_ALIGN_COLS = {"price", "cost", "price_cpm", "cost_cpm"}
+
+
+def _is_list_of_dicts(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(v, dict) for v in value)
+
+
 def _output_detail(record: dict) -> None:
-    """Pretty-print a single record as key-value pairs."""
+    """Pretty-print a single record as key-value pairs.
+
+    If a value is a non-empty list of dicts, it's rendered as an indented
+    sub-table beneath its label instead of stringified. Empty lists show
+    `(none)` to signal "no entries" explicitly rather than printing `[]`.
+    """
     console = Console()
-    max_key_len = max(len(k) for k in record) if record else 0
-    for key, value in record.items():
+    nested_items = [(k, v) for k, v in record.items() if _is_list_of_dicts(v)]
+    empty_list_items = [k for k, v in record.items() if isinstance(v, list) and not v]
+    nested_or_empty_keys = {k for k, _ in nested_items} | set(empty_list_items)
+    flat_items = [(k, v) for k, v in record.items() if k not in nested_or_empty_keys]
+
+    max_key_len = max((len(k) for k, _ in flat_items), default=0)
+    for key, value in flat_items:
+        # List that's not list-of-dicts → stringify as JSON for readability
+        if isinstance(value, list):
+            display = json.dumps(value, default=str)
+        else:
+            display = value
         label = f"[bold]{key:<{max_key_len}}[/bold]"
-        console.print(f"  {label}  {value}")
+        console.print(f"  {label}  {display}")
+
+    for key, rows in nested_items:
+        console.print(f"\n  [bold]{key}[/bold] ({len(rows)}):")
+        sub_cols = list(rows[0].keys())
+        sub_table = Table(show_header=True, padding=(0, 1))
+        for col in sub_cols:
+            kwargs: dict = {"overflow": "ellipsis", "max_width": 40}
+            if col in _RIGHT_ALIGN_COLS:
+                kwargs["justify"] = "right"
+            sub_table.add_column(col, **kwargs)
+        for row in rows:
+            sub_table.add_row(*[_format_cell(row.get(col)) for col in sub_cols])
+        console.print(sub_table)
+
+    for key in empty_list_items:
+        console.print(f"\n  [bold]{key}[/bold]: [dim](none)[/dim]")
+
+
+def _format_cell(value: object) -> str:
+    if value is None:
+        return ""
+    return _truncate(str(value), 40)
+
+
+def _output_detail_csv(record: dict) -> None:
+    """Flatten a detail record to CSV.
+
+    Flat fields become columns on every row. Nested list-of-dict fields are
+    cross-joined: one output row per nested item, with parent fields repeated
+    and nested fields prefixed with `<key>_` to avoid collisions (parent and
+    nested items may share field names like `id` or `name`).
+
+    Records with no nested items emit a single row of flat fields. If there
+    are multiple nested list fields, the rows are cross-joined.
+    """
+    flat = {k: ("" if v is None else v) for k, v in record.items() if not isinstance(v, list)}
+    nested = [(k, v) for k, v in record.items() if _is_list_of_dicts(v)]
+
+    # Build header: flat columns + prefixed nested columns
+    columns = list(flat.keys())
+    for key, rows in nested:
+        for col in rows[0].keys():
+            columns.append(f"{key}_{col}")
+
+    writer = csv.DictWriter(sys.stdout, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+
+    # No nested items → single row
+    if not nested:
+        writer.writerow(flat)
+        return
+
+    # Cross-join: cartesian product over nested lists. In practice there's
+    # usually one nested field (e.g. adspots), giving N rows per record.
+    from itertools import product
+    for combo in product(*(rows for _, rows in nested)):
+        row = dict(flat)
+        for (key, _), item in zip(nested, combo):
+            for col, val in item.items():
+                row[f"{key}_{col}"] = "" if val is None else val
+        writer.writerow(row)
 
 
 def _print_usage(usage: dict | None) -> None:

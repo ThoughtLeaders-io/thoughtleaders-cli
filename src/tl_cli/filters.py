@@ -38,6 +38,8 @@ def parse_filters(args: list[str]) -> dict[str, str]:
         key:value           → {"key": "value"}
         key:"quoted value"  → {"key": "quoted value"}
         key:'quoted value'  → {"key": "quoted value"}
+        key:                → {"key": ""}   (empty value — endpoint decides semantics,
+                                             e.g. `owner-sales:` → no owner assigned)
 
     Returns a dict of filter_name → filter_value. Prints an error and exits
     if a filter is malformed.
@@ -45,7 +47,7 @@ def parse_filters(args: list[str]) -> dict[str, str]:
     filters: dict[str, str] = {}
 
     for arg in args:
-        match = re.match(r'^([a-zA-Z_-]+):(.+)$', arg)
+        match = re.match(r'^([a-zA-Z_-]+):(.*)$', arg)
         if not match:
             print(f"Error: invalid filter '{arg}'. Expected format: key:value", file=sys.stderr)
             raise SystemExit(1)
