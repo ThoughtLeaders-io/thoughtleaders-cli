@@ -11,7 +11,7 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 **You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
 
-Use pagination in the `tl` commands to retrieve the whole data set if the user doesn't specifically ask for a subset of data. The maximum number of results per page is 500.
+Unless the user requested a subset of the result, use pagination in the `tl` commands to retrieve the entire data set (all pages, until total records are fetched). The maximum number of results per page is 500.
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 
@@ -39,6 +39,7 @@ Other key concepts:
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
   - **Channel CPM** = `(adspot.price / channel.impression) × 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
   - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
+  - **CPM does not have a range filter.** To find sponsorships in a CPM range (e.g. "around $15"), fetch the record set with other filters first, then apply the CPM range in post-processing (jq, Python, etc.) on the returned `cpm` field. Plan queries and pagination accordingly — the server cannot reduce the result count based on CPM.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
