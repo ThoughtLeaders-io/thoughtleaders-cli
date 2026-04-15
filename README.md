@@ -54,8 +54,13 @@ tl uploads list q:code --csv
 # Show upload details (supports colon-containing IDs)
 tl uploads show 1174310:0BehkmVa7ak
 
-# Search channels
+# Search channels. msn and tpp are tri-state filters (yes/no/both; default 'both').
+# msn = opted-in to receive sponsorship offers; tpp = exclusively TL-managed.
+# Both are also returned as boolean fields on every channel response.
 tl channels list category:cooking min-subs:100k
+tl channels list msn:yes                  # MSN channels only (~11k)
+tl channels list tpp:yes                  # TPP channels only (~169)
+tl channels list msn:no min-subs:500k     # big non-MSN channels
 
 # Show channel detail — accepts numeric ID or channel name.
 # Names that match more than one active channel print a candidate list
@@ -64,7 +69,8 @@ tl channels show 12345
 tl channels show "Economics Explained"
 
 # Find similar channels (vector recommender, 50 credits, Intelligence plan).
-# MSN filtering is on by default — pass msn:false to include non-MSN channels.
+# msn: is tri-state (default msn:yes): yes = MSN only, no = non-MSN only, both = no filter.
+# tpp: is tri-state (default tpp:both): yes = TPP only, no = non-TPP only, both = no filter.
 # Same ID-or-name resolution rules as `channels show`.
 tl channels similar 12345 --limit 10
 tl channels similar "Tremending girls" min-score:0.85 --limit 5

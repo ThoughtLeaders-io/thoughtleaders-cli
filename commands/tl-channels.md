@@ -20,6 +20,12 @@ Examples:
 - "/tl-channels mobile tech channels with US focus" → `tl channels list category:tech primary-device:mobile min-us-share:60`
 - "/tl-channels channels similar to 12345" → `tl channels similar 12345 --limit 10`
 - "/tl-channels look-alikes for Economics Explained at high similarity" → `tl channels similar "Economics Explained" min-score:0.85 --limit 10`
-- "/tl-channels look-alikes including non-MSN" → `tl channels similar 12345 msn:false --limit 20`
+- "/tl-channels look-alikes including non-MSN" → `tl channels similar 12345 msn:both --limit 20`
+- "/tl-channels look-alikes that are non-MSN only" → `tl channels similar 12345 msn:no --limit 20`
+- "/tl-channels TPP look-alikes for 12345" → `tl channels similar 12345 tpp:yes --limit 20`
+- "/tl-channels all TPP channels in cooking" → `tl channels list tpp:yes category:cooking`
+- "/tl-channels channels that are NOT in TPP" → `tl channels list tpp:no`
+- "/tl-channels MSN gaming channels" → `tl channels list msn:yes category:gaming`
+- "/tl-channels non-MSN channels with 500k+ subs" → `tl channels list msn:no min-subs:500000`
 
-Note: MSN filtering is on by default for `tl channels similar` (pass `msn:false` to include non-MSN channels). Ambiguous name arguments return a 400 with candidate IDs listed.
+Note: `tl channels list` and `tl channels similar` both support tri-state `msn:` and `tpp:` filters (`yes` / `no` / `both`). Defaults: `msn:yes` on `similar`, `msn:both` on `list`; `tpp:both` on both. Both values are also returned as boolean fields (`msn`, `tpp`) on every channel response — list, detail, and similar. Ambiguous name arguments return a 400 with candidate IDs listed.

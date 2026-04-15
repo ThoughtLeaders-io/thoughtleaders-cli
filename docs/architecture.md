@@ -46,9 +46,9 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl proposals create --channel <id> --brand <id>` | Create a proposal (free) |
 | `tl uploads list [filters...]` | List video uploads (ES) |
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
-| `tl channels list [filters...]` | Search channels |
+| `tl channels list [filters...]` | Search channels. Responses carry boolean `msn` (Media Selling Network) and `tpp` (TL-managed) fields; filterable via `msn:` / `tpp:` tri-state (`yes` / `no` / `both`, default `both`). |
 | `tl channels show <id>` | Show channel detail, including active adspots with price/cost/CPM |
-| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. MSN filtering is on by default (pass `msn:false` to include non-MSN). Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
+| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. Tri-state `msn:` filter (default `yes`) and `tpp:` filter (default `both`) — each takes `yes` / `no` / `both`. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
 | `tl brands show <brand>` | Brand intelligence report |
 | `tl brands show <brand> --channel <id>` | Brand mentions on a specific channel |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |

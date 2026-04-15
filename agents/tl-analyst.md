@@ -22,7 +22,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 ### Multi-step research
 "Find channels similar to the ones Nike sponsors and compare their pricing"
 1. `tl brands show Nike --json` → extract initial channel IDs from mentions
-2. `tl channels similar <initial-id> --json --limit 20` for each top initial channel → one 50-credit call per initial, returns enriched rows with subscribers / impression / cpm. MSN filtering is on by default (`msn:false` to broaden). Ambiguous name arguments return 400 with candidates.
+2. `tl channels similar <initial-id> --json --limit 20` for each top initial channel → one 50-credit call per initial, returns enriched rows with subscribers / impression / cpm. The `msn:` filter is tri-state with default `msn:yes` (MSN channels only): use `msn:both` to broaden to all, or `msn:no` for non-MSN only. Ambiguous name arguments return 400 with candidates.
 3. Union + dedupe, then compile comparison table by cpm / subscribers.
 
 ### Cross-resource analysis

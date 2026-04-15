@@ -14,7 +14,7 @@ app = typer.Typer(help="YouTube channels (search, detail, and similar-channel re
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.
-SIMILAR_COLUMNS = ["score", "id", "name", "subscribers", "projected_views", "total_views", "cpm", "audience"]
+SIMILAR_COLUMNS = ["score", "id", "name", "msn", "tpp", "subscribers", "projected_views", "total_views", "cpm", "audience"]
 SIMILAR_COLUMN_CONFIG = {
     "score": {"justify": "right"},
     "subscribers": {"justify": "right"},
@@ -57,7 +57,7 @@ def list_cmd(
         output(
             data,
             fmt,
-            columns=["id", "name", "subscribers", "category", "sponsorship_score", "trend"],
+            columns=["id", "name", "msn", "tpp", "subscribers", "category", "sponsorship_score", "trend"],
             title="Channels",
         )
     except ApiError as e:

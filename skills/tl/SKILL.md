@@ -36,6 +36,8 @@ Other key concepts:
 - **Reports** — saved report configurations that can be re-run
 - **Comments** — notes attached to sponsorships
 - **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
+- **MSN** (Media Selling Network) — the ~11k YouTube channels that have opted in to receive sponsorship offers. Returned as a boolean `msn` field on every channel response (list, detail, similar). Derived server-side from whether `Channel.media_selling_network_join_date` is non-null — the timestamp itself isn't exposed over the CLI, just the boolean. Filterable via `msn:` tri-state: `msn:yes` (MSN only — the default on `similar`; on `list` the default is `both`), `msn:no` (non-MSN only), `msn:both` (no filter).
+- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the smaller, exclusive ~169 channels TL manages directly. Returned as the `tpp` boolean field on every channel response (list, detail, similar). Filterable via `tpp:` with the same tri-state vocabulary: `tpp:yes` / `tpp:no` / `tpp:both` (default `both`).
 - **`impression`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed.
 - **`views`** (on sponsorships) — actual view count of the sold and published sponsored video, accessible when `article_id` is set.
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
@@ -121,6 +123,10 @@ All list commands accept `key:value` filters:
 tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
 tl uploads list channel:12345 type:longform
 tl channels list category:cooking min-subs:100k language:en
+tl channels list tpp:yes                       # list all TPP (TL-managed) channels
+tl channels list tpp:no primary-device:mobile  # mobile-first channels that aren't in TPP
+tl channels list msn:yes category:tech         # Media Selling Network channels in tech
+tl channels list msn:no min-subs:500k          # big non-MSN channels (not yet opted in)
 ```
 
 Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
@@ -232,10 +238,12 @@ tl sponsorships list status:sold primary-device:mobile min-us-share:60 --json
 
 "Find channels similar to one I know" (vector-similarity recommender, 50 credits per call):
 ```bash
-tl channels similar 29834 --limit 10                         # by ID
+tl channels similar 29834 --limit 10                         # by ID (defaults to msn:yes, tpp:both)
 tl channels similar "Tremending girls" --limit 5             # by unique name
 tl channels similar 29834 min-score:0.85 --limit 20          # tighter similarity threshold
-tl channels similar 29834 msn:false min-score:0.4 --limit 30 # broaden the net
+tl channels similar 29834 msn:both min-score:0.4 --limit 30  # include both MSN and non-MSN channels
+tl channels similar 29834 msn:no --limit 30                  # non-MSN channels only
+tl channels similar 29834 tpp:yes --limit 30                 # TPP (TL-managed) channels only
 tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-side filters
 ```
-**Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. **MSN filtering is on by default** for `similar` — pass `msn:false` to include non-MSN channels. `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
+**Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
