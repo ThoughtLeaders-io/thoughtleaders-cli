@@ -60,6 +60,11 @@ tl channels list category:cooking min-subs:100k
 # Show channel detail
 tl channels show 12345
 
+# Find similar channels (vector recommender, 50 credits, Intelligence plan).
+# MSN filtering is on by default — pass msn:false to include non-MSN channels.
+tl channels similar 12345 --limit 10
+tl channels similar "Economics Explained" min-score:0.85 --limit 5
+
 # Brand intelligence
 tl brands show Nike
 

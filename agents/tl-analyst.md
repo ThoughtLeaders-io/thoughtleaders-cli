@@ -21,9 +21,9 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 
 ### Multi-step research
 "Find channels similar to the ones Nike sponsors and compare their pricing"
-1. `tl brands show Nike --json` → extract channel IDs from mentions
-2. `tl channels show <id> --json` for top channels → read current price/cost/CPM from each channel's adspot list
-3. Compile comparison table
+1. `tl brands show Nike --json` → extract seed channel IDs from mentions
+2. `tl channels similar <seed-id> --json --limit 20` for each top seed → one 50-credit call per seed, returns enriched rows with subscribers / impression / cpm. MSN filtering is on by default (`msn:false` to broaden). Ambiguous name arguments return 400 with candidates.
+3. Union + dedupe, then compile comparison table by cpm / subscribers.
 
 ### Cross-resource analysis
 "Show me deal slippage this month"

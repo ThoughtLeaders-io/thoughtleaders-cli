@@ -15,6 +15,8 @@ Unless the user requested a subset of the result, use pagination in the `tl` com
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 
+Where possible reference sponsorships, brands, channel by numeric IDs.
+
 ## Data Model & Terminology
 
 ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers / media buyers) with **Channels** (YouTube creators, podcasters / media sellers).
@@ -93,6 +95,7 @@ tl uploads list [filters...]           # Video uploads from ES (1 credit/result)
 tl uploads show <id>                   # Upload detail (2 credits)
 tl channels list [filters...]          # Channel search (3 credits/result, 5/detail)
 tl channels show <id>                  # Channel detail
+tl channels similar <id-or-name>       # Vector-similarity recommender (50 credits; Intelligence plan)
 tl brands show <query>                 # Brand intelligence (5 credits/result, 8/detail)
 tl brands show <query> --channel <id>  # Brand mentions on specific channel
 tl snapshots channel <id>              # Channel metrics over time (1 credit/point)
@@ -226,3 +229,13 @@ tl channels list category:cooking primary-device:mobile min-us-share:50 --json
 ```bash
 tl sponsorships list status:sold primary-device:mobile min-us-share:60 --json
 ```
+
+"Find channels similar to one I know" (vector-similarity recommender, 50 credits per call):
+```bash
+tl channels similar 29834 --limit 10                         # by ID
+tl channels similar "Economics Explained" --limit 5          # by unique name
+tl channels similar 29834 min-score:0.85 --limit 20          # tighter similarity threshold
+tl channels similar 29834 msn:false min-score:0.4 --limit 30 # broaden the net
+tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-side filters
+```
+**MSN filtering is on by default** — pass `msn:false` to include non-MSN channels. Name arguments that match more than one active channel return a 400 with the candidates listed so you can disambiguate by ID. `tl channels look-alike` is a hidden alias that matches the internal "look-alike channels" terminology.

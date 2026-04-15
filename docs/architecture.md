@@ -48,6 +48,7 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
 | `tl channels list [filters...]` | Search channels |
 | `tl channels show <id>` | Show channel detail, including active adspots with price/cost/CPM |
+| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. MSN filtering is on by default (pass `msn:false` to include non-MSN). Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
 | `tl brands show <brand>` | Brand intelligence report |
 | `tl brands show <brand> --channel <id>` | Brand mentions on a specific channel |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
@@ -158,7 +159,7 @@ tools: [Bash, Read]
 ```
 
 What the agent does:
-- **Multi-step research**: "Find channels similar to the ones Nike sponsors and compare their pricing" → `tl brands show Nike --json` → extract channel IDs → `tl channels show <id> --json` for each (adspot list carries current price/cost/CPM) → compile comparison table
+- **Multi-step research**: "Find channels similar to the ones Nike sponsors and compare their pricing" → `tl brands show Nike --json` → extract seed channel IDs → `tl channels similar <seed-id> --json` for each (enriched with cpm) → union + dedupe → compile comparison table
 - **Cross-resource analysis**: "Show me deal slippage and add comments" → `tl sponsorships status:pending send-date-end:2026-03 --json` → identify slipping sponsorships → `tl comments add <id> "flagged for slippage"` for each
 - **Report comparison**: "Compare my Q1 report to Q4" → `tl reports run <id> --since 2026-01 --until 2026-03 --json` → `tl reports run <id> --since 2025-10 --until 2025-12 --json` → synthesize
 - **Discovery workflows**: "What's my best performing brand this quarter" → `tl sponsorships status:sold purchase-date-start:2026-01 --json` → aggregate by brand → `tl brands show <top_brand> --json` → full picture

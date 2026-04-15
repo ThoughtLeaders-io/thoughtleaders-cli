@@ -18,3 +18,8 @@ Examples:
 - "/tl-channels mobile-first channels" → `tl channels list primary-device:mobile`
 - "/tl-channels channels with majority US audience" → `tl channels list min-us-share:50`
 - "/tl-channels mobile tech channels with US focus" → `tl channels list category:tech primary-device:mobile min-us-share:60`
+- "/tl-channels channels similar to 12345" → `tl channels similar 12345 --limit 10`
+- "/tl-channels look-alikes for Economics Explained at high similarity" → `tl channels similar "Economics Explained" min-score:0.85 --limit 10`
+- "/tl-channels look-alikes including non-MSN" → `tl channels similar 12345 msn:false --limit 20`
+
+Note: MSN filtering is on by default for `tl channels similar` (pass `msn:false` to include non-MSN channels). Ambiguous name arguments return a 400 with candidate IDs listed.
