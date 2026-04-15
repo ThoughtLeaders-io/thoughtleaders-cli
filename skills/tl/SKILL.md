@@ -43,7 +43,7 @@ Users see data scoped by their organization and plan:
 - **Media sellers** see sponsorships where their org is the publisher. They see `cost` but never `price`.
 - **Intelligence plan** is required for `tl brands`, full channel search, and full uploads.
 
-When querying sponsorship bookings, query the date range by `purchase_date`, otherwise, query the date range by `publish_date`.
+When querying sponsorship bookings, query by state:sold and filter the the date range only by `purchase_date`. Otherwise, query for state:sold by `created_at`.
 
 ## Workflow
 
