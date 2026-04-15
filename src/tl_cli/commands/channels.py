@@ -14,11 +14,11 @@ app = typer.Typer(help="YouTube channels (search, detail, and similar-channel re
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.
-SIMILAR_COLUMNS = ["score", "id", "name", "subscribers", "impression", "total_views", "category", "cpm"]
+SIMILAR_COLUMNS = ["score", "id", "name", "subscribers", "projected_views", "total_views", "cpm", "audience"]
 SIMILAR_COLUMN_CONFIG = {
     "score": {"justify": "right"},
     "subscribers": {"justify": "right"},
-    "impression": {"justify": "right"},
+    "projected_views": {"justify": "right"},
     "total_views": {"justify": "right"},
     "cpm": {"justify": "right"},
 }
