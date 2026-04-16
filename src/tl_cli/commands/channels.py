@@ -8,6 +8,7 @@ from rich.console import Console
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.filters import parse_filters
+from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
 app = typer.Typer(help="YouTube channels (search, detail, and similar-channel recommendations)")
@@ -91,6 +92,14 @@ def show_cmd(
     try:
         data = client.get(f"/channels/{encoded_ref}")
         output_single(data, fmt)
+        if fmt == "table":
+            record = data.get("results", data)
+            if isinstance(record, list) and record:
+                record = record[0]
+            if isinstance(record, dict):
+                hint = detail_hint(client, channel=record.get("name"))
+                if hint:
+                    Console(stderr=True).print(f"\n[yellow]{hint}[/yellow]")
     except ApiError as e:
         _handle_channel_api_error(e)
     finally:

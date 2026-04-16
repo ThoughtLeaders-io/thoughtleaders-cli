@@ -8,6 +8,7 @@ from rich.console import Console
 from tl_cli.client.errors import handle_api_error, ApiError
 from tl_cli.client.http import get_client
 from tl_cli.filters import parse_filters
+from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
 COLUMNS = ["id", "created_at", "brand_id", "brand", "channel_id", "channel", "article_id", "views", "status", "price", "cost", "cpm", "owner_sales_email"]
@@ -85,6 +86,14 @@ def do_show(item_id: str, fmt: str) -> None:
     try:
         data = client.get(f"/sponsorships/{item_id}")
         output_single(data, fmt)
+        if fmt == "table":
+            record = data.get("results", data)
+            if isinstance(record, list) and record:
+                record = record[0]
+            if isinstance(record, dict):
+                hint = detail_hint(client, brand=record.get("brand"), channel=record.get("channel"))
+                if hint:
+                    Console(stderr=True).print(f"\n[yellow]{hint}[/yellow]")
     except ApiError as e:
         handle_api_error(e)
     finally:
