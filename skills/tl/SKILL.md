@@ -100,6 +100,7 @@ tl channels similar <id-or-name>       # Vector-similarity recommender (50 credi
 tl brands show <id-or-name>            # Brand detail (8 credits; accepts numeric ID or name)
 tl brands history <id-or-name>         # Sponsorship history — videos where brand was detected (5 credits/result)
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
+tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits)
 tl snapshots channel <id>              # Channel metrics over time (1 credit/point)
 tl snapshots video <id> --channel <id> # Video view curve (1 credit/point, --channel required!)
 tl reports                             # List saved reports (free)

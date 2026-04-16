@@ -114,3 +114,59 @@ def history_cmd(
         handle_api_error(e)
     finally:
         client.close()
+
+
+SIMILAR_COLUMNS = ["score", "brand_id", "brand_name", "website", "mbn"]
+SIMILAR_COLUMN_CONFIG = {
+    "score": {"justify": "right"},
+}
+
+
+def _format_score(results: list[dict]) -> list[dict]:
+    """Convert raw cosine score (0.0-1.0) to percentage string."""
+    for row in results:
+        score = row.get("score")
+        if isinstance(score, (int, float)):
+            row["score"] = f"{score * 100:.1f}%"
+    return results
+
+
+@app.command("similar")
+def similar_cmd(
+    query: str = typer.Argument(..., help="Brand name or numeric ID"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Find brands similar to a given one (by ID or name).
+
+    Costs 50 credits per call. Intelligence plan required.
+
+    Examples:
+        tl brands similar Nike
+        tl brands similar 6037
+        tl brands similar 6037 mbn:yes --limit 10
+    """
+    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    encoded_query = urllib.parse.quote(query, safe="")
+    params: dict[str, str] = {"limit": str(limit)}
+
+    client = get_client()
+    try:
+        data = client.get(f"/brands/{encoded_query}/similar", params=params)
+        brand_name = data.get("brand", {}).get("name", query)
+        if fmt in ("table", "md"):
+            _format_score(data.get("results", []))
+        output(
+            data,
+            fmt,
+            columns=SIMILAR_COLUMNS,
+            title=f"Brands similar to {brand_name}",
+            column_config=SIMILAR_COLUMN_CONFIG,
+        )
+    except ApiError as e:
+        _handle_brand_api_error(e)
+    finally:
+        client.close()
