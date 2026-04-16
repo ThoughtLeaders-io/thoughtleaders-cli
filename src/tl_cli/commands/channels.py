@@ -92,7 +92,7 @@ def show_cmd(
     try:
         data = client.get(f"/channels/{encoded_ref}")
         output_single(data, fmt)
-        if fmt == "table":
+        if fmt == "table" and data.get("show_cta"):
             record = data.get("results", data)
             if isinstance(record, list) and record:
                 record = record[0]

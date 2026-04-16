@@ -86,7 +86,7 @@ def do_show(item_id: str, fmt: str) -> None:
     try:
         data = client.get(f"/sponsorships/{item_id}")
         output_single(data, fmt)
-        if fmt == "table":
+        if fmt == "table" and data.get("show_cta"):
             record = data.get("results", data)
             if isinstance(record, list) and record:
                 record = record[0]

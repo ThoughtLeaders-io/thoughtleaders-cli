@@ -51,7 +51,7 @@ def show_cmd(
             columns=["channel", "mentions", "type", "latest_date", "views"],
             title=f"Brand Intelligence: {brand_name}",
         )
-        if fmt == "table" and data.get("results"):
+        if fmt == "table" and data.get("show_cta"):
             hint = detail_hint(client, brand=brand_name)
             if hint:
                 Console(stderr=True).print(f"\n[yellow]{hint}[/yellow]")
