@@ -227,6 +227,43 @@ def similar_cmd(
     _do_similar(channel_ref, args or [], fmt, limit)
 
 
+@app.command("history")
+def history_cmd(
+    channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+    offset: int = typer.Option(0, "--offset", help="Pagination offset"),
+) -> None:
+    """Show a channel's sponsorship history (videos with detected sponsors).
+
+    Requires an Intelligence plan.
+
+    Examples:
+        tl channels history 157060
+        tl channels history "Economics Explained"
+    """
+    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    encoded_ref = urllib.parse.quote(channel_ref, safe="")
+    client = get_client()
+    try:
+        params = {"limit": str(limit), "offset": str(offset)}
+        data = client.get(f"/channels/{encoded_ref}/history", params=params)
+        channel_name = data.get("channel", {}).get("name", channel_ref)
+        output(
+            data,
+            fmt,
+            columns=["video_id", "title", "brands", "views", "publication_date", "is_tl"],
+            title=f"Channel History: {channel_name}",
+        )
+    except ApiError as e:
+        _handle_channel_api_error(e)
+    finally:
+        client.close()
+
+
 @app.command("look-alike", hidden=True)
 def look_alike_cmd(
     channel_ref: str = typer.Argument(..., help="Channel ID or name"),
