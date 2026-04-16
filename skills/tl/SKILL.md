@@ -11,7 +11,7 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 **You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
 
-Unless the user requested a subset of the result, you MUST always use pagination in the `tl` commands to retrieve the entire data set (all pages, until total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
+Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page (i.e. the default `--limit` parameter) is 500.
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 

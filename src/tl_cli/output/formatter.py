@@ -55,6 +55,7 @@ def output(
     if fmt == "quiet":
         # Raw JSON data only — no envelope
         print(json.dumps(results, indent=2, default=str))
+        _print_pagination_notice(data)
         return
 
     if fmt == "json":
@@ -76,6 +77,7 @@ def output(
     else:
         _output_table(results, columns, title, total, column_config)
 
+    _print_pagination_notice(data)
     _print_usage(usage)
     _print_breadcrumbs(breadcrumbs)
 
@@ -258,6 +260,18 @@ def _output_detail_csv(record: dict) -> None:
             for col, val in item.items():
                 row[f"{key}_{col}"] = "" if val is None else val
         writer.writerow(row)
+
+
+def _print_pagination_notice(data: dict) -> None:
+    """Print a visible notice when there are more pages of results."""
+    if data.get("has_more") and data.get("next_offset") is not None:
+        total = data.get("total", "?")
+        next_offset = data["next_offset"]
+        shown = len(data.get("results", []))
+        err_console.print(
+            f"[yellow]Showing {shown} of {total} results. "
+            f"Use --offset {next_offset} for the next page.[/yellow]"
+        )
 
 
 def _print_usage(usage: dict | None) -> None:
