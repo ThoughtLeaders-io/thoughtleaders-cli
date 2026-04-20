@@ -24,7 +24,7 @@ from tl_cli import __version__
 
 CACHE_PATH = Path.home() / ".cache" / "tl-cli" / "version-check.json"
 CACHE_TTL_SECONDS = 3600  # 1 hour
-LATEST_URL = "https://api.github.com/repos/ThoughtLeaders-io/tl-cli/releases/latest"
+LATEST_URL = "https://api.github.com/repos/ThoughtLeaders-io/thoughtleaders-cli/releases/latest"
 REQUEST_TIMEOUT = 2  # tight — the user is already waiting to see their shell prompt back
 
 

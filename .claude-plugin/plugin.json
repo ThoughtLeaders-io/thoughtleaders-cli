@@ -7,6 +7,6 @@
     "email": "dev@thoughtleaders.io"
   },
   "homepage": "https://docs.thoughtleaders.io/cli",
-  "repository": "https://github.com/ThoughtLeaders-io/tl-cli",
+  "repository": "https://github.com/ThoughtLeaders-io/thoughtleaders-cli",
   "keywords": ["thoughtleaders", "sponsorship", "influencer", "data", "cli"]
 }

@@ -37,8 +37,8 @@ tl = "tl_cli.main:cli"
 
 [project.urls]
 Homepage = "https://thoughtleaders.io"
-Repository = "https://github.com/ThoughtLeaders-io/tl-cli"
-Documentation = "https://github.com/ThoughtLeaders-io/tl-cli/blob/main/docs/architecture.md"
+Repository = "https://github.com/ThoughtLeaders-io/thoughtleaders-cli"
+Documentation = "https://github.com/ThoughtLeaders-io/thoughtleaders-cli/blob/main/docs/architecture.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tl_cli"]

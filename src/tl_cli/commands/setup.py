@@ -13,7 +13,7 @@ from tl_cli import __version__
 app = typer.Typer(help="Set up integrations (Claude Code, OpenCode)")
 console = Console(stderr=True)
 
-MARKETPLACE_SOURCE = "ThoughtLeaders-io/tl-cli"
+MARKETPLACE_SOURCE = "ThoughtLeaders-io/thoughtleaders-cli"
 MARKETPLACE_NAME = "thoughtleaders-plugins"
 PLUGIN_NAME = "tl-cli"
 PLUGIN_KEY = f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
@@ -368,13 +368,13 @@ def setup_opencode(
     else:
         console.print("  [red]✗[/red] tl CLI not found on PATH")
         console.print("    OpenCode's Bash tool won't be able to run tl commands.")
-        console.print("    Install with: [cyan]pipx install git+https://github.com/ThoughtLeaders-io/tl-cli.git[/cyan]")
+        console.print("    Install with: [cyan]pipx install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
 
     # Find plugin assets
     plugin_root = _find_plugin_root()
     if plugin_root is None:
         console.print("  [red]✗[/red] Plugin assets not found")
-        console.print("    Try reinstalling: [cyan]pipx install --force git+https://github.com/ThoughtLeaders-io/tl-cli.git[/cyan]")
+        console.print("    Try reinstalling: [cyan]pipx install --force git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
         raise SystemExit(1)
     console.print(f"  [green]✓[/green] Plugin assets found: {plugin_root}")
     console.print()
