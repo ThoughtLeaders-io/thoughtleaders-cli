@@ -17,10 +17,8 @@ from rich.table import Table
 err_console = Console(stderr=True)
 
 
-def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool, quiet: bool) -> str:
+def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool) -> str:
     """Determine output format from flags and TTY detection."""
-    if quiet:
-        return "quiet"
     if json_flag:
         return "json"
     if csv_flag:
@@ -43,7 +41,7 @@ def output(
 
     Args:
         data: API response dict with 'results', 'total', 'usage', '_breadcrumbs'
-        fmt: Output format ('table', 'json', 'csv', 'md', 'quiet')
+        fmt: Output format ('table', 'json', 'csv', 'md')
         columns: Which fields to show in table/csv/md mode. If None, auto-detect from data.
         title: Optional title for table mode.
     """
@@ -51,12 +49,6 @@ def output(
     total = data.get("total")
     usage = data.get("usage")
     breadcrumbs = data.get("_breadcrumbs", [])
-
-    if fmt == "quiet":
-        # Raw JSON data only — no envelope
-        print(json.dumps(results, indent=2, default=str))
-        _print_pagination_notice(data)
-        return
 
     if fmt == "json":
         print(json.dumps(data, indent=2, default=str))
@@ -93,9 +85,8 @@ def output_single(data: dict, fmt: str) -> None:
     usage = data.get("usage")
     breadcrumbs = data.get("_breadcrumbs", [])
 
-    if fmt in ("quiet", "json"):
-        target = results if fmt == "quiet" else data
-        print(json.dumps(target, indent=2, default=str))
+    if fmt == "json":
+        print(json.dumps(data, indent=2, default=str))
         return
 
     # Unwrap single-item list

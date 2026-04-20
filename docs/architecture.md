@@ -108,7 +108,7 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 | `tl balance` | Show credit balance and recent usage |
 
 ### Global flags (all commands)
-`--json`, `--csv`, `--md`, `--quiet`, `--limit N`, `--offset N`
+`--json`, `--csv`, `--md`, `--limit N`, `--offset N`
 
 ### Agent support flag
 `--help --agent` returns structured JSON help (flags, gotchas, subcommands) for any command — optimized for AI agents to parse.
@@ -143,7 +143,7 @@ Key instructions in the skill:
 - Always run `tl describe show <resource> --json` first to discover fields, filters, and credit costs
 - Use structured commands, not `tl ask` (the user's Claude IS the AI layer)
 - Check `tl balance --json` before expensive queries and warn the user about credit cost
-- Use `--json` output for parsing, `--quiet` for clean data
+- Use `--json` output for parsing
 - Chain commands for multi-step analysis (e.g., get brand → find channels → check snapshots)
 - Use `tl reports` to check for saved reports before building queries from scratch
 
@@ -169,8 +169,8 @@ What the agent does:
 
 **PreToolUse hook on Bash** (`hooks/scripts/pre-check.sh`):
 When Claude is about to run a `tl` command:
-- **Auth check**: validates `tl auth status --quiet` succeeds before any data command — prevents confusing errors
-- **Credit guard**: before commands with `limit:` > 100 or known-expensive resources (brands, channels), runs `tl balance --quiet` and warns if balance is low relative to expected cost
+- **Auth check**: validates `tl auth status` succeeds before any data command — prevents confusing errors
+- **Credit guard**: before commands with `limit:` > 100 or known-expensive resources (brands, channels), runs `tl balance --json` and warns if balance is low relative to expected cost
 - **Limit safety**: if a `tl` command has no `limit:` filter on a list endpoint, suggests adding one to avoid accidentally draining credits on a large result set
 
 **PostToolUse hook on Bash** (`hooks/scripts/post-usage.sh`):
@@ -479,8 +479,7 @@ Reuse existing Auth0 setup:
 3. **Exit codes**: 0 success, 1 user error, 2 auth error, 3 server error, 4 insufficient credits
 4. **Breadcrumbs**: JSON responses include `_breadcrumbs` with next-command suggestions
 5. **Usage footer**: credits charged + balance remaining shown after each response
-6. **`--quiet`**: Raw JSON data only (no envelope, no breadcrumbs, no usage)
-7. **`--help --agent`**: Structured JSON help for AI agents
+6. **`--help --agent`**: Structured JSON help for AI agents
 
 ## Implementation Order
 

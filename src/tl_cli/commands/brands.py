@@ -42,7 +42,6 @@ def show_cmd(
     query: str = typer.Argument(..., help="Brand name or numeric ID"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output (flattens nested fields)"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """Show brand detail by name or ID.
 
@@ -53,7 +52,7 @@ def show_cmd(
         tl brands show Nike
         tl brands show 21416
     """
-    fmt = detect_format(json_output, csv_output, False, quiet)
+    fmt = detect_format(json_output, csv_output, False)
     encoded_query = urllib.parse.quote(query, safe="")
     client = get_client()
     try:
@@ -80,7 +79,6 @@ def history_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -93,7 +91,7 @@ def history_cmd(
         tl brands history 21416                         # By brand ID
         tl brands history Nike --channel 12345          # Nike mentions on a specific channel
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
 
     params: dict[str, str] = {"limit": str(limit), "offset": str(offset)}
     if channel is not None:
@@ -137,7 +135,6 @@ def similar_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
     """Find brands similar to a given one (by ID or name).
@@ -149,7 +146,7 @@ def similar_cmd(
         tl brands similar 6037
         tl brands similar 6037 mbn:yes --limit 10
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     encoded_query = urllib.parse.quote(query, safe="")
     params: dict[str, str] = {"limit": str(limit)}
 

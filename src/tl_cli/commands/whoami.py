@@ -113,7 +113,6 @@ def _render_whoami(data: dict) -> None:
 def whoami(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="User info only"),
 ) -> None:
     """Show information about the logged-in user.
 
@@ -123,20 +122,17 @@ def whoami(
     Examples:
         tl whoami                         # Pretty-printed info
         tl whoami --json                  # Full JSON response
-        tl whoami --quiet                 # Just user info
     """
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:
         data = client.get("/whoami")
 
-        if fmt == "quiet":
-            print(json.dumps(data.get("user", data), default=str))
-        elif fmt == "json":
+        if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
         else:
             _render_whoami(data)

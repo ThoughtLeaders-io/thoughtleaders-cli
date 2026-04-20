@@ -68,13 +68,13 @@ Unless the user specifically asks for running a specific report or showing the r
 
 1. **Discover first**: Run `tl describe show <resource> --json` to learn available fields, filters, and credit costs before querying
 2. **Check saved reports**: Run `tl reports --json` to see if the user has a saved report that already answers their question
-3. **Check credits**: Run `tl balance --quiet` before expensive queries. Warn the user if a query will cost many credits.
+3. **Check credits**: Run `tl balance --json` before expensive queries. Warn the user if a query will cost many credits.
 4. **Query with filters**: Use `key:value` filter syntax for structured queries
-5. **Always use --json**: Parse JSON output for multi-step analysis. Use `--quiet` for raw data only.
+5. **Always use --json**: Parse JSON output for multi-step analysis.
 6. **Chain commands**: For complex questions, chain multiple `tl` commands
 7. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers.
 
-Prefer writing Python code, shell code, or `jq` commands that fetche or analysise large sets of data, instead of analysing it yourself. Create temporary files in `/tmp` that can be analysed later in different ways.
+Prefer writing Python code, shell code, or `jq` commands that fetche or analysise large sets of data, instead of analysing it yourself. Create temporary files in `/tmp` that can be analysed later in different ways. Before bulk data analysis by running `jq`, Python or Bash commands, first try fetching just a single result with `--limit 1` without `jq` etc, to see the shape of the data and any error messages.
 
 ## Available Commands
 
@@ -113,7 +113,7 @@ tl comments add <adlink-id> "msg"      # Add comment (free)
 ```bash
 tl describe                            # List all resources with credit costs (free)
 tl describe show <resource> --json     # Fields, filters, credit rates (free)
-tl balance --quiet                 # Credit balance (free)
+tl balance --json                  # Credit balance (free)
 tl whoami                          # Current user, org, brands (free)
 tl auth status                     # Auth check (free)
 ```
@@ -160,7 +160,6 @@ tl sponsorships list status:sold primary-device:mobile min-us-share:60
 - `--json` — structured JSON (use this for parsing)
 - `--csv` — CSV output
 - `--md` — Markdown table
-- `--quiet` — raw JSON data only (no envelope/breadcrumbs)
 - `--limit N` — max results
 - `--offset N` — pagination
 
@@ -176,7 +175,7 @@ Successful `--json` responses wrap data in an envelope:
 }
 ```
 
-`--quiet` strips everything but `results`. Errors return `{"detail": "..."}` with an HTTP status (400 / 401 / 403 / 404).
+Errors return `{"detail": "..."}` with an HTTP status (400 / 401 / 403 / 404).
 
 While analysing results, you must always examine the `results` field in the JSON.
 

@@ -18,13 +18,12 @@ console = Console()
 def describe(ctx: typer.Context) -> None:
     """Discover resources, fields, filters, and credit costs (free)."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd, json_output=False, quiet=False)
+        ctx.invoke(list_cmd, json_output=False)
 
 
 @app.command("list")
 def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
     """List all available resources with credit costs.
 
@@ -32,13 +31,13 @@ def list_cmd(
         tl describe list
         tl describe list --json
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:
         data = client.get("/describe")
 
-        if fmt in ("json", "quiet"):
+        if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
             return
 
@@ -56,7 +55,6 @@ def show_cmd(
     filters_only: bool = typer.Option(False, "--filters", help="Show only available filters"),
     fields_only: bool = typer.Option(False, "--fields", help="Show only available fields"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
     """Show fields, filters, and credit costs for a specific resource.
 
@@ -65,13 +63,13 @@ def show_cmd(
         tl describe show sponsorships --filters
         tl describe show sponsorships --json
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:
         data = client.get(f"/describe/{resource}")
 
-        if fmt in ("json", "quiet"):
+        if fmt == "json":
             target = data
             if filters_only and "filters" in data:
                 target = data["filters"]

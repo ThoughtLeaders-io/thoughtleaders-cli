@@ -43,7 +43,7 @@ Exit codes: 1 (forbidden/not-found), 2 (auth required), 3 (rate-limit/server-err
 
 ## Output (`output/formatter.py`)
 
-TTY-aware: Rich tables in terminal, JSON when piped. Flags: `--json`, `--csv`, `--md`, `--quiet`. Usage footer (credits charged + balance) goes to stderr. Breadcrumbs suggest next commands.
+TTY-aware: Rich tables in terminal, JSON when piped. Flags: `--json`, `--csv`, `--md`. Usage footer (credits charged + balance) goes to stderr. Breadcrumbs suggest next commands.
 
 ## AI Agent Integration
 

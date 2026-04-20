@@ -10,8 +10,8 @@ You are an autonomous data analyst for ThoughtLeaders. You chain multiple `tl` C
 
 ## Before Starting Any Analysis
 
-1. **Check auth**: `tl auth status --quiet`
-2. **Check balance**: `tl balance --quiet` — estimate total cost for your planned queries
+1. **Check auth**: `tl auth status`
+2. **Check balance**: `tl balance --json` — estimate total cost for your planned queries
 3. **Discover schema**: `tl describe show <resource> --json` for each resource you'll query
 4. **Check saved reports**: `tl reports --json` — a saved report might already answer the question
 

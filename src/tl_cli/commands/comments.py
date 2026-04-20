@@ -13,14 +13,13 @@ app = typer.Typer(help="Comments on sponsorships (free, no credits)")
 def list_cmd(
     adlink_id: int = typer.Argument(..., help="Sponsorship (adlink) ID"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """List comments on a sponsorship (free, no credits).
 
     Examples:
         tl comments list 12345
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:
@@ -42,14 +41,13 @@ def add_comment(
     adlink_id: int = typer.Argument(..., help="Sponsorship (adlink) ID"),
     message: str = typer.Argument(..., help="Comment text"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
     """Add a comment to a sponsorship (free, no credits).
 
     Examples:
         tl comments add 12345 "Looks good, ready to send"
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:

@@ -27,7 +27,6 @@ def reports(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """List your organization's saved reports (free, no credits).
 
@@ -38,7 +37,7 @@ def reports(
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
 
     client = get_client()
     try:
@@ -63,7 +62,6 @@ def run_report(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(100, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -75,7 +73,7 @@ def run_report(
         tl reports run 789
         tl reports run 789 --since 2026-01-01 --json
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
 
     params: dict[str, str] = {"limit": str(limit), "offset": str(offset)}
     if since:
@@ -212,7 +210,6 @@ def create_report(
     prompt: str = typer.Argument(..., help="Natural language description of the report you want"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON config"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
     timeout: int = typer.Option(300, "--timeout", help="Max orchestration time in seconds"),
 ) -> None:
     """Create a report from a natural language description.
@@ -306,7 +303,7 @@ def create_report(
         report_url = result.get("report_url", "")
         campaign_id = result.get("campaign_id", "")
 
-        if json_output or quiet:
+        if json_output:
             print(json.dumps(data, indent=2, default=str))
         else:
             err.print()

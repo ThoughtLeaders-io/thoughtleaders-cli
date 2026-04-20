@@ -29,7 +29,7 @@ SIMILAR_COLUMN_CONFIG = {
 def channels(ctx: typer.Context) -> None:
     """YouTube channels — search and detail."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, quiet=False, limit=50, offset=0)
+        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, limit=50, offset=0)
 
 
 @app.command("list")
@@ -38,7 +38,6 @@ def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -48,7 +47,7 @@ def list_cmd(
         tl channels list                                  # List channels
         tl channels list category:cooking min-subs:100k   # Search with filters
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     filters = parse_filters(args or [])
 
     client = get_client()
@@ -72,7 +71,6 @@ def show_cmd(
     channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output (flattens adspots: one row per adspot)"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """Show channel detail by ID or name (includes active adspots).
 
@@ -85,7 +83,7 @@ def show_cmd(
         tl channels show "Economics Explained"
         tl channels show 12345 --csv > channel.csv
     """
-    fmt = detect_format(json_output, csv_output, False, quiet)
+    fmt = detect_format(json_output, csv_output, False)
 
     encoded_ref = urllib.parse.quote(channel_ref, safe="")
     client = get_client()
@@ -198,7 +196,6 @@ def similar_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
     """Find channels similar to a given one (by id or name).
@@ -223,7 +220,7 @@ def similar_cmd(
         tl channels similar "MrBeast" language:en msn:false
         tl channels similar 12345 min-score:0.7 min-subs:1000000 --limit 10
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     _do_similar(channel_ref, args or [], fmt, limit)
 
 
@@ -233,7 +230,6 @@ def history_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -245,7 +241,7 @@ def history_cmd(
         tl channels history 157060
         tl channels history "Economics Explained"
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     encoded_ref = urllib.parse.quote(channel_ref, safe="")
     client = get_client()
     try:
@@ -271,9 +267,8 @@ def look_alike_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
 ) -> None:
     """Alias for `tl channels similar` (matches internal "look-alike channels" terminology)."""
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     _do_similar(channel_ref, args or [], fmt, limit)

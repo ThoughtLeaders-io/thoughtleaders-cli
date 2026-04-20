@@ -14,7 +14,7 @@ app = typer.Typer(help="Video uploads (YouTube content from Elasticsearch)")
 def uploads(ctx: typer.Context) -> None:
     """Video uploads from YouTube (Elasticsearch)."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, quiet=False, limit=50, offset=0)
+        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, limit=50, offset=0)
 
 
 @app.command("list")
@@ -23,7 +23,6 @@ def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -33,7 +32,7 @@ def list_cmd(
         tl uploads list                               # List recent uploads
         tl uploads list channel:12345 type:longform   # Filter uploads
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     filters = parse_filters(args or [])
 
     client = get_client()
@@ -56,7 +55,6 @@ def list_cmd(
 def show_cmd(
     ids: list[str] = typer.Argument(..., help="One or more upload IDs"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """Show details for one or more uploads by ID.
 
@@ -67,7 +65,7 @@ def show_cmd(
         tl uploads show 1174310:0BehkmVa7ak
         tl uploads show 0BehkmVa7ak dQw4w9WgXcQ
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:

@@ -20,7 +20,6 @@ def ask(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
 ) -> None:
     """Ask a question about your data in plain English.
@@ -38,7 +37,7 @@ def ask(
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
 
     body: dict = {"query": question, "limit": limit}
     if llm_key:

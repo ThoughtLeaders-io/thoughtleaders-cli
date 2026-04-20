@@ -18,7 +18,6 @@ console = Console()
 def balance(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON only"),
 ) -> None:
     """Show your credit balance and recent usage (free, no credits).
 
@@ -29,13 +28,13 @@ def balance(
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
 
     client = get_client()
     try:
         data = client.get("/balance")
 
-        if fmt in ("json", "quiet"):
+        if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
             return
 

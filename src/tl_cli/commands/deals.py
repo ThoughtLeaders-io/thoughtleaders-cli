@@ -14,7 +14,7 @@ app = typer.Typer(help="Deals — agreed-upon sponsorships (shortcut for sponsor
 def deals(ctx: typer.Context) -> None:
     """Deals — contractually agreed-upon sponsorships."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, quiet=False, limit=50, offset=0)
+        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, limit=50, offset=0)
 
 
 @app.command("list")
@@ -23,7 +23,6 @@ def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -33,7 +32,7 @@ def list_cmd(
         tl deals list                         # List recent deals
         tl deals list brand:"Nike"            # Filter deals
     """
-    fmt = detect_format(json_output, csv_output, md_output, quiet)
+    fmt = detect_format(json_output, csv_output, md_output)
     do_list(args or [], fmt, limit, offset, default_status="deal", title="Deals")
 
 
@@ -41,12 +40,11 @@ def list_cmd(
 def show_cmd(
     item_id: str = typer.Argument(..., help="Sponsorship ID"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Raw JSON data only"),
 ) -> None:
     """Show deal detail by ID.
 
     Examples:
         tl deals show 12345
     """
-    fmt = detect_format(json_output, False, False, quiet)
+    fmt = detect_format(json_output, False, False)
     do_show(item_id, fmt)
