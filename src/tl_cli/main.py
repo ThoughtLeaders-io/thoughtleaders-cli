@@ -36,7 +36,7 @@ from tl_cli.commands.whoami import app as whoami_app
 
 app = typer.Typer(
     name="tl",
-    help="ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence.",
+    help=f"ThoughtLeaders CLI v{__version__} — query sponsorship data, channels, brands, and intelligence.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
