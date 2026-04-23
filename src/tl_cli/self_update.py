@@ -125,3 +125,34 @@ def check_and_upgrade() -> None:
     except Exception:
         # Never let a version-check bug break the user's workflow.
         pass
+
+
+def force_upgrade() -> None:
+    """Explicitly requested upgrade — bypasses cache, prints verbose output."""
+    method = _detect_install_method()
+    if not method:
+        print(
+            "tl-cli was not installed via pipx or uv — cannot auto-upgrade.\n"
+            "Update it with the same tool you used to install it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"Checking for updates (current: {__version__})…", file=sys.stderr)
+    latest = _fetch_latest_version()
+    if latest is None:
+        print("Could not reach GitHub to check for updates.", file=sys.stderr)
+        sys.exit(1)
+
+    _write_cache(latest)
+
+    try:
+        newer = _version_tuple(latest) > _version_tuple(__version__)
+    except ValueError:
+        newer = False
+
+    if not newer:
+        print(f"tl-cli {__version__} is already the latest version.", file=sys.stderr)
+        return
+
+    _run_upgrade(method, latest)

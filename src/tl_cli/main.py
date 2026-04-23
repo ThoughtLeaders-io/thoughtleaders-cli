@@ -106,6 +106,14 @@ app.add_typer(whoami_app, name="whoami")
 app.add_typer(ask_app, name="ask")
 
 
+@app.command(name="update")
+def update_command() -> None:
+    """Check for a newer version and upgrade if one is available."""
+    from tl_cli.self_update import force_upgrade
+    force_upgrade()
+    raise typer.Exit()
+
+
 def _get_terminology() -> str | None:
     """Extract the Terminology section from README.md.
 
