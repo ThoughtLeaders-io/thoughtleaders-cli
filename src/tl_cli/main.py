@@ -189,7 +189,8 @@ def cli() -> None:
             Console(stderr=True).print("[dim]Run with --debug for details.[/dim]")
         sys.exit(1)
     finally:
-        check_and_upgrade()
+        if "update" not in sys.argv:
+            check_and_upgrade()
 
 
 if __name__ == "__main__":
