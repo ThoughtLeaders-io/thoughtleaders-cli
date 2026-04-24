@@ -46,10 +46,15 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 
 ### Channel deep dive
 "Give me a full picture of channel 12345"
-1. `tl channels show 12345 --json` → profile and scores
+1. `tl channels show 12345 --json` → profile, scores, and demographics
 2. `tl snapshots channel 12345 --json` → growth over time
 3. `tl deals list channel:12345 --json` → deal history
 4. `tl uploads list channel:12345 --json` → recent content
+
+### Demographics screenshots check
+"Does channel X have demographics screenshots uploaded?"
+1. `tl channels show <id-or-name> --json` → check `demographics_updated_at` field
+2. If non-null, screenshots are on file (the timestamp shows when they were last processed via OCR). If null, no screenshots have been uploaded for this channel.
 
 ## Rules
 
