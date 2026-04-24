@@ -24,6 +24,7 @@ def describe(ctx: typer.Context) -> None:
 @app.command("list")
 def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """List all available resources with credit costs.
 
@@ -31,7 +32,7 @@ def list_cmd(
         tl describe list
         tl describe list --json
     """
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
 
     client = get_client()
     try:
@@ -55,6 +56,7 @@ def show_cmd(
     filters_only: bool = typer.Option(False, "--filters", help="Show only available filters"),
     fields_only: bool = typer.Option(False, "--fields", help="Show only available fields"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show fields, filters, and credit costs for a specific resource.
 
@@ -63,7 +65,7 @@ def show_cmd(
         tl describe show sponsorships --filters
         tl describe show sponsorships --json
     """
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
 
     client = get_client()
     try:

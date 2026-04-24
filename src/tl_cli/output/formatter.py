@@ -17,7 +17,7 @@ from rich.table import Table
 err_console = Console(stderr=True)
 
 
-def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool) -> str:
+def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool, toon_flag: bool = False) -> str:
     """Determine output format from flags and TTY detection."""
     if json_flag:
         return "json"
@@ -25,6 +25,8 @@ def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool) -> str:
         return "csv"
     if md_flag:
         return "md"
+    if toon_flag:
+        return "toon"
     if sys.stdout.isatty():
         return "table"
     return "json"
@@ -68,6 +70,8 @@ def output(
         _output_csv(results, columns)
     elif fmt == "md":
         _output_markdown(results, columns, column_types)
+    elif fmt == "toon":
+        _output_toon(results, columns)
     else:
         _output_table(results, columns, title, total, column_config, column_types)
 
@@ -97,7 +101,9 @@ def output_single(data: dict, fmt: str) -> None:
         print(json.dumps(results, indent=2, default=str))
         return
 
-    if fmt == "csv":
+    if fmt == "toon":
+        _output_toon_single(record)
+    elif fmt == "csv":
         _output_detail_csv(record)
     else:
         _output_detail(record)
@@ -280,6 +286,20 @@ def _output_markdown(results: list[dict], columns: list[str], column_types: dict
             else:
                 values.append(str(val).replace("\n", " ").replace("|", "\\|"))
         print("| " + " | ".join(values) + " |")
+
+
+def _output_toon(results: list[dict], columns: list[str]) -> None:
+    """TOON (Token-Oriented Object Notation) output for LLM consumption."""
+    from toon_format import encode
+    # Build column-filtered rows for uniform tabular encoding
+    rows = [{col: row.get(col) for col in columns} for row in results]
+    print(encode(rows))
+
+
+def _output_toon_single(record: dict) -> None:
+    """TOON output for a single detail record."""
+    from toon_format import encode
+    print(encode(record))
 
 
 _RIGHT_ALIGN_COLS = {"price", "cost", "cpm"}

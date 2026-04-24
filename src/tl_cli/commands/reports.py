@@ -27,6 +27,7 @@ def reports(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """List your organization's saved reports (free, no credits).
 
@@ -37,7 +38,7 @@ def reports(
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     client = get_client()
     try:
@@ -65,6 +66,7 @@ def run_report(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(100, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -77,7 +79,7 @@ def run_report(
         tl reports run 789 --since 2026-01-01 --json
         tl reports run 789 --columns brand_id,name,views_sum,channel_count
     """
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     params: dict[str, str] = {"limit": str(limit), "offset": str(offset)}
     if since:

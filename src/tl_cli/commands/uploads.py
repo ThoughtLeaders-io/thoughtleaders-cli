@@ -23,6 +23,7 @@ def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -32,7 +33,7 @@ def list_cmd(
         tl uploads list                               # List recent uploads
         tl uploads list channel:12345 type:longform   # Filter uploads
     """
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
     filters = parse_filters(args or [])
 
     client = get_client()
@@ -57,6 +58,7 @@ def list_cmd(
 def show_cmd(
     ids: list[str] = typer.Argument(..., help="One or more upload IDs"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show details for one or more uploads by ID.
 
@@ -67,7 +69,7 @@ def show_cmd(
         tl uploads show 1174310:0BehkmVa7ak
         tl uploads show 0BehkmVa7ak dQw4w9WgXcQ
     """
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
 
     client = get_client()
     try:

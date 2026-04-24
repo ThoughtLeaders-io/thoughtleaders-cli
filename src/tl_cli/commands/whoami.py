@@ -109,10 +109,68 @@ def _render_whoami(data: dict) -> None:
         console.print(table)
 
 
+def _render_whoami_md(data: dict) -> None:
+    """Markdown-formatted whoami output."""
+    user = data.get("user", {})
+    profile = data.get("profile", {})
+    org = data.get("organization", {})
+    profiles = data.get("associated_profiles", [])
+    brands = data.get("brands", [])
+
+    name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    print(f"# {name or user.get('email', '')}\n")
+    if name:
+        print(f"- **Email:** {user.get('email', '')}")
+    persona = profile.get("persona")
+    if persona:
+        print(f"- **Persona:** {persona}")
+    flags = profile.get("flags", [])
+    if flags:
+        print(f"- **Flags:** {', '.join(flags)}")
+    print(f"- **Paid:** {'yes' if profile.get('is_paid') else 'no'}")
+    print(f"- **Joined:** {user.get('date_joined', '')[:10]}")
+
+    print(f"\n## Organization: {org.get('name', '')}\n")
+    plan = org.get("plan")
+    if plan:
+        print(f"- **Plan:** {plan}")
+    if org.get("is_managed_services"):
+        print("- **Managed services:** yes")
+    start = org.get("contract_start_date")
+    end = org.get("contract_end_date")
+    if start or end:
+        print(f"- **Contract:** {start or '?'} → {end or '?'}")
+
+    if profiles:
+        print("\n## Profiles in Organization\n")
+        print("| Name | Email | Flags |")
+        print("| --- | --- | --- |")
+        for p in profiles:
+            print(f"| {p.get('name', '')} | {p.get('email', '')} | {', '.join(p.get('flags', []))} |")
+
+    if brands:
+        grouped: dict[int, dict] = {}
+        for b in brands:
+            bid = b.get("id")
+            if bid not in grouped:
+                grouped[bid] = {"id": bid, "name": b.get("name", ""), "website": b.get("website", ""), "emails": []}
+            email = b.get("profile_email", "")
+            if email and email not in grouped[bid]["emails"]:
+                grouped[bid]["emails"].append(email)
+
+        print("\n## Brands in Organization\n")
+        print("| ID | Name | Website | Profile Emails |")
+        print("| --- | --- | --- | --- |")
+        for g in grouped.values():
+            print(f"| {g['id']} | {g['name']} | {g['website']} | {', '.join(g['emails'])} |")
+
+
 @app.callback(invoke_without_command=True)
 def whoami(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show information about the logged-in user.
 
@@ -122,11 +180,12 @@ def whoami(
     Examples:
         tl whoami                         # Pretty-printed info
         tl whoami --json                  # Full JSON response
+        tl whoami --md                    # Markdown output
     """
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, md_output, toon_output)
 
     client = get_client()
     try:
@@ -134,6 +193,11 @@ def whoami(
 
         if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
+        elif fmt == "toon":
+            from toon_format import encode
+            print(encode(data))
+        elif fmt == "md":
+            _render_whoami_md(data)
         else:
             _render_whoami(data)
     except ApiError as e:

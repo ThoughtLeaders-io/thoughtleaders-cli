@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tl-cli"
-version = "0.4.16"
+version = "0.4.17"
 description = "ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence"
 readme = "README.md"
 license = "MIT"
@@ -30,6 +30,7 @@ dependencies = [
     "httpx>=0.27",
     "keyring>=25.0",
     "authlib>=1.3",
+    "toon-format>=0.9.0b1",
 ]
 
 [project.scripts]

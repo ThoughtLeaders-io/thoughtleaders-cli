@@ -18,6 +18,7 @@ console = Console()
 def balance(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show your credit balance and recent usage (free, no credits).
 
@@ -28,7 +29,7 @@ def balance(
     if ctx.invoked_subcommand is not None:
         return
 
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
 
     client = get_client()
     try:

@@ -16,6 +16,7 @@ def channel_snapshots(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(100, "--limit", "-l", help="Max data points"),
 ) -> None:
     """Channel metrics over time (subscribers, total views).
@@ -26,7 +27,7 @@ def channel_snapshots(
         tl snapshots channel 12345
         tl snapshots channel 12345 --since 2025-01-01
     """
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     params: dict[str, str] = {"limit": str(limit)}
     if since:
@@ -58,6 +59,7 @@ def video_snapshots(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(100, "--limit", "-l", help="Max data points"),
 ) -> None:
     """Video view curve over time (views, likes, comments by age).
@@ -70,7 +72,7 @@ def video_snapshots(
     Examples:
         tl snapshots video dQw4w9WgXcQ --channel 12345
     """
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     params: dict[str, str] = {"channel_id": str(channel), "limit": str(limit)}
     if since:

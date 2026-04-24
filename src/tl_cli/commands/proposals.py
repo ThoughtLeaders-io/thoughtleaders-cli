@@ -23,6 +23,7 @@ def list_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
@@ -32,7 +33,7 @@ def list_cmd(
         tl proposals list                     # List recent proposals
         tl proposals list brand:"Nike"        # Filter proposals
     """
-    fmt = detect_format(json_output, csv_output, md_output)
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
     do_list(args or [], fmt, limit, offset, default_status="proposal", title="Proposals")
 
 
@@ -40,13 +41,14 @@ def list_cmd(
 def show_cmd(
     item_id: str = typer.Argument(..., help="Sponsorship ID"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show proposal detail by ID.
 
     Examples:
         tl proposals show 12345
     """
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
     do_show(item_id, fmt)
 
 
@@ -56,11 +58,12 @@ def create_cmd(
     brand: int = typer.Option(..., "--brand", "-b", help="Brand ID"),
     price: Optional[float] = typer.Option(None, "--price", "-p", help="Deal price"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Create a new proposal (free, no credits charged).
 
     Examples:
         tl proposals create --channel 1 --brand 2
     """
-    fmt = detect_format(json_output, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
     do_create(channel, brand, price, fmt, status="proposed")
