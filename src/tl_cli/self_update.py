@@ -80,13 +80,32 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in v.split(".") if p.isdigit())
 
 
-def _run_upgrade(method: str, latest: str) -> None:
+REPO_URL = "https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git"
+
+
+def _run_upgrade(method: str, latest: str, *, force: bool = False) -> None:
     """Block briefly to run the upgrade. Progress goes to stderr so piped
-    stdout stays clean."""
-    cmd = {
-        "pipx": ["pipx", "upgrade", "tl-cli"],
-        "uv": ["uv", "tool", "upgrade", "tl-cli"],
-    }.get(method)
+    stdout stays clean.
+
+    When force=True (explicit `tl update`), uses `install --force` with the
+    new tag URL. pipx/uv pin the original install spec including the git tag,
+    so a plain `upgrade` re-installs the same version — `--force` is the only
+    way to advance the pinned tag.
+
+    When force=False (background auto-upgrade), uses the regular `upgrade`
+    command which works for non-tag-pinned installs.
+    """
+    if force:
+        tagged_url = f"git+{REPO_URL}@v{latest}"
+        cmd = {
+            "pipx": ["pipx", "install", "--force", tagged_url],
+            "uv": ["uv", "tool", "install", "--force", tagged_url],
+        }.get(method)
+    else:
+        cmd = {
+            "pipx": ["pipx", "upgrade", "tl-cli"],
+            "uv": ["uv", "tool", "upgrade", "tl-cli"],
+        }.get(method)
     if not cmd:
         return
     print(
@@ -155,4 +174,4 @@ def force_upgrade() -> None:
         print(f"tl-cli {__version__} is already the latest version.", file=sys.stderr)
         return
 
-    _run_upgrade(method, latest)
+    _run_upgrade(method, latest, force=True)
