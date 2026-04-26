@@ -11,11 +11,12 @@ from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-COLUMNS = ["sponsorship_id", "created_at", "brand_id", "brand", "channel_id", "channel", "article_id", "views", "status", "price", "cost", "cpm", "owner_sales_email"]
+COLUMNS = ["sponsorship_id", "created_at", "brand_id", "brand", "channel_id", "channel", "article_id", "views", "impressions_guarantee", "status", "price", "cost", "cpm", "owner_sales_email"]
 COLUMN_CONFIG = {
     "price": {"justify": "right"},
     "cost": {"justify": "right"},
     "views": {"justify": "right"},
+    "impressions_guarantee": {"justify": "right"},
     "cpm": {"justify": "right"},
 }
 
@@ -26,7 +27,7 @@ def _format_results(results: list[dict]) -> list[dict]:
         sd = row.get("send_date")
         if sd and isinstance(sd, str) and "T" in sd:
             row["send_date"] = sd[:10]
-        for field in ("price", "cost"):
+        for field in ("price", "cost", "impressions_guarantee"):
             val = row.get(field)
             if val is not None:
                 try:
