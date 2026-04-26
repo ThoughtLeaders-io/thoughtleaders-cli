@@ -19,3 +19,5 @@ Examples:
 - "/tl-sponsorships sold deals on mobile-first channels" → `tl sponsorships list status:sold primary-device:mobile`
 - "/tl-sponsorships deals on channels with majority US audience" → `tl sponsorships list min-us-share:50`
 - "/tl-sponsorships 12345" → `tl sponsorships show 12345`
+
+`tl sponsorships show <id> --json` returns extended detail fields beyond the list view, including: `impressions_guarantee`, `integration`, `publish_count`, `common_name`, `outreach_email`, nested `publisher` (first_name/last_name/email), nested `brand_contact` (first_name/last_name/email), and `brand.organization_name`.
