@@ -1,0 +1,210 @@
+# ThoughtLeaders Firebolt Schema Reference
+
+## How to query
+
+All Firebolt access goes through the `tl` CLI:
+
+```bash
+tl db fb "SELECT id, age, view_count FROM article_metrics
+          WHERE channel_id = 12345 AND id = 'dQw4w9WgXcQ'
+          ORDER BY age" --json
+
+# Read SQL from stdin
+cat curve.sql | tl db fb -
+```
+
+Each call costs 5 credits. Output flags: `--json`, `--csv`, `--md`, `--toon`.
+
+For **standard view-curve / channel-growth** questions, prefer the higher-level commands — they implement the project's interpolation/sparseness handling:
+
+```bash
+tl snapshots channel <channel_id> --json
+tl snapshots video <video_id> --channel <channel_id> --json   # --channel is mandatory
+```
+
+Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (custom aggregates, milestone-age slices, multi-channel growth comparisons, etc.).
+
+## Sanitizer-enforced restrictions
+
+(See `SKILL.md` → "Raw query reference → `tl db fb`" for full reasoning.)
+
+- **SELECT only.** No DDL/DML/transactions/SET/locks.
+- **Single table.** No JOIN, CTE (`WITH`), subquery, set operation, or `LATERAL`.
+- **Only known tables:** `article_metrics`, `channel_metrics`. Adding a table requires a server-side change to `_FIREBOLT_TABLE_INDEX`.
+- **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE is rejected (`NON_INDEXED_FILTER:<col>`). Apply those constraints client-side after fetching.
+- **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
+- **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
+- **No mandatory LIMIT/OFFSET** — but Firebolt will time out on bad plans, so keep the leading-index filter selective.
+
+## Tables
+
+### `article_metrics` — Video-Level Time-Series (PRIMARY TABLE)
+
+**7.4 billion rows** | 159 GiB compressed | Data from 2022-03-04 to present.
+
+Tracks YouTube video metrics over time. Each row = one scrape of one video on one date. Videos are scraped repeatedly, so a single video has many rows at different ages.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | YouTube video ID (e.g., `'dQw4w9WgXcQ'`). **Bare YouTube ID** — NOT the compound `<channel_id>:<youtube_id>` form used in PG `adlink.article_id` and ES `_id`. |
+| `channel_id` | INT | TL channel ID (= Postgres `thoughtleaders_channel.id`) |
+| `channel_format` | INT | Platform format (4 = YouTube) |
+| `publication_date` | DATE | When the video was published |
+| `scrape_date` | DATE | When this data point was captured |
+| `age` | INT | Days since publication (`scrape_date - publication_date`) |
+| `view_count` | INT | Total view count at time of scrape |
+| `like_count` | INT | Total likes at time of scrape |
+| `comment_count` | INT | Total comments at time of scrape |
+| `duration` | INT | Video duration in seconds |
+
+**Primary Index: `(channel_id, id)`** — queries MUST filter by `channel_id` first.
+
+**Shorts vs Longform:** `duration < 61` = Short. `duration >= 61` = Longform. In code: `(duration or 100) < 61`. Filter client-side after fetching — `duration` isn't an indexed column so it can't go in WHERE.
+
+### `channel_metrics` — Channel-Level Time-Series
+
+**1.1 billion rows** | 6.9 GiB compressed.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT | TL channel ID |
+| `total_views` | INT | Channel total views at time of scrape |
+| `reach` | INT | Subscriber count at time of scrape |
+| `scrape_date` | DATE | When this data point was captured |
+
+**Primary Index: `(id)`**
+
+### External / ingestion tables
+
+`ex_article_metrics_v1`, `ex_article_metrics_v1_initial_scrape`, `ex_article_metrics_v2`, `ex_channel_metrics` exist server-side but are **not in the sanitizer's allowlist** — `tl db fb` against them returns `UNKNOWN_TABLE`.
+
+## When to use Firebolt (and when NOT to)
+
+Firebolt's **only advantage** is historical metric snapshots. For everything else, prefer ES (current state) or the structured `tl` commands (deal/pipeline data).
+
+| Need | Source |
+|------|--------|
+| Current view count on a video | **Elasticsearch** (`tl uploads show` or `tl db es`) |
+| Current subscriber count | **Elasticsearch** (`tl channels show`) |
+| Video metadata (title, tags, duration) | **Elasticsearch** |
+| Find channels by criteria | **`tl channels list`** (Postgres) |
+| Deal / pipeline / sponsorship data | **`tl sponsorships`** etc. (Postgres) |
+| View curve over time (age 7→30→90→180) | **Firebolt** ✅ |
+| Views at age 30 vs age 180 (evergreenness) | **Firebolt** ✅ |
+| Channel subscriber growth trend | **Firebolt** ✅ |
+| Detect view spikes / anomalies over time | **Firebolt** ✅ |
+
+**Rule: only query Firebolt when you need a value AT A POINT IN TIME that no longer exists in the current ES/PG snapshot.**
+
+## Index rules — verified timings
+
+`article_metrics` has 7.4B rows. The primary index is `(channel_id, id)`. Without `channel_id` in WHERE, the engine does a full table scan and times out — and the sanitizer rejects such queries up front.
+
+| Query Pattern | Performance | Result |
+|--------------|-------------|--------|
+| `WHERE channel_id = X AND id = Y` | ~12s | ✅ Full index match |
+| `WHERE channel_id = X` | ~12s | ✅ Partial index, viable |
+| `WHERE channel_id IN (X, Y, Z)` | ~12–30s | ✅ Multiple lookups, viable |
+| `WHERE id = 'abc'` (no channel_id) | n/a | ❌ rejected (`MISSING_INDEXED_FILTER`) |
+| `WHERE publication_date > X` | n/a | ❌ rejected (`NON_INDEXED_FILTER:publication_date`) |
+| `WHERE age = 30 AND view_count > 50000` | n/a | ❌ rejected (multiple `NON_INDEXED_FILTER`) |
+
+For `channel_metrics`, primary index is `(id)`. Same rule: always filter by `id`.
+
+## Workflow: resolve IDs first, then query
+
+Every Firebolt workflow has two steps:
+
+**Step 1 — get `channel_id` and (optionally) video IDs from PG/ES.**
+
+```bash
+# Channels matching some criterion (PG side)
+tl channels list category:tech --json --limit 50 | jq '.results[].id'
+
+# Or videos for a specific brand's deals (Postgres side, via tl sponsorships)
+tl deals list brand:"Nike" --json --limit 500 \
+  | jq -r '.results[] | select(.article_id != null) | "\(.channel_id):\(.article_id)"'
+
+# Or videos via Elasticsearch content search
+tl db es '{
+  "size":100,
+  "query":{"term":{"sponsored_brand_mentions":"5612"}},
+  "_source":["channel.id","id"]
+}' --json | jq '.results[] | {channel_id: .channel.id, id: (.id | split(":")[1])}'
+```
+
+**Step 2 — query Firebolt with those IDs.**
+
+```bash
+# Best: full index
+tl db fb "SELECT id, age, view_count FROM article_metrics
+          WHERE channel_id IN (123, 456, 789)
+            AND id IN ('abc', 'def', 'ghi')
+          ORDER BY id, age"
+
+# Acceptable: channel_id only (scans all videos for that channel)
+tl db fb "SELECT id, age, view_count FROM article_metrics
+          WHERE channel_id = 12345
+          ORDER BY id, age"
+```
+
+For non-indexed filters (`age IN (30, 180)`, `duration > 60`), pull a slightly wider slice and filter in `jq`/Python.
+
+## Common Query Patterns
+
+### Get a video's full view curve
+
+```bash
+tl db fb "SELECT id, age, view_count, like_count, comment_count, duration
+          FROM article_metrics
+          WHERE channel_id = 12345 AND id = 'dQw4w9WgXcQ'
+          ORDER BY age"
+```
+
+### Get all videos for a channel, then filter client-side to milestone ages and longform
+
+```bash
+tl db fb "SELECT id, age, view_count, like_count, comment_count, duration, publication_date
+          FROM article_metrics
+          WHERE channel_id = 12345
+          ORDER BY id, age" --json \
+| jq '.results[] | select(.duration > 60 and (.age == 7 or .age == 30 or .age == 60 or .age == 90 or .age == 180 or .age == 365))'
+```
+
+### Channel subscriber/view growth over time
+
+```bash
+tl db fb "SELECT scrape_date, total_views, reach
+          FROM channel_metrics
+          WHERE id = 12345
+          ORDER BY scrape_date"
+```
+
+### Compare multiple channels' growth
+
+```bash
+tl db fb "SELECT id, scrape_date, total_views, reach
+          FROM channel_metrics
+          WHERE id IN (123, 456, 789)
+          ORDER BY id, scrape_date"
+```
+
+## Sparse data warning
+
+Snapshots are **sparse**, especially for older videos (the project's scrape cadence backs off as videos age). Channels are snapshotted daily. Do **not** assume two arbitrary dates have data points. For approximations between gaps, prefer `tl snapshots` (which implements project-internal interpolation logic) over hand-rolled raw queries.
+
+## How Firebolt powers other features
+
+- **Evergreenness:** `evergreenness = (views_at_180 - views_at_30) / views_at_30`. Falls back to `(views_at_90 × 1.265 - views_at_30) / views_at_30` if 180 isn't available. Threshold `views_180 ≥ views_30 × 2`. Min views: 5,000. Stored on ES `evergreenness` and PG `thoughtleaders_channel.evergreenness` — read those first; only recompute from Firebolt for investigations.
+- **Growth/Trend stats** (initial → middle → current dynamics) are computed in `firebolt_utils.py` server-side.
+- **View-curve approximation:** linear (channel metrics, gap ≤ 10 days) or logarithmic (article metrics, `views = a · log(b · age)`). Server-side; not exposed to raw `tl db fb`.
+
+## Use cases (mostly underexplored)
+
+- Late viral detection: dormant videos that spike — what caused it?
+- Evergreen outliers: abnormally high/low evergreen scores — why?
+- Engagement shifts: like/comment ratios changing dramatically over time.
+- View projection: fit logarithmic curve, project future views.
+- Sponsorship timing: when in a video's lifecycle does a sponsorship deliver most views?
+- Anomaly alerts: detect unusual view patterns and notify.
+- Performance benchmarking: a video's curve vs its niche average.
