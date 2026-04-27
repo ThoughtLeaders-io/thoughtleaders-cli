@@ -89,6 +89,8 @@ The version string is defined in three files and all three must be updated toget
 
 Do not reference internal architecture of the ThoughtLeaders app in commit messages.
 
+When a feature is purely server-side but changes the data the CLI receives (e.g. adding, removing, or renaming a field on a response, changing a credit rate, expanding an enum), make a forced empty commit on the tl-cli repo (`git commit --allow-empty`) describing the change. This keeps the CLI repo's history a complete log of what users see, even when no client code had to change.
+
 # Be aware of tests
 
 Be sure to check if tests need to be updated when changing any data structures or function names, in all repos involved in the change.
