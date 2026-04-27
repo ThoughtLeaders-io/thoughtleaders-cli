@@ -81,7 +81,6 @@ def fb_cmd(
 @app.command("es")
 def es_cmd(
     query: str = typer.Argument(None, help="Elasticsearch search body as JSON (or '-' to read from stdin)"),
-    index: str = typer.Option("tl-platform", "--index", "-i", help="Elasticsearch index/alias"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
@@ -89,9 +88,11 @@ def es_cmd(
 ) -> None:
     """Run a raw Elasticsearch search query.
 
+    The index is fixed server-side; the client cannot select it.
+
     Examples:
         tl db es '{"size": 5, "query": {"term": {"channel.id": 5607}}}'
-        tl db es '{"size": 0, "aggs": {"by_channel": {"terms": {"field": "channel.id"}}}}' --index tl-platform-2026-q1
+        tl db es '{"size": 0, "aggs": {"by_channel": {"terms": {"field": "channel.id"}}}}'
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     raw = _read_query(query)
@@ -100,4 +101,4 @@ def es_cmd(
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(f"Query is not valid JSON: {exc}") from exc
 
-    _run("/raw/es", {"query": body_query, "index": index}, fmt, "Elasticsearch results")
+    _run("/raw/es", {"query": body_query}, fmt, "Elasticsearch results")

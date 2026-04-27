@@ -27,7 +27,7 @@ See the `tl` skill for filter syntax, pagination rules, status labels, role scop
 ```bash
 tl db pg "<SELECT ...>"               # PostgreSQL — currently a server-side stub (501)
 tl db fb "<SELECT ...>"               # Firebolt — single-table reads against article_metrics / channel_metrics
-tl db es '<JSON body>' [--index ...]  # Elasticsearch — search bodies against tl-platform-* aliases
+tl db es '<JSON body>'                # Elasticsearch — search bodies against the server-fixed tl-platform alias
 ```
 
 All three share output flags (`--json`, `--csv`, `--md`, `--toon`) and accept `-` to read the query from stdin (`cat q.sql | tl db fb -`). Each call costs 5 credits regardless of result size.
@@ -76,8 +76,8 @@ The CLI POSTs your JSON body to `/api/cli/v1/raw/es`. The server validates the b
 # Find a single video by composite ID
 tl db es '{"size":1,"query":{"term":{"id":"1247603:8LskGvKUA9I"}}}'
 
-# Aggregation: count sponsored mentions of brand 5612 in Q1 2026
-tl db es --index tl-platform-2026-q1 '{
+# Aggregation: count sponsored mentions of brand 5612
+tl db es '{
   "size":0,
   "track_total_hits":true,
   "query":{"term":{"sponsored_brand_mentions":"5612"}}
@@ -87,7 +87,7 @@ tl db es --index tl-platform-2026-q1 '{
 cat query.json | tl db es -
 ```
 
-`--index` defaults to `tl-platform`. Prefer the narrow alias `tl-platform-{year}-q{quarter}` when you can.
+The index is fixed server-side (defaults to `tl-platform`) — the client cannot select it. To narrow a query to a quarter or year, scope it inside the body with a `publication_date` range filter rather than picking a different alias.
 
 **Server-side restrictions** (sanitizer in `db_sanitizer.sanitize_es_query`):
 - Top-level keys allowed: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (`scroll`, `pit`, `runtime_mappings`, `knn`, …) is rejected.

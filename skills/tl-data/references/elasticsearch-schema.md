@@ -5,15 +5,13 @@
 All ES access goes through the `tl` CLI:
 
 ```bash
-# Default index alias is tl-platform (all data)
 tl db es '{"size": 1, "query": {"match_all": {}}}' --json
-
-# Time-scoped — preferred for performance
-tl db es --index tl-platform-2026-q1 '{"size": 5, "query": {"match_all": {}}}'
 
 # Read body from stdin
 cat query.json | tl db es -
 ```
+
+The index is **fixed server-side** (defaults to `tl-platform`). The client cannot select an index — there is no `--index` flag. To narrow a query to a smaller time window, scope it inside the body with a `publication_date` range filter rather than picking a different alias.
 
 Every call costs 5 credits. Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into rows of `{_id, _score, ...source}`; aggregations come back in the response envelope and are rendered after the rows in TTY mode.
 
@@ -35,12 +33,9 @@ The primary index. Contains videos AND channels as parent-child documents (`doc_
 
 Sharded by quarter going back to 2015. **~15.6M docs in Q1 2026 alone.**
 
-**Always use aliases, never wildcards or physical index names:**
-- `tl-platform-2026-q1` — single quarter (preferred for scoped queries)
-- `tl-platform-2026` — full year (all 4 quarters)
-- `tl-platform` — all data (use sparingly, always with a `publication_date` range filter)
-- **Never use `*` wildcards** — during reindexing you'd hit duplicate data. Aliases point to a single index.
-- **Always add `publication_date` range filters** when querying broad time ranges for performance.
+Through `tl db es`, all queries hit a server-fixed alias (typically `tl-platform`, which fans out across every quarter). **Always add `publication_date` range filters** when narrowing to a time window — that's the only knob the client has, since the alias itself isn't selectable.
+
+The underlying physical layout (one index per quarter, e.g. `tl-platform-2026-q1`, with year and full-platform aliases on top) is for context only.
 
 Raw mappings (read-only links — out of band, not via `tl`):
 - [articles](https://github.com/ThoughtLeaders-io/elk-stack-resources/blob/main/elasticsearch/templates/_mappings_article.kibana)
@@ -158,7 +153,7 @@ Note: `knn` queries against vector indices are **not currently allowed** by the 
 ### Search videos by sponsored brand mention
 
 ```bash
-tl db es --index tl-platform-2026-q1 '{
+tl db es '{
   "size": 50,
   "query": {"term": {"sponsored_brand_mentions": "5612"}},
   "_source": ["title", "channel.id", "publication_date", "views"],
@@ -204,7 +199,7 @@ tl db es '{
 ### Filter by date range
 
 ```bash
-tl db es --index tl-platform-2026 '{
+tl db es '{
   "size": 100,
   "query": {
     "bool": {
@@ -220,7 +215,7 @@ tl db es --index tl-platform-2026 '{
 ### Single top-level aggregation (sanitizer caps at one)
 
 ```bash
-tl db es --index tl-platform-2026-q1 '{
+tl db es '{
   "size": 0,
   "aggs": {
     "by_channel": {
@@ -255,7 +250,7 @@ tl db es '{
 ## Notes & gotchas
 
 - **Composite IDs:** `tl-platform.id` and `_id` are `<channel_id>:<youtube_id>`. The `youtube_id` portion alone is what Firebolt's `article_metrics.id` stores.
-- **Use the narrow alias** (`tl-platform-{year}-q{quarter}`) whenever the question is time-bounded. Saves credits indirectly by avoiding bigger result sets and pages faster.
+- **Add a `publication_date` range filter** whenever the question is time-bounded — the alias is fixed, so this is the only way to narrow the search.
 - `sponsored_brand_mentions` and `organic_brand_mentions` are keyword arrays — use `term` queries.
 - For brand mention details (position, snippet, detection_tool), the data is in the `brand_mentions` nested field.
 - **`publication_id` is deprecated** — don't use for joins.

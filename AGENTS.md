@@ -82,7 +82,7 @@ The version string is defined in three files and all three must be updated toget
 
 ## Coding
 
-* Do not reference internal architecture of the ThoughtLeaders app in comments.
+* Do not reference internal architecture of the ThoughtLeaders app in comments or skills.
 * Place all imports at the start of the Python module file
 
 # Git commit rules
