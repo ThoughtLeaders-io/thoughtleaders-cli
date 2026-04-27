@@ -129,10 +129,16 @@ The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource
 ```bash
 tl describe                            # List all resources with credit costs (free)
 tl describe show <resource> --json     # Fields, filters, credit rates (free)
-tl balance --json                  # Credit balance (free)
-tl whoami                          # Current user, org, brands (free)
-tl auth status                     # Auth check (free)
+tl balance --json                      # Credit balance (free)
+tl whoami                              # Current user, org, brands (free)
+tl auth status                         # Auth check (free)
+tl changelog                           # Release notes — current version, or current..latest if behind (free)
+tl changelog v0.4.17 v0.4.18           # Notes for explicit versions
+tl changelog since v0.4.10             # Notes from v0.4.10 to latest
+tl changelog --md > CHANGELOG.md       # Capture for a doc
 ```
+
+`tl changelog` summaries are LLM-generated server-side from full commit messages and cached per version, so repeat calls are fast and don't re-bill the LLM. The release date and a 2–4 sentence prose summary come back per version.
 
 ### Filter syntax
 All list commands accept `key:value` filters:

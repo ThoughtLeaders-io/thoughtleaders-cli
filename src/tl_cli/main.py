@@ -19,6 +19,7 @@ from tl_cli import config as tl_config
 from tl_cli.auth.commands import app as auth_app
 from tl_cli.commands.ask import app as ask_app
 from tl_cli.commands.balance import app as balance_app
+from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
 from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.comments import app as comments_app
@@ -103,6 +104,13 @@ app.add_typer(describe_app, name="describe")
 app.add_typer(balance_app, name="balance")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
+
+# `changelog` is a single command (not a sub-typer) so positional version args
+# don't get interpreted as subcommand names.
+app.command(
+    name="changelog",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)(changelog_command)
 
 # AI fallback
 app.add_typer(ask_app, name="ask")
