@@ -30,7 +30,33 @@ tl db fb "<SELECT ...>"               # Firebolt — single-table reads against 
 tl db es '<JSON body>'                # Elasticsearch — search bodies against the server-fixed tl-platform alias
 ```
 
-All three share output flags (`--json`, `--csv`, `--md`, `--toon`) and accept `-` to read the query from stdin (`cat q.sql | tl db fb -`). Each call costs 5 credits regardless of result size.
+All three share output flags (`--json`, `--csv`, `--md`, `--toon`) and accept `-` to read the query from stdin (`cat q.sql | tl db fb -`).
+
+**Cost grows non-linearly with result size.** The curve is `cost = setup + mult × 0.126 × n^1.2`, used for `tl db` and every structured `list` endpoint (`tl sponsorships list`, `tl channels list`, `tl uploads list`, `tl snapshots …`, `tl comments list`, `tl reports`). The per-call `setup` is a flat 1 credit for everyone; the per-resource `mult` reflects how heavy that resource is to run server-side:
+
+- **mult = 1.0** — channels, brands, comments, uploads, sponsorships (cheap, indexed reads)
+- **mult = 1.2** — snapshots (Firebolt-backed time-series)
+- **mult = 1.3** — reports (multi-stage server work)
+- **mult = 1.4** — `tl db {pg, fb, es}` (raw queries, no role scoping, wider blast radius)
+
+Per-row cost scales linearly with `mult` at every `n`, so a 1.4× resource is exactly 1.4× the row cost (modulo the 1-credit setup) of a 1.0× resource at any size.
+
+Reference table for raw `tl db {pg,fb,es}` (mult = 1.4):
+
+| Rows returned | Total credits |
+|---:|---:|
+| 1 | 1 |
+| 10 | 4 |
+| 50 | 20 |
+| 100 | 45 |
+| 200 | 103 |
+| 500 | 307 |
+
+Implications:
+- **Ask for what you need.** A `--limit 50` query is ~15× cheaper than `--limit 500`.
+- **Aggregations bill on docs scanned**, not rows returned. ES queries with `aggs` bill on `min(hits.total, 200)` so a `terms` agg over the full index is priced like a medium pull (~103 credits at db's 1.4× mult), not free.
+- **Splitting one big call into many small ones is cheaper** but only modestly (10×50 rows ≈ 200 credits vs 1×500 ≈ 307 at db rates — about 35% saved, of which most is from amortising 10 setup floors). Don't over-rotate to micro-batches; the right move is usually "narrow the query".
+- **Detail / similar / history endpoints are still linear** (`rate × results`) — only `list`-mode endpoints and `tl db` are on the curve.
 
 **Reach for raw queries — don't simulate them client-side.** Structured `tl <resource> list` is great when the user wants a filtered list of records. The moment the question turns into **aggregation, joining, or complex multi-condition filtering**, switch to `tl db`:
 

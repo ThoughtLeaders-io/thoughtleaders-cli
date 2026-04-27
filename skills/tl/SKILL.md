@@ -83,34 +83,47 @@ Prefer writing Python code, shell code, or `jq` commands that fetche or analysis
 
 ### Data queries
 ```bash
-tl sponsorships list [filters...]      # Sponsorships (2 credits/result, 3/detail)
-tl sponsorships show <id>              # Sponsorship detail
+tl sponsorships list [filters...]      # Sponsorships — list curve, mult 1.0
+tl sponsorships show <id>              # Sponsorship detail (2 credits)
 tl sponsorships create --channel <id> --brand <id>  # Create proposal (free)
-tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal)
-tl deals show <id>                     # Deal detail
-tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match)
-tl matches show <id>                   # Match detail
+tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal); same curve as sponsorships list
+tl deals show <id>                     # Deal detail (2 credits)
+tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match); same curve
+tl matches show <id>                   # Match detail (2 credits)
 tl matches create --channel <id> --brand <id>  # Create match (free)
-tl proposals list [filters...]         # Shortcut: proposed matches (status:proposal)
-tl proposals show <id>                 # Proposal detail
+tl proposals list [filters...]         # Shortcut: proposed matches (status:proposal); same curve
+tl proposals show <id>                 # Proposal detail (2 credits)
 tl proposals create --channel <id> --brand <id>  # Create proposal (free)
-tl uploads list [filters...]           # Video uploads from ES (1 credit/result)
+tl uploads list [filters...]           # Video uploads from ES — list curve, mult 1.0
 tl uploads show <id>                   # Upload detail (2 credits)
-tl channels list [filters...]          # Channel search (3 credits/result, 5/detail)
-tl channels show <id-or-name>          # Channel detail (accepts numeric ID or channel name)
-tl channels history <id-or-name>       # Sponsorship history — videos with detected sponsors (5 credits/result)
-tl channels similar <id-or-name>       # Vector-similarity recommender (50 credits; Intelligence plan)
-tl brands show <id-or-name>            # Brand detail (8 credits; accepts numeric ID or name)
-tl brands history <id-or-name>         # Sponsorship history — videos where brand was detected (5 credits/result)
+tl channels list [filters...]          # Channel search — list curve, mult 1.0
+tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name)
+tl channels history <id-or-name>       # Sponsorship history (5 credits/result, linear)
+tl channels similar <id-or-name>       # Vector-similarity recommender (50 credits flat; Intelligence plan)
+tl brands show <id-or-name>            # Brand detail (1 credit)
+tl brands history <id-or-name>         # Sponsorship history (5 credits/result, linear)
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
-tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits)
-tl snapshots channel <id>              # Channel metrics over time (1 credit/point)
-tl snapshots video <id> --channel <id> # Video view curve (1 credit/point, --channel required!)
-tl reports                             # List saved reports (free)
+tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits flat)
+tl snapshots channel <id>              # Channel metrics over time — list curve, mult 1.2 (Firebolt-backed)
+tl snapshots video <id> --channel <id> # Video view curve — list curve, mult 1.2 (--channel required!)
+tl reports                             # List saved reports — list curve, mult 1.3
 tl reports run <id>                    # Run a saved report (credits vary)
-tl comments list <adlink-id>           # List comments (free)
+tl comments list <adlink-id>           # List comments — list curve, mult 1.0
 tl comments add <adlink-id> "msg"      # Add comment (free)
 ```
+
+**"List curve"** above means non-linear pricing: `cost = 1 + mult × 0.126 × n^1.2`. The flat 1-credit setup applies to every list call; the `mult` reflects per-resource complexity. `tl db {pg,fb,es}` shares the same curve at mult=1.4. Concrete totals:
+
+| Rows | mult=1.0 (channels, brands, comments, uploads, sponsorships) | mult=1.2 (snapshots) | mult=1.3 (reports) | mult=1.4 (db.pg / db.fb / db.es) |
+|---:|---:|---:|---:|---:|
+| 1 | 1 | 1 | 1 | 1 |
+| 10 | 3 | 3 | 4 | 4 |
+| 50 | 15 | 18 | 19 | 20 |
+| 100 | 33 | 39 | 42 | 45 |
+| 200 | 74 | 88 | 96 | 103 |
+| 500 | 219 | 263 | 285 | 307 |
+
+The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource costs 1.4× the row part of a 1.0× resource at any size. Splitting a 500-row pull into ten 50-row calls saves ~30% but burns 10 setup floors instead of 1; "narrow the query" is almost always the better move than "fragment the pagination."
 
 ### Discovery & system
 ```bash
@@ -186,8 +199,9 @@ While analysing results, you must always examine the `results` field in the JSON
 
 Every query costs credits. Before running expensive queries:
 1. Check the credit rate: `tl describe show <resource> --json | jq '.credits'` and the user balance.
-2. Estimate cost: results × rate
-3. If estimated cost is more than 10% of the remaining balance, ask the user to confirm the operation before running.
+2. **List endpoints (sponsorships/channels/uploads/snapshots/comments/reports/db) are priced non-linearly:** `cost = 1 + mult × 0.126 × n^1.2`, where `mult` is the per-resource complexity factor (1.0 for cheap reads, 1.2 for snapshots, 1.3 for reports, 1.4 for raw db). Detail/history/similar endpoints are linear (`rate × results`). See the table in the command list above.
+3. Estimate cost from the formula or the table; for non-list endpoints use `results × rate`.
+4. If estimated cost is more than 10% of the remaining balance, ask the user to confirm the operation before running.
 
 ## Data Scoping
 
