@@ -1,0 +1,32 @@
+{
+  "_placeholder": true,
+  "_status": "Milestone 1 — placeholder. Awaiting initial sync.",
+  "_schema_version": "v1",
+  "_synced_from": "evals/topics/seed_topics_v1.json (platform repo)",
+  "_sync_instructions": [
+    "1. From the platform repo, copy evals/topics/seed_topics_v1.json into this file.",
+    "2. The Topic Matcher (prompts/topic_matcher.md, Milestone 2) reads from this file directly — do not transform structure during sync.",
+    "3. Re-sync whenever the seeded topic cache changes. Until a tl topics CLI subcommand exists, this is a manual step.",
+    "4. The skill must continue to function with a stale snapshot; degradation is gradual (older topics still match), not catastrophic."
+  ],
+  "_expected_shape": {
+    "topics": [
+      {
+        "id": "<integer, matches DB id>",
+        "name": "<canonical topic name>",
+        "description": "<one-line summary>",
+        "keywords": {
+          "core_head": ["..."],
+          "sub_segment": ["..."],
+          "long_tail": ["..."]
+        },
+        "evidence": {
+          "brands": ["..."],
+          "channels": ["..."],
+          "iab_tier_2": "<IAB tier 2 label>"
+        }
+      }
+    ]
+  },
+  "topics": []
+}
