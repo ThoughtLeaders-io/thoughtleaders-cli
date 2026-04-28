@@ -13,7 +13,7 @@ cat query.json | tl db es -
 
 The index is **fixed server-side** (defaults to `tl-platform`). The client cannot select an index — there is no `--index` flag. To narrow a query to a smaller time window, scope it inside the body with a `publication_date` range filter rather than picking a different alias.
 
-Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity multiplier on the per-row charge (the `db.es` rate, tunable in `CREDIT_RATES`) so 10 rows ≈ 4 credits, 100 rows ≈ 45, 500 rows ≈ 307. Aggregation queries bill on `min(hits.total, 200)` instead of `len(hits)` — a `terms` agg over the whole index is priced like a ~103-credit pull, not free. See `SKILL.md` → "Cost grows non-linearly" for the full table.
+Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity multiplier on the per-row charge (raw db queries are tuned heavier than structured list endpoints) so 10 rows ≈ 4 credits, 100 rows ≈ 45, 500 rows ≈ 307. Aggregation queries bill on `min(hits.total, 200)` instead of `len(hits)` — a `terms` agg over the whole index is priced like a ~103-credit pull, not free. See `SKILL.md` → "Cost grows non-linearly" for the full table.
 
 Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into rows of `{_id, _score, ...source}`; aggregations come back in the response envelope and are rendered after the rows in TTY mode.
 

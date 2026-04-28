@@ -27,7 +27,7 @@ See the `tl` skill for filter syntax, pagination rules, status labels, role scop
 ```bash
 tl db pg "<SELECT ...>"               # PostgreSQL — currently a server-side stub (501)
 tl db fb "<SELECT ...>"               # Firebolt — single-table reads against article_metrics / channel_metrics
-tl db es '<JSON body>'                # Elasticsearch — search bodies against the server-fixed tl-platform alias
+tl db es "<JSON body>"                # Elasticsearch — search bodies against the server-fixed tl-platform alias
 ```
 
 All three share output flags (`--json`, `--csv`, `--md`, `--toon`) and accept `-` to read the query from stdin (`cat q.sql | tl db fb -`).
@@ -96,7 +96,7 @@ The structured commands stay best for: single-record lookups, role-scoped lists 
 
 ### `tl db es` — Elasticsearch
 
-The CLI POSTs your JSON body to `/api/cli/v1/raw/es`. The server validates the body before forwarding to ES.
+The CLI sends your JSON body to the server, which validates it before forwarding to ES.
 
 ```bash
 # Find a single video by composite ID
@@ -115,7 +115,7 @@ cat query.json | tl db es -
 
 The index is fixed server-side (defaults to `tl-platform`) — the client cannot select it. To narrow a query to a quarter or year, scope it inside the body with a `publication_date` range filter rather than picking a different alias.
 
-**Server-side restrictions** (sanitizer in `db_sanitizer.sanitize_es_query`):
+**Server-side restrictions** (enforced by the request sanitizer):
 - Top-level keys allowed: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (`scroll`, `pit`, `runtime_mappings`, `knn`, …) is rejected.
 - `size` ≤ 500. `from + size` ≤ 10,000 (deep pagination cap — use `search_after` for deeper).
 - Body depth ≤ 16, total node count ≤ 1,000.
@@ -137,7 +137,7 @@ tl db fb "SELECT scrape_date, total_views, reach FROM channel_metrics
           ORDER BY scrape_date"
 ```
 
-**Server-side restrictions** (`db_sanitizer.sanitize_firebolt_sql`):
+**Server-side restrictions** (enforced by the request sanitizer):
 - **SELECT only.** No DDL/DML/transactions/locks/SET.
 - **Single table.** No JOINs, CTEs (`WITH`), subqueries, set operations, or `LATERAL`.
 - **Only known tables:** `article_metrics` (indexed on `channel_id, id`) or `channel_metrics` (indexed on `id`). New tables must be added server-side.
@@ -152,7 +152,7 @@ tl db fb "SELECT scrape_date, total_views, reach FROM channel_metrics
 
 **Currently a server-side stub — POSTs return HTTP 501.** The endpoint accepts the same shape as the others (`{"query": "<sql>"}`) and the CLI is wired up, but the server view returns "not yet implemented" until execution + the strict PG sanitizer ship.
 
-When it does ship, the planned restrictions (per `db_sanitizer.sanitize_pg_sql`):
+When it does ship, the planned restrictions (enforced by the sanitizer):
 - **SELECT only**, single statement, no DDL/DML/transactions/SET/COPY/MERGE.
 - Function calls gated by an explicit allowlist (aggregates, window, string, JSON, math, date-time, array). No catalog-introspection casts (`::regclass`, `::regprocedure`, …).
 - **`LIMIT` is mandatory** and must be an integer literal ≤ 500. **`OFFSET` is mandatory** (use `0` if you don't need to page).
@@ -187,7 +187,7 @@ Load these on demand — don't read all upfront. Pick the one(s) relevant to the
 
 ## Key business concepts (quick recap)
 
-- **AdLink** = a deal/sponsorship. Source-of-truth table is `thoughtleaders_adlink` (Postgres); the CLI exposes it as `tl sponsorships`.
+- **AdLink** = a deal/sponsorship. The CLI exposes it as `tl sponsorships`.
 - **Revenue** = ONLY `publish_status = 3` (SOLD). Everything else is pipeline or lost.
 - **Gross revenue** = `SUM(price)` on sold deals. **Net/profit** = `SUM(price - cost)`.
 - **Weighted pipeline** = `SUM(weighted_price)` on open opportunities (statuses 0,2,6,7,8). Pre-computed in PG.

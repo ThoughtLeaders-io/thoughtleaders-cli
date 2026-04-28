@@ -13,7 +13,7 @@ tl db fb "SELECT id, age, view_count FROM article_metrics
 cat curve.sql | tl db fb -
 ```
 
-Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity multiplier on the per-row charge (the `db.fb` rate, tunable in `CREDIT_RATES`) so 10 rows ≈ 4 credits, 100 ≈ 45, 500 ≈ 307. For a video view-curve, that means a tightly-scoped `WHERE channel_id = X AND id = Y` query rarely costs more than ~10 credits even with months of snapshots, while a channel-wide `WHERE channel_id = X` over a busy channel can run into the hundreds. See `SKILL.md` → "Cost grows non-linearly" for the full table.
+Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity multiplier on the per-row charge (raw db queries are tuned heavier than structured list endpoints) so 10 rows ≈ 4 credits, 100 ≈ 45, 500 ≈ 307. For a video view-curve, that means a tightly-scoped `WHERE channel_id = X AND id = Y` query rarely costs more than ~10 credits even with months of snapshots, while a channel-wide `WHERE channel_id = X` over a busy channel can run into the hundreds. See `SKILL.md` → "Cost grows non-linearly" for the full table.
 
 Output flags: `--json`, `--csv`, `--md`, `--toon`.
 
@@ -32,7 +32,7 @@ Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (cu
 
 - **SELECT only.** No DDL/DML/transactions/SET/locks.
 - **Single table.** No JOIN, CTE (`WITH`), subquery, set operation, or `LATERAL`.
-- **Only known tables:** `article_metrics`, `channel_metrics`. Adding a table requires a server-side change to `_FIREBOLT_TABLE_INDEX`.
+- **Only known tables:** `article_metrics`, `channel_metrics`. Adding a table requires a server-side change to the sanitizer's allowlist.
 - **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE is rejected (`NON_INDEXED_FILTER:<col>`). Apply those constraints client-side after fetching.
 - **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
 - **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
@@ -49,7 +49,7 @@ Tracks YouTube video metrics over time. Each row = one scrape of one video on on
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | TEXT | YouTube video ID (e.g., `'dQw4w9WgXcQ'`). **Bare YouTube ID** — NOT the compound `<channel_id>:<youtube_id>` form used in PG `adlink.article_id` and ES `_id`. |
-| `channel_id` | INT | TL channel ID (= Postgres `thoughtleaders_channel.id`) |
+| `channel_id` | INT | TL channel ID (matches the channel ID returned by `tl channels list`) |
 | `channel_format` | INT | Platform format (4 = YouTube) |
 | `publication_date` | DATE | When the video was published |
 | `scrape_date` | DATE | When this data point was captured |
@@ -197,8 +197,8 @@ Snapshots are **sparse**, especially for older videos (the project's scrape cade
 
 ## How Firebolt powers other features
 
-- **Evergreenness:** `evergreenness = (views_at_180 - views_at_30) / views_at_30`. Falls back to `(views_at_90 × 1.265 - views_at_30) / views_at_30` if 180 isn't available. Threshold `views_180 ≥ views_30 × 2`. Min views: 5,000. Stored on ES `evergreenness` and PG `thoughtleaders_channel.evergreenness` — read those first; only recompute from Firebolt for investigations.
-- **Growth/Trend stats** (initial → middle → current dynamics) are computed in `firebolt_utils.py` server-side.
+- **Evergreenness:** `evergreenness = (views_at_180 - views_at_30) / views_at_30`. Falls back to `(views_at_90 × 1.265 - views_at_30) / views_at_30` if 180 isn't available. Threshold `views_180 ≥ views_30 × 2`. Min views: 5,000. Stored on the ES `evergreenness` field and on the channel record returned by `tl channels show` — read those first; only recompute from Firebolt for investigations.
+- **Growth/Trend stats** (initial → middle → current dynamics) are computed server-side.
 - **View-curve approximation:** linear (channel metrics, gap ≤ 10 days) or logarithmic (article metrics, `views = a · log(b · age)`). Server-side; not exposed to raw `tl db fb`.
 
 ## Use cases (mostly underexplored)
