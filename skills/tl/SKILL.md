@@ -69,7 +69,7 @@ An obsolete name for "sponsorship" is an "adlink".
 
 ## Methodology
 
-Where possible, if searching for a sponsorship match between channels and brand, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. This similarity should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
+Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
 ## Workflow
 
