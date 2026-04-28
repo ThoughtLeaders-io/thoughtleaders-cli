@@ -54,6 +54,16 @@ The CLI integrates with AI coding agents via skills, commands, agents, and hooks
 
 This repo is also a Claude Code plugin, and can directly be installed as one.
 
+### Skill content boundaries
+
+Skills under `skills/` are split into a `SKILL.md` and one or more `references/*.md` files. To prevent drift, each fact has exactly one home:
+
+- **CLI-shaped facts live in `SKILL.md`** — command surface, flags, filter syntax, output shapes, workflow, credit-cost curve, status-label mapping the CLI emits.
+- **Schema-shaped facts live in `references/`** — table/column catalogues, accepted-query rules for raw DB engines (PG/ES/Firebolt), index constraints, field types, ID formats.
+- **Business-shaped facts live in `references/business-glossary.md`** (or the equivalent glossary file) — revenue/pipeline definitions, performance grades, ownership semantics, MSN/TPP meaning, team rosters.
+
+When adding or updating skill content, place the fact in its single home and link from the others. Do not duplicate or "quick-recap" content across files — recaps are the highest drift surface.
+
 ## API Response Envelope
 
 All list endpoints return: `{ results, total, limit, offset, usage: { credits_charged, credit_rate, balance_remaining }, _breadcrumbs }`.

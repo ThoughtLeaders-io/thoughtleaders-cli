@@ -176,13 +176,7 @@ tl db es '{"size":0,"track_total_hits":true,"query":{"term":{"sponsored_brand_me
 cat query.json | tl db es -
 ```
 
-**Accepted query bodies:**
-- Top-level keys accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (`scroll`, `pit`, `runtime_mappings`, `knn`, …) is not accepted.
-- `size` ≤ 500. `from + size` ≤ 10,000 (use `search_after` for deeper). Body depth ≤ 16, total nodes ≤ 1,000.
-- **Query types not accepted:** `has_child`, `has_parent`, `parent_id`, `query_string`, `regexp`, `more_like_this`, `fuzzy`, `wildcard`. `nested` is accepted.
-- **No scripts of any kind** — any key whose lowercased name contains `script` is not accepted (rules out `script_score`, `script_fields`, `scripted_metric`, runtime-script mappings, `_script` sort).
-- **At most one aggregation total**, counted recursively (top-level agg with a sub-agg = two, not accepted). For multi-metric work, run multiple queries.
-- Aggregations bill on docs scanned, capped at `min(hits.total, 200)` — a `terms` agg over the whole index is priced like a medium pull (~103 credits), not free.
+See [references/elasticsearch-schema.md](references/elasticsearch-schema.md) for accepted top-level keys, query types, size/depth limits, scripting/aggregation rules, and the field catalogue.
 
 #### `tl db fb` — Firebolt
 
@@ -198,25 +192,13 @@ tl db fb "SELECT scrape_date, total_views, reach FROM channel_metrics
           ORDER BY scrape_date"
 ```
 
-**Accepted queries:**
-- **SELECT only.** No DDL/DML/transactions/locks/SET.
-- **Single table.** No JOINs, CTEs (`WITH`), subqueries, set operations, or `LATERAL`.
-- **Only known tables:** `article_metrics` (indexed on `channel_id, id`) or `channel_metrics` (indexed on `id`). Other names return `UNKNOWN_TABLE`.
-- **WHERE/HAVING may only reference the table's indexed columns** — i.e. `channel_id` / `id` for `article_metrics`, `id` for `channel_metrics`. Filtering by `age`, `publication_date`, `view_count`, etc. in WHERE returns `NON_INDEXED_FILTER:<col>`. Apply those constraints **after** fetching, in `jq`/Python.
-- **Leading index column must be equality-or-IN-filtered with literals.** For `article_metrics` that's `channel_id = N` or `channel_id IN (...)`. Without it: `MISSING_INDEXED_FILTER`.
-- **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates with no GROUP BY / HAVING may omit WHERE entirely. Don't rely on this for anything but tiny check-counts.
-
-**ID format reminder:** `article_metrics.id` is the bare YouTube video ID (`'dQw4w9WgXcQ'`), not the compound `channel_id:video_id` used in Postgres `adlink.article_id` and ES `_id`. When bridging from Postgres, use `SPLIT_PART(article_id, ':', 2)`.
+See [references/firebolt-schema.md](references/firebolt-schema.md) for accepted-query rules (SELECT-only, single-table, indexed-filter requirements), table schemas, and ID-format details.
 
 #### `tl db pg` — PostgreSQL
 
 **Currently a server-side stub — POSTs return HTTP 501.** Endpoint accepts the same shape as the others (`{"query": "<sql>"}`) and the CLI is wired up, but the server view returns "not yet implemented" until execution support ships.
 
-Accepted SQL when it ships:
-- **SELECT only**, single statement, no DDL/DML/transactions/SET/COPY/MERGE.
-- Function calls accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-introspection casts (`::regclass`, `::regprocedure`, …) are not accepted.
-- **`LIMIT` mandatory** as integer literal ≤ 500. **`OFFSET` mandatory** (use `0` if not paging).
-- Max SQL length 50,000 chars. AST depth ≤ 64, node count ≤ 5,000.
+See [references/postgres-schema.md](references/postgres-schema.md) for the planned accepted-SQL rules and the table/column catalogue.
 
 Until PG raw queries land, answer Postgres-shaped questions through the structured `tl` commands (which already cover sponsorships/channels/brands/profiles/orgs with role scoping). For things those don't expose, see Limitations below.
 
@@ -246,19 +228,9 @@ Load these on demand — don't read all upfront. Pick the one(s) relevant to the
 
 Always load the [references/business-glossary.md](references/business-glossary.md) file. It describes how business terms are mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
 
-### Key business concepts (quick recap)
+### Key business concepts
 
-- **AdLink** = a deal/sponsorship. The CLI exposes it as `tl sponsorships`.
-- **Revenue** = ONLY `publish_status = 3` (SOLD). Everything else is pipeline or lost.
-- **Gross revenue** = `SUM(price)` on sold deals. **Net/profit** = `SUM(price - cost)`.
-- **Weighted pipeline** = `SUM(weighted_price)` on open opportunities (statuses 0,2,6,7,8). Pre-computed.
-- **Closed-lost** = `publish_status IN (4, 5, 9)`.
-- **Ad is live on YouTube** = `publish_date IS NOT NULL`. Until then, even sold deals can be canceled.
-- **`owner_sales_id`** on adlink = ultimate revenue accountability.
-- **Adspots** are catalogue entries (list price/cost). The adlink carries the actual deal price/cost.
-- **MSN** (Media Selling Network) = `media_selling_network_join_date IS NOT NULL`. **TPP** = `is_tl_channel = true`.
-
-See [references/business-glossary.md](references/business-glossary.md) for the full mapping plus team rosters.
+See [references/business-glossary.md](references/business-glossary.md) for revenue/pipeline definitions, performance grades, ownership fields, MSN/TPP, and team rosters.
 
 ### Limitations of the `tl`-only data path
 

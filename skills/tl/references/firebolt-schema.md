@@ -13,7 +13,7 @@ tl db fb "SELECT id, age, view_count FROM article_metrics
 cat curve.sql | tl db fb -
 ```
 
-Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity multiplier on the per-row charge (raw db queries are tuned heavier than structured list endpoints) so 10 rows ≈ 4 credits, 100 ≈ 45, 500 ≈ 307. For a video view-curve, that means a tightly-scoped `WHERE channel_id = X AND id = Y` query rarely costs more than ~10 credits even with months of snapshots, while a channel-wide `WHERE channel_id = X` over a busy channel can run into the hundreds. See `SKILL.md` → "Cost grows non-linearly" for the full table.
+Cost grows non-linearly with result size (raw db queries use the list curve at `mult=1.4`). A tightly-scoped `WHERE channel_id = X AND id = Y` query rarely costs more than ~10 credits even with months of snapshots; a channel-wide `WHERE channel_id = X` over a busy channel can run into the hundreds. See `SKILL.md` for the curve formula and the row-count → credits table.
 
 Output flags: `--json`, `--csv`, `--md`, `--toon`.
 
