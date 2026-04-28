@@ -11,7 +11,7 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 **You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
 
-Always run `tl describe show <type>` before running a query. Note that `type` can be `pg`, `fb`, or `es` to get the database schemas for raw queries.
+Always run `tl describe show <resource>` before running a query against that resource. For raw-db queries, use `tl schema pg|fb|es` to get the database schemas.
 
 Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
 
@@ -29,6 +29,8 @@ The centre of the data model is **Sponsorships** — business relationships betw
   - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work
   - **Proposals** — matches that have been proposed to both sides to consider
   - **Deals** — contractually agreed-upon sponsorships (sold), either in production or published
+
+Sponsorships are sometimes called "Ads" or "Ad campaigns".
 
 The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These filter `tl sponsorships` by status.
 
@@ -64,6 +66,10 @@ Users see data scoped by their organization and plan:
 When querying sponsorship bookings, query by `status:sold` and filter the the date range only by `purchase_date`. Otherwise, query for state:sold by `created_at`.
 
 An obsolete name for "sponsorship" is an "adlink".
+
+## Methodology
+
+Where possible, if searching for a sponsorship match between channels and brand, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. This similarity should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
 ## Workflow
 
@@ -252,6 +258,9 @@ If a user asks for one of the **Unavailable** items, say so explicitly and propo
 ```bash
 tl describe                            # List all resources with credit costs (free)
 tl describe show <resource> --json     # Fields, filters, credit rates (free)
+tl schema pg                           # PostgreSQL schema reference for `tl db pg` (free)
+tl schema fb                           # Live Firebolt tables and column types for `tl db fb` (free)
+tl schema es                           # Elasticsearch document shape for `tl db es` (free)
 tl balance --json                      # Credit balance (free)
 tl whoami                              # Current user, org, brands (free)
 tl auth status                         # Auth check (free)

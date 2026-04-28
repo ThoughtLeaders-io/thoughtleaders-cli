@@ -4,7 +4,6 @@ import json
 
 import typer
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.table import Table
 
 from tl_cli.client.errors import ApiError, handle_api_error
@@ -79,14 +78,6 @@ def show_cmd(
             elif fields_only and "fields" in data:
                 target = data["fields"]
             print(json.dumps(target, indent=2, default=str))
-            return
-
-        if data.get("content_type") == "markdown" and "content" in data:
-            content = data["content"]
-            if console.is_terminal:
-                console.print(Markdown(content))
-            else:
-                print(content)
             return
 
         _print_resource_detail(data, filters_only, fields_only)

@@ -29,6 +29,7 @@ from tl_cli.commands.matches import app as matches_app
 from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.sponsorships import app as sponsorships_app
 from tl_cli.commands.describe import app as describe_app
+from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
 from tl_cli.commands.setup import app as setup_app
@@ -101,6 +102,7 @@ app.add_typer(db_app, name="db")
 
 # Discoverability
 app.add_typer(describe_app, name="describe")
+app.add_typer(schema_app, name="schema")
 app.add_typer(balance_app, name="balance")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
