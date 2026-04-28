@@ -243,7 +243,8 @@ Load these on demand — don't read all upfront. Pick the one(s) relevant to the
 - [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Useful even today for understanding what the structured `tl` commands return; required reading when `tl db pg` ships.
 - [references/elasticsearch-schema.md](references/elasticsearch-schema.md) — index aliases, video/channel fields, common query bodies for `tl db es`.
 - [references/firebolt-schema.md](references/firebolt-schema.md) — the two metric tables and their indexes; how to write valid `tl db fb` queries.
-- [references/business-glossary.md](references/business-glossary.md) — business terms mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
+
+Always load the [references/business-glossary.md](references/business-glossary.md) file. It describes how business terms are mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
 
 ### Key business concepts (quick recap)
 
