@@ -26,14 +26,14 @@ tl snapshots video <video_id> --channel <channel_id> --json   # --channel is man
 
 Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (custom aggregates, milestone-age slices, multi-channel growth comparisons, etc.).
 
-## Sanitizer-enforced restrictions
+## Accepted queries
 
 (See `SKILL.md` → "Raw query reference → `tl db fb`" for full reasoning.)
 
 - **SELECT only.** No DDL/DML/transactions/SET/locks.
 - **Single table.** No JOIN, CTE (`WITH`), subquery, set operation, or `LATERAL`.
-- **Only known tables:** `article_metrics`, `channel_metrics`. Adding a table requires a server-side change to the sanitizer's allowlist.
-- **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE is rejected (`NON_INDEXED_FILTER:<col>`). Apply those constraints client-side after fetching.
+- **Only known tables:** `article_metrics`, `channel_metrics`. Other names return `UNKNOWN_TABLE`.
+- **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE returns `NON_INDEXED_FILTER:<col>`. Apply those constraints client-side after fetching.
 - **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
 - **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
 - **No mandatory LIMIT/OFFSET** — but Firebolt will time out on bad plans, so keep the leading-index filter selective.
@@ -76,10 +76,6 @@ Tracks YouTube video metrics over time. Each row = one scrape of one video on on
 
 **Primary Index: `(id)`**
 
-### External / ingestion tables
-
-`ex_article_metrics_v1`, `ex_article_metrics_v1_initial_scrape`, `ex_article_metrics_v2`, `ex_channel_metrics` exist server-side but are **not in the sanitizer's allowlist** — `tl db fb` against them returns `UNKNOWN_TABLE`.
-
 ## When to use Firebolt (and when NOT to)
 
 Firebolt's **only advantage** is historical metric snapshots. For everything else, prefer ES (current state) or the structured `tl` commands (deal/pipeline data).
@@ -100,7 +96,7 @@ Firebolt's **only advantage** is historical metric snapshots. For everything els
 
 ## Index rules — verified timings
 
-`article_metrics` has 7.4B rows. The primary index is `(channel_id, id)`. Without `channel_id` in WHERE, the engine does a full table scan and times out — and the sanitizer rejects such queries up front.
+`article_metrics` has 7.4B rows. The primary index is `(channel_id, id)`. Without `channel_id` in WHERE, the engine does a full table scan and times out — such queries are not accepted up front.
 
 | Query Pattern | Performance | Result |
 |--------------|-------------|--------|

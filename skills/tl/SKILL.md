@@ -1,6 +1,6 @@
 ---
 name: tl
-description: Query ThoughtLeaders sponsorship data using the tl CLI. Triggers on questions about deals, sponsorships, channels, brands, uploads, videos, metrics, pipeline, revenue, or any business data questions. Use structured tl commands — you ARE the AI layer, not tl ask.
+description: Query and analyze ThoughtLeaders business data using the `tl` CLI — structured resource commands (sponsorships, deals, channels, brands, uploads, snapshots, reports) plus raw PostgreSQL / Elasticsearch / Firebolt access via `tl db pg|fb|es`. Triggers on questions about deals, sponsorships, pipeline, revenue, brands, channels, MSN, TPP, uploads/videos, transcripts, brand mentions, view-curves, sales numbers, reports, or any cross-source business analysis ("how many deals", "pipeline report", "weighted pipeline", "channel data", "brand lookup", "view curve", "find mentions of", "investigate this video", "query the database"). Use structured tl commands — you ARE the AI layer, not tl ask.
 ---
 
 # ThoughtLeaders Data Analyst
@@ -10,6 +10,8 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 ## Core Principles
 
 **You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
+
+Always run `tl describe show <type>` before running a query. Note that `type` can be `pg`, `fb`, or `es` to get the database schemas for raw queries.
 
 Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
 
@@ -124,6 +126,154 @@ tl comments add <adlink-id> "msg"      # Add comment (free)
 | 500 | 219 | 263 | 285 | 307 |
 
 The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource costs 1.4× the row part of a 1.0× resource at any size. Splitting a 500-row pull into ten 50-row calls saves ~30% but burns 10 setup floors instead of 1; "narrow the query" is almost always the better move than "fragment the pagination."
+
+### Raw queries (`tl db`)
+
+When a structured `tl <resource>` command can answer the question, prefer it — authoritative, role-scoped, paginated, breadcrumbed. Drop down to `tl db pg|fb|es` only when the high-level command can't express what you need.
+
+```bash
+tl db pg "<SELECT ...>"     # PostgreSQL — currently a server-side stub (HTTP 501)
+tl db fb "<SELECT ...>"     # Firebolt — single-table reads on article_metrics / channel_metrics
+tl db es "<JSON body>"      # Elasticsearch — search bodies against the server-fixed alias
+```
+
+All three honour `--json`/`--csv`/`--md`/`--toon` and accept `-` to read from stdin (`cat q.sql | tl db fb -`). They share the list-curve at `mult=1.4` (raw queries, no role scoping, wider blast radius).
+
+**Reach for raw queries — don't simulate them client-side.** The structured `list` commands are great for filtered records. The moment the question turns into **aggregation, joining, or complex multi-condition filtering**, switch to `tl db`:
+
+- **Aggregations** (counts, sums, avgs, group-bys, percentiles, time histograms) — push them into a single `tl db es` agg query or `tl db pg` `GROUP BY`. One server-side aggregation is faster, cheaper (one call vs N pages), and avoids the `from+size=10000` deep-pagination cap in ES.
+- **Joins** — "X plus the related Y" belongs in `tl db pg` once it ships. Until then, doing the join client-side via two paginated structured walks is a workaround — flag it as such.
+- **Complex filtering** the structured filter vocabulary can't express (compound boolean, `NOT IN`/`EXISTS`, `WHERE col IS NULL` on hidden fields, mixed range + enum + text predicates) — write it as one query rather than over-fetching and post-filtering.
+
+Structured commands stay best for: single-record lookups (`tl <resource> show`), role-scoped filtered lists with simple filters, and anything where breadcrumbs/role-scoping matter.
+
+| Need | Use |
+|---|---|
+| Single-record detail lookup | `tl <resource> show <id>` |
+| Simple filtered list of records | Structured `tl <resource> list` |
+| Channel/brand similarity, history | `tl channels similar / history`, `tl brands similar / history` |
+| Saved reports | `tl reports`, `tl reports run` |
+| Time-series view-curve / channel growth (default shape) | `tl snapshots channel`, `tl snapshots video` |
+| **Aggregations** (counts, sums, group-by, histograms, percentiles) | **`tl db es` agg query** or **`tl db pg` `GROUP BY`** — do not paginate-and-roll-up client-side |
+| **Joins / cross-table data** | **`tl db pg`** (when shipped) — until then, two paginated structured walks is a workaround |
+| **Complex filtering** the structured filters can't express | **`tl db pg` / `tl db es`** rather than over-fetching and post-filtering |
+| Transcript / brand-mention search inside video content | `tl db es` (no structured equivalent for content text) |
+| Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | `tl db fb` |
+| Anything requiring a Postgres column the structured commands don't expose | `tl db pg` — **currently unavailable, see Limitations** |
+
+#### `tl db es` — Elasticsearch
+
+The CLI sends your JSON body to the server, which validates it before forwarding to ES. The index is fixed server-side (defaults to `tl-platform`); the client cannot select it. To narrow to a quarter or year, scope inside the body with a `publication_date` range filter rather than picking a different alias.
+
+```bash
+# Single video by composite ID
+tl db es '{"size":1,"query":{"term":{"id":"1247603:8LskGvKUA9I"}}}'
+
+# Aggregation: count sponsored mentions of brand 5612
+tl db es '{"size":0,"track_total_hits":true,"query":{"term":{"sponsored_brand_mentions":"5612"}}}'
+
+# Pipe a larger body
+cat query.json | tl db es -
+```
+
+**Accepted query bodies:**
+- Top-level keys accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (`scroll`, `pit`, `runtime_mappings`, `knn`, …) is not accepted.
+- `size` ≤ 500. `from + size` ≤ 10,000 (use `search_after` for deeper). Body depth ≤ 16, total nodes ≤ 1,000.
+- **Query types not accepted:** `has_child`, `has_parent`, `parent_id`, `query_string`, `regexp`, `more_like_this`, `fuzzy`, `wildcard`. `nested` is accepted.
+- **No scripts of any kind** — any key whose lowercased name contains `script` is not accepted (rules out `script_score`, `script_fields`, `scripted_metric`, runtime-script mappings, `_script` sort).
+- **At most one aggregation total**, counted recursively (top-level agg with a sub-agg = two, not accepted). For multi-metric work, run multiple queries.
+- Aggregations bill on docs scanned, capped at `min(hits.total, 200)` — a `terms` agg over the whole index is priced like a medium pull (~103 credits), not free.
+
+#### `tl db fb` — Firebolt
+
+```bash
+# View curve for one video (composite key)
+tl db fb "SELECT age, view_count, like_count FROM article_metrics
+          WHERE channel_id = 12345 AND id = 'dQw4w9WgXcQ'
+          ORDER BY age"
+
+# Channel reach over time
+tl db fb "SELECT scrape_date, total_views, reach FROM channel_metrics
+          WHERE id = 12345
+          ORDER BY scrape_date"
+```
+
+**Accepted queries:**
+- **SELECT only.** No DDL/DML/transactions/locks/SET.
+- **Single table.** No JOINs, CTEs (`WITH`), subqueries, set operations, or `LATERAL`.
+- **Only known tables:** `article_metrics` (indexed on `channel_id, id`) or `channel_metrics` (indexed on `id`). Other names return `UNKNOWN_TABLE`.
+- **WHERE/HAVING may only reference the table's indexed columns** — i.e. `channel_id` / `id` for `article_metrics`, `id` for `channel_metrics`. Filtering by `age`, `publication_date`, `view_count`, etc. in WHERE returns `NON_INDEXED_FILTER:<col>`. Apply those constraints **after** fetching, in `jq`/Python.
+- **Leading index column must be equality-or-IN-filtered with literals.** For `article_metrics` that's `channel_id = N` or `channel_id IN (...)`. Without it: `MISSING_INDEXED_FILTER`.
+- **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates with no GROUP BY / HAVING may omit WHERE entirely. Don't rely on this for anything but tiny check-counts.
+
+**ID format reminder:** `article_metrics.id` is the bare YouTube video ID (`'dQw4w9WgXcQ'`), not the compound `channel_id:video_id` used in Postgres `adlink.article_id` and ES `_id`. When bridging from Postgres, use `SPLIT_PART(article_id, ':', 2)`.
+
+#### `tl db pg` — PostgreSQL
+
+**Currently a server-side stub — POSTs return HTTP 501.** Endpoint accepts the same shape as the others (`{"query": "<sql>"}`) and the CLI is wired up, but the server view returns "not yet implemented" until execution support ships.
+
+Accepted SQL when it ships:
+- **SELECT only**, single statement, no DDL/DML/transactions/SET/COPY/MERGE.
+- Function calls accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-introspection casts (`::regclass`, `::regprocedure`, …) are not accepted.
+- **`LIMIT` mandatory** as integer literal ≤ 500. **`OFFSET` mandatory** (use `0` if not paging).
+- Max SQL length 50,000 chars. AST depth ≤ 64, node count ≤ 5,000.
+
+Until PG raw queries land, answer Postgres-shaped questions through the structured `tl` commands (which already cover sponsorships/channels/brands/profiles/orgs with role scoping). For things those don't expose, see Limitations below.
+
+### Three sources, each authoritative for different things
+
+- **Postgres** — deals, pipeline, brands, channels, users, organizations, profiles, revenue. Source of truth for deal state. Reachable today via the structured `tl` commands; raw `tl db pg` is a stub.
+- **Elasticsearch** — videos, transcripts, brand mentions, **current** channel/video metrics, demographics. Reachable via `tl uploads`, `tl channels`, and `tl db es`.
+- **Firebolt** — **historical** time-series snapshots only (view curves over time, subscriber-growth trends). Reachable via `tl snapshots` (preferred) or `tl db fb`.
+
+**Use Firebolt only when you need a value AT A POINT IN TIME that no longer exists in the current ES/PG snapshot.** For "current views/subs", use ES.
+
+**Join keys across sources** (you'll be doing the join in `jq`/Python, not in SQL):
+- `Postgres channel.id` ↔ `ES channel.id` (on article docs) ↔ `Firebolt article_metrics.channel_id` / `channel_metrics.id`
+- `Postgres adlink.article_id` is `<channel_id>:<youtube_id>` — same as ES `_id`. Strip the prefix to get `Firebolt article_metrics.id`.
+- `Postgres brand.id` ↔ ES `sponsored_brand_mentions[]` / `organic_brand_mentions[]`.
+- `publication_id` is **deprecated** — don't use it.
+
+**Snapshots are sparse**, especially for older videos. Don't assume two arbitrary dates have data points. For approximations, prefer `tl snapshots` which already implements the project's interpolation logic; falling back to raw `tl db fb` means you handle gaps yourself.
+
+### Schema references
+
+Load these on demand — don't read all upfront. Pick the one(s) relevant to the question.
+
+- [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Useful even today for understanding what the structured `tl` commands return; required reading when `tl db pg` ships.
+- [references/elasticsearch-schema.md](references/elasticsearch-schema.md) — index aliases, video/channel fields, common query bodies for `tl db es`.
+- [references/firebolt-schema.md](references/firebolt-schema.md) — the two metric tables and their indexes; how to write valid `tl db fb` queries.
+- [references/business-glossary.md](references/business-glossary.md) — business terms mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
+
+### Key business concepts (quick recap)
+
+- **AdLink** = a deal/sponsorship. The CLI exposes it as `tl sponsorships`.
+- **Revenue** = ONLY `publish_status = 3` (SOLD). Everything else is pipeline or lost.
+- **Gross revenue** = `SUM(price)` on sold deals. **Net/profit** = `SUM(price - cost)`.
+- **Weighted pipeline** = `SUM(weighted_price)` on open opportunities (statuses 0,2,6,7,8). Pre-computed.
+- **Closed-lost** = `publish_status IN (4, 5, 9)`.
+- **Ad is live on YouTube** = `publish_date IS NOT NULL`. Until then, even sold deals can be canceled.
+- **`owner_sales_id`** on adlink = ultimate revenue accountability.
+- **Adspots** are catalogue entries (list price/cost). The adlink carries the actual deal price/cost.
+- **MSN** (Media Selling Network) = `media_selling_network_join_date IS NOT NULL`. **TPP** = `is_tl_channel = true`.
+
+See [references/business-glossary.md](references/business-glossary.md) for the full mapping plus team rosters.
+
+### Limitations of the `tl`-only data path
+
+| Capability | Status | Workaround |
+|---|---|---|
+| Arbitrary read-only `SELECT` on Postgres (any joins, any tables, `information_schema` introspection) | **Unavailable** — `tl db pg` is a server-side stub (HTTP 501). | Use the structured `tl sponsorships / channels / brands / reports` commands. They cover the majority of business questions, with role scoping the raw queries don't have. For the rest, wait for `tl db pg` to ship — or ask a human to run the SQL. |
+| Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Unavailable** — these were stacked PG joins. | Approximate with `tl brands history <brand>` (videos where the brand was detected → extract channel IDs) and `tl sponsorships list brand:<name> status:<...>`. Won't perfectly match (e.g. `media_buying_network_join_date` isn't exposed). |
+| **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. It does not let you set price/cost/owner_sales_id/send_date/etc. | Done in the app or by a human with DB access. |
+| Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Unavailable** as a single query (needs PG joins). | Partial: `tl channels show <id>` exposes `msn`, `tpp`, and active adspots with `integration` codes. Persona/plan/profile-level checks aren't surfaced. |
+| Firebolt cross-table or join queries; filtering on non-indexed columns in WHERE | **Unavailable** — not accepted. | Fetch a wider slice keyed on `channel_id` (and optionally `id`), filter the rest in `jq`/Python. |
+| ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (vector KNN, server-implemented). |
+| ES deep pagination beyond `from+size = 10,000` | **Unavailable** via raw — `scroll` and `pit` aren't allowlisted; `search_after` is allowed but `from` is still capped. | Use `search_after` with `sort` to walk past 10k. For huge sweeps, narrow with `publication_date` ranges. |
+| ES index introspection (`_cat/indices`, mappings) | **Unavailable** — only `_search` is wired. | Read [references/elasticsearch-schema.md](references/elasticsearch-schema.md). It's manually maintained — update it when you discover new fields. |
+| Schema introspection on Postgres (`information_schema.columns`, `pg_class`, …) | **Unavailable** until `tl db pg` ships, and even then catalog-resolving casts and many `pg_*` helpers are blocked. | Read [references/postgres-schema.md](references/postgres-schema.md). |
+
+If a user asks for one of the **Unavailable** items, say so explicitly and propose the closest `tl`-based approximation rather than silently degrading.
 
 ### Discovery & system
 ```bash

@@ -17,15 +17,15 @@ Cost grows non-linearly with result size: 1-credit flat setup + 1.4× complexity
 
 Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into rows of `{_id, _score, ...source}`; aggregations come back in the response envelope and are rendered after the rows in TTY mode.
 
-## Sanitizer-enforced restrictions
+## Accepted query bodies
 
 Read `SKILL.md` → "Raw query reference → `tl db es`" for the full list. Highlights:
 
-- **Top-level keys** allowed: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Everything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is rejected.
+- **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
 - `size` ≤ 500. `from + size` ≤ 10,000. Use `search_after` to page deeper.
-- **Blocked query types:** `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id`. `nested` is fine.
-- **No scripts** — any key whose name contains `script` is rejected.
-- **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = rejected). Run multiple calls for multi-metric work.
+- **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`. `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
+- **No scripts** — any key whose name contains `script` is not accepted.
+- **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
 
 ## Index Structure
 
@@ -148,7 +148,7 @@ Raw mappings (read-only links — out of band, not via `tl`):
 - `tl-vectors-brand-company-descriptions-*` — brand similarity vectors.
 - `tl-vectors-channel-audience-*`, `tl-vectors-channel-topic-descriptions-*`, `tl-vectors-channel-features` — channel feature vectors.
 
-Note: `knn` queries against vector indices are **not currently allowed** by the sanitizer (top-level `knn` is not in the allowlist). For "find similar" results, use `tl channels similar` / `tl brands similar` — they wrap the vector search server-side.
+Note: `knn` queries against vector indices are **not currently accepted** as a top-level key. For "find similar" results, use `tl channels similar` / `tl brands similar` — they wrap the vector search server-side.
 
 ## Common Query Patterns
 
@@ -214,7 +214,7 @@ tl db es '{
 }'
 ```
 
-### Single top-level aggregation (sanitizer caps at one)
+### Single top-level aggregation (only one aggregation per request is accepted)
 
 ```bash
 tl db es '{

@@ -82,7 +82,7 @@ The version string is defined in three files and all three must be updated toget
 
 ## Coding
 
-* Do not reference internal architecture of the ThoughtLeaders app in comments or skills. Specifially: do not reference internal table names, field names, API endpoints, Python modules or functions.
+* Do not reference internal architecture of the ThoughtLeaders app in comments or skills. Specifially: do not reference internal table names, field names, API endpoints, Python modules or functions (including the sanitizer).
 * Place all imports at the start of the Python module file
 
 # Git commit rules

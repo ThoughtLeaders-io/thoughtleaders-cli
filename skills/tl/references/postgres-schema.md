@@ -2,7 +2,7 @@
 
 ## How to query
 
-> ⚠️ **`tl db pg` is currently a server-side stub** — POSTs return HTTP 501. Until execution + the strict PG sanitizer ship, you cannot run arbitrary SQL through the CLI.
+> ⚠️ **`tl db pg` is currently a server-side stub** — POSTs return HTTP 501. Until execution support ships, you cannot run arbitrary SQL through the CLI.
 
 For Postgres-shaped questions today, use the structured `tl` commands. They cover the common business questions with role scoping the raw queries don't have:
 
@@ -28,12 +28,12 @@ tl db pg "SELECT id, weighted_price FROM thoughtleaders_adlink
           LIMIT 50 OFFSET 0"
 ```
 
-Sanitizer rules already implemented server-side:
+Accepted SQL (when the executor ships):
 - **SELECT only**, single statement. No DDL/DML/transactions/SET/COPY/MERGE.
-- Functions allowed via explicit allowlist (aggregates, window, string, JSON, math, date-time, array). No catalog-resolving casts (`::regclass`, `::regprocedure`, …).
+- Functions accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-resolving casts (`::regclass`, `::regprocedure`, …) are not accepted.
 - **`LIMIT` mandatory** as integer literal ≤ 500. **`OFFSET` mandatory** (use `0` if not paging).
 - SQL ≤ 50,000 chars; AST depth ≤ 64; node count ≤ 5,000.
-- Best-effort syntactic filter — the connecting role is also minimum-privilege server-side.
+- The connecting role is also minimum-privilege server-side.
 
 ## Core Tables
 
