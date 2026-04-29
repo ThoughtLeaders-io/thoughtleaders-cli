@@ -78,6 +78,16 @@ tl channels show "Economics Explained"
 tl channels similar 12345 --limit 10
 tl channels similar "Tremending girls" min-score:0.85 --limit 5
 
+# Vector recommender — discovery by category/demographic tag (Intelligence plan).
+# `tags` is free; `top`, `inspect-*`, and `similar-to-profile` cost 50 credits flat.
+tl recommender tags                              # List every tag (free)
+tl recommender tags cooking                      # Search tag names by substring
+tl recommender top "Cooking" msn:yes --limit 50  # Top channels & brand profiles for a tag
+tl recommender top "USA share" mbn:yes           # Demographic tag, MBN brands only
+tl recommender inspect-channel 12345             # Per-tag breakdown of a channel's vector
+tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal vector
+tl recommender similar-to-profile 842            # Channels closest to a brand profile
+
 # Brand intelligence
 tl brands show Nike
 

@@ -1,3 +1,3 @@
 """ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence."""
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"

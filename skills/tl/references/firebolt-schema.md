@@ -116,10 +116,9 @@ Every Firebolt workflow has two steps:
 **Step 1 — get `channel_id` and (optionally) video IDs from PG/ES.**
 
 ```bash
-# Channels matching some criterion (PG side)
-tl db pg "SELECT id FROM thoughtleaders_channel
-          WHERE content_category = <TECH_CODE> AND total_views >= 1000000
-          ORDER BY total_views DESC LIMIT 50 OFFSET 0" --json | jq '.results[].id'
+# Channels matching some category (vector recommender — preferred over content_category equality)
+tl recommender top "Tech" msn:yes --limit 50 --json \
+  | jq '.channels[].channel_id'
 
 # Or videos for a specific brand's deals (Postgres side, via tl sponsorships)
 tl deals list brand:"Nike" --json --limit 500 \

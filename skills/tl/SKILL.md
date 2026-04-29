@@ -95,7 +95,7 @@ When querying sponsorship bookings, query by `status:sold` and filter the the da
 
 Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
-Use the `tl channels similar` and `tl brands similar` commands to explore channels and brands.
+Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top "<tag>"` against the vector recommender — that's faster, ranked by category-strength, and returns both channels and matching brand profiles. Run `tl recommender tags` to discover the valid tag names.
 
 ## Workflow
 
@@ -138,6 +138,11 @@ tl brands show <id-or-name>            # Brand detail (1 credit)
 tl brands history <id-or-name>         # Sponsorship history (5 credits/result, linear)
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
 tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits flat)
+tl recommender tags [query]            # List vector tag names — categories, demographics, formats (free)
+tl recommender top "<tag>"             # Top channels & profiles loaded on a vector tag (50 credits; Intelligence)
+tl recommender inspect-channel <ref>   # Show a channel's feature-vector breakdown (50 credits; Intelligence)
+tl recommender inspect-brand <ref>     # Show a brand profile's ideal-vector breakdown (50 credits; Intelligence)
+tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal vector (50 credits; Intelligence)
 tl snapshots channel <id>              # Channel metrics over time — list curve, mult 1.2 (Firebolt-backed)
 tl snapshots video <id> --channel <id> # Video view curve — list curve, mult 1.2 (--channel required!)
 tl reports                             # List saved reports — list curve, mult 1.3
@@ -317,46 +322,41 @@ tl uploads list channel:12345 type:longform
 
 Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
 
-#### Channel discovery — raw SQL
+#### Channel discovery — recommender first, raw SQL second
 
-For channel discovery (anything beyond a single ID lookup or one filter), write SQL against `thoughtleaders_channel`. Run `tl schema pg` once to confirm the live column set; the columns referenced below are stable.
+For category- or demographic-driven discovery, **use the vector recommender, not `content_category` SQL.** The recommender ranks channels by how strongly they load on a category/demographic tag (cosine-style scores), instead of forcing exact equality on a single integer code. It also returns the matching brand profiles alongside the channels — useful when the user actually wants to know "who buys this kind of inventory."
 
 ```bash
-# English-language Cooking channels with significant viewership
-tl db pg "SELECT id, channel_name, total_views, language
-          FROM thoughtleaders_channel
-          WHERE content_category = <COOKING_CODE>   -- resolve via your category lookup
-            AND language = 'en'
-            AND total_views >= 1000000
-          ORDER BY total_views DESC
-          LIMIT 50 OFFSET 0"
+# Discover the right tag name first (free)
+tl recommender tags cooking
+tl recommender tags "usa"
 
-# All TPP (TL-managed) channels
+# Top channels & profiles loaded on a vector tag (50 credits; Intelligence)
+tl recommender top "Cooking" msn:yes --limit 50
+tl recommender top "Tech" --limit 30
+tl recommender top "USA share" mbn:yes --limit 50
+```
+
+Use `tl db pg` only for predicates the recommender can't express — pure attribute filters (`is_tl_channel`, `language`, `demographic_device_primary`), aggregations, and joins. Run `tl schema pg` once to confirm the live column set; the columns referenced below are stable.
+
+```bash
+# All TPP (TL-managed) channels — pure attribute filter, not a category query
 tl db pg "SELECT id, channel_name, content_category, total_views
           FROM thoughtleaders_channel
           WHERE is_tl_channel = TRUE
           ORDER BY total_views DESC
           LIMIT 200 OFFSET 0"
 
-# Mobile-first non-TPP channels
+# Mobile-first non-TPP channels — device share, not topic
 tl db pg "SELECT id, channel_name, demographic_device_primary, total_views
           FROM thoughtleaders_channel
           WHERE is_tl_channel = FALSE
             AND demographic_device_primary = 'mobile'
           ORDER BY total_views DESC
           LIMIT 100 OFFSET 0"
-
-# Tech-category channels with US-heavy audience and decent size
-tl db pg "SELECT id, channel_name, demographic_usa_share, total_views
-          FROM thoughtleaders_channel
-          WHERE content_category = <TECH_CODE>
-            AND demographic_usa_share >= 50
-            AND total_views >= 1000000
-          ORDER BY demographic_usa_share DESC
-          LIMIT 100 OFFSET 0"
 ```
 
-For per-country share beyond `demographic_usa_share`, use the `demographic_geo` jsonb: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
+For per-country share beyond the recommender's "USA share" tag, use the `demographic_geo` jsonb in raw SQL: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
 
 **MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context; use the structured `tl channels list msn:yes|no|both` for MSN-specific lookups, then drop down to SQL on the resulting IDs (`WHERE id IN (...)`) for further analysis.
 
@@ -431,15 +431,19 @@ tl reports --json  # Find the report ID first
 tl reports run 42 --json
 ```
 
-"Find mobile-first US channels in cooking":
+"Find Cooking channels with US-heavy mobile audiences":
 ```bash
-tl db pg "SELECT id, channel_name, total_views, demographic_usa_share
-          FROM thoughtleaders_channel
-          WHERE content_category = <COOKING_CODE>
-            AND demographic_device_primary = 'mobile'
-            AND demographic_usa_share >= 50
-          ORDER BY total_views DESC
-          LIMIT 50 OFFSET 0" --json
+# Use the vector recommender for the topic, then narrow with structured filters / SQL on the IDs.
+tl recommender top "Cooking" msn:yes --limit 100 --json \
+  | jq -r '.results[] | select(.kind=="channel") | .channel_id' \
+  | paste -sd, - \
+  | xargs -I {} tl db pg "SELECT id, channel_name, total_views, demographic_usa_share
+                          FROM thoughtleaders_channel
+                          WHERE id IN ({})
+                            AND demographic_device_primary = 'mobile'
+                            AND demographic_usa_share >= 50
+                          ORDER BY total_views DESC
+                          LIMIT 50 OFFSET 0" --json
 ```
 
 "Show sold sponsorships targeting mobile US audiences":
@@ -458,3 +462,16 @@ tl channels similar 29834 tpp:yes --limit 30                 # TPP (TL-managed) 
 tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-side filters
 ```
 **Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
+
+"Browse the vector recommender" (categories, demographics, formats — `tl recommender tags` is free):
+```bash
+tl recommender tags                                            # Full tag list (free)
+tl recommender tags cooking                                    # Search tag names by substring
+tl recommender top "Cooking" msn:yes --limit 50                # Top channels & profiles loaded on a tag (50 credits)
+tl recommender top "USA share" mbn:yes --limit 30              # Demographic tag — MBN brands only
+tl recommender top "Tech" exclude-for-profile:842              # Drop channels already proposed for profile 842
+tl recommender inspect-channel 29834                           # Per-tag breakdown of a channel's vector
+tl recommender inspect-brand Nike                              # Per-tag breakdown of a brand's ideal vector
+tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal vector
+```
+Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches.

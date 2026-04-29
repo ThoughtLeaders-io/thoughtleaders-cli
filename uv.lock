@@ -387,8 +387,8 @@ wheels = [
 ]
 
 [[package]]
-name = "tl-cli"
-version = "0.4.19"
+name = "thoughtleaders-cli"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
