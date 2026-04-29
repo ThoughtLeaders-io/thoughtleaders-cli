@@ -20,6 +20,25 @@ Decision rule:
 
 Always run `tl describe show <resource>` before using a structured command, and `tl schema pg|fb|es` before writing a raw query.
 
+**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field — that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`) into `jq`, `yq`, `rg`, or `duckdb` and read only the answer back. Pick the tool by shape:
+
+- **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
+  ```bash
+  tl sponsorships list status:sold --json | jq '.results[] | select(.price > 5000) | {id, brand, price}'
+  ```
+- **`yq`** — same idea for YAML/TOML, useful when reading config files or `--md` blocks.
+- **`rg`** — fast text search across CLI output, transcripts, and the codebase. Better than `grep` for searching large `--csv` exports or transcript dumps.
+  ```bash
+  tl db es '{"size":500,"query":{"term":{"channel.id":5607}},"_source":["id","transcript"]}' --json | rg -o "NordVPN[^.]*"
+  ```
+- **`duckdb`** — embedded analytical SQL over CSV/JSON files. Use when you need joins, aggregations, or window functions across multiple `tl` exports without spinning up a database.
+  ```bash
+  tl deals list purchase-date-start:2026-01 --csv > deals.csv
+  duckdb -c "SELECT brand, SUM(price) AS revenue FROM 'deals.csv' GROUP BY brand ORDER BY revenue DESC LIMIT 10"
+  ```
+
+The pattern is always: server-side narrowing first (filter in the `tl db` query or the structured filters), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
+
 Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
