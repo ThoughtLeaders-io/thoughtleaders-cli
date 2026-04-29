@@ -54,13 +54,16 @@ tl uploads list q:code --csv
 # Show upload details (supports colon-containing IDs)
 tl uploads show 1174310:0BehkmVa7ak
 
-# Search channels. msn and tpp are tri-state filters (yes/no/both; default 'both').
-# msn = opted-in to receive sponsorship offers; tpp = exclusively TL-managed.
-# Both are also returned as boolean fields on every channel response.
-tl channels list category:cooking min-subs:100k
-tl channels list msn:yes                  # MSN channels only (~11k)
-tl channels list tpp:yes                  # TPP channels only (~169)
-tl channels list msn:no min-subs:500k     # big non-MSN channels
+# Search channels via raw SQL — `tl db pg` against thoughtleaders_channel
+# (run `tl schema pg` once to confirm the live column set).
+tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel
+          WHERE content_category = <COOKING_CODE> AND total_views >= 100000
+          ORDER BY total_views DESC LIMIT 50 OFFSET 0"
+tl db pg "SELECT id, channel_name FROM thoughtleaders_channel
+          WHERE is_tl_channel = TRUE LIMIT 200 OFFSET 0"             # all TPP channels (~169)
+# MSN status (media_selling_network_join_date) is scrubbed from the
+# advertiser sandbox view — for MSN-only / non-MSN lookups, the
+# structured filter is the right tool: `tl channels list msn:yes|no`.
 
 # Show channel detail — accepts numeric ID or channel name.
 # Names that match more than one active channel print a candidate list

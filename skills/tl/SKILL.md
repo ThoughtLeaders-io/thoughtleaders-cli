@@ -309,42 +309,56 @@ tl changelog --md > CHANGELOG.md       # Capture for a doc
 `tl changelog` summaries are LLM-generated server-side from full commit messages and cached per version, so repeat calls are fast and don't re-bill the LLM. The release date and a 2–4 sentence prose summary come back per version.
 
 ### Filter syntax
-All list commands accept `key:value` filters:
+Structured list commands accept `key:value` filters (use them for trivially simple lookups):
 ```bash
 tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
 tl uploads list channel:12345 type:longform
-tl channels list category:cooking min-subs:100k language:en
-tl channels list tpp:yes                       # list all TPP (TL-managed) channels
-tl channels list tpp:no primary-device:mobile  # mobile-first channels that aren't in TPP
-tl channels list msn:yes category:tech         # Media Selling Network channels in tech
-tl channels list msn:no min-subs:500k          # big non-MSN channels (not yet opted in)
 ```
 
 Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
 
-#### Channel demographic filters
+#### Channel discovery — raw SQL
 
-These filters apply to both `tl channels list` and `tl sponsorships list` (the latter filters by the associated channel's demographics):
+For channel discovery (anything beyond a single ID lookup or one filter), write SQL against `thoughtleaders_channel`. Run `tl schema pg` once to confirm the live column set; the columns referenced below are stable.
 
 ```bash
-# Primary device type
-tl channels list primary-device:mobile
-tl channels list primary-device:desktop
-tl channels list primary-device:tablet
+# English-language Cooking channels with significant viewership
+tl db pg "SELECT id, channel_name, total_views, language
+          FROM thoughtleaders_channel
+          WHERE content_category = <COOKING_CODE>   -- resolve via your category lookup
+            AND language = 'en'
+            AND total_views >= 1000000
+          ORDER BY total_views DESC
+          LIMIT 50 OFFSET 0"
 
-# Minimum device audience share (0–100)
-tl channels list min-mobile-share:60
-tl channels list min-desktop-share:30
-tl channels list min-tablet-share:10
+# All TPP (TL-managed) channels
+tl db pg "SELECT id, channel_name, content_category, total_views
+          FROM thoughtleaders_channel
+          WHERE is_tl_channel = TRUE
+          ORDER BY total_views DESC
+          LIMIT 200 OFFSET 0"
 
-# Minimum geo share (0–100, ISO country codes lowercase)
-tl channels list min-us-share:70
-tl channels list min-gb-share:25
+# Mobile-first non-TPP channels
+tl db pg "SELECT id, channel_name, demographic_device_primary, total_views
+          FROM thoughtleaders_channel
+          WHERE is_tl_channel = FALSE
+            AND demographic_device_primary = 'mobile'
+          ORDER BY total_views DESC
+          LIMIT 100 OFFSET 0"
 
-# Combine with other filters
-tl channels list category:tech primary-device:mobile min-us-share:50 min-subs:100k
-tl sponsorships list status:sold primary-device:mobile min-us-share:60
+# Tech-category channels with US-heavy audience and decent size
+tl db pg "SELECT id, channel_name, demographic_usa_share, total_views
+          FROM thoughtleaders_channel
+          WHERE content_category = <TECH_CODE>
+            AND demographic_usa_share >= 50
+            AND total_views >= 1000000
+          ORDER BY demographic_usa_share DESC
+          LIMIT 100 OFFSET 0"
 ```
+
+For per-country share beyond `demographic_usa_share`, use the `demographic_geo` jsonb: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
+
+**MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context; use the structured `tl channels list msn:yes|no|both` for MSN-specific lookups, then drop down to SQL on the resulting IDs (`WHERE id IN (...)`) for further analysis.
 
 ### Output flags
 - `--json` — structured JSON (use this for parsing)
@@ -419,7 +433,13 @@ tl reports run 42 --json
 
 "Find mobile-first US channels in cooking":
 ```bash
-tl channels list category:cooking primary-device:mobile min-us-share:50 --json
+tl db pg "SELECT id, channel_name, total_views, demographic_usa_share
+          FROM thoughtleaders_channel
+          WHERE content_category = <COOKING_CODE>
+            AND demographic_device_primary = 'mobile'
+            AND demographic_usa_share >= 50
+          ORDER BY total_views DESC
+          LIMIT 50 OFFSET 0" --json
 ```
 
 "Show sold sponsorships targeting mobile US audiences":

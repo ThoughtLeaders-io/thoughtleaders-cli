@@ -49,7 +49,7 @@ Tracks YouTube video metrics over time. Each row = one scrape of one video on on
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | TEXT | YouTube video ID (e.g., `'dQw4w9WgXcQ'`). **Bare YouTube ID** — NOT the compound `<channel_id>:<youtube_id>` form used in PG `adlink.article_id` and ES `_id`. |
-| `channel_id` | INT | TL channel ID (matches the channel ID returned by `tl channels list`) |
+| `channel_id` | INT | TL channel ID (matches `thoughtleaders_channel.id` in Postgres) |
 | `channel_format` | INT | Platform format (4 = YouTube) |
 | `publication_date` | DATE | When the video was published |
 | `scrape_date` | DATE | When this data point was captured |
@@ -85,8 +85,8 @@ Firebolt's **only advantage** is historical metric snapshots. For everything els
 | Current view count on a video | **Elasticsearch** (`tl uploads show` or `tl db es`) |
 | Current subscriber count | **Elasticsearch** (`tl channels show`) |
 | Video metadata (title, tags, duration) | **Elasticsearch** |
-| Find channels by criteria | **`tl channels list`** (Postgres) |
-| Deal / pipeline / sponsorship data | **`tl sponsorships`** etc. (Postgres) |
+| Find channels by criteria | **`tl db pg`** against `thoughtleaders_channel` |
+| Deal / pipeline / sponsorship data | **`tl db pg`** against `thoughtleaders_adlink` (joins to `adspot`/`channel`/`profile`/`brand`) |
 | View curve over time (age 7→30→90→180) | **Firebolt** ✅ |
 | Views at age 30 vs age 180 (evergreenness) | **Firebolt** ✅ |
 | Channel subscriber growth trend | **Firebolt** ✅ |
@@ -117,7 +117,9 @@ Every Firebolt workflow has two steps:
 
 ```bash
 # Channels matching some criterion (PG side)
-tl channels list category:tech --json --limit 50 | jq '.results[].id'
+tl db pg "SELECT id FROM thoughtleaders_channel
+          WHERE content_category = <TECH_CODE> AND total_views >= 1000000
+          ORDER BY total_views DESC LIMIT 50 OFFSET 0" --json | jq '.results[].id'
 
 # Or videos for a specific brand's deals (Postgres side, via tl sponsorships)
 tl deals list brand:"Nike" --json --limit 500 \

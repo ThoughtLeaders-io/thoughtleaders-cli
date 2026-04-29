@@ -75,7 +75,12 @@ Filters are passed as `key:value` pairs after `list`:
 tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
 tl sponsorships list status:pending send-date:2026-03
 tl uploads list channel:12345 type:longform since:2026-03
-tl channels list category:cooking min-subs:100k language:en
+# Channel discovery is raw SQL — the structured `tl channels list` covers
+# only narrow lookups. Default to:
+tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel
+          WHERE content_category = <COOKING_CODE> AND language = 'en'
+            AND total_views >= 1000000
+          ORDER BY total_views DESC LIMIT 50 OFFSET 0"
 ```
 
 Sponsorship date filtering (on `created-at`, `publish-date`, `purchase-date`, `send-date`) exposes three shapes per field:
