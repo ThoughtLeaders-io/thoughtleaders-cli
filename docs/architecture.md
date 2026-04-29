@@ -125,8 +125,6 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 |---------|-------------|
 | `/tl <request>` | Smart router — Claude interprets the request and runs the right `tl` command(s). E.g., `/tl sold sponsorships for Nike in Q1` → `tl sponsorships status:sold brand:"Nike" purchase-date-start:2026-01-01 purchase-date-end:2026-03-31` |
 | `/tl-sponsorships [query]` | Quick sponsorship lookup. E.g., `/tl-sponsorships pending with send dates in April` |
-| `/tl-channels [query]` | Channel search. E.g., `/tl-channels cooking channels over 100k subs` |
-| `/tl-brands [query]` | Brand intelligence. E.g., `/tl-brands Nike` |
 | `/tl-reports` | List and run saved reports |
 | `/tl-balance` | Check credit balance and recent usage |
 
@@ -310,8 +308,6 @@ tl-cli/
 ├── commands/                          # Slash commands for Claude Code
 │   ├── tl.md                         # /tl — smart router
 │   ├── tl-sponsorships.md             # /tl-sponsorships — quick sponsorship lookup
-│   ├── tl-channels.md                # /tl-channels — channel search
-│   ├── tl-brands.md                  # /tl-brands — brand intelligence
 │   ├── tl-reports.md                 # /tl-reports — saved reports
 │   └── tl-balance.md                 # /tl-balance — credit balance
 ├── skills/
@@ -514,7 +510,7 @@ Build each command + its server endpoint together:
 
 ### Step 3: Plugin + commands + agent + hooks
 1. `.claude-plugin/plugin.json`
-2. `commands/` — slash commands (`/tl`, `/tl-sponsorships`, `/tl-channels`, `/tl-brands`, `/tl-reports`, `/tl-balance`)
+2. `commands/` — slash commands (`/tl`, `/tl-sponsorships`, `/tl-reports`, `/tl-balance`)
 3. `skills/tl/SKILL.md` — comprehensive skill file
 4. `agents/tl-analyst.md` — multi-step analysis agent
 5. `hooks/` — pre-check, post-usage, session-summary

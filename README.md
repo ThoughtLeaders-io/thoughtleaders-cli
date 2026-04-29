@@ -146,8 +146,6 @@ Talk naturally in Claude Code:
 Resource-specific slash commands:
 ```
 /tl-sponsorships pending with send dates in April
-/tl-channels cooking channels over 100k subscribers
-/tl-brands Nike
 /tl-reports run my Q1 pipeline
 /tl-balance
 ```

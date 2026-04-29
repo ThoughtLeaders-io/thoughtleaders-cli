@@ -240,8 +240,6 @@ def setup_claude(
     console.print("Available skills in Claude Code:")
     console.print("  [cyan]/tl[/cyan]                  — data analyst (smart query router)")
     console.print("  [cyan]/tl-sponsorships[/cyan]     — sponsorship lookup")
-    console.print("  [cyan]/tl-brands[/cyan]           — brand intelligence")
-    console.print("  [cyan]/tl-channels[/cyan]         — channel search")
     console.print("  [cyan]/tl-reports[/cyan]          — saved reports")
     console.print("  [cyan]/tl-balance[/cyan]          — credit balance")
     console.print()

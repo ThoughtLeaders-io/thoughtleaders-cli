@@ -10,8 +10,8 @@ The user wants to query ThoughtLeaders data. Translate their request into the ri
 ## Steps
 
 1. Identify which resource(s) the request is about (sponsorships, deals, channels, brands, uploads, snapshots, reports)
-2. Run `tl describe show <resource> --json` to discover available filters
-3. Translate the user's natural language into a `tl` command with appropriate filters
+2. Discover the appropriate database structure, with `tl schema pg` and other commands, and formulate a raw database query solution first. Only use other commands like `tl sponsorships` if the user query is simple enough for it (run `tl describe show sponsorships` to see what it can do).
+3. Translate the user's natural language into a `tl` command
 4. Execute the command
 5. Present results clearly
 
