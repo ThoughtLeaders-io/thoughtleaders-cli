@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tl-cli"
+name = "thoughtleaders-cli"
 version = "0.4.19"
 description = "ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence"
 readme = "README.md"

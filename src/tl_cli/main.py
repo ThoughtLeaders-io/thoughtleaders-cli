@@ -139,7 +139,7 @@ def _get_terminology() -> str | None:
             text = readme.read_text()
         else:
             from importlib.metadata import metadata
-            text = metadata("tl-cli").get_payload()
+            text = metadata("thoughtleaders-cli").get_payload()
         if not text:
             return None
         match = re.search(r"^# Terminology\s*\n(.+?)(?=\n# |\Z)", text, re.DOTALL | re.MULTILINE)

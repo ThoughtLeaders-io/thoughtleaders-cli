@@ -174,13 +174,13 @@ def setup_claude(
     else:
         console.print("  [red]✗[/red] tl CLI not found on PATH")
         console.print("    Claude Code's Bash tool won't be able to run tl commands.")
-        console.print("    Install with: [cyan]pipx install tl-cli[/cyan]")
+        console.print("    Install with: [cyan]pipx install thoughtleaders-cli[/cyan]")
 
     # Find plugin assets
     plugin_root = _find_plugin_root()
     if plugin_root is None:
         console.print("  [red]✗[/red] Plugin assets not found")
-        console.print("    Try reinstalling: [cyan]pipx install tl-cli[/cyan]")
+        console.print("    Try reinstalling: [cyan]pipx install thoughtleaders-cli[/cyan]")
         raise SystemExit(1)
     console.print(f"  [green]✓[/green] Plugin assets found: {plugin_root}")
 

@@ -449,7 +449,7 @@ Auth0 token → Django User → Profile → Organization → Plan. Plan types de
 
 ```toml
 [project]
-name = "tl-cli"
+name = "thoughtleaders-cli"
 requires-python = ">=3.10"
 dependencies = [
     "typer[all]>=0.12",

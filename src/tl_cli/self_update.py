@@ -29,12 +29,18 @@ REQUEST_TIMEOUT = 2  # tight — the user is already waiting to see their shell 
 
 
 def _detect_install_method() -> str | None:
-    """Return 'pipx', 'uv', or None (dev/pip install — don't auto-upgrade)."""
+    """Return 'pipx', 'uv', or None (dev/pip install — don't auto-upgrade).
+
+    Both the new distribution name (`thoughtleaders-cli`) and the legacy one
+    (`tl-cli`) are matched so users who installed before the rename keep
+    auto-updating.
+    """
     exe = sys.executable
-    if "/pipx/venvs/tl-cli/" in exe:
-        return "pipx"
-    if "/uv/tools/tl-cli/" in exe:
-        return "uv"
+    for dist_name in ("thoughtleaders-cli", "tl-cli"):
+        if f"/pipx/venvs/{dist_name}/" in exe:
+            return "pipx"
+        if f"/uv/tools/{dist_name}/" in exe:
+            return "uv"
     return None
 
 

@@ -8,7 +8,7 @@ ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligenc
 
 ```bash
 git clone https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git
-cd tl-cli
+cd thoughtleaders-cli
 python -m venv .venv
 pip install -e .
 ```
