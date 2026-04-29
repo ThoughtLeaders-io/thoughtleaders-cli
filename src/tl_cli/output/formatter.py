@@ -8,6 +8,7 @@
 import csv
 import io
 import json
+import math
 import sys
 
 from rich.console import Console
@@ -15,6 +16,31 @@ from rich.table import Table
 
 # Stderr console for status messages (never pollutes piped data)
 err_console = Console(stderr=True)
+
+
+def _sanitize_for_json(obj: object) -> object:
+    """Recursively replace non-finite floats with their string form.
+
+    JSON has no native representation for NaN / +-Infinity. Emitting them as
+    bare ``NaN`` / ``Infinity`` tokens (Python's ``json`` default) produces
+    output strict parsers reject. Stringifying as ``"nan"`` / ``"inf"`` /
+    ``"-inf"`` keeps the JSON valid AND preserves which value was there —
+    these strings round-trip through ``float()`` in Python, JS, etc.
+    """
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
+def _dump_json(data: object) -> str:
+    """JSON-encode `data`, ensuring strict (no NaN/Inf) output."""
+    return json.dumps(_sanitize_for_json(data), indent=2, default=str, allow_nan=False)
 
 
 def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool, toon_flag: bool = False) -> str:
@@ -53,7 +79,7 @@ def output(
     breadcrumbs = data.get("_breadcrumbs", [])
 
     if fmt == "json":
-        print(json.dumps(data, indent=2, default=str))
+        print(_dump_json(data))
         return
 
     if not results:
@@ -92,13 +118,13 @@ def output_single(data: dict, fmt: str) -> None:
     breadcrumbs = data.get("_breadcrumbs", [])
 
     if fmt == "json":
-        print(json.dumps(data, indent=2, default=str))
+        print(_dump_json(data))
         return
 
     # Unwrap single-item list
     record = results[0] if isinstance(results, list) and len(results) == 1 else results
     if not isinstance(record, dict):
-        print(json.dumps(results, indent=2, default=str))
+        print(_dump_json(results))
         return
 
     if fmt == "toon":
@@ -191,6 +217,8 @@ def _format_numeric(val: object, decimals: bool = False, currency: bool = False)
         f = float(val)
     except (ValueError, TypeError, OverflowError):
         return str(val)
+    if not math.isfinite(f):
+        return str(f)
     if decimals or currency:
         text = f"{f:,.2f}"
     else:
@@ -259,12 +287,26 @@ def _output_table(
     console.print(table)
 
 
+def _csv_cell(val: object) -> object:
+    """Encode a cell value for CSV output.
+
+    Lists and dicts are serialized as JSON so consumers get parseable
+    structured data instead of Python's ``repr`` (e.g. ``[1, 2, 3]`` or
+    ``{'k': 1}``).
+    """
+    if val is None:
+        return ""
+    if isinstance(val, (list, dict)):
+        return json.dumps(_sanitize_for_json(val), default=str, allow_nan=False)
+    return val
+
+
 def _output_csv(results: list[dict], columns: list[str]) -> None:
     """CSV output to stdout."""
     writer = csv.DictWriter(sys.stdout, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     for row in results:
-        writer.writerow({k: row.get(k, "") for k in columns})
+        writer.writerow({k: _csv_cell(row.get(k)) for k in columns})
 
 
 def _output_markdown(results: list[dict], columns: list[str], column_types: dict[str, str] | None = None) -> None:
@@ -366,7 +408,7 @@ def _output_detail_csv(record: dict) -> None:
     Records with no nested items emit a single row of flat fields. If there
     are multiple nested list fields, the rows are cross-joined.
     """
-    flat = {k: ("" if v is None else v) for k, v in record.items() if not isinstance(v, list)}
+    flat = {k: _csv_cell(v) for k, v in record.items() if not isinstance(v, list)}
     nested = [(k, v) for k, v in record.items() if _is_list_of_dicts(v)]
 
     # Build header: flat columns + prefixed nested columns
@@ -390,7 +432,7 @@ def _output_detail_csv(record: dict) -> None:
         row = dict(flat)
         for (key, _), item in zip(nested, combo):
             for col, val in item.items():
-                row[f"{key}_{col}"] = "" if val is None else val
+                row[f"{key}_{col}"] = _csv_cell(val)
         writer.writerow(row)
 
 
