@@ -33,6 +33,24 @@ _RECOMMENDED_TOOLS: tuple[tuple[str, str, dict[str, str]], ...] = (
             "Windows": "winget install BurntSushi.ripgrep.MSVC",
         },
     ),
+    (
+        "yq",
+        "YAML/TOML processor — `jq` for non-JSON formats, useful when reading config or `--md` output.",
+        {
+            "Linux": "apt install yq  /  dnf install yq  /  pacman -S go-yq  (or `pip install yq`)",
+            "Darwin": "brew install yq",
+            "Windows": "winget install MikeFarah.yq",
+        },
+    ),
+    (
+        "duckdb",
+        "Embedded analytical SQL — query `tl … --csv` / `--json` files locally without setting up a database.",
+        {
+            "Linux": "https://duckdb.org/docs/installation/  (or `pip install duckdb`)",
+            "Darwin": "brew install duckdb",
+            "Windows": "winget install DuckDB.cli",
+        },
+    ),
 )
 
 app = typer.Typer(help="Health check (auth, connectivity, version)")
