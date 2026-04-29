@@ -2,11 +2,13 @@
 
 ## Context
 
-We're building a Python CLI (`tl`) for ThoughtLeaders that lets external customers query their sponsorship data. Inspired by Basecamp's CLI approach — agent-first, pipe-friendly, distributed as both a PyPI package and a Claude Code plugin.
+We're building a Python CLI (`tl`) for ThoughtLeaders that lets external customers query their sponsorship data. Inspired by Basecamp's CLI approach — agent-first, pipe-friendly, distributed as both a PyPI package (`thoughtleaders-cli`) and a Claude Code plugin.
 
 The CLI talks to Django API endpoints (not directly to databases) so permissions are enforced server-side and no DB credentials leave our infrastructure.
 
 **Design philosophy** (following Basecamp): The CLI is a dumb tool — structured commands are the primary interface. AI intelligence comes from the user's own agent (Claude Code, etc.) using the CLI as a tool. `tl ask` exists as an optional fallback for users without an AI agent. The skill file + `tl describe` teach agents how to use the CLI effectively.
+
+**Intended audience: AI agents.** The primary user of `tl` is an AI coding agent (Claude Code, OpenCode) acting on behalf of a human. Every surface — the structured commands, the discovery commands (`tl describe`, `tl schema`), the breadcrumbs in JSON envelopes, the skill file — is shaped to be parseable and self-explanatory to an agent. Where the structured commands hit a ceiling (joins, aggregations, filters they don't expose), we steer agents toward **raw database queries** via `tl db pg|fb|es`. One server-side aggregation beats N client-side roll-ups on cost, latency, and the `from+size = 10000` cap; raw queries are the right tool for heavy data work, not a last-resort escape hatch. The skill file's "When to use raw vs structured" guidance and the live `tl schema pg|fb|es` output are how we teach agents to make this trade-off.
 
 **Business model**: Prepaid credit balance. Customers deposit funds, credits are deducted per result returned. Different data types cost different amounts based on value. No subscriptions — pure pay-as-you-go.
 
@@ -47,14 +49,25 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl uploads list [filters...]` | List video uploads (ES) |
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
 | `tl channels list [filters...]` | Search channels. Responses carry boolean `msn` (Media Selling Network) and `tpp` (TL-managed) fields; filterable via `msn:` / `tpp:` tri-state (`yes` / `no` / `both`, default `both`). |
-| `tl channels show <id>` | Show channel detail, including active adspots with price/cost/CPM |
-| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. Tri-state `msn:` filter (default `yes`) and `tpp:` filter (default `both`) — each takes `yes` / `no` / `both`. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
+| `tl channels show <id-or-name>` | Channel detail, including active adspots with price/cost/CPM |
+| `tl channels history <id-or-name>` | Sponsorship history (videos with detected sponsors) |
+| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. Tri-state `msn:` (default `yes`) and `tpp:` (default `both`) filters. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
 | `tl brands show <brand>` | Brand intelligence report |
-| `tl brands show <brand> --channel <id>` | Brand mentions on a specific channel |
+| `tl brands history <brand> [--channel <id>]` | Brand sponsorship history; videos where the brand was detected |
+| `tl brands similar <brand>` | Find similar brands (profile vector KNN, 50 credits) |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
 | `tl snapshots video <id> --channel <id>` | Video view curve (Firebolt article_metrics, --channel required) |
 | `tl comments list <adlink-id>` | List comments on a sponsorship (free) |
 | `tl comments add <adlink-id> "message"` | Add a comment (free) |
+
+### Raw database access (escape hatch for joins / aggregations / complex filters)
+
+| Command | Description |
+|---------|-------------|
+| `tl db pg "<SQL>"` | Raw read-only PostgreSQL `SELECT`. LIMIT/OFFSET optional — server fills in `LIMIT 50 OFFSET 0` defaults; explicit OFFSET ≥ 10,000 returns 403. Single statement; sqlglot-validated against an allowlist of functions. |
+| `tl db fb "<SQL>"` | Raw read-only Firebolt `SELECT`. Single-table only; WHERE must filter the leading index column with an equality or `IN` literal. |
+| `tl db es '<json>'` | Raw Elasticsearch search body against the server-fixed index alias. Top-level keys, query types, size/depth limits all gated server-side. |
+| `tl schema pg\|fb\|es` | Print live schema docs for the matching `tl db` engine (free). PG returns the role-scoped tables/columns from `information_schema`; FB returns the live column types of accepted tables; ES returns a maintained Markdown reference. |
 
 ### Flexible filtering (all list commands)
 Filters are passed as `key:value` pairs after `list`:
@@ -75,10 +88,10 @@ Ranges combine freely across fields (e.g. "created in Jan that published in Marc
 | Command | Description |
 |---------|-------------|
 | `tl describe` | List all resources with credit costs |
-| `tl describe sponsorships` | Show fields, filters, and credit rate for sponsorships |
-| `tl describe sponsorships --filters` | Just the valid filters |
-| `tl describe sponsorships --fields` | Just the data fields |
-| `tl docs` | Open full docs in browser |
+| `tl describe show <resource>` | Show fields, filters, and credit rate for a resource |
+| `tl describe show <resource> --filters` | Just the valid filters |
+| `tl describe show <resource> --fields` | Just the data fields |
+| `tl schema pg\|fb\|es` | Show schema docs for raw `tl db` queries (free) |
 
 Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always in sync. Includes credit cost per result. Free, no credits charged. Agent-friendly: `tl describe sponsorships --json`.
 
@@ -106,9 +119,11 @@ Schema metadata from server (`GET /api/cli/v1/describe/<resource>`) — always i
 | `tl doctor` | Health check (auth, connectivity, version, balance) |
 | `tl whoami` | Show current user, profile, org, and brands (free) |
 | `tl balance` | Show credit balance and recent usage |
+| `tl changelog` | Show release notes |
+| `tl update` | Self-upgrade (when installed via pipx or `uv tool`) |
 
 ### Global flags (all commands)
-`--json`, `--csv`, `--md`, `--limit N`, `--offset N`
+`--json`, `--csv`, `--md`, `--toon` (token-efficient for LLMs), `--limit N`, `--offset N`
 
 ### Agent support flag
 `--help --agent` returns structured JSON help (flags, gotchas, subcommands) for any command — optimized for AI agents to parse.
@@ -134,12 +149,13 @@ Each slash command's markdown file instructs Claude to:
 3. Execute the command and present results
 4. Show breadcrumbs for follow-up actions
 
-#### Skill: `tl-data-analyst`
-Teaches Claude how to use the CLI effectively. Triggers on data questions about sponsorships, channels, brands, uploads, metrics.
+#### Skill: `tl`
+Teaches Claude how to use the CLI effectively. Triggers on data questions about sponsorships, channels, brands, uploads, metrics. Authoritative source lives at `skills/tl/SKILL.md` with engine-specific reference files under `skills/tl/references/` (`postgres-schema.md`, `firebolt-schema.md`, `elasticsearch-schema.md`, `business-glossary.md`).
 
 Key instructions in the skill:
-- Always run `tl describe show <resource> --json` first to discover fields, filters, and credit costs
-- Use structured commands, not `tl ask` (the user's Claude IS the AI layer)
+- Always run `tl describe show <resource> --json` (or `tl schema pg|fb|es`) first to discover fields, filters, and credit costs
+- Use structured commands for single-record lookups and simple filtered lists; **switch to `tl db pg|fb|es` for aggregations, joins, and complex filtering**
+- Don't use `tl ask` — the user's Claude IS the AI layer
 - Check `tl balance --json` before expensive queries and warn the user about credit cost
 - Use `--json` output for parsing
 - Chain commands for multi-step analysis (e.g., get brand → find channels → check snapshots)
@@ -177,12 +193,6 @@ After a `tl` command completes:
 - If `balance_remaining` < 500 credits, emits a warning to stderr
 - If command returned 402, provides a clear "deposit more credits" message with link
 
-**Stop hook** (`hooks/scripts/session-summary.sh`):
-When Claude finishes a session:
-- Summarizes total credits consumed during the session
-- Shows starting vs ending balance
-- Lists the commands that were run (parsed from session)
-
 ## Usage Metering & Pricing
 
 ### Prepaid credit balance
@@ -192,25 +202,30 @@ When Claude finishes a session:
 - Customers can opt-in to allow overage (keep working, settle later) — configurable in dashboard
 - `tl auth status` and `tl balance` show current credit balance
 
-### Credit rates by data value
+### Credit rates — pricing intent
 
-| Resource | List (per result) | Detail (single) | Rationale |
-|----------|-------------------|-----------------|-----------|
-| **Brand intelligence** | 5 credits | 8 credits | Core IP — competitive intelligence on who sponsors whom |
-| **Channel** | 3 credits | 5 credits | Rich profile data, demographics, scores |
-| **Sponsorship** | 2 credits | 3 credits | User's own sponsorship data |
-| **Snapshot** (Firebolt) | 1 credit | 1 credit | Time-series data points, high volume |
-| **Upload** (video) | 1 credit | 2 credits | Individual video data |
-| **Report run** | Sum of result credits | — | Charged based on what the report returns |
-| **Comment** | 0 | 0 | Operational — don't charge |
-| **Sponsorship create** | 0 | — | Free — more proposals = more future data consumption |
-| **Describe / auth / doctor** | 0 | 0 | System + discoverability must be free |
-| **`tl ask` surcharge** | +2 credits per result | — | LLM cost surcharge (waived if user provides own key) |
+Detail and history endpoints charge a flat `rate × results` (linear). List endpoints (and raw `tl db`) use a non-linear curve so a 0-row pull still pays a small floor and a 500-row pull doesn't pay 500× a 1-row pull:
 
-### Credit formula per request
 ```
-credits = sum(results × rate_per_result) + surcharge_if_ask
+list cost = setup + mult × scale × n^exp
 ```
+
+`setup`, `scale`, and `exp` are global shape parameters; `mult` is a per-resource complexity factor (lighter reads use 1.0, raw `tl db` uses 1.4). The live values are in `thoughtleaders/cli_metering.py` (`CLI_LIST_COST_*` settings + `CREDIT_RATES`); the live values are reported by `tl describe`.
+
+Rationale per resource — pricing follows data value:
+
+| Resource | Why it's priced where it is |
+|----------|-----------------------------|
+| **Brand intelligence** | Core IP — competitive intelligence on who sponsors whom |
+| **Channels** | Rich profile data, demographics, scores |
+| **Sponsorships** | User's own sponsorship data |
+| **Snapshots** (Firebolt) | Time-series data points, high volume → cheap |
+| **Uploads** (video) | Individual video data |
+| **Raw `tl db pg\|fb\|es`** | No role scoping, wider blast radius → 1.4× multiplier |
+| **Reports run** | Charged on what the report returns |
+| **Comments / proposal create** | Operational — free, more proposals = more future data consumption |
+| **Describe / schema / auth / doctor / whoami / balance / changelog** | System + discoverability must be free |
+| **`tl ask` surcharge** | LLM cost surcharge (waived if user provides own key via `--llm-key`) |
 
 ### Server-side metering implementation
 
@@ -290,19 +305,24 @@ tl-cli/
 │   │   ├── matches.py                # tl matches (shortcut: status:match)
 │   │   ├── proposals.py              # tl proposals (shortcut: status:proposal)
 │   │   ├── uploads.py                # tl uploads (list/show)
-│   │   ├── channels.py              # tl channels (list/show)
-│   │   ├── brands.py                # tl brands show (brand intelligence)
-│   │   ├── snapshots.py             # tl snapshots (Firebolt metrics)
-│   │   ├── reports.py               # tl reports / tl reports run
-│   │   ├── comments.py              # tl comments (list/add)
-│   │   ├── describe.py              # tl describe list/show (schema/filter/pricing discovery)
-│   │   ├── ask.py                   # tl ask (optional AI fallback)
-│   │   ├── setup.py                 # tl setup claude / tl setup opencode
-│   │   ├── balance.py               # tl balance
-│   │   ├── doctor.py                # tl doctor
-│   │   └── whoami.py                # tl whoami
+│   │   ├── channels.py               # tl channels (list/show/history/similar)
+│   │   ├── brands.py                 # tl brands (show/history/similar)
+│   │   ├── snapshots.py              # tl snapshots (Firebolt metrics)
+│   │   ├── reports.py                # tl reports / tl reports run
+│   │   ├── comments.py               # tl comments (list/add)
+│   │   ├── db.py                     # tl db pg|fb|es (raw read-only queries)
+│   │   ├── schema.py                 # tl schema pg|fb|es (live schema docs)
+│   │   ├── describe.py               # tl describe list/show (schema/filter/pricing discovery)
+│   │   ├── changelog.py              # tl changelog (release notes)
+│   │   ├── ask.py                    # tl ask (optional AI fallback)
+│   │   ├── setup.py                  # tl setup claude / tl setup opencode
+│   │   ├── balance.py                # tl balance
+│   │   ├── doctor.py                 # tl doctor
+│   │   └── whoami.py                 # tl whoami
+│   ├── self_update.py                # tl update (pipx/uv self-upgrade)
+│   ├── hints.py                      # Inline tips & post-error suggestions
 │   ├── filters.py                    # key:value filter parser (parsing only)
-│   └── _completions.py              # Shell completion helpers
+│   └── _completions.py               # Shell completion helpers
 ├── .claude-plugin/
 │   └── plugin.json                   # Claude Code plugin manifest
 ├── commands/                          # Slash commands for Claude Code
@@ -319,8 +339,7 @@ tl-cli/
 │   ├── hooks.json                    # Hook event bindings
 │   └── scripts/
 │       ├── pre-check.sh             # Auth + credit guard before tl commands
-│       ├── post-usage.sh            # Low balance warning after tl commands
-│       └── session-summary.sh       # Credit usage summary on session end
+│       └── post-usage.sh            # Low balance warning after tl commands
 ├── tests/
 │   ├── __init__.py
 │   ├── test_auth.py
@@ -330,7 +349,7 @@ tl-cli/
 │   └── test_commands.py
 └── .github/
     └── workflows/
-        └── release.yml               # PyPI publish on tag
+        └── python-publish.yml        # PyPI publish on release (Trusted Publishing)
 ```
 
 ### Server Side (in existing thoughtleaders repo)
@@ -446,17 +465,18 @@ Auth0 token → Django User → Profile → Organization → Plan. Plan types de
 ```toml
 [project]
 name = "thoughtleaders-cli"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "typer[all]>=0.12",
     "rich>=13.0",
     "httpx>=0.27",
     "keyring>=25.0",
     "authlib>=1.3",
+    "toon-format>=0.9.0b1",
 ]
 ```
 
-Entry point: `tl = "tl_cli.main:app"`
+Entry point: `tl = "tl_cli.main:cli"`
 
 ## Auth Strategy
 

@@ -1,6 +1,6 @@
 ---
 name: tl
-description: Query and analyze ThoughtLeaders business data using the `tl` CLI — structured resource commands (sponsorships, deals, channels, brands, uploads, snapshots, reports) plus raw PostgreSQL / Elasticsearch / Firebolt access via `tl db pg|fb|es`. Triggers on questions about deals, sponsorships, pipeline, revenue, brands, channels, MSN, TPP, uploads/videos, transcripts, brand mentions, view-curves, sales numbers, reports, or any cross-source business analysis ("how many deals", "pipeline report", "weighted pipeline", "channel data", "brand lookup", "view curve", "find mentions of", "investigate this video", "query the database"). Use structured tl commands — you ARE the AI layer, not tl ask.
+description: Query and analyze ThoughtLeaders business data using the `tl` CLI. Default to raw database queries via `tl db pg|fb|es` for anything non-trivial (joins, aggregations, multi-condition filters, anything that would otherwise need post-processing); use the structured resource commands (sponsorships, deals, channels, brands, uploads, snapshots, reports) only for trivially simple lookups (single-record show by ID, plain filtered lists). Triggers on questions about deals, sponsorships, pipeline, revenue, brands, channels, MSN, TPP, uploads/videos, transcripts, brand mentions, view-curves, sales numbers, reports, or any cross-source business analysis ("how many deals", "pipeline report", "weighted pipeline", "channel data", "brand lookup", "view curve", "find mentions of", "investigate this video", "query the database"). You ARE the AI layer — do not use `tl ask`.
 ---
 
 # ThoughtLeaders Data Analyst
@@ -9,9 +9,16 @@ You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platfo
 
 ## Core Principles
 
-**You are the intelligence layer.** Use structured `tl` commands, not `tl ask`. The `tl ask` command is a server-side LLM fallback for users without Claude — but the user has you. Translate their questions into the right `tl` commands.
+**You are the intelligence layer.** Don't use `tl ask` — that's a server-side LLM fallback for users without Claude. Translate the user's question into the right `tl` invocation yourself.
 
-Always run `tl describe show <resource>` before running a query against that resource. For raw-db queries, use `tl schema pg|fb|es` to get the database schemas.
+**Default to raw database queries.** For anything beyond a trivially simple lookup, reach for `tl db pg|fb|es` first. The structured `tl <resource>` commands (`sponsorships list`, `channels show`, `brands history`, etc.) are convenient shorthands for single-record lookups and plain filtered lists — but the moment the question involves joins, aggregations, multi-condition filtering, or anything you'd otherwise post-process client-side, the right tool is a single raw query. One server-side aggregation beats N paginated client-side roll-ups on cost, latency, and the `from+size = 10000` ES cap.
+
+Decision rule:
+
+- **Trivially simple** (use a structured command): "show sponsorship 12345", "list deals for Nike", "show channel 5607", "run report 42".
+- **Anything else** (use `tl db pg|fb|es`): aggregations, joins, conditions the structured filters don't expose, comparing across resources, computing rates / shares / percentiles, anything that would otherwise need a paginated walk + client-side reduce.
+
+Always run `tl describe show <resource>` before using a structured command, and `tl schema pg|fb|es` before writing a raw query.
 
 Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
 
@@ -135,7 +142,7 @@ The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource
 
 ### Raw queries (`tl db`)
 
-When a structured `tl <resource>` command can answer the question, prefer it — authoritative, role-scoped, paginated, breadcrumbed. Drop down to `tl db pg|fb|es` only when the high-level command can't express what you need.
+`tl db pg|fb|es` is the default tool. Reach for it whenever the question is anything beyond a trivially simple lookup — and use the structured commands only for those trivial cases (single-record `show`, plain filtered `list`). Don't paginate-and-reduce in your head when one SQL or ES body would do it server-side.
 
 ```bash
 tl db pg "<SELECT ...>"     # PostgreSQL — read-only SELECT
@@ -145,27 +152,28 @@ tl db es "<JSON body>"      # Elasticsearch — search bodies against the server
 
 All three honour `--json`/`--csv`/`--md`/`--toon` and accept `-` to read from stdin (`cat q.sql | tl db fb -`). They share the list-curve at `mult=1.4` (raw queries, no role scoping, wider blast radius).
 
-**Reach for raw queries — don't simulate them client-side.** The structured `list` commands are great for filtered records. The moment the question turns into **aggregation, joining, or complex multi-condition filtering**, switch to `tl db`:
+Reasons to write a raw query (the common case):
 
-- **Aggregations** (counts, sums, avgs, group-bys, percentiles, time histograms) — push them into a single `tl db es` agg query or `tl db pg` `GROUP BY`. One server-side aggregation is faster, cheaper (one call vs N pages), and avoids the `from+size=10000` deep-pagination cap in ES.
-- **Joins** — "X plus the related Y" belongs in `tl db pg` once it ships. Until then, doing the join client-side via two paginated structured walks is a workaround — flag it as such.
-- **Complex filtering** the structured filter vocabulary can't express (compound boolean, `NOT IN`/`EXISTS`, `WHERE col IS NULL` on hidden fields, mixed range + enum + text predicates) — write it as one query rather than over-fetching and post-filtering.
+- **Aggregations** (counts, sums, avgs, group-bys, percentiles, time histograms) — one `tl db pg` `GROUP BY` or `tl db es` agg body, not a paginated walk + Python reduce.
+- **Joins / cross-table data** — `tl db pg` returns brand+channel+deal in one row instead of two structured walks stitched in `jq`.
+- **Multi-condition filtering** — compound boolean, `NOT IN`/`EXISTS`, `WHERE col IS NULL` on hidden fields, mixed range + enum + text predicates: write the SQL/ES body, don't over-fetch and post-filter.
+- **Fields the structured commands don't expose** — e.g. `media_selling_network_join_date` (only the `msn` boolean is surfaced), `weighted_price`, `tx_data`, raw `publish_status` integer, etc.
 
-Structured commands stay best for: single-record lookups (`tl <resource> show`), role-scoped filtered lists with simple filters, and anything where breadcrumbs/role-scoping matter.
+Structured commands are still the right tool for: single-record `show` by ID, plain filtered `list` (one or two filters that the structured vocabulary already supports), saved `tl reports run`, and `tl snapshots channel|video` (these wrap interpolation logic you'd otherwise reimplement).
 
 | Need | Use |
 |---|---|
-| Single-record detail lookup | `tl <resource> show <id>` |
-| Simple filtered list of records | Structured `tl <resource> list` |
-| Channel/brand similarity, history | `tl channels similar / history`, `tl brands similar / history` |
+| **Aggregations** (counts, sums, group-by, histograms, percentiles) | **`tl db pg` `GROUP BY`** or **`tl db es` agg query** |
+| **Joins / cross-table data** | **`tl db pg`** |
+| **Multi-condition filtering** the structured filters can't express | **`tl db pg` / `tl db es`** |
+| **Fields the structured commands don't expose** (raw `publish_status`, `weighted_price`, `media_selling_network_join_date`, etc.) | **`tl db pg`** |
+| Transcript / brand-mention search inside video content | **`tl db es`** (no structured equivalent for content text) |
+| Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | **`tl db fb`** |
+| Single-record detail lookup by ID | `tl <resource> show <id>` |
+| Plain filtered list with one or two simple filters | `tl <resource> list` |
+| Channel/brand similarity (vector KNN, server-implemented) | `tl channels similar`, `tl brands similar` |
 | Saved reports | `tl reports`, `tl reports run` |
-| Time-series view-curve / channel growth (default shape) | `tl snapshots channel`, `tl snapshots video` |
-| **Aggregations** (counts, sums, group-by, histograms, percentiles) | **`tl db es` agg query** or **`tl db pg` `GROUP BY`** — do not paginate-and-roll-up client-side |
-| **Joins / cross-table data** | **`tl db pg`** — single SQL query beats two paginated structured walks |
-| **Complex filtering** the structured filters can't express | **`tl db pg` / `tl db es`** rather than over-fetching and post-filtering |
-| Transcript / brand-mention search inside video content | `tl db es` (no structured equivalent for content text) |
-| Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | `tl db fb` |
-| Anything requiring a Postgres column the structured commands don't expose | `tl db pg` |
+| Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
 
 #### `tl db es` — Elasticsearch
 
