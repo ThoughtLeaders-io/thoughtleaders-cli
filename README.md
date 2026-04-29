@@ -16,11 +16,11 @@ pip install -e .
 ### As a user
 
 ```bash
-pipx install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git
+pipx install thoughtleaders-cli
 # or
-uv tool install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git
+uv tool install thoughtleaders-cli
 # or (but try to avoid it because just "pip" will not create a new venv for the product - only "uv" and "pipx" will do that)
-pip install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git
+pip install thoughtleaders-cli
 ```
 
 Then set up:
