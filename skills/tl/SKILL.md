@@ -51,12 +51,12 @@ ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers /
 
 The centre of the data model is **Sponsorships** — business relationships between brands and channels. Sponsorships have a funnel of types, from broad to narrow:
 
-- **Sponsorships** — the broadest category, encompassing all stages
+- **Sponsorships** — the broadest category, encompassing all stages, stored in the `thoughtleaders_adlink` table.
   - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work
   - **Proposals** — matches that have been proposed to both sides to consider
   - **Deals** — contractually agreed-upon sponsorships (sold), either in production or published
 
-Sponsorships are sometimes called "Ads" or "Ad campaigns".
+Sponsorships are sometimes called "Ads" or "Ad campaigns". An obsolete name for "sponsorship" is an "adlink".
 
 The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These filter `tl sponsorships` by status.
 
@@ -66,15 +66,15 @@ Other key concepts:
 - **Reports** — saved report configurations that can be re-run
 - **Comments** — notes attached to sponsorships
 - **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
-- **MSN** (Media Selling Network) — the ~11k YouTube channels that have opted in to receive sponsorship offers. Returned as a boolean `msn` field on every channel response (list, detail, similar). Derived server-side from whether `Channel.media_selling_network_join_date` is non-null — the timestamp itself isn't exposed over the CLI, just the boolean. Filterable via `msn:` tri-state: `msn:yes` (MSN only — the default on `similar`; on `list` the default is `both`), `msn:no` (non-MSN only), `msn:both` (no filter).
-- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the smaller, exclusive ~169 channels TL manages directly. Returned as the `tpp` boolean field on every channel response (list, detail, similar). Filterable via `tpp:` with the same tri-state vocabulary: `tpp:yes` / `tpp:no` / `tpp:both` (default `both`).
+- **MSN** (Media Selling Network) — the ~11k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
+- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the smaller, exclusive ~169 channels TL manages directly. A channel is in the TPP group if the `channel.is_tl_channel` is True.
 - **`demographics_updated_at`** (on channel detail) — ISO timestamp of when demographic screenshots were last uploaded and processed via OCR. If non-null, the channel has demographics screenshots on file. If null, no screenshots have been uploaded. Use this to check whether a channel has demographics data from screenshots.
 - **`impression`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed.
 - **`views`** (on sponsorships) — actual view count of the sold and published sponsored video, accessible when `article_id` is set.
 - **`impressions_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric; rounded to int in list output.
 - **Sponsorship detail fields** (returned by `tl sponsorships show <id> --json`) — in addition to the list-view columns, the detail payload includes `integration` (raw int), `publish_count`, `common_name`, `outreach_email`, nested `publisher` (`first_name`, `last_name`, `email`), nested `brand_contact` (`first_name`, `last_name`, `email`), and `brand.organization_name`. Use these when generating IOs, contracts, or outreach.
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
-  - **Channel CPM** = `(adspot.price / channel.impression) × 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
+  - **Channel CPM** = `(adspot.price / channel.impression) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
   - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
   - **CPM does not have a range filter.** To find sponsorships in a CPM range (e.g. "around $15"), fetch the record set with other filters first, then apply the CPM range in post-processing (jq, Python, etc.) on the returned `cpm` field. Plan queries and pagination accordingly — the server cannot reduce the result count based on CPM.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
@@ -87,15 +87,15 @@ Other key concepts:
 Users see data scoped by their organization and plan:
 - **Media buyers** see sponsorships where their org is the brand. They see `price` but never `cost`.
 - **Media sellers** see sponsorships where their org is the publisher. They see `cost` but never `price`.
-- **Intelligence plan** is required for `tl brands`, full channel search, and full uploads.
+- **Intelligence plan** is required for accessing information not strictly related to the user's organisation.
 
 When querying sponsorship bookings, query by `status:sold` and filter the the date range only by `purchase_date`. Otherwise, query for state:sold by `created_at`.
-
-An obsolete name for "sponsorship" is an "adlink".
 
 ## Methodology
 
 Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
+
+Use the `tl channels similar` and `tl brands similar` commands to explore channels and brands.
 
 ## Workflow
 
@@ -103,7 +103,7 @@ At the start of session, always run a `tl help` command to find out which comman
 
 Unless the user specifically asks for running a specific report or showing the result of a specific report, find the data by using other, low-level commands.
 
-1. **Discover first**: Run `tl describe show <resource> --json` to learn available fields, filters, and credit costs before querying
+1. **Discover first**: Run `tl describe show <resource> --json` to learn available fields, filters, and credit costs before querying. Use `tl schema pg`, `tl schema es`, and `tl schema fb` to find information about the main database (pg), the articles / uploads database (es), and the channel metrics database (fb).
 2. **Check saved reports**: Run `tl reports --json` to see if the user has a saved report that already answers their question
 3. **Check credits**: Run `tl balance --json` before expensive queries. Warn the user if a query will cost many credits.
 4. **Query with filters**: Use `key:value` filter syntax for structured queries
@@ -278,10 +278,10 @@ See [references/business-glossary.md](references/business-glossary.md) for reven
 
 | Capability | Status | Workaround |
 |---|---|---|
-| Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 500` + `OFFSET`, function allowlist, no `::reg*` casts. See `references/postgres-schema.md`. |
-| Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Unavailable** — these were stacked PG joins. | Approximate with `tl brands history <brand>` (videos where the brand was detected → extract channel IDs) and `tl sponsorships list brand:<name> status:<...>`. Won't perfectly match (e.g. `media_buying_network_join_date` isn't exposed). |
-| **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. It does not let you set price/cost/owner_sales_id/send_date/etc. | Done in the app or by a human with DB access. |
-| Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Unavailable** as a single query (needs PG joins). | Partial: `tl channels show <id>` exposes `msn`, `tpp`, and active adspots with `integration` codes. Persona/plan/profile-level checks aren't surfaced. |
+| Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 500` + `OFFSET`, only certain SQL forms are allowed. See `references/postgres-schema.md`. |
+| Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Available** via `tl db pg`. | Write the join: `thoughtleaders_adlink` ↔ `adspot` ↔ `channel` ↔ `profile` ↔ `profile_brands` ↔ `brand`. Filter by `publish_status` for proposed/sold and by date range as needed. See `references/postgres-schema.md` for the exact column names. |
+| **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. The `tl db pg` sanitizer accepts SELECT only — no INSERT/UPDATE. | Done in the app or by a human with DB access. |
+| Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Available** via `tl db pg`. | One SELECT joining the four tables. Use `thoughtleaders_channel.media_selling_network_join_date IS NOT NULL` for MSN, `thoughtleaders_adspot.integration = 1` for mention adspots, `thoughtleaders_profile.persona` for the persona code (see persona constants in `references/postgres-schema.md`). |
 | Firebolt cross-table or join queries; filtering on non-indexed columns in WHERE | **Unavailable** — not accepted. | Fetch a wider slice keyed on `channel_id` (and optionally `id`), filter the rest in `jq`/Python. |
 | ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (vector KNN, server-implemented). |
 | ES deep pagination beyond `from+size = 10,000` | **Unavailable** via raw — `scroll` and `pit` aren't allowlisted; `search_after` is allowed but `from` is still capped. | Use `search_after` with `sort` to walk past 10k. For huge sweeps, narrow with `publication_date` ranges. |
