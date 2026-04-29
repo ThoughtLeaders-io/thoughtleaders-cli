@@ -2,38 +2,19 @@
 
 ## How to query
 
-> ⚠️ **`tl db pg` is currently a server-side stub** — POSTs return HTTP 501. Until execution support ships, you cannot run arbitrary SQL through the CLI.
-
-For Postgres-shaped questions today, use the structured `tl` commands. They cover the common business questions with role scoping the raw queries don't have:
-
-```bash
-tl sponsorships list [filters...]   # adlink/deal queries (status, dates, brand, channel, owner)
-tl sponsorships show <id>            # single deal
-tl deals / matches / proposals       # status-shortcut variants
-tl channels list [filters...]        # channel search (category, MSN, TPP, demographics)
-tl channels show <id-or-name>        # channel detail incl. active adspots, demographics
-tl channels history <id-or-name>     # videos with detected sponsors
-tl brands show <id-or-name>          # brand detail
-tl brands history <id-or-name>       # brand sponsorship history
-tl reports / tl reports run          # saved reports (some are pure PG joins)
-```
-
-Use `tl describe show <resource> --json` to enumerate every field/filter the structured commands expose.
-
-When `tl db pg` ships, the planned syntax will be:
-
 ```bash
 tl db pg "SELECT id, weighted_price FROM thoughtleaders_adlink
           WHERE publish_status = 2
           LIMIT 50 OFFSET 0"
 ```
 
-Accepted SQL (when the executor ships):
+`tl schema pg` prints the live table/column listing visible to your user.
+
+Accepted SQL:
 - **SELECT only**, single statement. No DDL/DML/transactions/SET/COPY/MERGE.
 - Functions accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-resolving casts (`::regclass`, `::regprocedure`, …) are not accepted.
 - **`LIMIT` mandatory** as integer literal ≤ 500. **`OFFSET` mandatory** (use `0` if not paging).
 - SQL ≤ 50,000 chars; AST depth ≤ 64; node count ≤ 5,000.
-- The connecting role is also minimum-privilege server-side.
 
 ## Core Tables
 
@@ -100,8 +81,6 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 | 9 | REJECTED_AGENCY | Rejected by Agency | 0% |
 | -1 | CLIENT_SIDE_AVAILABLE | Client Side Available | — |
 | -2 | CLIENT_SIDE_TAKEN | Client Side Taken | — |
-
-The CLI exposes these as lowercase status labels — see the `tl` skill's status mapping section for the user-facing names.
 
 #### Pipeline Stages
 
@@ -196,7 +175,7 @@ thoughtleaders_adlink
 ⚠️ thoughtleaders_brand has NO organization_id column — org lives on profile.
 ```
 
-### Common Join Paths (relevant when `tl db pg` ships)
+### Common Join Paths
 
 **Adlink → Channel name:**
 ```sql
@@ -245,14 +224,46 @@ Joining `adspot.publisher_id → profile.id` directly mixes ID spaces and return
 
 Note: separate from the adspot publisher relationship. Not always in sync.
 
-## What you can express today via the CLI (vs raw SQL)
+## Example queries
 
-| Question | CLI command |
-|---|---|
-| Total weighted pipeline by sales rep | `tl sponsorships list status:matched,outreach,proposed,proposal_approved,pending --json` (then aggregate by `owner_sales` client-side) |
-| Deals updated this week | `tl sponsorships list created-at-start:<...>` (or `purchase-date-start:`, `send-date-start:` depending on intent) |
-| MSN channel joins this month | not directly exposed — `media_selling_network_join_date` is reduced to a boolean `msn` field. Wait for `tl db pg` for the timestamp. |
-| Sold deals this month | `tl deals list purchase-date-start:<...>` |
-| Channel detail incl. demographics & adspots | `tl channels show <id>` |
-| Brand detail incl. mention history | `tl brands show <name>` and `tl brands history <name>` |
+**Total weighted pipeline by sales rep:**
+```sql
+SELECT owner_sales_id, SUM(weighted_price) AS pipeline
+FROM thoughtleaders_adlink
+WHERE publish_status IN (0, 2, 6, 7, 8)
+GROUP BY owner_sales_id
+ORDER BY pipeline DESC
+LIMIT 100 OFFSET 0
+```
 
+**Sold deals this month:**
+```sql
+SELECT id, price, purchase_date, ad_spot_id, creator_profile_id
+FROM thoughtleaders_adlink
+WHERE publish_status = 3
+  AND purchase_date >= date_trunc('month', CURRENT_DATE)
+ORDER BY purchase_date DESC
+LIMIT 500 OFFSET 0
+```
+
+**MSN channel joins this month:**
+```sql
+SELECT id, channel_name, media_selling_network_join_date
+FROM thoughtleaders_channel
+WHERE media_selling_network_join_date >= date_trunc('month', CURRENT_DATE)
+ORDER BY media_selling_network_join_date DESC
+LIMIT 500 OFFSET 0
+```
+
+**Deal with brand and channel name:**
+```sql
+SELECT a.id, a.price, a.publish_status, b.name AS brand, ch.channel_name
+FROM thoughtleaders_adlink a
+JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id
+JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
+JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
+JOIN thoughtleaders_brand b ON pb.brand_id = b.id
+WHERE a.id = 12345
+LIMIT 1 OFFSET 0
+```

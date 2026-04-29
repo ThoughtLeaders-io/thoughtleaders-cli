@@ -138,7 +138,7 @@ The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource
 When a structured `tl <resource>` command can answer the question, prefer it — authoritative, role-scoped, paginated, breadcrumbed. Drop down to `tl db pg|fb|es` only when the high-level command can't express what you need.
 
 ```bash
-tl db pg "<SELECT ...>"     # PostgreSQL — currently a server-side stub (HTTP 501)
+tl db pg "<SELECT ...>"     # PostgreSQL — read-only SELECT
 tl db fb "<SELECT ...>"     # Firebolt — single-table reads on article_metrics / channel_metrics
 tl db es "<JSON body>"      # Elasticsearch — search bodies against the server-fixed alias
 ```
@@ -161,11 +161,11 @@ Structured commands stay best for: single-record lookups (`tl <resource> show`),
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape) | `tl snapshots channel`, `tl snapshots video` |
 | **Aggregations** (counts, sums, group-by, histograms, percentiles) | **`tl db es` agg query** or **`tl db pg` `GROUP BY`** — do not paginate-and-roll-up client-side |
-| **Joins / cross-table data** | **`tl db pg`** (when shipped) — until then, two paginated structured walks is a workaround |
+| **Joins / cross-table data** | **`tl db pg`** — single SQL query beats two paginated structured walks |
 | **Complex filtering** the structured filters can't express | **`tl db pg` / `tl db es`** rather than over-fetching and post-filtering |
 | Transcript / brand-mention search inside video content | `tl db es` (no structured equivalent for content text) |
 | Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | `tl db fb` |
-| Anything requiring a Postgres column the structured commands don't expose | `tl db pg` — **currently unavailable, see Limitations** |
+| Anything requiring a Postgres column the structured commands don't expose | `tl db pg` |
 
 #### `tl db es` — Elasticsearch
 
@@ -202,15 +202,24 @@ See [references/firebolt-schema.md](references/firebolt-schema.md) for accepted-
 
 #### `tl db pg` — PostgreSQL
 
-**Currently a server-side stub — POSTs return HTTP 501.** Endpoint accepts the same shape as the others (`{"query": "<sql>"}`) and the CLI is wired up, but the server view returns "not yet implemented" until execution support ships.
+```bash
+# Top brands by deal count
+tl db pg "SELECT b.name, COUNT(*) AS deals
+          FROM thoughtleaders_adlink a
+          JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+          JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
+          JOIN thoughtleaders_brand b ON pb.brand_id = b.id
+          WHERE a.publish_status = 3
+          GROUP BY b.name
+          ORDER BY deals DESC
+          LIMIT 20 OFFSET 0"
+```
 
-See [references/postgres-schema.md](references/postgres-schema.md) for the planned accepted-SQL rules and the table/column catalogue.
-
-Until PG raw queries land, answer Postgres-shaped questions through the structured `tl` commands (which already cover sponsorships/channels/brands/profiles/orgs with role scoping). For things those don't expose, see Limitations below.
+See [references/postgres-schema.md](references/postgres-schema.md) for the accepted-SQL rules and the table/column catalogue. `tl schema pg` prints the live table/column listing visible to the caller.
 
 ### Three sources, each authoritative for different things
 
-- **Postgres** — deals, pipeline, brands, channels, users, organizations, profiles, revenue. Source of truth for deal state. Reachable today via the structured `tl` commands; raw `tl db pg` is a stub.
+- **Postgres** — deals, pipeline, brands, channels, users, organizations, profiles, revenue. Source of truth for deal state. Reachable via the structured `tl` commands or raw `tl db pg`.
 - **Elasticsearch** — videos, transcripts, brand mentions, **current** channel/video metrics, demographics. Reachable via `tl uploads`, `tl channels`, and `tl db es`.
 - **Firebolt** — **historical** time-series snapshots only (view curves over time, subscriber-growth trends). Reachable via `tl snapshots` (preferred) or `tl db fb`.
 
@@ -228,7 +237,7 @@ Until PG raw queries land, answer Postgres-shaped questions through the structur
 
 Load these on demand — don't read all upfront. Pick the one(s) relevant to the question.
 
-- [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Useful even today for understanding what the structured `tl` commands return; required reading when `tl db pg` ships.
+- [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Required reading for `tl db pg` queries, and useful for understanding what the structured `tl` commands return.
 - [references/elasticsearch-schema.md](references/elasticsearch-schema.md) — index aliases, video/channel fields, common query bodies for `tl db es`.
 - [references/firebolt-schema.md](references/firebolt-schema.md) — the two metric tables and their indexes; how to write valid `tl db fb` queries.
 
@@ -242,7 +251,7 @@ See [references/business-glossary.md](references/business-glossary.md) for reven
 
 | Capability | Status | Workaround |
 |---|---|---|
-| Arbitrary read-only `SELECT` on Postgres (any joins, any tables, `information_schema` introspection) | **Unavailable** — `tl db pg` is a server-side stub (HTTP 501). | Use the structured `tl sponsorships / channels / brands / reports` commands. They cover the majority of business questions, with role scoping the raw queries don't have. For the rest, wait for `tl db pg` to ship — or ask a human to run the SQL. |
+| Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 500` + `OFFSET`, function allowlist, no `::reg*` casts. See `references/postgres-schema.md`. |
 | Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Unavailable** — these were stacked PG joins. | Approximate with `tl brands history <brand>` (videos where the brand was detected → extract channel IDs) and `tl sponsorships list brand:<name> status:<...>`. Won't perfectly match (e.g. `media_buying_network_join_date` isn't exposed). |
 | **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. It does not let you set price/cost/owner_sales_id/send_date/etc. | Done in the app or by a human with DB access. |
 | Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Unavailable** as a single query (needs PG joins). | Partial: `tl channels show <id>` exposes `msn`, `tpp`, and active adspots with `integration` codes. Persona/plan/profile-level checks aren't surfaced. |
@@ -250,7 +259,7 @@ See [references/business-glossary.md](references/business-glossary.md) for reven
 | ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (vector KNN, server-implemented). |
 | ES deep pagination beyond `from+size = 10,000` | **Unavailable** via raw — `scroll` and `pit` aren't allowlisted; `search_after` is allowed but `from` is still capped. | Use `search_after` with `sort` to walk past 10k. For huge sweeps, narrow with `publication_date` ranges. |
 | ES index introspection (`_cat/indices`, mappings) | **Unavailable** — only `_search` is wired. | Read [references/elasticsearch-schema.md](references/elasticsearch-schema.md). It's manually maintained — update it when you discover new fields. |
-| Schema introspection on Postgres (`information_schema.columns`, `pg_class`, …) | **Unavailable** until `tl db pg` ships, and even then catalog-resolving casts and many `pg_*` helpers are blocked. | Read [references/postgres-schema.md](references/postgres-schema.md). |
+| Schema introspection on Postgres (`information_schema.columns`, `pg_class`, …) | **Partial** — catalog-resolving casts and many `pg_*` helpers are blocked. | Use `tl schema pg` for the live table/column listing, or read [references/postgres-schema.md](references/postgres-schema.md). |
 
 If a user asks for one of the **Unavailable** items, say so explicitly and propose the closest `tl`-based approximation rather than silently degrading.
 
