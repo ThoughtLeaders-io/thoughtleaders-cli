@@ -56,8 +56,8 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 | `draft_expected_date` | date | Expected draft delivery |
 | `actual_end_date` | timestamptz | Actual end date |
 | `scheduled_end_date` | timestamptz | Scheduled end date |
-| `rejection_reason` | int | Rejection reason code |
-| `rejection_reason_details` | text | Free-text rejection details |
+| `rejection_reason` | int | Rejection reason code (1–24). See "`rejection_reason` Constants" below for the code → label mapping. Set when `publish_status IN (4, 5, 9)` (closed-lost). |
+| `rejection_reason_details` | text | Free-text rejection details. Often empty (~78% of lost deals). When populated, contains AM/agency notes like *"english content only"*, *"isn't talking about stocks"*, *"channel does not exist"*. Use as supplementary context, not primary classification. |
 | `payment_status` | int | 0=Unpaid, 1=Paid |
 | `performance_grade` | int | Performance rating (see business-glossary) |
 | `article_id` | varchar | Compound `<channel_id>:<youtube_id>` — links to ES `_id` and ES `id` field |
@@ -81,6 +81,66 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 | 9 | REJECTED_AGENCY | Rejected by Agency | 0% |
 | -1 | CLIENT_SIDE_AVAILABLE | Client Side Available | — |
 | -2 | CLIENT_SIDE_TAKEN | Client Side Taken | — |
+
+#### `rejection_reason` Constants
+
+Source of truth: `thoughtleaders.models.AdLink.REJECTION_REASON` (Django `IntegerField` choices in the main `thoughtleaders` repo).
+
+**Storage model:** `thoughtleaders_adlink.rejection_reason` is an `IntegerField`. **Postgres stores only the integer code.** The labels live in the Django `IntegerField.choices` tuple in application code — they are NOT a queryable column or a join key. The integer is the only thing you can `WHERE` against; the labels below are display mappings only.
+
+The **Enum Label** column is the verbatim string from the Django choices tuple (some have typos / internal vocabulary). The **AM-friendly label** is the recommended phrasing for AM-facing reports and proposals — use it when surfacing rejection reasons in any human-readable output.
+
+**Grouping — be careful, codes 18–24 are NOT homogeneous:**
+- **Codes 1–9** — brand-side rejections (brand said no)
+- **Codes 10–17** — publisher-side rejections (channel said no)
+- **Code 18 (`DEMOGRAPHICS_NO_MATCH`)** — audience-fit mismatch. Neither side is "wrong"; the channel may be excellent but its audience doesn't align with the brand's target. Don't bucket as "channel quality."
+- **Codes 19, 21, 22, 24** (`NOT_BRAND_SAFE`, `HIGH_VOLATILITY`, `LOW_ENGAGEMENT`, `NO_FACE_ON_SCREEN`) — channel-quality / channel-performance signals (production and delivery).
+- **Code 20 (`POOR_BRAND_HISTORY`)** — **brand-quality**, NOT channel quality. The brand has a poor sponsorship track record (e.g., known to ghost / pay late / be difficult). Do not include when reporting on channel quality.
+- **Code 23 (`DUPLICATE_PROPOSAL`)** — **process/timing**, NOT channel quality. Channel was pitched too recently. Outreach-cadence issue.
+
+⚠️ Naïve "codes 18–24 = channel quality" bucketing will misattribute brand-quality (20), audience-fit (18), and process (23) failures to channel quality and skew rejection-rate analysis.
+
+| Code | Constant | Enum Label (verbatim from Django) | AM-friendly label |
+|------|----------|---------------------|-------------------|
+| 1 | OTHER | Other (brand) | Brand declined — other reason |
+| 2 | COMPETITOR | Channel works with competitor (brand) | Channel runs a competitor |
+| 3 | NO_MATCH | Doesn't fit together (brand) | Brand says channel isn't a fit |
+| 4 | DISLIKE | Doesn't like the channel | Brand doesn't want this channel |
+| 5 | PRICING | Price is unreasonable | Brand says price is too high |
+| 6 | WORKING_TOGETHER | Already working together with the channel | Already running with this channel |
+| 7 | TIMING | Timing is off (brand) | Brand timing — not now |
+| 8 | NO_RESPONSE | Channel did not respond | Channel never replied |
+| 9 | DO_NOT_CONTACT | Do not contact channel | Channel is on do-not-contact list |
+| 10 | PUBLISHER_OTHER | Other (publisher) | Channel declined — other reason |
+| 11 | PUBLISHER_COMPETITOR | Works with competitor (publisher) | Channel already runs the competitor |
+| 12 | PUBLISHER_NO_MATCH | Doesn't fit together (publisher) | Channel says brand isn't a fit |
+| 13 | PUBLISHER_DISLIKE | Doesn't like the brand | Channel doesn't want this brand |
+| 14 | PUBLISHER_PRICING | Brand Price is too low | Channel says price is too low |
+| 15 | PUBLISHER_WORKING_TOGETHER | Already working together with the brand | Channel already running with brand |
+| 16 | PUBLISHER_TIMING | Timing is off (publisher) | Channel timing — not now |
+| 17 | PUBLISHER_NO_RESPONSE | Brand did not respond | Brand never replied |
+| 18 | DEMOGRAPHICS_NO_MATCH | Demographics don't fit | Audience demographics don't match |
+| 19 | NOT_BRAND_SAFE | Not brand safe | Brand-safety concern |
+| 20 | POOR_BRAND_HISTORY | Poor brand sponsorship history | Brand has a poor sponsorship track record |
+| 21 | HIGH_VOLATILITY | High Volatility | Channel views are too volatile |
+| 22 | LOW_ENGAGEMENT | Low engagement/Low views | Low engagement or low views |
+| 23 | DUPLICATE_PROPOSAL | Duplicate proposal | Already pitched recently |
+| 24 | NO_FACE_ON_SCREEN | No face on screen | Channel doesn't show a host on screen |
+
+#### Which date column for which question?
+
+`thoughtleaders_adlink` has multiple timestamps. Picking the wrong one silently distorts trend analysis (e.g. grouping by `created_at` mixes outreach-blast batches with steady-state activity; grouping by `purchase_date` drops everything that didn't sell because rejected/pipeline rows have NULL `purchase_date`).
+
+| Question | Use |
+|---|---|
+| "How many deals **sold** in year X?" | `purchase_date` (only set on sold/transacted deals) |
+| "How many deals **created** in year X?" (incl. pipeline + lost) | `created_at` |
+| "How much was **active outreach** in window X?" | `outreach_date` (sparse — falls back to `created_at` if null) |
+| "When did the ad **go live on YouTube**?" | `publish_date` — null means not yet published; sold deals can still be canceled until this is set |
+| "Latest activity / pipeline aging" | `updated_at` |
+| "When was the deal **proposed/presented/rejected**?" | `proposal_approved_date` / `presented_date` / `rejected_date` (each only set when that stage was reached) |
+
+**Default for "deals over time" reporting:** `created_at` if you want all flow, `purchase_date` if you want only revenue.
 
 #### Pipeline Stages
 

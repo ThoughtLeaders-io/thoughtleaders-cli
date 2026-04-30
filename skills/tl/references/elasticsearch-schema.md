@@ -90,7 +90,21 @@ Raw mappings (read-only links — out of band, not via `tl`):
 | `banner_ads` | object | Banner ad data |
 | `not_sponsored_by` | object | Explicitly not sponsored by |
 
-#### Channel Fields (on video docs via `channel.id`, or on channel parent docs)
+#### Channel Fields
+
+> ⚠️ **The embedded `channel.*` object on video (article) docs is a denormalized SUBSET — NOT the full channel schema.** The full field list below exists only on **channel parent docs** (`doc_type: "channel"`). On article docs, `channel.*` contains at most **6 fields**: `id`, `country`, `language`, `content_category`, `format`, `publication_id`. **`reach`, `subscribers`, `impression`, `channel_name`, `sponsorship_score`, `is_tl_channel`, etc. are NOT on the embedded object.** Filtering article docs by `channel.reach` returns zero results silently — query the parent channel doc, or join PG `thoughtleaders_channel` for those fields.
+>
+> Also: `channel.country` is missing on ~14% of article docs even when `channel` itself exists, so a bare `{"term": {"channel.country": "US"}}` filter silently drops those rows. **A bare `exists` clause does NOT fix this** — in a filter context it also rejects missing values, just explicitly. To include the missing-country rows alongside US (treat them as "country unknown"), use a `should` split:
+> ```json
+> {"bool": {"should": [
+>   {"term": {"channel.country": "US"}},
+>   {"bool": {"filter": [{"exists": {"field": "channel.id"}}],
+>             "must_not": [{"exists": {"field": "channel.country"}}]}}
+> ], "minimum_should_match": 1}}
+> ```
+> To **separately count** the missing rows, use a `filters` aggregation with `exists` / `must_not exists` branches.
+
+The full table below applies to **channel parent docs only**:
 
 | Field | Type | Description |
 |-------|------|-------------|
