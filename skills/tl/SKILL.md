@@ -56,7 +56,7 @@ The centre of the data model is **Sponsorships** — business relationships betw
   - **Proposals** — matches that have been proposed to both sides to consider
   - **Deals** — contractually agreed-upon sponsorships (sold), either in production or published
 
-Sponsorships are sometimes called "Ads" or "Ad campaigns". An obsolete name for "sponsorship" is an "adlink".
+Sponsorships are sometimes called "Ads" or "Ad campaigns". **"AdLink"** is another name for the same thing — it's the term the database uses (`thoughtleaders_adlink`) and shows up across internal code, schema docs, and AM Slack threads. Treat "sponsorship" and "adlink" as interchangeable; the user-facing word is "sponsorship," the engineering/DB word is "adlink."
 
 The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These filter `tl sponsorships` by status.
 
