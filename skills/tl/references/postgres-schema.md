@@ -27,6 +27,8 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 > - ❌ `organization_id` — there is NO direct org FK. Org is reached via `creator_profile_id → profile.organization_id → organization`.
 > - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`.
 > - ❌ `youtube_id` (on channel) — use `external_channel_id`.
+> - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
+> - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
 
 #### Key Columns
 
