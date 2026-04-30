@@ -20,6 +20,8 @@ Decision rule:
 
 Always run `tl describe show <resource>` before using a structured command, and `tl schema pg|fb|es` before writing a raw query.
 
+**When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`) — never the unscoped form.** The unscoped `tl schema pg` returns *every* table visible to your role, which is dozens of tables and tens of thousands of tokens; the single-table form returns only the section you need, in the same markdown layout. Reaching for the unscoped form when you already know the table name is a tokens/latency tax with zero benefit. ES has no per-table form (the index is a single document shape) — `tl schema es` is the only call there.
+
 **Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field — that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`) into `jq`, `yq`, `rg`, or `duckdb` and read only the answer back. Pick the tool by shape:
 
 - **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
@@ -113,6 +115,7 @@ The CLI exposes three different discovery surfaces — pick by what you actually
 | Arguments and flags for a specific leaf command | `tl <group> <subcommand> --help` (e.g. `tl recommender top-channels --help`) |
 | Fields, filters, credit rates for a **data resource** (sponsorships, uploads, snapshots, reports, comments, recommender) | `tl describe show <resource> --json` |
 | The live PG/ES/Firebolt schema for raw `tl db` queries | `tl schema pg` / `tl schema es` / `tl schema fb` |
+| The schema of a **single** PG / Firebolt table | **`tl schema pg <table>`** / **`tl schema fb <table>`** — strongly preferred when you only need one |
 
 Notes:
 - Use `--help` everywhere — there is no separate `tl help` command. `tl help` returns "No such command 'help'".
@@ -318,8 +321,10 @@ If a user asks for one of the **Unavailable** items, say so explicitly and propo
 ```bash
 tl describe                            # List all resources with credit costs (free)
 tl describe show <resource> --json     # Fields, filters, credit rates (free)
-tl schema pg                           # PostgreSQL schema reference for `tl db pg` (free)
-tl schema fb                           # Live Firebolt tables and column types for `tl db fb` (free)
+tl schema pg                           # PostgreSQL schema reference for `tl db pg` (free) — every visible table
+tl schema pg <table>                   # PostgreSQL schema for a SINGLE table (free) — same markdown shape
+tl schema fb                           # Live Firebolt tables and column types for `tl db fb` (free) — both tables
+tl schema fb <table>                   # Firebolt schema for a SINGLE table (free) — `article_metrics` or `channel_metrics`
 tl schema es                           # Elasticsearch document shape for `tl db es` (free)
 tl balance --json                      # Credit balance (free)
 tl whoami                              # Current user, org, brands (free)

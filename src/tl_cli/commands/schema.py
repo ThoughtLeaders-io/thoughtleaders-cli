@@ -13,10 +13,11 @@ app = typer.Typer(help="Show schema documentation for raw db queries (`tl db pg|
 console = Console()
 
 
-def _show(db: str, json_output: bool) -> None:
+def _show(db: str, json_output: bool, table: str | None = None) -> None:
     client = get_client()
     try:
-        data = client.get(f"/raw/{db}/schema")
+        params = {"table": table} if table else {}
+        data = client.get(f"/raw/{db}/schema", params=params)
         if json_output:
             print(json.dumps(data, indent=2, default=str))
             return
@@ -33,18 +34,45 @@ def _show(db: str, json_output: bool) -> None:
 
 @app.command("pg")
 def pg_cmd(
+    table: str = typer.Argument(None, help="Optional table name. When given, prints only that table's section in the same markdown format."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
 ) -> None:
-    """Show PostgreSQL schema reference (for `tl db pg`)."""
-    _show("pg", json_output)
+    """Show PostgreSQL schema reference (for `tl db pg`).
+
+    With no argument: lists every table visible to your role.
+    With a table name: prints only that table's column listing.
+
+    **Strongly preferred for single-table lookups.** Listing every
+    table just to read one is wasteful — pass the table name and the
+    server returns only that section.
+
+    Examples:
+        tl schema pg
+        tl schema pg thoughtleaders_channel
+        tl schema pg thoughtleaders_adlink --json
+    """
+    _show("pg", json_output, table=table)
 
 
 @app.command("fb")
 def fb_cmd(
+    table: str = typer.Argument(None, help="Optional table name (`article_metrics` or `channel_metrics`). When given, prints only that table's section."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
 ) -> None:
-    """Show Firebolt schema (live: tables and column types) for `tl db fb`."""
-    _show("fb", json_output)
+    """Show Firebolt schema (live: tables and column types) for `tl db fb`.
+
+    With no argument: lists both accepted tables.
+    With a table name: prints only that table's columns + primary index.
+
+    **Strongly preferred for single-table lookups.** Pass the table
+    name to skip the other one.
+
+    Examples:
+        tl schema fb
+        tl schema fb article_metrics
+        tl schema fb channel_metrics --json
+    """
+    _show("fb", json_output, table=table)
 
 
 @app.command("es")
