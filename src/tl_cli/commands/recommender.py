@@ -19,10 +19,12 @@ from tl_cli.client.http import get_client
 from tl_cli.filters import parse_filters
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Vector recommender (tags, top-by-tag, vector inspection, profile→channel similarity)")
+app = typer.Typer(help="Vector recommender (tags, top-channels/profiles/brands, vector inspection, profile→channel similarity)")
 
 
-TOP_COLUMNS = ["kind", "value", "channel_id", "profile_id", "name", "brand_name", "slug"]
+TOP_CHANNEL_COLUMNS = ["value", "channel_id", "channel_name", "slug"]
+TOP_PROFILE_COLUMNS = ["value", "profile_id", "profile_email", "brand_name", "brand_slug"]
+TOP_BRAND_COLUMNS = ["value", "brand_slug", "brand_name", "profile_id"]
 TOP_COLUMN_CONFIG = {"value": {"justify": "right"}}
 
 
@@ -70,7 +72,7 @@ def tags_cmd(
         tl recommender tags "age 18"
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
-    query = " ".join(args or []).strip()
+    query = _strip_quotes(" ".join(args or []).strip())
     params = {"q": query} if query else {}
     client = get_client()
     try:
@@ -78,7 +80,7 @@ def tags_cmd(
         output(
             data,
             fmt,
-            columns=["group", "field_name", "normalized_name"],
+            columns=["group", "field_name"],
             title="Recommender vector tags",
         )
     except ApiError as e:
@@ -87,36 +89,21 @@ def tags_cmd(
         client.close()
 
 
-@app.command("top")
-def top_cmd(
-    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
-    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
-    json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
-    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Max results per group (1-100)"),
-) -> None:
-    """Top channels and profiles loaded on a single vector tag.
+def _strip_quotes(value: str) -> str:
+    """Strip one matching pair of surrounding quotes if present.
 
-    Costs 50 credits per call. Intelligence plan required. Returns both
-    channels and profiles ranked by the tag's value (descending).
-
-    Filters:
-        msn:<yes|no|all>            MSN membership for channel rows (default: all)
-        mbn:<yes|no|all>            MBN membership for profile rows (default: all)
-        exclude-for-channel:<id>    Drop profiles already proposed for this channel
-        exclude-for-profile:<id>    Drop channels already proposed for this profile
-
-    Examples:
-        tl recommender top "Cooking"
-        tl recommender top "Tech" msn:yes --limit 30
-        tl recommender top "USA share" mbn:yes
-        tl recommender top "Cooking" exclude-for-profile:842
+    Lets users paste an example like `tl recommender top-channels "cooking"`
+    where the shell already strips quotes, but also tolerates a layer of
+    extra quoting from agents or scripts that re-wrap the literal.
     """
-    fmt = detect_format(json_output, csv_output, md_output, toon_output)
-    filters = parse_filters(args or [])
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        return value[1:-1]
+    return value
 
+
+def _do_top(kind: str, tag: str, args: list[str], fmt: str, limit: int, columns: list[str], title: str) -> None:
+    tag = _strip_quotes(tag)
+    filters = parse_filters(args or [])
     server_keys = {"msn", "mbn", "exclude-for-channel", "exclude-for-profile"}
     params = {k: v for k, v in filters.items() if k in server_keys}
     params["tag"] = tag
@@ -124,21 +111,101 @@ def top_cmd(
 
     client = get_client()
     try:
-        data = client.get("/recommender/top", params=params)
-        rows = data.get("results", [])
-        for r in rows:
-            r["name"] = r.get("channel_name") or r.get("profile_email") or ""
+        data = client.get(f"/recommender/top/{kind}", params=params)
         output(
             data,
             fmt,
-            columns=TOP_COLUMNS,
-            title=f"Top by tag: {tag}",
+            columns=columns,
+            title=title,
             column_config=TOP_COLUMN_CONFIG,
         )
     except ApiError as e:
         handle_api_error(e)
     finally:
         client.close()
+
+
+@app.command("top-channels")
+def top_channels_cmd(
+    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Top channels loaded on a single vector tag.
+
+    Costs 50 credits per call. Intelligence plan required.
+
+    Filters:
+        msn:<yes|no|all>            MSN membership (default: all)
+        exclude-for-profile:<id>    Drop channels already proposed for this profile
+
+    Examples:
+        tl recommender top-channels "Cooking"
+        tl recommender top-channels "Tech" msn:yes --limit 30
+        tl recommender top-channels "Cooking" exclude-for-profile:842
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    _do_top("channels", tag, args or [], fmt, limit, TOP_CHANNEL_COLUMNS, f"Top channels: {tag}")
+
+
+@app.command("top-profiles")
+def top_profiles_cmd(
+    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Top brand profiles loaded on a single vector tag.
+
+    Costs 50 credits per call. Intelligence plan required. Profiles can
+    represent the same brand more than once (one brand → multiple
+    profiles); use `top-brands` for brand-deduplicated results.
+
+    Filters:
+        mbn:<yes|no|all>            MBN membership (default: all)
+        exclude-for-channel:<id>    Drop profiles already proposed for this channel
+
+    Examples:
+        tl recommender top-profiles "Cooking"
+        tl recommender top-profiles "USA share" mbn:yes --limit 30
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    _do_top("profiles", tag, args or [], fmt, limit, TOP_PROFILE_COLUMNS, f"Top profiles: {tag}")
+
+
+@app.command("top-brands")
+def top_brands_cmd(
+    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Top brands loaded on a single vector tag (deduplicated from profiles).
+
+    Costs 50 credits per call. Intelligence plan required. Server-side
+    aggregates the underlying profile rows by brand, keeping the
+    highest-scoring profile per brand.
+
+    Filters:
+        mbn:<yes|no|all>            MBN membership of the underlying profile (default: all)
+        exclude-for-channel:<id>    Drop brands already proposed for this channel
+
+    Examples:
+        tl recommender top-brands "Cooking"
+        tl recommender top-brands "USA share" mbn:yes --limit 30
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    _do_top("brands", tag, args or [], fmt, limit, TOP_BRAND_COLUMNS, f"Top brands: {tag}")
 
 
 @app.command("inspect-channel")

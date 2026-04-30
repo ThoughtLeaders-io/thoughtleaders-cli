@@ -117,8 +117,8 @@ Every Firebolt workflow has two steps:
 
 ```bash
 # Channels matching some category (vector recommender — preferred over content_category equality)
-tl recommender top "Tech" msn:yes --limit 50 --json \
-  | jq '.channels[].channel_id'
+tl recommender top-channels "Tech" msn:yes --limit 50 --json \
+  | jq '.results[].channel_id'
 
 # Or videos for a specific brand's deals (Postgres side, via tl sponsorships)
 tl deals list brand:"Nike" --json --limit 500 \

@@ -95,7 +95,7 @@ When querying sponsorship bookings, query by `status:sold` and filter the the da
 
 Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
-Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top "<tag>"` against the vector recommender — that's faster, ranked by category-strength, and returns both channels and matching brand profiles. Run `tl recommender tags` to discover the valid tag names.
+Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top-channels "<tag>"` (or `top-brands`/`top-profiles`) against the vector recommender — that's faster, ranked by category-strength. Run `tl recommender tags` to discover the valid tag names.
 
 ## Workflow
 
@@ -139,7 +139,9 @@ tl brands history <id-or-name>         # Sponsorship history (5 credits/result, 
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
 tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits flat)
 tl recommender tags [query]            # List vector tag names — categories, demographics, formats (free)
-tl recommender top "<tag>"             # Top channels & profiles loaded on a vector tag (50 credits; Intelligence)
+tl recommender top-channels "<tag>"    # Top channels loaded on a vector tag (50 credits; Intelligence)
+tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a vector tag (50 credits)
+tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a vector tag (50 credits)
 tl recommender inspect-channel <ref>   # Show a channel's feature-vector breakdown (50 credits; Intelligence)
 tl recommender inspect-brand <ref>     # Show a brand profile's ideal-vector breakdown (50 credits; Intelligence)
 tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal vector (50 credits; Intelligence)
@@ -332,9 +334,9 @@ tl recommender tags cooking
 tl recommender tags "usa"
 
 # Top channels & profiles loaded on a vector tag (50 credits; Intelligence)
-tl recommender top "Cooking" msn:yes --limit 50
-tl recommender top "Tech" --limit 30
-tl recommender top "USA share" mbn:yes --limit 50
+tl recommender top-channels "Cooking" msn:yes --limit 50
+tl recommender top-channels "Tech" --limit 30
+tl recommender top-brands "USA share" mbn:yes --limit 50
 ```
 
 Use `tl db pg` only for predicates the recommender can't express — pure attribute filters (`is_tl_channel`, `language`, `demographic_device_primary`), aggregations, and joins. Run `tl schema pg` once to confirm the live column set; the columns referenced below are stable.
@@ -434,8 +436,8 @@ tl reports run 42 --json
 "Find Cooking channels with US-heavy mobile audiences":
 ```bash
 # Use the vector recommender for the topic, then narrow with structured filters / SQL on the IDs.
-tl recommender top "Cooking" msn:yes --limit 100 --json \
-  | jq -r '.results[] | select(.kind=="channel") | .channel_id' \
+tl recommender top-channels "Cooking" msn:yes --limit 100 --json \
+  | jq -r '.results[].channel_id' \
   | paste -sd, - \
   | xargs -I {} tl db pg "SELECT id, channel_name, total_views, demographic_usa_share
                           FROM thoughtleaders_channel
@@ -467,9 +469,10 @@ tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-s
 ```bash
 tl recommender tags                                            # Full tag list (free)
 tl recommender tags cooking                                    # Search tag names by substring
-tl recommender top "Cooking" msn:yes --limit 50                # Top channels & profiles loaded on a tag (50 credits)
-tl recommender top "USA share" mbn:yes --limit 30              # Demographic tag — MBN brands only
-tl recommender top "Tech" exclude-for-profile:842              # Drop channels already proposed for profile 842
+tl recommender top-channels "Cooking" msn:yes --limit 50       # Top channels loaded on a tag (50 credits)
+tl recommender top-profiles "Cooking" --limit 30               # Top brand profiles for the tag
+tl recommender top-brands "USA share" mbn:yes --limit 30       # Top brands (deduped) — demographic tag, MBN only
+tl recommender top-channels "Tech" exclude-for-profile:842     # Drop channels already proposed for profile 842
 tl recommender inspect-channel 29834                           # Per-tag breakdown of a channel's vector
 tl recommender inspect-brand Nike                              # Per-tag breakdown of a brand's ideal vector
 tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal vector

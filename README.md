@@ -82,8 +82,9 @@ tl channels similar "Tremending girls" min-score:0.85 --limit 5
 # `tags` is free; `top`, `inspect-*`, and `similar-to-profile` cost 50 credits flat.
 tl recommender tags                              # List every tag (free)
 tl recommender tags cooking                      # Search tag names by substring
-tl recommender top "Cooking" msn:yes --limit 50  # Top channels & brand profiles for a tag
-tl recommender top "USA share" mbn:yes           # Demographic tag, MBN brands only
+tl recommender top-channels "Cooking" msn:yes --limit 50  # Top channels for a tag
+tl recommender top-profiles "Cooking" mbn:yes --limit 30  # Top brand profiles (one brand → potentially multiple profiles)
+tl recommender top-brands "Cooking" --limit 30            # Top brands (deduped from profiles)
 tl recommender inspect-channel 12345             # Per-tag breakdown of a channel's vector
 tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal vector
 tl recommender similar-to-profile 842            # Channels closest to a brand profile
