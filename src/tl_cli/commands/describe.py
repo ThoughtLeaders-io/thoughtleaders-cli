@@ -67,6 +67,17 @@ def show_cmd(
     """
     fmt = detect_format(json_output, False, False, toon_output)
 
+    if resource in {"channels", "brands"}:
+        notice = (
+            f"Examine the database schema with `tl schema pg` and then perform "
+            f"a `tl db pg` query on {resource}."
+        )
+        if fmt == "json":
+            print(json.dumps({"resource": resource, "notice": notice}, indent=2))
+        else:
+            console.print(notice)
+        return
+
     client = get_client()
     try:
         data = client.get(f"/describe/{resource}")
