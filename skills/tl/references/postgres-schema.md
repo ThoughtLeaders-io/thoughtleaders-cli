@@ -42,7 +42,7 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 | `weighted_price_currency` | varchar | Always USD |
 | `cost` | numeric | Cost to TL |
 | `ad_spot_id` | int FK | → `thoughtleaders_adspot.id` |
-| `creator_profile_id` | int FK | → brand/advertiser profile |
+| `creator_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `creator_profile` — the "creator_" prefix lives on the FK column, not the table. |
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
 | `owner_publisher_id` | int FK | → `auth_user.id` (channel-side owner) |
 | `owner_sales_id` | int FK | → `auth_user.id` (sales rep) |
@@ -125,12 +125,49 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | int | Primary key |
-| `channel_name` | varchar | Display name |
-| `external_channel_id` | varchar | YouTube channel ID (`UCxxxxxx`). ⚠️ There is NO `youtube_id` column. |
+| `channel_name` | varchar | Display name. ⚠️ The column is `channel_name`, NOT `name`. |
+| `external_channel_id` | varchar | YouTube channel ID (e.g., `UCxxxxxx`). ⚠️ There is NO `youtube_id` column — use this one. |
 | `url` | varchar | Channel URL |
-| `media_selling_network_join_date` | date/timestamptz | When channel joined MSN |
-| `is_tl_channel` | boolean | True = TPP/VIP channel |
+| `reach` | bigint | Subscriber count. ⚠️ There is NO `subscribers` column — `reach` is the subscriber count. Many internal docs and outputs use the word "subscribers"; in SQL, always query `reach`. |
+| `media_selling_network_join_date` | date/timestamptz | When channel joined MSN. **MSN membership = this column IS NOT NULL.** |
+| `is_tl_channel` | boolean | True = TPP/VIP channel (the small VIP subset, ~144 channels at 100k+ reach). ⚠️ **`is_tl_channel` is NOT the MSN flag.** Naive `WHERE is_tl_channel = true` as an "MSN filter" silently drops ~98% of the MSN pool (8,652 → 144 at 100k+). For MSN, use `media_selling_network_join_date IS NOT NULL`. |
+| `content_category` | int | Content category code (1–22). See "`content_category` Constants" below for the code → label mapping. ⚠️ **Data-quality notes:** (1) per-row category assignments are often inconsistent with the official label (e.g. cat 15 = Technology, but many top-`reach` channels in cat 15 are clearly Entertainment). (2) Several codes are essentially unused in practice — codes 1, 2, 4, 6, 7, 8, 9, 11, 13 (Backend Development, Design, Frontend Development, Marketing, Mobile Development, Sales, Travel, Photography, Personal Finance) return ~0 active high-reach channels. Most travel creators land under Lifestyle (5), not Travel (9). The label table below is authoritative; the per-row assignment is best-effort. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` (ranked) over `WHERE content_category = <code>` (equality). |
+| `is_active` | boolean | Whether the channel is active. ⚠️ **Always include `is_active = true` in channel queries** unless explicitly looking for archived rows. |
+| `country` | varchar | Channel's primary country (ISO 3166-1 alpha-2 code, e.g. `US`, `GB`, `BR`). Often the cleanest answer to "geo" questions on sponsorships (since adlink itself has no geo). May be NULL or blank on ~10% of channels. |
+| `language` | varchar | Primary content language. ⚠️ **Short ISO 639 codes — NOT BCP-47.** Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with `language = 'en-US'` returns zero rows. **Don't assume `LENGTH(language) = 2`** — that silently drops the 3-letter long-tail. May be NULL on ~10% of channels. |
+| `last_published` | date | Date of the channel's most recent video. Use for "is the channel still active?" filters — e.g. `last_published >= CURRENT_DATE - INTERVAL '120 days'`. |
+| `sponsorship_score` | double precision | TL-internal channel quality score (higher is better). Useful as a tiebreaker when ranking candidate channels. |
+| `description` | text | LLM-generated description of the channel. Sometimes useful as a regex-target for thematic filtering when the integer category is too coarse (e.g. filtering "Technology" cat 15 down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
 | `evergreenness` | float | Cached evergreen score |
+
+#### `content_category` Constants
+
+Source of truth: `thoughtleaders.taxonomies.ContentCategory` (Django `IntEnum` in the main `thoughtleaders` repo).
+
+| Value | Constant | Pretty Label |
+|-------|----------|--------------|
+| 1 | BACKEND_DEVELOPMENT | Backend Development |
+| 2 | DESIGN | Design |
+| 3 | ENTREPRENEURSHIP | Entrepreneurship |
+| 4 | FRONTEND_DEVELOPMENT | Frontend Development |
+| 5 | LIFESTYLE | Lifestyle |
+| 6 | MARKETING | Marketing |
+| 7 | MOBILE_DEVELOPMENT | Mobile Development |
+| 8 | SALES | Sales |
+| 9 | TRAVEL | Travel |
+| 10 | BUSINESS | Business |
+| 11 | PHOTOGRAPHY | Photography |
+| 12 | GENERAL_KNOWLEDGE | General Knowledge |
+| 13 | PERSONAL_FINANCE | Personal Finance |
+| 14 | NEWS_POLITICS | News & Politics |
+| 15 | TECHNOLOGY | Technology |
+| 16 | GAMING | Gaming |
+| 17 | FOOD | Food |
+| 18 | SPORTS | Sports |
+| 19 | HOWTO | How To & Crafts |
+| 20 | ENTERTAINMENT | Entertainment |
+| 21 | HEALTH_FITNESS | Health & Fitness |
+| 22 | MUSIC | Music |
 
 ### `auth_user` (Django Users)
 
