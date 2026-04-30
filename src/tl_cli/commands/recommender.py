@@ -1,10 +1,11 @@
-"""tl recommender — Vector-recommender introspection and discovery.
+"""tl recommender — Recommender introspection and discovery.
 
-Surfaces the channel/profile feature-vector machinery that powers the
-"Recommender Insights" web view: list the vector tags (categories,
-demographics, formats, etc.), find the top channels and profiles loaded
-on a given tag, inspect a single channel or brand vector, or fetch
-channels similar to a brand profile's ideal vector.
+Surfaces the channel/profile similarity machinery that powers the
+"Recommender Insights" web view: list the similarity tags (categories,
+demographics, formats, etc.), find the top channels and profiles
+scoring high on a given tag, inspect a single channel or brand
+similarity profile, fetch channels similar to a brand's ideal profile,
+or fetch brands likely to sponsor a given channel.
 
 For 1:1 similarity use `tl channels similar` and `tl brands similar`.
 """
@@ -19,7 +20,7 @@ from tl_cli.client.http import get_client
 from tl_cli.filters import parse_filters
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Vector recommender (tags, top-channels/profiles/brands, vector inspection, profile→channel similarity)")
+app = typer.Typer(help="Recommender (similarity tags, top-channels/profiles/brands, similarity-profile inspection, profile→channel and channel→brand similarity)")
 
 
 TOP_CHANNEL_COLUMNS = ["value", "channel_id", "channel_name", "slug"]
@@ -46,7 +47,7 @@ def _handle_recommender_error(e: ApiError) -> None:
 
 @app.callback(invoke_without_command=True)
 def recommender(ctx: typer.Context) -> None:
-    """Vector recommender."""
+    """Recommender."""
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
 
@@ -59,10 +60,10 @@ def tags_cmd(
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """List vector tag names (free).
+    """List similarity tag names (free).
 
     Use this to discover the tag names accepted by `tl recommender top`.
-    Each tag is one dimension of a channel/profile feature vector —
+    Each tag is one signal in a channel or brand similarity profile —
     e.g. content categories like "Cooking", demographic buckets like
     "Age 18-24", device shares, country shares.
 
@@ -81,7 +82,7 @@ def tags_cmd(
             data,
             fmt,
             columns=["group", "field_name"],
-            title="Recommender vector tags",
+            title="Similarity tags",
         )
     except ApiError as e:
         handle_api_error(e)
@@ -127,7 +128,7 @@ def _do_top(kind: str, tag: str, args: list[str], fmt: str, limit: int, columns:
 
 @app.command("top-channels")
 def top_channels_cmd(
-    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    tag: str = typer.Argument(..., help='Similarity tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
     args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
@@ -135,9 +136,9 @@ def top_channels_cmd(
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
-    """Top channels loaded on a single vector tag.
+    """Top channels scoring high on a single similarity tag.
 
-    Costs 50 credits per call. Intelligence plan required.
+    Costs 25 credits per call. Intelligence plan required.
 
     Filters:
         msn:<yes|no|all>            MSN membership (default: all)
@@ -154,7 +155,7 @@ def top_channels_cmd(
 
 @app.command("top-profiles")
 def top_profiles_cmd(
-    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    tag: str = typer.Argument(..., help='Similarity tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
     args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
@@ -162,9 +163,9 @@ def top_profiles_cmd(
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
-    """Top brand profiles loaded on a single vector tag.
+    """Top brand profiles scoring high on a single similarity tag.
 
-    Costs 50 credits per call. Intelligence plan required. Profiles can
+    Costs 25 credits per call. Intelligence plan required. Profiles can
     represent the same brand more than once (one brand → multiple
     profiles); use `top-brands` for brand-deduplicated results.
 
@@ -182,7 +183,7 @@ def top_profiles_cmd(
 
 @app.command("top-brands")
 def top_brands_cmd(
-    tag: str = typer.Argument(..., help='Vector tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    tag: str = typer.Argument(..., help='Similarity tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
     args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
@@ -190,9 +191,9 @@ def top_brands_cmd(
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
-    """Top brands loaded on a single vector tag (deduplicated from profiles).
+    """Top brands scoring high on a single similarity tag (deduplicated from profiles).
 
-    Costs 50 credits per call. Intelligence plan required. Server-side
+    Costs 25 credits per call. Intelligence plan required. Server-side
     aggregates the underlying profile rows by brand, keeping the
     highest-scoring profile per brand.
 
@@ -216,10 +217,10 @@ def inspect_channel_cmd(
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Show a channel's feature vector grouped by category.
+    """Show a channel's similarity profile grouped by category.
 
-    Costs 50 credits per call. Intelligence plan required. Returns the
-    grouped sparse vector (active dimensions only) and the magnitude.
+    Costs 25 credits per call. Intelligence plan required. Returns the
+    active similarity tags grouped by category, plus the overall strength.
 
     Examples:
         tl recommender inspect-channel 12345
@@ -245,11 +246,11 @@ def inspect_brand_cmd(
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Show a brand profile's ideal feature vector grouped by category.
+    """Show a brand profile's ideal similarity profile grouped by category.
 
-    Costs 50 credits per call. Intelligence plan required. Resolves the
+    Costs 25 credits per call. Intelligence plan required. Resolves the
     brand to its (preferred MBN) profile and inspects that profile's
-    aggregated vector.
+    aggregated similarity tags.
 
     Examples:
         tl recommender inspect-brand 287
@@ -277,9 +278,9 @@ def similar_to_profile_cmd(
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
 ) -> None:
-    """Channels closest to a brand profile's ideal vector.
+    """Channels closest to a brand profile's ideal similarity profile.
 
-    Costs 50 credits per call. Intelligence plan required. Channels the
+    Costs 25 credits per call. Intelligence plan required. Channels the
     brand has already worked with or been proposed are excluded.
 
     Filters:
@@ -310,5 +311,53 @@ def similar_to_profile_cmd(
         )
     except ApiError as e:
         handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("similar-brands-to-channel")
+def similar_brands_to_channel_cmd(
+    channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Brands most likely to sponsor a given channel.
+
+    Compares the channel's similarity profile against brand similarity
+    profiles and dedupes the results by brand. Costs 25 credits per call.
+    Intelligence plan required.
+
+    Filters:
+        mbn:<yes|no|all>    MBN membership of the underlying profile (default: all)
+
+    Examples:
+        tl recommender similar-brands-to-channel 12345
+        tl recommender similar-brands-to-channel "MrBeast" mbn:yes --limit 30
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    filters = parse_filters(args or [])
+    params = {k: v for k, v in filters.items() if k in {"mbn"}}
+    params["limit"] = str(limit)
+    encoded = urllib.parse.quote(channel_ref, safe="")
+    client = get_client()
+    try:
+        data = client.get(f"/recommender/channels/{encoded}/similar-brands", params=params)
+        for r in data.get("results", []):
+            score = r.get("score")
+            if isinstance(score, (int, float)) and fmt in ("table", "md"):
+                r["score"] = f"{score * 100:.1f}%"
+        output(
+            data,
+            fmt,
+            columns=["score", "brand_id", "brand_name", "website", "mbn", "profile_id"],
+            title=f"Brands likely to sponsor channel {channel_ref}",
+            column_config={"score": {"justify": "right"}},
+        )
+    except ApiError as e:
+        _handle_recommender_error(e)
     finally:
         client.close()

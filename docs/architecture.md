@@ -50,10 +50,10 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
 | `tl channels show <id-or-name>` | Channel detail, including active adspots with price/cost/CPM |
 | `tl channels history <id-or-name>` | Sponsorship history (videos with detected sponsors) |
-| `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. Tri-state `msn:` (default `yes`) and `tpp:` (default `both`) filters. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
+| `tl channels similar <id-or-name>` | Similarity recommender. 25 credits; Intelligence plan. Tri-state `msn:` (default `yes`) and `tpp:` (default `both`) filters. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
 | `tl brands show <brand>` | Brand intelligence report |
 | `tl brands history <brand> [--channel <id>]` | Brand sponsorship history; videos where the brand was detected |
-| `tl brands similar <brand>` | Find similar brands (profile vector KNN, 50 credits) |
+| `tl brands similar <brand>` | Find similar brands (similarity search, 25 credits) |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
 | `tl snapshots video <id> --channel <id>` | Video view curve (Firebolt article_metrics, --channel required) |
 | `tl comments list <adlink-id>` | List comments on a sponsorship (free) |

@@ -1,6 +1,6 @@
 # Project Overview
 
-**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (sponsorships, channels, brands, uploads, snapshots, reports, vector recommender). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
+**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (sponsorships, channels, brands, uploads, snapshots, reports, recommender). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
 
 # Architecture
 
@@ -20,7 +20,7 @@ When adding a new data command, follow this pattern. See `sponsorships.py` for t
 
 `deals`, `matches`, and `proposals` are shortcut commands that delegate to sponsorships' `do_list`/`do_show`/`do_create` with a pre-set status filter. They reject explicit `status:` filters — users should use `tl sponsorships list` for finer-grained status filtering.
 
-`recommender` (`commands/recommender.py`) wraps the vector-recommender API at `/api/cli/v1/recommender/*` — `tags` (free), `top-channels` / `top-profiles` / `top-brands`, `inspect-channel`, `inspect-brand`, `similar-to-profile` (all 50 credits flat, Intelligence-gated). The three `top-*` URLs share one server resolver; `top-brands` dedupes the underlying profile rows by brand. Channel→channel and brand→brand similarity stay on `tl channels similar` / `tl brands similar`. When updating the SKILL or examples, prefer steering category/topic discovery (e.g. "Cooking channels") to `tl recommender top-channels "<tag>"` rather than `WHERE content_category = <code>` SQL — the recommender is ranked, not equality-based. The underlying recommender code uses "element"/"field_name" terminology; the CLI/API layer renames these to "tag" at the boundary.
+`recommender` (`commands/recommender.py`) wraps the recommender API at `/api/cli/v1/recommender/*` — `tags` (free), `top-channels` / `top-profiles` / `top-brands`, `inspect-channel`, `inspect-brand`, `similar-to-profile` (all 25 credits flat, Intelligence-gated). The three `top-*` URLs share one server resolver; `top-brands` dedupes the underlying profile rows by brand. Channel→channel and brand→brand similarity stay on `tl channels similar` / `tl brands similar`. When updating the SKILL or examples, prefer steering category/topic discovery (e.g. "Cooking channels") to `tl recommender top-channels "<tag>"` rather than `WHERE content_category = <code>` SQL — the recommender is ranked, not equality-based. The underlying recommender code uses "element"/"field_name" terminology; the CLI/API layer renames these to "tag" at the boundary.
 
 ## Filter Parsing (`filters.py`)
 

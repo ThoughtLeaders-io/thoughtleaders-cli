@@ -95,7 +95,7 @@ When querying sponsorship bookings, query by `status:sold` and filter the the da
 
 Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
-Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top-channels "<tag>"` (or `top-brands`/`top-profiles`) against the vector recommender — that's faster, ranked by category-strength. Run `tl recommender tags` to discover the valid tag names.
+Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top-channels "<tag>"` (or `top-brands`/`top-profiles`) against the recommender — that's faster, ranked by category-strength. Run `tl recommender tags` to discover the valid tag names.
 
 ## Workflow
 
@@ -149,18 +149,18 @@ tl uploads list [filters...]           # Video uploads from ES — list curve, m
 tl uploads show <id>                   # Upload detail (2 credits)
 tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels history <id-or-name>       # Sponsorship history (5 credits/result, linear)
-tl channels similar <id-or-name>       # Vector-similarity recommender (50 credits flat; Intelligence plan)
+tl channels similar <id-or-name>       # Similarity recommender (25 credits flat; Intelligence plan)
 tl brands show <id-or-name>            # Brand detail (1 credit)
 tl brands history <id-or-name>         # Sponsorship history (5 credits/result, linear)
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
-tl brands similar <id-or-name>         # Find similar brands via profile vector KNN (50 credits flat)
-tl recommender tags [query]            # List vector tag names — categories, demographics, formats (free)
-tl recommender top-channels "<tag>"    # Top channels loaded on a vector tag (50 credits; Intelligence)
-tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a vector tag (50 credits)
-tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a vector tag (50 credits)
-tl recommender inspect-channel <ref>   # Show a channel's feature-vector breakdown (50 credits; Intelligence)
-tl recommender inspect-brand <ref>     # Show a brand profile's ideal-vector breakdown (50 credits; Intelligence)
-tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal vector (50 credits; Intelligence)
+tl brands similar <id-or-name>         # Find similar brands via similarity search (25 credits flat)
+tl recommender tags [query]            # List similarity tag names — categories, demographics, formats (free)
+tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (25 credits; Intelligence)
+tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a similarity tag (25 credits)
+tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag (25 credits)
+tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (25 credits; Intelligence)
+tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (25 credits; Intelligence)
+tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal profile (25 credits; Intelligence)
 tl snapshots channel <id>              # Channel metrics over time — list curve, mult 1.2 (Firebolt-backed)
 tl snapshots video <id> --channel <id> # Video view curve — list curve, mult 1.2 (--channel required!)
 tl reports                             # List saved reports — list curve, mult 1.3
@@ -213,7 +213,7 @@ Structured commands are still the right tool for: single-record `show` by ID, pl
 | Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | **`tl db fb`** |
 | Single-record detail lookup by ID | `tl <resource> show <id>` |
 | Plain filtered list with one or two simple filters | `tl <resource> list` |
-| Channel/brand similarity (vector KNN, server-implemented) | `tl channels similar`, `tl brands similar` |
+| Channel/brand similarity (server-implemented similarity search) | `tl channels similar`, `tl brands similar` |
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
 
@@ -306,7 +306,7 @@ See [references/business-glossary.md](references/business-glossary.md) for reven
 | **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. The `tl db pg` sanitizer accepts SELECT only — no INSERT/UPDATE. | Done in the app or by a human with DB access. |
 | Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Available** via `tl db pg`. | One SELECT joining the four tables. Use `thoughtleaders_channel.media_selling_network_join_date IS NOT NULL` for MSN, `thoughtleaders_adspot.integration = 1` for mention adspots, `thoughtleaders_profile.persona` for the persona code (see persona constants in `references/postgres-schema.md`). |
 | Firebolt cross-table or join queries; filtering on non-indexed columns in WHERE | **Unavailable** — not accepted. | Fetch a wider slice keyed on `channel_id` (and optionally `id`), filter the rest in `jq`/Python. |
-| ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (vector KNN, server-implemented). |
+| ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (server-implemented similarity search). |
 | ES deep pagination beyond `from+size = 10,000` | **Unavailable** via raw — `scroll` and `pit` aren't allowlisted; `search_after` is allowed but `from` is still capped. | Use `search_after` with `sort` to walk past 10k. For huge sweeps, narrow with `publication_date` ranges. |
 | ES index introspection (`_cat/indices`, mappings) | **Unavailable** — only `_search` is wired. | Read [references/elasticsearch-schema.md](references/elasticsearch-schema.md). It's manually maintained — update it when you discover new fields. |
 | Schema introspection on Postgres (`information_schema.columns`, `pg_class`, …) | **Partial** — catalog-resolving casts and many `pg_*` helpers are blocked. | Use `tl schema pg` for the live table/column listing, or read [references/postgres-schema.md](references/postgres-schema.md). |
@@ -342,14 +342,14 @@ Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
 
 #### Channel discovery — recommender first, raw SQL second
 
-For category- or demographic-driven discovery, **use the vector recommender, not `content_category` SQL.** The recommender ranks channels by how strongly they load on a category/demographic tag (cosine-style scores), instead of forcing exact equality on a single integer code. It also returns the matching brand profiles alongside the channels — useful when the user actually wants to know "who buys this kind of inventory."
+For category- or demographic-driven discovery, **use the recommender, not `content_category` SQL.** The recommender ranks channels by how strongly they load on a category/demographic tag (similarity scores), instead of forcing exact equality on a single integer code. It also returns the matching brand profiles alongside the channels — useful when the user actually wants to know "who buys this kind of inventory."
 
 ```bash
 # Discover the right tag name first (free)
 tl recommender tags cooking
 tl recommender tags "usa"
 
-# Top channels & profiles loaded on a vector tag (50 credits; Intelligence)
+# Top channels & profiles loaded on a similarity tag (25 credits; Intelligence)
 tl recommender top-channels "Cooking" msn:yes --limit 50
 tl recommender top-channels "Tech" --limit 30
 tl recommender top-brands "USA share" mbn:yes --limit 50
@@ -451,7 +451,7 @@ tl reports run 42 --json
 
 "Find Cooking channels with US-heavy mobile audiences":
 ```bash
-# Use the vector recommender for the topic, then narrow with structured filters / SQL on the IDs.
+# Use the recommender for the topic, then narrow with structured filters / SQL on the IDs.
 tl recommender top-channels "Cooking" msn:yes --limit 100 --json \
   | jq -r '.results[].channel_id' \
   | paste -sd, - \
@@ -469,7 +469,7 @@ tl recommender top-channels "Cooking" msn:yes --limit 100 --json \
 tl sponsorships list status:sold primary-device:mobile min-us-share:60 --json
 ```
 
-"Find channels similar to one I know" (vector-similarity recommender, 50 credits per call):
+"Find channels similar to one I know" (similarity recommender, 25 credits per call):
 ```bash
 tl channels similar 29834 --limit 10                         # by ID (defaults to msn:yes, tpp:both)
 tl channels similar "Tremending girls" --limit 5             # by unique name
@@ -481,16 +481,16 @@ tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-s
 ```
 **Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
 
-"Browse the vector recommender" (categories, demographics, formats — `tl recommender tags` is free):
+"Browse the recommender" (categories, demographics, formats — `tl recommender tags` is free):
 ```bash
 tl recommender tags                                            # Full tag list (free)
 tl recommender tags cooking                                    # Search tag names by substring
-tl recommender top-channels "Cooking" msn:yes --limit 50       # Top channels loaded on a tag (50 credits)
+tl recommender top-channels "Cooking" msn:yes --limit 50       # Top channels loaded on a tag (25 credits)
 tl recommender top-profiles "Cooking" --limit 30               # Top brand profiles for the tag
 tl recommender top-brands "USA share" mbn:yes --limit 30       # Top brands (deduped) — demographic tag, MBN only
 tl recommender top-channels "Tech" exclude-for-profile:842     # Drop channels already proposed for profile 842
 tl recommender inspect-channel 29834                           # Per-tag breakdown of a channel's vector
-tl recommender inspect-brand Nike                              # Per-tag breakdown of a brand's ideal vector
-tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal vector
+tl recommender inspect-brand Nike                              # Per-tag breakdown of a brand's ideal profile
+tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal profile
 ```
 Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches.

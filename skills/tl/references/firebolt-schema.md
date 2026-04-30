@@ -116,7 +116,7 @@ Every Firebolt workflow has two steps:
 **Step 1 — get `channel_id` and (optionally) video IDs from PG/ES.**
 
 ```bash
-# Channels matching some category (vector recommender — preferred over content_category equality)
+# Channels matching some category (recommender — preferred over content_category equality)
 tl recommender top-channels "Tech" msn:yes --limit 50 --json \
   | jq '.results[].channel_id'
 

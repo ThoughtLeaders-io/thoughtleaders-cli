@@ -56,7 +56,7 @@ tl uploads show 1174310:0BehkmVa7ak
 
 # Search channels via raw SQL — `tl db pg` against thoughtleaders_channel
 # (run `tl schema pg` once to confirm the live column set).
-# NOTE: For topic / category discovery, prefer the vector recommender over
+# NOTE: For topic / category discovery, prefer the recommender over
 # `content_category` equality — `tl recommender top-channels "<tag>"`
 # returns channels ranked by how strongly they load on the topic, not just
 # rows where the single category code matches exactly.
@@ -74,22 +74,22 @@ tl db pg "SELECT id, channel_name FROM thoughtleaders_channel
 tl channels show 12345
 tl channels show "Economics Explained"
 
-# Find similar channels (vector recommender, 50 credits, Intelligence plan).
+# Find similar channels (recommender, 25 credits, Intelligence plan).
 # msn: is tri-state (default msn:yes): yes = MSN only, no = non-MSN only, both = no filter.
 # tpp: is tri-state (default tpp:both): yes = TPP only, no = non-TPP only, both = no filter.
 # Same ID-or-name resolution rules as `channels show`.
 tl channels similar 12345 --limit 10
 tl channels similar "Tremending girls" min-score:0.85 --limit 5
 
-# Vector recommender — discovery by category/demographic tag (Intelligence plan).
-# `tags` is free; `top`, `inspect-*`, and `similar-to-profile` cost 50 credits flat.
+# Recommender — discovery by category/demographic tag (Intelligence plan).
+# `tags` is free; `top-*`, `inspect-*`, `similar-to-profile`, and `similar-brands-to-channel` cost 25 credits flat.
 tl recommender tags                              # List every tag (free)
 tl recommender tags cooking                      # Search tag names by substring
 tl recommender top-channels "Cooking" msn:yes --limit 50  # Top channels for a tag
 tl recommender top-profiles "Cooking" mbn:yes --limit 30  # Top brand profiles (one brand → potentially multiple profiles)
 tl recommender top-brands "Cooking" --limit 30            # Top brands (deduped from profiles)
 tl recommender inspect-channel 12345             # Per-tag breakdown of a channel's vector
-tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal vector
+tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal profile
 tl recommender similar-to-profile 842            # Channels closest to a brand profile
 
 # Brand intelligence

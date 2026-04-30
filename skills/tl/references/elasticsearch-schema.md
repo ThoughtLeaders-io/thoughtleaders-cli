@@ -158,11 +158,9 @@ The full table below applies to **channel parent docs only**:
 ### Other indices
 
 - `tl-ingest` — ingestion queue. **Don't query.** Internal pipeline state.
-- `tl-feature-vectors-channel`, `tl-feature-vectors-channel-profile` — channel similarity vectors.
+- `tl-similarity-profiles-channel`, `tl-similarity-profiles-channel-profile` — channel similarity vectors.
 - `tl-vectors-brand-company-descriptions-*` — brand similarity vectors.
-- `tl-vectors-channel-audience-*`, `tl-vectors-channel-topic-descriptions-*`, `tl-vectors-channel-features` — channel feature vectors.
-
-Note: `knn` queries against vector indices are **not currently accepted** as a top-level key. For "find similar" results, use `tl channels similar` / `tl brands similar` — they wrap the vector search server-side.
+- `tl-vectors-channel-audience-*`, `tl-vectors-channel-topic-descriptions-*`, `tl-vectors-channel-features` — channel similarity profiles.
 
 ## Common Query Patterns
 

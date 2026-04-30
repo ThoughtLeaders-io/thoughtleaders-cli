@@ -125,7 +125,7 @@ SIMILAR_COLUMN_CONFIG = {
 
 
 def _format_score(results: list[dict]) -> list[dict]:
-    """Convert raw cosine score (0.0-1.0) to percentage string."""
+    """Convert raw similarity score (0.0-1.0) to percentage string."""
     for row in results:
         score = row.get("score")
         if isinstance(score, (int, float)):
@@ -144,7 +144,7 @@ def similar_cmd(
 ) -> None:
     """Find brands similar to a given one (by ID or name).
 
-    Costs 50 credits per call. Intelligence plan required.
+    Costs 25 credits per call. Intelligence plan required.
 
     Examples:
         tl brands similar Nike

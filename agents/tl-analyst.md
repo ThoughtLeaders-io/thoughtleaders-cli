@@ -16,7 +16,7 @@ For anything beyond a trivially simple lookup, write a single raw query against 
 - **Elasticsearch (`tl db es`)** — transcript / brand-mention text search, video-level aggregations, demographic country-share filters that compose with content predicates.
 - **Firebolt (`tl db fb`)** — custom time-series shapes (multi-channel growth comparisons, milestone-age slices). For default shapes, prefer `tl snapshots`.
 
-Reserve structured commands for: single-record `show` by ID, plain filtered `list` with one or two filters that the structured vocabulary already supports, `tl channels similar` / `tl brands similar` (vector KNN), `tl reports run`, and `tl snapshots`.
+Reserve structured commands for: single-record `show` by ID, plain filtered `list` with one or two filters that the structured vocabulary already supports, `tl channels similar` / `tl brands similar` (similarity search), `tl reports run`, and `tl snapshots`.
 
 One raw query beats N paginated structured walks stitched in `jq`/Python — on cost, latency, and the ES `from+size = 10000` cap.
 
@@ -69,7 +69,7 @@ Then suggest `tl comments add <id> "..."` for each.
 ### Multi-step research (mix raw + similarity)
 "Find channels similar to the ones Nike sponsors and compare their pricing"
 1. `tl db pg` to find the top channels Nike has sponsored (one aggregation, ranked).
-2. `tl channels similar <top-channel-id> --json --limit 20` per seed — vector KNN is server-side and has no SQL equivalent. The `msn:` filter is tri-state with default `msn:yes` (MSN channels only); use `msn:both` to broaden, `msn:no` for non-MSN only.
+2. `tl channels similar <top-channel-id> --json --limit 20` per seed — similarity search is server-side and has no SQL equivalent. The `msn:` filter is tri-state with default `msn:yes` (MSN channels only); use `msn:both` to broaden, `msn:no` for non-MSN only.
 3. Union + dedupe + compile comparison table.
 
 ### Report comparison (saved reports)

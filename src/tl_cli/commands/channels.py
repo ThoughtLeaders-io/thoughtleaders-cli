@@ -93,7 +93,7 @@ def _handle_channel_api_error(e: ApiError) -> None:
 
 
 def _format_score(results: list[dict]) -> list[dict]:
-    """Convert raw cosine score (0.0-1.0) to percentage string for table/csv/md."""
+    """Convert raw similarity score (0.0-1.0) to percentage string for table/csv/md."""
     for row in results:
         score = row.get("score")
         if isinstance(score, (int, float)):
@@ -171,14 +171,14 @@ def similar_cmd(
 ) -> None:
     """Find channels similar to a given one (by id or name).
 
-    Costs 50 credits per call. Intelligence plan required. Results are
-    ranked by cosine similarity and enriched with subscribers, impression,
+    Costs 25 credits per call. Intelligence plan required. Results are
+    ranked by similarity and enriched with subscribers, impression,
     total_views, category, and the channel's representative CPM.
 
     Server-side filters (pushed to the recommender):
         language:<iso>      Restrict to a content language (default: en)
         msn:<true|false>    Restrict to Media Selling Network (default: true)
-        min-score:<0-1>     Minimum cosine similarity (default: 0.5)
+        min-score:<0-1>     Minimum similarity (default: 0.5)
 
     Client-side post-filters (applied after fetch):
         category:<code>     Keep only rows matching this content_category
