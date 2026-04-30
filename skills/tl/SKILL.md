@@ -157,6 +157,8 @@ tl channels similar <id-or-name>       # Similarity recommender (25 credits flat
 tl brands show <id-or-name>            # Brand detail (1 credit)
 tl brands history <id-or-name>         # Sponsorship history (5 credits/result, linear)
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
+tl brands history-stats <id-or-name>   # Aggregate roll-up: counts, total/avg/median views, first/last seen, by-year, top channels (5 credits flat)
+tl brands history-stats <q> --channel <id>  # Same roll-up, narrowed to one channel
 tl brands similar <id-or-name>         # Find similar brands via similarity search (25 credits flat)
 tl recommender tags [query]            # List similarity tag names — categories, demographics, formats (free)
 tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (25 credits; Intelligence)

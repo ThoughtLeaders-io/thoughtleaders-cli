@@ -118,6 +118,50 @@ def history_cmd(
         client.close()
 
 
+@app.command("history-stats")
+def history_stats_cmd(
+    query: str = typer.Argument(..., help="Brand name or numeric ID"),
+    channel: int | None = typer.Option(None, "--channel", "-c", help="Restrict the roll-up to a specific channel"),
+    top_channels: int = typer.Option(10, "--top-channels", help="How many top-by-count channels to include in the roll-up (1-50)"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Aggregate roll-up of a brand's sponsorship history (no per-row output).
+
+    Same scope as `tl brands history` (videos where the brand is in
+    `sponsored_brand_mentions`), but returned as a single summary
+    record: total sponsored videos, view sums/avg/median, first/last
+    seen dates, per-year buckets, top channels by count, and
+    TL-brokered adlink counts. Computed via one ES aggregation +
+    one PG count — cost is flat regardless of how prolific the
+    brand is.
+
+    Requires an Intelligence plan. Costs 5 credits flat.
+
+    Examples:
+        tl brands history-stats Nike
+        tl brands history-stats 21416 --top-channels 25
+        tl brands history-stats Nike --channel 12345 --json
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+
+    params: dict[str, str] = {"top-channels": str(top_channels)}
+    if channel is not None:
+        params["channel_id"] = str(channel)
+
+    encoded_query = urllib.parse.quote(query, safe="")
+    client = get_client()
+    try:
+        data = client.get(f"/brands/{encoded_query}/history-stats", params=params)
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
 SIMILAR_COLUMNS = ["score", "brand_id", "brand_name", "website", "mbn"]
 SIMILAR_COLUMN_CONFIG = {
     "score": {"justify": "right"},
