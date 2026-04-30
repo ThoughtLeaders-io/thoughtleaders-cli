@@ -52,33 +52,33 @@ This is exactly what the matcher needs to read at the start of every query.
 
 | Surface | Status | Notes |
 |---|---|---|
-| `thoughtleaders-cli` on PyPI | ✓ v0.5.0 published | `pip install thoughtleaders-cli` |
-| Local install (Nerya's machine) | v0.4.0 | Predates `tl db pg`. Upgrade pending Pepa's broader rollout. |
-| `tl db pg` (raw SQL endpoint) | Live in sandbox / master | Per Pepa 2026-04-29 Slack. CLI fixes already in main; broader deployment in progress. |
-| `tl db es` / `tl db fb` | Pending | Same pattern; super-user only initially per 2026-04-29 plan. |
-| `tl ask` | ✓ live in v0.4.0 | Skill entry point — works today. |
-| `tl describe show <resource>` | ✓ live in v0.4.0 | **Excluded from v2 skill surface** (per 2026-04-23 daily — duplicative of raw SQL). |
-| `tl channels` / `uploads` / `sponsorships` / `brands` | ✓ live in v0.4.0 | **Excluded from v2 skill surface** (same reason). |
-| `tl reports create / run` | ✓ live in v0.4.0 | Used by humans for save; v2 skill displays JSON during prototype. |
+| `thoughtleaders-cli` on PyPI | ✓ v0.6.2 published | `pip install thoughtleaders-cli` |
+| Local install (Nerya's machine) | ✓ **v0.6.2 (upgraded 2026-04-29)** | `tl db pg` working end-to-end, verified live. |
+| `tl db pg` (raw SQL endpoint) | ✓ **Live in sandbox; verified locally** | Returns `{"results": [...]}` envelope (skill orchestration extracts `.results`). |
+| `tl db es` / `tl db fb` | Pending | Super-user only initially per 2026-04-29 plan. |
+| `tl ask` | ✓ live | Skill entry point. |
+| `tl describe show <resource>` | ✓ live | **Excluded from v2 skill surface** (per 2026-04-23 daily — duplicative of raw SQL). |
+| `tl channels` / `uploads` / `sponsorships` / `brands` | ✓ live | **Excluded from v2 skill surface** (same reason). |
+| `tl reports create / run` | ✓ live | Used by humans for save; v2 skill displays JSON during prototype. |
 
 ---
 
-## 3. Data plane — interim vs target
+## 3. Data plane — primary vs fallback
 
-The architecture's data plane is `tl db pg` raw SQL. **Until that ships broadly, the prototype rides on the `tl-data` skill's direct DB access** (same DB, different transport).
+The architecture's data plane is `tl db pg` raw SQL. **As of 2026-04-29 v0.6.2 is installed locally and `tl db pg` works end-to-end.** The `tl-data` skill's `pg_query.py` is now a *fallback* (for users without sandbox access), not the primary path.
 
-| Concern | Interim (today) | Target (post `tl db pg` rollout) |
+| Concern | Primary (tl-cli ≥ v0.6.2) | Fallback (no sandbox access) |
 |---|---|---|
-| Topics fetch | `python scripts/pg_query.py "SELECT ... FROM thoughtleaders_topics ..."` | `tl db pg --json "SELECT ..."` |
-| Validation `db_count` | `python scripts/pg_query.py "SELECT COUNT(*) ..."` | `tl db pg --json "SELECT COUNT(*) ..."` |
-| Validation `db_sample` | `python scripts/pg_query.py "SELECT ... LIMIT 10"` | `tl db pg --json "SELECT ... LIMIT 10 OFFSET 0"` |
-| Auth | Local env: `TL_DATABASE_URI` (read-only) | Same auth as `tl whoami` |
-| Sandbox constraints | None (direct DB) | `LIMIT/OFFSET` mandatory, ≤500 rows, forbidden-functions list |
-| Output formats | `--format json/table/csv` (pg_query.py) | `--json/--csv/--md/--toon` |
+| Topics fetch | `tl db pg --json "SELECT ... FROM thoughtleaders_topics ... LIMIT 100 OFFSET 0"` | `python scripts/pg_query.py "..."` |
+| Validation `db_count` | `tl db pg --json "SELECT COUNT(*) ... LIMIT 1 OFFSET 0"` | `python scripts/pg_query.py "..."` |
+| Validation `db_sample` | `tl db pg --json "SELECT ... LIMIT 10 OFFSET 0"` | `python scripts/pg_query.py "..."` |
+| Auth | Same as `tl whoami` | Local env: `TL_DATABASE_URI` |
+| Sandbox constraints | `LIMIT/OFFSET` mandatory, ≤500 rows, forbidden-functions list | None enforced (skill self-enforces) |
+| Output | JSON envelope `{"results": [...]}` (orchestration extracts `.results`) | Bare array `[...]` |
 
-**The migration cost is near-zero** — same SQL, different invocation. The skill's prompts can be written today against `pg_query.py`, then a one-line orchestration swap ports them to `tl db pg` when it lands.
+**Migration is done.** The skill orchestration uses `tl db pg` as primary; `pg_query.py` retained as a documented fallback for users who lack sandbox access.
 
-**Key discipline:** even though `pg_query.py` doesn't enforce `LIMIT/OFFSET`, **write SQL as if it did** during the prototype. Mandatory `LIMIT n OFFSET m`, no top-level `UNION`, no forbidden functions. That way the swap is invisible.
+**Key discipline:** write SQL as if all constraints applied (mandatory `LIMIT n OFFSET m`, no top-level `UNION`, no forbidden functions) so primary and fallback paths produce identical results.
 
 ---
 

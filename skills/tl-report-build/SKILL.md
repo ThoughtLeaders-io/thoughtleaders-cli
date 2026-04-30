@@ -25,7 +25,7 @@ If unclear: ask the user `"Do you want a saved TL report, or just a list here in
 
 ---
 
-## The 5 phases
+## The phases
 
 ```
 NL query
@@ -34,23 +34,36 @@ NL query
 Phase 1 — Report Type Selection         (no CLI calls; M3+)
     │   inference: CONTENT (1) | BRANDS (2) | CHANNELS (3) | SPONSORSHIPS (8)
     ▼
-Phase 2a — Topic Matcher                (LLM call #1a; M2 ✓ implemented)
-    │   reads: live topics (tl db pg / pg_query.py against thoughtleaders_topics)
-    │   produces: per-topic verdicts (strong | weak | none) + reasoning
+Phase 2a — Topic Matcher                (LLM call #1; M2 ✓)
+    │   reads: live topics via tl db pg against thoughtleaders_topics
+    │   produces: per-topic verdicts (strong | weak | none) + summary
     ▼
-Phase 2b — Filter Builder, Pass A       (LLM call #1b; M3)
-    │   reads: topic verdicts + live schema (tl db pg against information_schema)
-    │   produces: partial FilterSet (filters only)
+Phase 2b — Keyword Research             (LLM call #2 + tl db pg validation; M3 part 1)
+    │   STRICT TRIGGER:
+    │     RUN  iff  report_type ∈ {1,2,3}  AND  summary.strong_matches is empty
+    │     SKIP if   strong topic match exists  (trust topic's curated keywords[])
+    │     SKIP if   report_type == 8 (SPONSORSHIPS — no ES content matching)
+    │   inputs:  NL query (no topic anchor; that's why we're here)
+    │   produces: validated KeywordSet
+    │             { core_head, sub_segment, long_tail, content_fields,
+    │               recommended_operator, validated: [...] }
+    │   logic:   LLM proposes candidates → tl db pg COUNT(*) per candidate
+    │            → prune zero-count → emit set
+    │   this is the ONLY filter signal Phase 2c gets in this branch
+    ▼
+Phase 2c — Filter Builder, Pass A       (LLM call #3; M3 part 2)
+    │   reads: NL query + verdicts + KeywordSet + live schema (information_schema)
+    │   produces: partial FilterSet (filters only — no columns/widgets yet)
     ▼
 Phase 3 — Validation Loop               (MANDATORY; M4)
     │   db_count: tl db pg "SELECT COUNT(*) ... LIMIT 1 OFFSET 0"
     │   db_sample: tl db pg "SELECT ... LIMIT 10 OFFSET 0"
-    │   if count == 0   → retry Phase 2b with feedback
+    │   if count == 0   → retry from Phase 2b/2c with feedback
     │   if count >> ok  → narrow filters
     │   else            → proceed to Phase 4
     │   cap: 3 retries
     ▼
-Phase 4 — Column/Widget Builder, Pass B (LLM call #2; M5)
+Phase 4 — Column/Widget Builder, Pass B (LLM call #4; M5)
     │   reads: data/sortable_columns.json
     │   produces: full report config (filters + columns + widgets)
     ▼
@@ -67,15 +80,19 @@ The matcher prompt lives at `prompts/topic_matcher.md`. To run Phase 2a:
 
 1. **Fetch live topics** via the data plane:
    ```bash
-   # Target (once tl db pg ships broadly):
+   # Primary (tl-cli ≥ v0.6.2):
    tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
 
-   # Interim (today, via tl-data skill):
+   # Fallback (older CLI / no PG sandbox access):
    python ~/Desktop/ThoughtLeader/thoughtleaders-skills/tl-data/scripts/pg_query.py \
      "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0" \
      --format json
    ```
-   Both return the same shape: an array of `{id, name, description, keywords}` objects.
+
+   **Response shape difference (important):**
+   - `tl db pg --json` returns `{"results": [...]}` — extract `.results` before passing as `TOPICS` to the matcher
+   - `pg_query.py --format json` returns a bare `[...]` array — pass directly as `TOPICS`
+   - The matcher prompt expects `TOPICS` to be the bare array; the orchestration normalizes
 
 2. **Load the matcher prompt**: `Read prompts/topic_matcher.md` and inject the contents as a system-style instruction.
 
@@ -87,9 +104,9 @@ The matcher prompt lives at `prompts/topic_matcher.md`. To run Phase 2a:
 
 ### Phase 2a contract (downstream consumers)
 
-- **`summary.strong_matches`** is the canonical list of topic IDs Phase 2b should consider for `topics:` filter
-- **`summary.weak_matches`** is informational — Phase 2b can use these for related-keyword expansion or surface them to the user as "did you also mean...?"
-- **`summary.no_match == true`** means the query is off-taxonomy. Phase 2b should fall back to a keyword-only path (no `topics:` filter)
+- **`summary.strong_matches`** is the canonical list of topic IDs whose `keywords[]` arrays Phase 2c will translate into `keyword_groups`. **There is no `topics:` field on v1's FilterSet** — topic IDs are v2 routing metadata only; the platform sees only the resolved `keyword_groups`.
+- **`summary.weak_matches`** is informational — Phase 2c may surface these to the user as "did you also mean...?" but doesn't translate them to keyword_groups by default
+- **`summary.no_match == true`** means the query is off-taxonomy. Phase 2b runs (per the strict trigger) and generates fresh `keyword_groups` from scratch; Phase 2c emits those directly as the only filter signal
 - **`verdicts[i].matching_keywords`** is a strict subset of the corresponding topic's `keywords` array — Phase 2b can trust them as already-validated
 
 ### Phase 2a constraints (what the matcher must NOT do)
@@ -156,7 +173,10 @@ Living at `tl-cli/docs/`:
 
 - [x] **M1**: scaffolding — folder structure, this `SKILL.md`, ported `sortable_columns.json` + v1 `system_prompt.txt` reference, golden queries seed
 - [x] **M2**: `prompts/topic_matcher.md` — Phase 2a topic-matcher prompt; `SKILL.md` Phase 2a invocation flow wired in
-- [ ] **Next (M3)**: `prompts/filter_builder.md` — Phase 2b filter-builder prompt; takes Phase 2a verdicts + schema + NL query → partial FilterSet
+- [ ] **Next (M3)**: TWO prompts —
+  - `prompts/keyword_research.md` (Phase 2b — conditional, ES-validated keyword set; **the only filter signal for off-taxonomy queries**)
+  - `prompts/filter_builder.md` (Phase 2c — verdicts + keyword set + schema → partial FilterSet)
+  - **Stub already in place** at `prompts/filter_builder.md` with the **HARD CONSTRAINTS** section pre-locked: no `topics:` field, topic→keyword_groups translation, v1 schema rules (C1–C10). M3 implementation flesh out the prompt body but **must not relax the constraints**.
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
 - [ ] M6: end-to-end output (display config; suggest `tl reports create`)
