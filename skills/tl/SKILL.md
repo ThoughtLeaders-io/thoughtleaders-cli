@@ -99,7 +99,24 @@ Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 si
 
 ## Workflow
 
-At the start of session, always run a `tl help` command to find out which commands are available, and the `tl whoami` command to find out what you have access to.
+At the start of session, always run `tl --help` to find out which command groups are available, and `tl whoami` to find out what you have access to.
+
+### How to discover commands and subcommands
+
+The CLI exposes three different discovery surfaces — pick by what you actually need:
+
+| You want to know… | Run |
+|---|---|
+| Top-level command groups (`sponsorships`, `channels`, `db`, `recommender`, etc.) | `tl --help` |
+| Subcommands of a group (`tl recommender` → `tags`, `top-channels`, `inspect-brand`, …) | `tl <group> --help` (e.g. `tl recommender --help`, `tl db --help`) |
+| Arguments and flags for a specific leaf command | `tl <group> <subcommand> --help` (e.g. `tl recommender top-channels --help`) |
+| Fields, filters, credit rates for a **data resource** (sponsorships, uploads, snapshots, reports, comments, recommender) | `tl describe show <resource> --json` |
+| The live PG/ES/Firebolt schema for raw `tl db` queries | `tl schema pg` / `tl schema es` / `tl schema fb` |
+
+Notes:
+- Use `--help` everywhere — there is no separate `tl help` command. `tl help` returns "No such command 'help'".
+- **`tl describe show channels`** and **`tl describe show brands`** intentionally do not list fields/filters — channel and brand search live in raw SQL (`tl db pg`) and the recommender, not in a structured list endpoint. They print a notice steering you there.
+- `--help` describes **CLI shape**; `tl describe` describes **data shape**. They don't overlap.
 
 Unless the user specifically asks for running a specific report or showing the result of a specific report, find the data by using other, low-level commands.
 

@@ -3,16 +3,11 @@
 Query sponsorship data, channels, brands, and intelligence.
 """
 
-import re
 import sys
 import traceback
-from pathlib import Path
-from typing import Optional
 
-import click
 import typer
 from rich.console import Console
-from rich.markdown import Markdown
 
 from tl_cli import __version__
 from tl_cli import config as tl_config
@@ -125,61 +120,6 @@ def update_command() -> None:
     """Check for a newer version and upgrade if one is available."""
     from tl_cli.self_update import force_upgrade
     force_upgrade()
-    raise typer.Exit()
-
-
-def _get_terminology() -> str | None:
-    """Extract the Terminology section from README.md.
-
-    Tries to locate README.md relative to the package source first,
-    then falls back to importlib.metadata.
-    """
-    try:
-        text = None
-        readme = Path(__file__).resolve().parent.parent.parent / "README.md"
-        if readme.is_file():
-            text = readme.read_text()
-        else:
-            from importlib.metadata import metadata
-            text = metadata("thoughtleaders-cli").get_payload()
-        if not text:
-            return None
-        match = re.search(r"^# Terminology\s*\n(.+?)(?=\n# |\Z)", text, re.DOTALL | re.MULTILINE)
-        if not match:
-            return None
-        return match.group(1).strip()
-    except Exception:
-        return None
-
-
-@app.command(name="help", hidden=True)
-def help_command(
-    ctx: typer.Context,
-    command: Optional[str] = typer.Argument(None, help="Command to show help for"),
-) -> None:
-    """Show help for the CLI or a specific command."""
-    root_ctx = ctx.parent
-    root_cmd = root_ctx.command
-
-    if command is None:
-        click.echo(root_cmd.get_help(root_ctx))
-        terminology = _get_terminology()
-        if terminology:
-            import shutil
-            term_width = shutil.get_terminal_size().columns
-            console = Console(width=int(term_width * 0.9))
-            console.print(Markdown(terminology))
-            console.print()
-        raise typer.Exit()
-
-    # Look up the subcommand
-    sub_cmd = root_cmd.get_command(root_ctx, command)
-    if sub_cmd is None:
-        click.echo(f"Unknown command: {command}", err=True)
-        raise typer.Exit(1)
-
-    sub_ctx = click.Context(sub_cmd, info_name=command, parent=root_ctx)
-    click.echo(sub_cmd.get_help(sub_ctx))
     raise typer.Exit()
 
 
