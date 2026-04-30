@@ -130,8 +130,7 @@ tl proposals show <id>                 # Proposal detail (2 credits)
 tl proposals create --channel <id> --brand <id>  # Create proposal (free)
 tl uploads list [filters...]           # Video uploads from ES — list curve, mult 1.0
 tl uploads show <id>                   # Upload detail (2 credits)
-tl channels list [filters...]          # Channel search — list curve, mult 1.0
-tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name)
+tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels history <id-or-name>       # Sponsorship history (5 credits/result, linear)
 tl channels similar <id-or-name>       # Vector-similarity recommender (50 credits flat; Intelligence plan)
 tl brands show <id-or-name>            # Brand detail (1 credit)
@@ -155,7 +154,7 @@ tl comments add <adlink-id> "msg"      # Add comment (free)
 
 **"List curve"** above means non-linear pricing: `cost = 1 + mult × 0.126 × n^1.2`. The flat 1-credit setup applies to every list call; the `mult` reflects per-resource complexity. `tl db {pg,fb,es}` shares the same curve at mult=1.4. Concrete totals:
 
-| Rows | mult=1.0 (channels, brands, comments, uploads, sponsorships) | mult=1.2 (snapshots) | mult=1.3 (reports) | mult=1.4 (db.pg / db.fb / db.es) |
+| Rows | mult=1.0 (comments, uploads, sponsorships) | mult=1.2 (snapshots) | mult=1.3 (reports) | mult=1.4 (db.pg / db.fb / db.es) |
 |---:|---:|---:|---:|---:|
 | 1 | 1 | 1 | 1 | 1 |
 | 10 | 3 | 3 | 4 | 4 |
@@ -360,7 +359,7 @@ tl db pg "SELECT id, channel_name, demographic_device_primary, total_views
 
 For per-country share beyond the recommender's "USA share" tag, use the `demographic_geo` jsonb in raw SQL: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
 
-**MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context; use the structured `tl channels list msn:yes|no|both` for MSN-specific lookups, then drop down to SQL on the resulting IDs (`WHERE id IN (...)`) for further analysis.
+**MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context. For MSN-only / non-MSN lookups, run the same raw SQL with `media_selling_network_join_date IS [NOT] NULL` from a context that has access to it (full-access role), or rely on the recommender's MSN-aware filters: `tl recommender top-channels "<tag>" msn:yes|no|all`.
 
 ### Output flags
 - `--json` — structured JSON (use this for parsing)
@@ -398,7 +397,7 @@ Every query costs credits. Before running expensive queries:
 Users only see data their plan allows:
 - **Media buyers** see deals where their org is the brand. They see `price` but never `cost`.
 - **Media sellers** see deals where their org is the publisher. They see `cost` but never `price`.
-- **Intelligence plan** required for `tl brands`, full `tl channels list` search, and full `tl uploads list`.
+- **Intelligence plan** required for `tl brands`, the full `tl recommender` surface, and full `tl uploads list`.
 - **Paid plan** required for `tl snapshots`.
 
 ## Important: Status Labels

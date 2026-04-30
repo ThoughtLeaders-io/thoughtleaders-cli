@@ -48,7 +48,6 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl proposals create --channel <id> --brand <id>` | Create a proposal (free) |
 | `tl uploads list [filters...]` | List video uploads (ES) |
 | `tl uploads show <id> [<id>...]` | Show upload detail(s) by ID |
-| `tl channels list [filters...]` | Search channels. Responses carry boolean `msn` (Media Selling Network) and `tpp` (TL-managed) fields; filterable via `msn:` / `tpp:` tri-state (`yes` / `no` / `both`, default `both`). |
 | `tl channels show <id-or-name>` | Channel detail, including active adspots with price/cost/CPM |
 | `tl channels history <id-or-name>` | Sponsorship history (videos with detected sponsors) |
 | `tl channels similar <id-or-name>` | Vector-similarity recommender. 50 credits; Intelligence plan. Tri-state `msn:` (default `yes`) and `tpp:` (default `both`) filters. Ambiguous names return 400 + candidates list. Hidden `look-alike` alias. |
@@ -75,8 +74,10 @@ Filters are passed as `key:value` pairs after `list`:
 tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
 tl sponsorships list status:pending send-date:2026-03
 tl uploads list channel:12345 type:longform since:2026-03
-# Channel discovery is raw SQL — the structured `tl channels list` covers
-# only narrow lookups. Default to:
+# Channel discovery is raw SQL — default to:
+# (For topic/category lookups, `tl recommender top-channels "<tag>"` is a
+# better starting point than `content_category` equality — it ranks by
+# how strongly each channel loads on the topic, not exact-match.)
 tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel
           WHERE content_category = <COOKING_CODE> AND language = 'en'
             AND total_views >= 1000000
@@ -387,7 +388,6 @@ Most CLI endpoints can reuse existing views/utilities rather than being built fr
 | **`POST /api/cli/v1/sponsorships`** | `api/create-bulk-proposal` (`CreateBulkProposalView`) + MCP `save_proposals_for_email` in `mcp/proposals.py` | Adapt for single-proposal creation from CLI params |
 | **`GET /api/cli/v1/uploads`** | `api/articles` (`ArticlesView`) — full ES article search with configurable columns, filters, aggregation. Already handles channel format, brand filters, content type. | Translate CLI filters → ArticlesView params. Restrict to VIDEO format. |
 | **`GET /api/cli/v1/uploads/<id>`** | `api/articles/<id>` (`SingleArticleView`) | Add CLI envelope |
-| **`GET /api/cli/v1/channels`** | `api/v2/external-youtube-thoughtleaders` (`ExternalYoutubeThoughtleadersView`) — rich ES-powered channel search with configurable columns, aggregation. Also `api/v1/channels/dropdown` for simple name search. | Translate CLI filters → existing view params |
 | **`GET /api/cli/v1/channels/<id>`** | `api/v1/channels/<id>` (`ChannelAPIViewSet.retrieve`) — returns channel detail with loyalty metrics | Add CLI envelope + breadcrumbs linking to snapshots |
 | **`GET /api/cli/v1/brands/<query>`** | `api/v1/brands` (`BrandsViewSet`) for brand lookup + `api/articles` with `sponsored_brand_mentions` filter for intelligence data. Also `api/brand/<id>/matcher` (`BrandChannelMatcherAPI`) for channel discovery. | Combine brand lookup + ES brand mention query |
 | **`GET /api/cli/v1/snapshots/channel/<id>`** | `api/v2/channel-history` (`ChannelHistoryView`) — already queries Firebolt `channel_metrics` with pagination, uses `get_firebolt_query_results()` utility. Also `api/v2/external-channel-total-views` for time-series with granularity. | Direct reuse — just translate params + add CLI envelope |

@@ -18,8 +18,8 @@ The user wants to query ThoughtLeaders data. Translate their request into the ri
 ## Examples
 
 - "/tl sold sponsorships for Nike in Q1" → `tl sponsorships list status:sold brand:"Nike" purchase-date-start:2026-01-01 purchase-date-end:2026-03-31`
-- "/tl cooking channels over 100k subs" → `tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel WHERE content_category = <COOKING_CODE> AND total_views >= 100000 ORDER BY total_views DESC LIMIT 50 OFFSET 0"`
-- "/tl mobile-first US cooking channels" → `tl db pg "SELECT id, channel_name, demographic_usa_share FROM thoughtleaders_channel WHERE content_category = <COOKING_CODE> AND demographic_device_primary = 'mobile' AND demographic_usa_share >= 50 ORDER BY total_views DESC LIMIT 50 OFFSET 0"`
+- "/tl cooking channels over 100k subs" → `tl recommender top-channels "cooking" --limit 50` (then post-filter by `subscribers >= 100000` on the resulting IDs)
+- "/tl mobile-first US cooking channels" → `tl recommender top-channels "cooking" --limit 100` (then narrow by `demographic_device_primary = 'mobile'` / `demographic_usa_share >= 50` with raw SQL on the resulting IDs)
 - "/tl Nike's sponsorship activity" → `tl brands show Nike`
 - "/tl run my Q1 report" → `tl reports --json` then `tl reports run <id>`
 - "/tl check my balance" → `tl balance`

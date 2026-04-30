@@ -56,14 +56,17 @@ tl uploads show 1174310:0BehkmVa7ak
 
 # Search channels via raw SQL — `tl db pg` against thoughtleaders_channel
 # (run `tl schema pg` once to confirm the live column set).
+# NOTE: For topic / category discovery, prefer the vector recommender over
+# `content_category` equality — `tl recommender top-channels "<tag>"`
+# returns channels ranked by how strongly they load on the topic, not just
+# rows where the single category code matches exactly.
 tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel
           WHERE content_category = <COOKING_CODE> AND total_views >= 100000
           ORDER BY total_views DESC LIMIT 50 OFFSET 0"
 tl db pg "SELECT id, channel_name FROM thoughtleaders_channel
           WHERE is_tl_channel = TRUE LIMIT 200 OFFSET 0"             # all TPP channels (~169)
-# MSN status (media_selling_network_join_date) is scrubbed from the
-# advertiser sandbox view — for MSN-only / non-MSN lookups, the
-# structured filter is the right tool: `tl channels list msn:yes|no`.
+# MSN status: filter on `media_selling_network_join_date IS [NOT] NULL`
+# in the same raw SQL query (column is scrubbed from advertiser sandboxes).
 
 # Show channel detail — accepts numeric ID or channel name.
 # Names that match more than one active channel print a candidate list

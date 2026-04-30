@@ -11,7 +11,7 @@ from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="YouTube channels (search, detail, and similar-channel recommendations)")
+app = typer.Typer(help="YouTube channels (detail, history, and similar-channel recommendations)")
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.
@@ -23,50 +23,6 @@ SIMILAR_COLUMN_CONFIG = {
     "total_views": {"justify": "right"},
     "cpm": {"justify": "right"},
 }
-
-
-@app.callback(invoke_without_command=True)
-def channels(ctx: typer.Context) -> None:
-    """YouTube channels — search and detail."""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, limit=50, offset=0)
-
-
-@app.command("list")
-def list_cmd(
-    args: list[str] = typer.Argument(None, help="Filters (key:value pairs). Run 'tl describe show channels' for available filters."),
-    json_output: bool = typer.Option(False, "--json", help="JSON output"),
-    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
-    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
-    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
-    offset: int = typer.Option(0, "--offset", help="Pagination offset"),
-) -> None:
-    """Search channels with optional filters.
-
-    Examples:
-        tl channels list                                  # List channels
-        tl channels list category:cooking min-subs:100k   # Search with filters
-    """
-    fmt = detect_format(json_output, csv_output, md_output, toon_output)
-    filters = parse_filters(args or [])
-
-    client = get_client()
-    try:
-        params = {**filters, "limit": str(limit), "offset": str(offset)}
-        data = client.get("/channels", params=params)
-        for r in data.get("results", []):
-            r["channel_id"] = r.pop("id", None)
-        output(
-            data,
-            fmt,
-            columns=["channel_id", "name", "url", "msn", "tpp", "subscribers", "gender", "countries", "category", "sponsorship_score", "trend"],
-            title="Channels",
-        )
-    except ApiError as e:
-        handle_api_error(e)
-    finally:
-        client.close()
 
 
 @app.command("show")
