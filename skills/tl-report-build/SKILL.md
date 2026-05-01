@@ -173,10 +173,14 @@ Living at `tl-cli/docs/`:
 
 - [x] **M1**: scaffolding — folder structure, this `SKILL.md`, ported `sortable_columns.json` + v1 `system_prompt.txt` reference, golden queries seed
 - [x] **M2**: `prompts/topic_matcher.md` — Phase 2a topic-matcher prompt; `SKILL.md` Phase 2a invocation flow wired in
-- [ ] **Next (M3)**: TWO prompts —
-  - `prompts/keyword_research.md` (Phase 2b — conditional, ES-validated keyword set; **the only filter signal for off-taxonomy queries**)
-  - `prompts/filter_builder.md` (Phase 2c — verdicts + keyword set + schema → partial FilterSet)
-  - **Stub already in place** at `prompts/filter_builder.md` with the **HARD CONSTRAINTS** section pre-locked: no `topics:` field, topic→keyword_groups translation, v1 schema rules (C1–C10). M3 implementation flesh out the prompt body but **must not relax the constraints**.
+- [x] **M3 part 1**: `prompts/keyword_research.md` (Phase 2b — conditional, ES-validated keyword set; the only filter signal for off-taxonomy queries) + rehearsal artifact ([`keyword_research_rehearsal.md`](examples/keyword_research_rehearsal.md)) — **22/22 defensible across 4 off-taxonomy paths**
+- [x] **M3 part 4**: G11–G13 added to `golden_queries.md`; rehearsal extended
+- [x] **M3 part 2**: `prompts/filter_builder.md` body (529 lines) — 13 reasoning dimensions D1–D11 + D-S/D-M/D-X, 5 worked examples (G01/G03/G04/G09/G10), 15-point self-check tied to HARD CONSTRAINTS C1–C10
+- [x] **M3 part 3**: [`examples/filter_builder_rehearsal.md`](examples/filter_builder_rehearsal.md) — all 13 goldens; **13/13 self-check defensible**; 12/13 produce non-zero Phase 3 results (G11 sparse in TL data — surfaced as expected)
+- **M3 ✓ DONE**
+- [ ] **Next (M4)**: validation loop orchestration in `SKILL.md` flow — translate partial FilterSet → SQL → run db_count + db_sample → decide proceed/retry/fail. M3 Part 3 surfaced calibration rules: 0 retry / 1–4 warn / 5–50 narrow-but-ok / 51–10K normal / 10K+ broad.
+- [ ] M5: `prompts/column_widget_builder.md` (Phase 4 — needs `_routing_metadata.intent_signal` threading per M3 finding)
+- [ ] M6: end-to-end output (display config; suggest `tl reports create`)
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
 - [ ] M6: end-to-end output (display config; suggest `tl reports create`)

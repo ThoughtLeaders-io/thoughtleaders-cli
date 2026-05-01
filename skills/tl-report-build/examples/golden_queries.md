@@ -107,6 +107,36 @@ For each golden query, the skill's Phase 1 + Phase 2a output is **defensible** i
 
 **Target for M2 exit**: 8 out of 10 defensible verdicts on first run, no critical misclassifications (i.e., G07's "partnership" must route to type 8, not 3).
 
+---
+
+## Off-taxonomy expansion goldens (added 2026-05-01 for M3 Part 4)
+
+These specifically exercise paths Phase 2b takes that G09 alone doesn't cover. Per `keyword_research_rehearsal.md`, the original M3 Part 1 rehearsal was 9/9 *on G09 only* — these three close the coverage gap.
+
+## 11. Anti-overlap with weak topic match
+- **ID**: G11
+- **Query**: `"channels about IRS tax debt forgiveness programs"`
+- **Expected report type**: CHANNELS (3)
+- **Expected topic match(es)**: 97 (Personal Investing) — **weak** (tax-adjacent finance vertical, but `keywords[]` covers stocks/portfolio/budgeting, NOT tax debt resolution); rest none
+- **Expected Phase 2b**: runs (no strong matches); produces tax-debt-resolution candidates AND avoids overlap with Topic 97's stocks/ETFs/portfolio territory
+- **Notes**: Tests anti-overlap rule R6 from `keyword_research.md`. Validation will show TL data is sparse on this niche (most candidates near-zero) — meaning Phase 3 will likely surface a "narrow result" warning. That's a real-data feature, not a bug.
+
+## 12. Obscure niche, all-none
+- **ID**: G12
+- **Query**: `"channels about competitive speedcubing"`
+- **Expected report type**: CHANNELS (3)
+- **Expected topic match(es)**: none (no topic covers Rubik's cube solving or twisty-puzzle hobby)
+- **Expected Phase 2b**: runs; emits hobby-specific terms (`speedcubing`, `cubing`, `Rubik`, `twisty puzzles`) — has to discipline itself to not over-propose adjacencies (e.g. "puzzle games", which would drift into PC Games territory)
+- **Notes**: Tests the LLM's ability to stay narrow on a small niche. Live db_count for `speedcubing` ≈ 32, `Rubik` ≈ 140 — small but real coverage in TL data.
+
+## 13. Off-taxonomy with explicit AND
+- **ID**: G13
+- **Query**: `"channels about both 3D printing and miniature painting"`
+- **Expected report type**: CHANNELS (3)
+- **Expected topic match(es)**: none (no topic covers either 3D printing or miniature painting)
+- **Expected Phase 2b**: runs; `recommended_operator: "AND"` because user said "both X and Y"; emits keyword candidates for each side independently
+- **Notes**: Tests R4 (AND inference from "both X and Y") combined with off-taxonomy. Live AND intersection in TL data: 21 channels — narrow but non-zero. Distinguishes from G09's OR-default path.
+
 ## What to add later (when expanding to ~50)
 - More multi-topic combinations (Topic × Topic, Topic × keyword)
 - Date-range edge cases ("last week", "Q4 2025", "since the new year")
@@ -115,3 +145,4 @@ For each golden query, the skill's Phase 1 + Phase 2a output is **defensible** i
 - Boolean combinations ("either gaming or beauty, not both")
 - Lookalike requests ("channels similar to MrBeast")
 - Edit-mode triggers ("update my Q1 gaming report to also include esports")
+- More off-taxonomy goldens — currently 4 (G09, G11–G13); aim for ~10 by M7
