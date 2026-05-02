@@ -119,6 +119,165 @@ These are encoded in `prompts/topic_matcher.md`:
 
 ---
 
+## Phase 3 — Validation Loop (how to invoke)
+
+Phase 3 is the **only mandatory non-LLM-dominated phase**. It takes the partial FilterSet from Phase 2c, translates it to SQL, runs `tl db pg`, applies threshold rules, runs the [`sample_judge.md`](prompts/sample_judge.md) sub-step on samples, and decides `proceed | retry | alternatives | fail`.
+
+### Step 3.1 — Translate FilterSet to SQL
+
+Determined by `report_type`. The skill builds two queries: `db_count` (returns scalar) and `db_sample` (returns up to 10 rows).
+
+#### Type 3 (CHANNELS) — most common path
+
+Predicate template (assembled from `filterset` fields):
+```sql
+is_active = TRUE
+  AND (<keyword_groups predicate>)        -- if non-empty
+  AND <reach_from / reach_to>             -- if set
+  AND language IN (<languages>)           -- if set
+  AND <demographic predicates>            -- if set
+  AND <date predicates from days_ago>     -- if set
+```
+
+`<keyword_groups predicate>`:
+- For each non-excluded `keyword_groups` entry → `(description ILIKE '%<text>%' OR channel_name ILIKE '%<text>%')`
+- Combine entries with `keyword_operator` (AND or OR)
+- For each `exclude: true` entry → wrap in `AND NOT (description ILIKE ... OR channel_name ILIKE ...)` — independent of `keyword_operator`
+
+Final SQL shape:
+```sql
+-- db_count
+SELECT COUNT(*) FROM thoughtleaders_channel WHERE <predicate> LIMIT 1 OFFSET 0
+-- db_sample
+SELECT id, channel_name, reach FROM thoughtleaders_channel WHERE <predicate> ORDER BY reach DESC NULLS LAST LIMIT 10 OFFSET 0
+```
+
+#### Type 1 (CONTENT) — videos/uploads
+
+Production runs against ES; for the prototype, fall back to a channel-level proxy with the same predicate against `thoughtleaders_channel` and emit a `_validation.note: "type 1 prototype validation uses channel-level proxy; production will use ES word-boundary scoring"` so Phase 5 can surface it.
+
+#### Type 2 (BRANDS)
+
+Same prototype proxy as Type 1: query `thoughtleaders_channel` with the keyword predicate. The brand-level filtering happens in production via ES; for prototype validation, channel-level smoke check is sufficient.
+
+#### Type 8 (SPONSORSHIPS) — completely different schema
+
+```sql
+SELECT COUNT(*) FROM thoughtleaders_adlink al
+  LEFT JOIN thoughtleaders_channel c ON al.channel_id = c.id
+  LEFT JOIN thoughtleaders_brand b ON al.brand_id = b.id
+WHERE
+  al.publish_status IN (<filters_json.publish_status>)   -- mandatory; default active set
+  AND al.created_at BETWEEN <start_date> AND <end_date>  -- if dates given
+  AND b.id IN (<resolved brand_ids>)                     -- if brand_names set
+  AND c.id IN (<resolved channel_ids>)                   -- if channel_names set
+LIMIT 1 OFFSET 0
+```
+
+`brand_names` and `channel_names` are *strings* in v1's FilterSet — Phase 3 resolves them to IDs via a preliminary `tl db pg` query against `thoughtleaders_brand` / `thoughtleaders_channel` before composing the main predicate.
+
+### Step 3.2 — Run `db_count` (with timeout retry)
+
+```
+tl db pg --json "<count_sql>"
+```
+
+If the query times out:
+1. Drop the `channel_name ILIKE` half of each keyword predicate (description-only)
+2. Retry once
+3. If still times out: split the predicate by `AND` and run each as a separate baseline query, then estimate intersection arithmetically
+4. If that fails too: emit `decision: "fail"` with diagnostic in `_validation.errors`
+
+This is the **serial-with-retry orchestration rule** from M3 findings. `tl db pg` timeouts surfaced repeatedly during M3 rehearsals; the skill must defend against them.
+
+### Step 3.3 — Apply threshold rules
+
+```
+db_count    →  classification    →  next step
+─────────────────────────────────────────────
+0           →  empty             →  Step 3.5 (retry — broaden)
+1–4         →  very_narrow       →  Step 3.4 (sample inspection); proceed with warning
+5–50        →  narrow            →  Step 3.4 (sample inspection); proceed with note
+51–10000    →  normal            →  Step 3.4 (sample inspection)
+10001–50000 →  broad             →  Step 3.4 (sample inspection); proceed with narrow-suggest
+> 50000     →  too_broad         →  Step 3.5 (retry — narrow)
+```
+
+Calibration source: M3 Part 3 rehearsal where every golden's actual count fell into one of these buckets and the right decision was clear.
+
+### Step 3.4 — Run `db_sample`, then `sample_judge`
+
+```
+tl db pg --json "<sample_sql>"
+```
+
+Pipe the sample (up to 10 rows) into the sample_judge prompt:
+1. Load [`prompts/sample_judge.md`](prompts/sample_judge.md)
+2. Inject `USER_QUERY`, `DB_SAMPLE`, and `VALIDATION_CONCERNS` (inherited from Phase 2c's `_routing_metadata.validation_concerns`)
+3. Parse JSON output: `{judgment, reasoning, noise_signals, matching_signals}`
+
+Decision based on judgment:
+- `matches_intent` → `decision: "proceed"`, route to Phase 4
+- `looks_wrong` → `decision: "alternatives"`, skip Phase 4, route to Phase 5 with structured user prompt
+- `uncertain` → `decision: "alternatives"` with the user prompt favoring "Refine" — surface ambiguity rather than silently shipping
+
+### Step 3.5 — Retry orchestration (cap: 3)
+
+When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever upstream phase produced the failing FilterSet:
+
+| Source | Retry target | Feedback shape |
+|---|---|---|
+| matched topics (Phase 2c) | Phase 2c | `{issue, suggestion, previous_filterset}`; suggest supplement with more keywords from `topic.keywords[]` (beyond head) or relax operator AND→OR |
+| KEYWORD_SET (Phase 2b) | Phase 2b | `{issue, suggestion}`; suggest broader candidates or different sub_segment terms |
+
+Cap at **3 retries total** across both phases. After 3, emit `decision: "fail"` with diagnostic — better to honestly fail than infinite-loop.
+
+**What does NOT trigger retry**:
+- `sample_judge` returning `looks_wrong` — this is a substantive failure (data sparsity or noise), not a shape failure. Retrying would just produce more noise. Go straight to `alternatives`.
+- `db_count` in the `narrow` (1–4) bucket — proceed with warning; retry would lose the small but real signal.
+
+### Step 3.6 — Compose decision output
+
+```json
+{
+  "decision": "proceed" | "retry" | "alternatives" | "fail",
+  "validation": {
+    "db_count": <int>,
+    "db_sample": [<channels>],
+    "count_classification": "empty" | "very_narrow" | "narrow" | "normal" | "broad" | "too_broad",
+    "sample_judgment": "matches_intent" | "looks_wrong" | "uncertain" | null,
+    "sample_judgment_reasoning": "<from sample_judge>",
+    "validation_concerns": [/* accumulated from Phase 2b + Phase 3 */],
+    "errors": [/* if fail */]
+  },
+  "feedback_for_retry": { /* present iff decision == "retry" */ },
+  "alternatives_for_user": { /* present iff decision == "alternatives" */ }
+}
+```
+
+Phase 4 reads `decision == "proceed"` to know it's safe to run. Phase 5 reads `alternatives_for_user` to construct the user prompt.
+
+### Phase 3 edge cases
+
+| Edge case | Behavior |
+|---|---|
+| Multi-step query (G10) | Phase 3 runs `source_query` first, extracts `channel_ids`, then runs main report's count/sample with `apply_as` injection. Two `tl db pg` queries instead of one. |
+| Cross-references (G05) | Resolve brand names → brand IDs via `tl db pg` against `thoughtleaders_brand` first; then resolve cross-reference channel set; then main predicate. Adds 1–2 preliminary queries. |
+| Brand/channel name lookups | All string-name resolutions happen in Phase 3 (not Phase 2c). v1's schema treats them as strings; v1's backend resolved to IDs. v2 must replicate that resolution explicitly. |
+| Inherited `validation_concerns` | Pass through to `sample_judge`'s `VALIDATION_CONCERNS` input verbatim. The prompt biases toward `looks_wrong` when these are present and confirmed in samples. |
+| Type 8 with no date filter | Reject upfront (`decision: "fail"`) — sponsorship queries without dates are unbounded and meaningless. v1's `multi_step_query` rule for source_query (line 116) requires explicit dates; same applies here. |
+
+### Phase 3 contract (downstream consumers)
+
+- **Phase 4 (Column/Widget Builder)** runs ONLY when `decision == "proceed"`. Reads `_routing_metadata.intent_signal` and the validated FilterSet.
+- **Phase 5 (Display)** runs in three modes:
+  - `proceed` path — assemble the full config from Phases 2c + 4
+  - `alternatives` path — present the structured user prompt (save anyway / refine / cancel)
+  - `fail` path — present the diagnostic to the user with no save option
+- **`validation_concerns`** propagates into Phase 5's user-facing message — the user should see noise warnings, narrow-result notes, and sample-judgment reasoning.
+
+---
+
 ## CLI surface used by this skill (only these)
 
 Per the 2026-04-23 daily call: the v2 skill uses the **3 DB endpoint commands plus `tl ask`** as primitives. Higher-level entity commands (`tl channels`, `tl describe`, etc.) are excluded — they're "layers that duplicate schema knowledge" on top of the primitives.
@@ -178,7 +337,9 @@ Living at `tl-cli/docs/`:
 - [x] **M3 part 2**: `prompts/filter_builder.md` body (529 lines) — 13 reasoning dimensions D1–D11 + D-S/D-M/D-X, 5 worked examples (G01/G03/G04/G09/G10), 15-point self-check tied to HARD CONSTRAINTS C1–C10
 - [x] **M3 part 3**: [`examples/filter_builder_rehearsal.md`](examples/filter_builder_rehearsal.md) — all 13 goldens; **13/13 self-check defensible**; 12/13 produce non-zero Phase 3 results (G11 sparse in TL data — surfaced as expected)
 - **M3 ✓ DONE**
-- [ ] **Next (M4)**: validation loop orchestration in `SKILL.md` flow — translate partial FilterSet → SQL → run db_count + db_sample → decide proceed/retry/fail. M3 Part 3 surfaced calibration rules: 0 retry / 1–4 warn / 5–50 narrow-but-ok / 51–10K normal / 10K+ broad.
+- [x] **M4 part 1**: `prompts/sample_judge.md` (Phase 3 sub-step — judges whether `db_sample` plausibly matches the user's intent; the safety net G11 needs) + rehearsal artifact ([`validation_rehearsal.md`](examples/validation_rehearsal.md)) — **4/4 defensible, G11 regression test passing**
+- [x] **M4 part 2**: SKILL.md "Phase 3 — Validation Loop (how to invoke)" section — SQL translation patterns per report_type, threshold rules table, sample_judge composition, retry orchestration (cap 3), edge cases (multi-step queries, cross-references, type-8 schema, timeout retry), Phase 3 decision output contract
+- [ ] **Next (M4 part 3)**: full Phase 3 rehearsal across all 13 goldens — extends `validation_rehearsal.md` with per-golden SQL translation + live db_count/db_sample + sample_judge composition + decision
 - [ ] M5: `prompts/column_widget_builder.md` (Phase 4 — needs `_routing_metadata.intent_signal` threading per M3 finding)
 - [ ] M6: end-to-end output (display config; suggest `tl reports create`)
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
