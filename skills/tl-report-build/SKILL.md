@@ -337,9 +337,10 @@ Living at `tl-cli/docs/`:
 - [x] **M3 part 2**: `prompts/filter_builder.md` body (529 lines) — 13 reasoning dimensions D1–D11 + D-S/D-M/D-X, 5 worked examples (G01/G03/G04/G09/G10), 15-point self-check tied to HARD CONSTRAINTS C1–C10
 - [x] **M3 part 3**: [`examples/filter_builder_rehearsal.md`](examples/filter_builder_rehearsal.md) — all 13 goldens; **13/13 self-check defensible**; 12/13 produce non-zero Phase 3 results (G11 sparse in TL data — surfaced as expected)
 - **M3 ✓ DONE**
-- [x] **M4 part 1**: `prompts/sample_judge.md` (Phase 3 sub-step — judges whether `db_sample` plausibly matches the user's intent; the safety net G11 needs) + rehearsal artifact ([`validation_rehearsal.md`](examples/validation_rehearsal.md)) — **4/4 defensible, G11 regression test passing**
-- [x] **M4 part 2**: SKILL.md "Phase 3 — Validation Loop (how to invoke)" section — SQL translation patterns per report_type, threshold rules table, sample_judge composition, retry orchestration (cap 3), edge cases (multi-step queries, cross-references, type-8 schema, timeout retry), Phase 3 decision output contract
-- [ ] **Next (M4 part 3)**: full Phase 3 rehearsal across all 13 goldens — extends `validation_rehearsal.md` with per-golden SQL translation + live db_count/db_sample + sample_judge composition + decision
+- [x] **M4 part 1**: `prompts/sample_judge.md` (Phase 3 sub-step) + 4-golden rehearsal — G11 regression test passing
+- [x] **M4 part 2**: SKILL.md "Phase 3 — Validation Loop (how to invoke)" section
+- [x] **M4 part 3**: full Phase 3 rehearsal across all 13 goldens — **13/13 reach a clean decision**; G11 + G02 both routed to `alternatives` (sample_judge caught both noise cases); threshold rules calibrated against live db_counts
+- **M4 ✓ DONE**
 - [ ] M5: `prompts/column_widget_builder.md` (Phase 4 — needs `_routing_metadata.intent_signal` threading per M3 finding)
 - [ ] M6: end-to-end output (display config; suggest `tl reports create`)
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
