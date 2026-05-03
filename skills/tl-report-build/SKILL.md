@@ -491,10 +491,9 @@ Living at `tl-cli/docs/`:
 - [x] **M6**: Phase 5 (Display/Save) flow rules in SKILL.md — 4 modes (proceed / alternatives / fail / vague). Full e2e rehearsal: [`e2e_rehearsal.md`](examples/e2e_rehearsal.md) — **13/13 goldens reach a user-facing output**; G02 + G11 routed to Mode B (silent-ship blocked); G06 routed to Mode D (Phase 1 asks first)
 - **M5 + M6 ✓ DONE — prototype skill is functionally complete end-to-end**
 - [skip] M7: Mixpanel corpus eval — deferred (requires Mixpanel API access)
-- [x] **M8 Part 1**: `prompts/judge.md` + [`examples/judge_calibration.md`](examples/judge_calibration.md) — assertion-style scorer for offline refinement; calibrated against G01 / G11 / G06; 12-class failure taxonomy; example synthetic-fail correctly identifies primary failure phase + suggested direction. Creator and Coder roles documented as methodology (orchestration patterns, not single-prompt artifacts; manual rehearsals were the M1–M6 equivalent).
-- [ ] **Next (M9)**: shadow-mode calibration vs v1 — run both paths against same queries; measure agreement
-- [ ] M10: promote (v2 default; evaluate `tl preview` etc.)
-- [ ] M11: sunset legacy v1
+- [x] **M8 Part 1**: `prompts/judge.md` + [`examples/judge_calibration.md`](examples/judge_calibration.md) — assertion-style scorer; 12-class failure taxonomy; calibrated G01/G11/G06; synthetic-fail correctly identifies primary phase + suggested direction. Creator + Coder roles documented as methodology only.
+- [x] **M9 methodology**: [`examples/m9_shadow_mode_methodology.md`](examples/m9_shadow_mode_methodology.md) — 6 comparison dimensions (report_type / FilterSet fields / db_count / db_sample / column choice / Mode), aggregated metric targets, expected-divergence catalog (where v2 *legitimately* differs from v1), promote-or-iterate decision criteria. **Actual run is operational, deferred to deployment phase.**
+- ⏳ **M9 run, M10, M11**: deployment / operational milestones. Not skill construction. The skill is functionally complete after M8 Part 1.
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
 - [ ] M6: end-to-end output (display config; save action TBD pending new policy-compliant save mechanism)
