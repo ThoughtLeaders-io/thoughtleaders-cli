@@ -490,7 +490,11 @@ Living at `tl-cli/docs/`:
 - [x] **M5**: `prompts/column_widget_builder.md` (Phase 4) — 12-point self-check tied to W1–W9 hard rules; `intent_signal` and `validation_concerns` threading; type-3/8 column-set bifurcation. Rehearsal: [`column_widget_rehearsal.md`](examples/column_widget_rehearsal.md) — **5/5 defensible** across distinct paths
 - [x] **M6**: Phase 5 (Display/Save) flow rules in SKILL.md — 4 modes (proceed / alternatives / fail / vague). Full e2e rehearsal: [`e2e_rehearsal.md`](examples/e2e_rehearsal.md) — **13/13 goldens reach a user-facing output**; G02 + G11 routed to Mode B (silent-ship blocked); G06 routed to Mode D (Phase 1 asks first)
 - **M5 + M6 ✓ DONE — prototype skill is functionally complete end-to-end**
-- [ ] M7+: Mixpanel corpus eval (~100 real user queries), refinement pipeline (Creator/Judge/Coder), shadow-mode calibration vs v1, Python port, v1 sunset
+- [skip] M7: Mixpanel corpus eval — deferred (requires Mixpanel API access)
+- [x] **M8 Part 1**: `prompts/judge.md` + [`examples/judge_calibration.md`](examples/judge_calibration.md) — assertion-style scorer for offline refinement; calibrated against G01 / G11 / G06; 12-class failure taxonomy; example synthetic-fail correctly identifies primary failure phase + suggested direction. Creator and Coder roles documented as methodology (orchestration patterns, not single-prompt artifacts; manual rehearsals were the M1–M6 equivalent).
+- [ ] **Next (M9)**: shadow-mode calibration vs v1 — run both paths against same queries; measure agreement
+- [ ] M10: promote (v2 default; evaluate `tl preview` etc.)
+- [ ] M11: sunset legacy v1
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
 - [ ] M6: end-to-end output (display config; save action TBD pending new policy-compliant save mechanism)
