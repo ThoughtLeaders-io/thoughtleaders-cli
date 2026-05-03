@@ -476,3 +476,60 @@ Every milestone's rehearsal must cover G09 as the smoke test for the keyword-onl
 ---
 
 **That's the whole system.** Everything else (refinement pipeline, calibration, Python port) is post-prototype.
+
+---
+
+## 13. API tools — utilities Phase 2c emits and Phase 3 invokes
+
+Some FilterSet fields aren't directly executable SQL — they require resolution or expansion via API-like operations. Phase 2c emits them as strings/declarations; Phase 3 (or the platform at execution time) calls these **API tools** to materialize them.
+
+| Tool | Signature | Used by | Status |
+|---|---|---|---|
+| `resolve_brand_names` | `(names: list[str]) → dict[name, brand_id]` | Phase 3 cross-refs; type-8 brand_names | ✓ `tl db pg` against `thoughtleaders_brand` |
+| `resolve_channel_names` | `(names: list[str]) → dict[name, channel_id]` | Phase 3 channel filters; similar_to_channels existence check | ✓ `tl db pg` against `thoughtleaders_channel` |
+| `resolve_cross_references` | `(refs: list[CrossRef]) → {exclude_ids, include_ids}` | Phase 3 prelim; G05 pattern | ✓ `tl db pg` JOIN on `thoughtleaders_adlink` |
+| `expand_similar_channels` | `(seeds: list[str]) → list[channel_id]` | Phase 3 prelim; "creators like X" pattern | ✗ requires embedding service; **prototype passes through, platform resolves at report-execution time**. v1 implementation: `thoughtleaders-skills/create-report/scripts/find_similar_channels.py` (342 lines) |
+| `validate_keyword_via_es` | `(keyword, content_fields) → {count, sample}` | Phase 2b candidate validation, Phase 3 | ✗ requires `tl db es` (super-user only initially); prototype uses `tl db pg ILIKE` proxy with substring-noise warnings |
+
+### Where each tool fires in the flow
+
+```
+Phase 2c (Filter Builder)
+   │  emits FilterSet fields that REQUIRE these tools downstream:
+   │    - brand_names, exclude_brand_names                    → resolve_brand_names later
+   │    - channel_names, exclude_channel_names                → resolve_channel_names later
+   │    - similar_to_channels                                 → expand_similar_channels later
+   │    - cross_references[*].brand_names, channel_names      → resolve_cross_references later
+   ▼
+Phase 3 (Validation Loop) — orchestrates the actual calls
+   │  Step 3.1.5 — Resolution (preliminary, before main predicate):
+   │    1. Resolve brand/channel names to IDs (1–2 tl db pg queries; batched)
+   │    2. Resolve cross_references → exclude_ids / include_ids
+   │    3. For similar_to_channels: verify seed channels exist (existence check
+   │       only — actual vector similarity defers to report-execution time
+   │       since prototype lacks embedding access)
+   │    4. Compose final SQL predicate with resolved IDs injected
+   ▼
+Phase 3 main count/sample, threshold, sample_judge, decision (unchanged)
+```
+
+### The Phase 3 prototype contract for `similar_to_channels`
+
+Per filter_builder.md rule D10: when the skill emits `similar_to_channels: ["MrBeast"]`, it **also skips `keyword_groups`** because vector similarity captures topic relevance.
+
+But that means Phase 3's normal pipeline (translate keyword_groups to ILIKE → count → sample → judge) has nothing to validate against. Three options:
+
+1. **Existence check only** (current prototype default) — verify named seeds exist in `thoughtleaders_channel`; `db_count` is "the platform will resolve at runtime"; `sample_judge` skipped. Decision: `proceed` automatically. Risk: silent ship if MrBeast is misspelled.
+2. **Defer to platform at execution** — same as 1, but Phase 5's user-facing message is explicit: "Similarity expansion happens server-side; preview not available in skill prototype."
+3. **Wire `expand_similar_channels` API tool when available** — once the platform exposes a similarity endpoint via the CLI (e.g. `tl similar channels:MrBeast`), Phase 3 calls it to get the expanded ID list, then runs normal `db_count`/`db_sample`/`sample_judge` on those IDs.
+
+**Current prototype uses option 2.** Option 3 is M5+ work, contingent on the platform exposing the endpoint.
+
+### Implication for the recap
+
+API tools are an **architectural class**, not a phase. They're called by Phase 2c (declaratively, via the FilterSet fields it emits) and Phase 3 (imperatively, as preliminary resolution). Three of five exist today via `tl db pg`; two are deferred to the platform until ES and similarity endpoints ship.
+
+When v1 is ported to Python (M9+):
+- The 3 SQL-resolvable tools become Django ORM helpers
+- `expand_similar_channels` wraps v1's `find_similar_channels.py` directly
+- `validate_keyword_via_es` calls the existing ES client
