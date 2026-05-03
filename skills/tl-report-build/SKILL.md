@@ -278,6 +278,142 @@ Phase 4 reads `decision == "proceed"` to know it's safe to run. Phase 5 reads `a
 
 ---
 
+## Phase 4 — Column/Widget Builder (how to invoke)
+
+Runs ONLY when Phase 3's `decision == "proceed"`. Skipped on `alternatives` and `fail`.
+
+### Step 4.1 — Load inputs
+
+- `REPORT_TYPE` (from Phase 1)
+- `FILTERSET` (validated, from Phase 2c via Phase 3)
+- `ROUTING_METADATA` (from Phase 2c — including `intent_signal` and `validation_concerns`)
+- `SORTABLE_COLUMNS`: read [`data/sortable_columns.json`](data/sortable_columns.json)
+
+### Step 4.2 — Apply [`prompts/column_widget_builder.md`](prompts/column_widget_builder.md)
+
+Single LLM call. Produces `{ columns, widgets, histogram_bucket_size, refinement_suggestions, _phase4_metadata }`.
+
+### Step 4.3 — Validate against W1–W9
+
+The prompt's 12-point self-check fires before emit. Orchestration does a sanity pass on the JSON shape (no missing required fields per `report_type`'s default column list) but trusts the prompt.
+
+### Phase 4 contract
+
+- Phase 5 reads `columns`, `widgets`, `refinement_suggestions`, `histogram_bucket_size` to assemble the saved-report config
+- Phase 5 reads `_phase4_metadata.intent_consumed` and `_phase4_metadata.concerns_surfaced` to construct the user-facing message ("here's why these columns" + "noise warnings")
+
+---
+
+## Phase 5 — Display / Save (how to invoke)
+
+Phase 5 is **the only phase with branching modes**, driven by Phase 3's `decision`. No new LLM call; templated user messaging plus orchestration.
+
+### Mode A — `decision: "proceed"` (the happy path)
+
+Phase 5 assembles the complete report config in v1's authoritative shape:
+
+```json
+{
+  "action": "create_report",
+  "report_title": "<derived from query and topics>",
+  "report_description": "<1–3 sentences summarizing intent + filters>",
+  "summary": "<one sentence>",
+  "report_type": <int>,
+  "filterset": { /* from Phase 2c, post-Phase 3 validation */ },
+  "filters_json": { /* from Phase 2c */ },
+  "cross_references": [ /* from Phase 2c, top-level */ ],
+  "columns": { /* from Phase 4 */ },
+  "widgets": [ /* from Phase 4 */ ],
+  "histogram_bucket_size": "...",
+  "refinement_suggestions": [ /* from Phase 4 */ ]
+}
+```
+
+Plus internal-only `_validation` metadata (stripped before any future POST):
+
+```json
+{
+  "_validation": {
+    "db_count": <int>,
+    "db_sample_size": <int>,
+    "count_classification": "narrow" | "normal" | "broad" | ...,
+    "sample_judgment": "matches_intent",
+    "phase_2a": "<verdict summary>",
+    "phase_2b": "skipped" | "<keyword count>",
+    "phase_2c_retries": 0,
+    "phase_3_retries": 0,
+    "validation_concerns": [...]
+  }
+}
+```
+
+User-facing message template:
+
+> Built a report config for **"<original NL_QUERY>"** — matches **<db_count>** <entity>.
+>
+> [If `_phase4_metadata.intent_consumed` non-null:]
+> Optimized for **<intent>**: emphasized columns like <list 3 outreach-relevant column names>.
+>
+> [If `validation_concerns` non-empty:]
+> ⚠️ **Worth knowing**: <each concern stated plainly>
+>
+> [If `count_classification == "narrow"`:]
+> 📌 The result is narrow (<count> matches). Consider broadening if you expected more.
+>
+> If this looks right, run:
+>   `tl reports create "<original NL_QUERY>"`
+> to commit the saved report. Otherwise tell me what to change — see refinement suggestions below.
+
+### Mode B — `decision: "alternatives"` (looks_wrong or uncertain)
+
+Phase 4 is skipped. Phase 5 receives the alternatives payload from Phase 3 and presents structured choices:
+
+> ⚠️ I built a filter for **"<original NL_QUERY>"** but the validation surfaces a problem:
+>
+> - <Phase 3.4 sample_judge.reasoning, citing 2–3 specific channel_names from db_sample>
+> - [If validation_concerns non-empty:] This confirms the noise warning from Phase 2b (<concern>).
+> - <db_count and what fraction looks plausible>
+>
+> **Three options:**
+> 1. **Save anyway** — useful if you want to inspect the long tail manually
+> 2. **Refine** — give me a different angle (e.g., "<refine-suggestion-1>", "<refine-suggestion-2>")
+> 3. **Cancel** — TL data may not have meaningful coverage for this niche
+
+Refine suggestions are *generated* from `_routing_metadata.weak_matched_topic_ids` (if any) and the failing FilterSet's structure. Templated, not LLM.
+
+If the user picks "Save anyway", Phase 4 runs *now* (deferred from before) with `validation_concerns` heavily surfaced in `_phase4_metadata`. Phase 5 then enters Mode A but with a header noise warning.
+
+### Mode C — `decision: "fail"` (3 retries exhausted, or hard error)
+
+Phase 4 skipped. Phase 5 shows the diagnostic and offers no save option:
+
+> ❌ I couldn't build a sensible report for **"<original NL_QUERY>"**.
+>
+> Diagnosis:
+> - <retry count> retries; each returned <empty | too_broad | timeout> (<details>)
+> - <validation_concerns surfaced>
+>
+> What you could try:
+> - <suggestion based on failure mode>
+> - <fallback approach (e.g., "describe the channels you have in mind directly")>
+
+### Mode D — Vague query (Phase 1 asks first)
+
+This isn't really a Phase 5 mode — it fires before Phase 1 even completes. The skill's flow rules in this `SKILL.md` document recognize a vague query and emit a `follow_up` action without invoking later phases. See G06 in the rehearsal artifacts.
+
+### Save behavior
+
+**Prototype**: Phase 5 in Mode A *displays* the JSON config. Does NOT auto-POST. The user-facing message suggests `tl reports create "<original prompt>"` as the explicit save action — matches v1's existing CLI command. Auto-save can be enabled once the skill's calibration passes M9 shadow-mode.
+
+### Phase 5 contract
+
+- Mode A → user sees full config + can run `tl reports create` to commit
+- Mode B → user picks save anyway / refine / cancel; refine routes back to Phase 1 with feedback; save anyway runs Phase 4 + emits Mode A output with warnings
+- Mode C → user sees diagnostic; no commit action available
+- Mode D → user gets follow-up question; pipeline halts pending answer
+
+---
+
 ## CLI surface used by this skill (only these)
 
 Per the 2026-04-23 daily call: the v2 skill uses the **3 DB endpoint commands plus `tl ask`** as primitives. Higher-level entity commands (`tl channels`, `tl describe`, etc.) are excluded — they're "layers that duplicate schema knowledge" on top of the primitives.
@@ -339,10 +475,12 @@ Living at `tl-cli/docs/`:
 - **M3 ✓ DONE**
 - [x] **M4 part 1**: `prompts/sample_judge.md` (Phase 3 sub-step) + 4-golden rehearsal — G11 regression test passing
 - [x] **M4 part 2**: SKILL.md "Phase 3 — Validation Loop (how to invoke)" section
-- [x] **M4 part 3**: full Phase 3 rehearsal across all 13 goldens — **13/13 reach a clean decision**; G11 + G02 both routed to `alternatives` (sample_judge caught both noise cases); threshold rules calibrated against live db_counts
+- [x] **M4 part 3**: full Phase 3 rehearsal across all 13 goldens — **13/13 reach a clean decision**; G11 + G02 both routed to `alternatives`; threshold rules calibrated against live db_counts
 - **M4 ✓ DONE**
-- [ ] M5: `prompts/column_widget_builder.md` (Phase 4 — needs `_routing_metadata.intent_signal` threading per M3 finding)
-- [ ] M6: end-to-end output (display config; suggest `tl reports create`)
+- [x] **M5**: `prompts/column_widget_builder.md` (Phase 4) — 12-point self-check tied to W1–W9 hard rules; `intent_signal` and `validation_concerns` threading; type-3/8 column-set bifurcation. Rehearsal: [`column_widget_rehearsal.md`](examples/column_widget_rehearsal.md) — **5/5 defensible** across distinct paths
+- [x] **M6**: Phase 5 (Display/Save) flow rules in SKILL.md — 4 modes (proceed / alternatives / fail / vague). Full e2e rehearsal: [`e2e_rehearsal.md`](examples/e2e_rehearsal.md) — **13/13 goldens reach a user-facing output**; G02 + G11 routed to Mode B (silent-ship blocked); G06 routed to Mode D (Phase 1 asks first)
+- **M5 + M6 ✓ DONE — prototype skill is functionally complete end-to-end**
+- [ ] M7+: Mixpanel corpus eval (~100 real user queries), refinement pipeline (Creator/Judge/Coder), shadow-mode calibration vs v1, Python port, v1 sunset
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
 - [ ] M6: end-to-end output (display config; suggest `tl reports create`)
