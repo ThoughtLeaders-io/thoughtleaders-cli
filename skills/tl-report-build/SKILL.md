@@ -360,7 +360,13 @@ User-facing message template:
 > [If `count_classification == "narrow"`:]
 > 📌 The result is narrow (<count> matches). Consider broadening if you expected more.
 >
-> If this looks right, the config above is ready to save. **Note**: per current policy, the CLI's `tl reports create` save action has been removed. Copy the config JSON into the platform UI's report-import surface (or whichever internal save mechanism is current) to commit. Otherwise tell me what to change — see refinement suggestions below.
+> If this looks right, the config above is ready to save.
+>
+> **Save behavior is runtime-dependent** (the skill is TL-internal — no external-customer flow exists):
+> - **If `TL_DATABASE_URI` is set with `santaclaw_ro` (or equivalent) creds** → the orchestration invokes a `create_report.py`-style direct INSERT via the `campaign_maker` RLS policy. Report is created atomically in one transaction. This is the path SantaClaw and the legacy v1 create-report skill use.
+> - **Otherwise** → save is unavailable from the skill. The TL-superuser web-UI AI Report Builder is the alternative for human admins, but it's a separate codepath the skill doesn't drive.
+>
+> The CLI's `tl reports create` server-side endpoint is slated for removal per the current API-cleanup policy; not a recommended save target. Otherwise tell me what to change — see refinement suggestions below.
 
 ### Mode B — `decision: "alternatives"` (looks_wrong or uncertain)
 
@@ -401,11 +407,17 @@ This isn't really a Phase 5 mode — it fires before Phase 1 even completes. The
 
 ### Save behavior
 
-**Prototype**: Phase 5 in Mode A *displays* the JSON config. Does NOT auto-POST. **`tl reports create` was removed by policy** (the v1 CLI save action is no longer the canonical path). Phase 5's user-facing message shows the config and points the user to the platform UI's report-import surface (or whichever internal save mechanism is current). Auto-save via a future API endpoint can be enabled once the skill's calibration passes M9 shadow-mode AND a save endpoint exists.
+**Prototype save model** (TL-internal; no external-customer save flow exists):
+- The skill always *displays* the JSON config in Mode A — config is the canonical artifact regardless of save path.
+- **Path 3 (direct DB INSERT via `campaign_maker`)** is the surviving write path:
+  - When `TL_DATABASE_URI` is set in the runtime (e.g. SantaClaw, TL team member's local Claude Code session with shared `santaclaw_ro` creds) → the skill invokes a `create_report.py`-style transaction: filterset INSERT + M2M rows for brands/channels + campaign INSERT, all atomic, all enforced by RLS.
+  - When `TL_DATABASE_URI` is absent → save is unavailable from the skill. Manual creation via the platform UI's AI Report Builder feature (superuser-only) is the only TL-internal alternative, and it's a separate Django codepath the skill doesn't drive.
+- **Path 1 (`tl reports create` CLI → server-side orchestration)** is being removed per the API-cleanup policy. Not a save target the skill should suggest.
+- **Path 2 (web UI's AI Report Builder)** is superuser-gated and uses Django ORM (not `campaign_maker`); separate concern, not part of skill scope.
 
 ### Phase 5 contract
 
-- Mode A → user sees full config; saving handled outside the skill per current policy (`tl reports create` removed)
+- Mode A → user sees full config; save behavior runtime-dependent (Path 3 `campaign_maker` direct INSERT if `TL_DATABASE_URI` set; otherwise display-only — superuser UI is a manual alternative for humans)
 - Mode B → user picks save anyway / refine / cancel; refine routes back to Phase 1 with feedback; save anyway runs Phase 4 + emits Mode A output with warnings
 - Mode C → user sees diagnostic; no commit action available
 - Mode D → user gets follow-up question; pipeline halts pending answer

@@ -194,7 +194,7 @@ A subset of the platform's `dashboard.models.FilterSet` schema — **filters onl
 | `db_count` | `tl db pg --json "SELECT COUNT(*) FROM ... WHERE ... LIMIT 1 OFFSET 0"` | `python pg_query.py "..." --format json` |
 | `db_sample` | `tl db pg --json "SELECT ... LIMIT 10 OFFSET 0"` | `python pg_query.py "..." --format json` |
 | Auth/user | `tl whoami` (works in v0.4.0+) | unchanged |
-| Save (later) | **`tl reports create` removed by policy** — save mechanism TBD; prototype displays JSON only | TBD |
+| Save (later) | **Path 3 (direct DB INSERT via `campaign_maker`)** when `TL_DATABASE_URI` is set in the runtime; otherwise display-only. Skill is TL-internal — no external-customer save flow. Path 1 (`tl reports create` server-side endpoint) being removed per API-cleanup policy. Path 2 (web UI AI Report Builder) is superuser-only and a separate Django codepath. | Same |
 
 **⚠️ Response shape — `tl db pg` vs `pg_query.py`** (skill orchestration must normalize):
 - `tl db pg --json` → `{"results": [...]}` envelope; orchestration extracts `.results`
@@ -379,7 +379,7 @@ Note: there is **no `topics: [98]` field** — Topic 98 is v2 routing metadata; 
 
 **Phase 4** chooses columns/widgets via `column_widget_builder.md` → complete config.
 
-**Phase 5** displays JSON. Save mechanism TBD — `tl reports create` was removed by policy; Phase 5's user message points to the platform UI's report-import surface (or whichever internal save mechanism is current).
+**Phase 5** displays JSON. Save mechanism is **Path 3 (direct DB INSERT via `campaign_maker`)** when running in a TL-internal runtime with `TL_DATABASE_URI` set (SantaClaw, team member's local session with shared santaclaw_ro creds). Otherwise display-only — the skill is TL-internal-only (no external-customer save flow); the web UI AI Report Builder is superuser-gated and separate.
 
 ### 11b. Off-taxonomy path — G09
 
