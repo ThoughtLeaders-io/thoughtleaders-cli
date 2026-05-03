@@ -1,5 +1,9 @@
 # AI Report Builder v2 — Status Snapshot
 
+
+> ⚠️ **Policy update (2026-05-02)**: `tl reports create` was removed from the CLI by policy. References to it in this doc reflect the architecture as designed before the change. Phase 5 now displays JSON only; saving is handled outside the skill (platform UI / TBD internal mechanism). See [SKILL.md](../skills/tl-report-build/SKILL.md) Phase 5 for current behavior.
+
+
 **As of 2026-04-29 (Wed) · Owner: Arik Aviv (per 2026-04-23 daily) · Companion to [SKILL_ARCHITECTURE.md](SKILL_ARCHITECTURE.md) and [SKILL_VISUAL_ARCHITECTURE.md](SKILL_VISUAL_ARCHITECTURE.md)**
 
 This is a one-screen "where are we today." For the full architecture, read the companion docs.
@@ -59,7 +63,8 @@ This is exactly what the matcher needs to read at the start of every query.
 | `tl ask` | ✓ live | Skill entry point. |
 | `tl describe show <resource>` | ✓ live | **Excluded from v2 skill surface** (per 2026-04-23 daily — duplicative of raw SQL). |
 | `tl channels` / `uploads` / `sponsorships` / `brands` | ✓ live | **Excluded from v2 skill surface** (same reason). |
-| `tl reports create / run` | ✓ live | Used by humans for save; v2 skill displays JSON during prototype. |
+| `tl reports run` | ✓ live | Reading existing saved reports unaffected. |
+| `tl reports create` | **❌ REMOVED BY POLICY (2026-05-02)** | Save action no longer available via CLI. v2 skill displays JSON only; saving handled via platform UI / TBD mechanism. |
 
 ---
 

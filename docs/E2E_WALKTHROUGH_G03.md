@@ -1,5 +1,9 @@
 # End-to-End Walkthrough — G03 ("AI cooking shows for product placements")
 
+
+> ⚠️ **Policy update (2026-05-02)**: `tl reports create` was removed from the CLI by policy. References to it in this doc reflect the architecture as designed before the change. Phase 5 now displays JSON only; saving is handled outside the skill (platform UI / TBD internal mechanism). See [SKILL.md](../skills/tl-report-build/SKILL.md) Phase 5 for current behavior.
+
+
 **Date**: 2026-04-29
 **Golden**: G03 — chosen as the natural pair to G09. Where G09 exercises Phase 2b (off-taxonomy → keyword research), **G03 exercises the topic matcher itself** — Phase 2a returns TWO strong matches → Phase 2b is SKIPPED → Phase 2c uses the topics' curated keywords directly.
 **Companion**: [`E2E_WALKTHROUGH_G09.md`](E2E_WALKTHROUGH_G09.md) — the off-taxonomy run-2b walkthrough.

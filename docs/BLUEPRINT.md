@@ -194,7 +194,7 @@ A subset of the platform's `dashboard.models.FilterSet` schema — **filters onl
 | `db_count` | `tl db pg --json "SELECT COUNT(*) FROM ... WHERE ... LIMIT 1 OFFSET 0"` | `python pg_query.py "..." --format json` |
 | `db_sample` | `tl db pg --json "SELECT ... LIMIT 10 OFFSET 0"` | `python pg_query.py "..." --format json` |
 | Auth/user | `tl whoami` (works in v0.4.0+) | unchanged |
-| Save (later) | `tl reports create "<NL prompt>"` | unchanged |
+| Save (later) | **`tl reports create` removed by policy** — save mechanism TBD; prototype displays JSON only | TBD |
 
 **⚠️ Response shape — `tl db pg` vs `pg_query.py`** (skill orchestration must normalize):
 - `tl db pg --json` → `{"results": [...]}` envelope; orchestration extracts `.results`
@@ -228,7 +228,8 @@ The v2 skill uses **only these commands** (per the 2026-04-23 daily: higher-leve
 | ✅ IN | `tl whoami`, `tl balance` | Auth + credit awareness |
 | ❌ OUT | `tl describe show <r>` | Replaced by `information_schema` queries |
 | ❌ OUT | `tl channels`, `tl brands`, `tl sponsorships`, `tl uploads` | Replaced by raw SQL |
-| ❌ OUT | `tl reports create / run` (during prototype) | Used by humans for save; v2 displays JSON during M1–M6 |
+| ❌ REMOVED BY POLICY | `tl reports create` | Save action no longer available via CLI; Phase 5 displays JSON, save handled via platform UI / TBD mechanism |
+| ⚠ STILL AVAILABLE | `tl reports run` | Reading existing saved reports unaffected |
 
 (All "OUT" commands continue to exist in the CLI for human use; the skill just doesn't call them.)
 
@@ -378,7 +379,7 @@ Note: there is **no `topics: [98]` field** — Topic 98 is v2 routing metadata; 
 
 **Phase 4** chooses columns/widgets via `column_widget_builder.md` → complete config.
 
-**Phase 5** displays JSON; user runs `tl reports create "..."` to commit.
+**Phase 5** displays JSON. Save mechanism TBD — `tl reports create` was removed by policy; Phase 5's user message points to the platform UI's report-import surface (or whichever internal save mechanism is current).
 
 ### 11b. Off-taxonomy path — G09
 

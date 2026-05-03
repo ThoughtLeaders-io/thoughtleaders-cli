@@ -68,7 +68,7 @@ Phase 4 — Column/Widget Builder, Pass B (LLM call #4; M5)
     │   produces: full report config (filters + columns + widgets)
     ▼
 Phase 5 — Display (prototype) / Save (later; M6)
-    │   prototype: print JSON, suggest `tl reports create "<original prompt>"`
+    │   prototype: print JSON; saving handled outside the skill per current policy
     │   later: auto-POST to /api/dashboard/campaigns/
 ```
 
@@ -360,9 +360,7 @@ User-facing message template:
 > [If `count_classification == "narrow"`:]
 > 📌 The result is narrow (<count> matches). Consider broadening if you expected more.
 >
-> If this looks right, run:
->   `tl reports create "<original NL_QUERY>"`
-> to commit the saved report. Otherwise tell me what to change — see refinement suggestions below.
+> If this looks right, the config above is ready to save. **Note**: per current policy, the CLI's `tl reports create` save action has been removed. Copy the config JSON into the platform UI's report-import surface (or whichever internal save mechanism is current) to commit. Otherwise tell me what to change — see refinement suggestions below.
 
 ### Mode B — `decision: "alternatives"` (looks_wrong or uncertain)
 
@@ -403,11 +401,11 @@ This isn't really a Phase 5 mode — it fires before Phase 1 even completes. The
 
 ### Save behavior
 
-**Prototype**: Phase 5 in Mode A *displays* the JSON config. Does NOT auto-POST. The user-facing message suggests `tl reports create "<original prompt>"` as the explicit save action — matches v1's existing CLI command. Auto-save can be enabled once the skill's calibration passes M9 shadow-mode.
+**Prototype**: Phase 5 in Mode A *displays* the JSON config. Does NOT auto-POST. **`tl reports create` was removed by policy** (the v1 CLI save action is no longer the canonical path). Phase 5's user-facing message shows the config and points the user to the platform UI's report-import surface (or whichever internal save mechanism is current). Auto-save via a future API endpoint can be enabled once the skill's calibration passes M9 shadow-mode AND a save endpoint exists.
 
 ### Phase 5 contract
 
-- Mode A → user sees full config + can run `tl reports create` to commit
+- Mode A → user sees full config; saving handled outside the skill per current policy (`tl reports create` removed)
 - Mode B → user picks save anyway / refine / cancel; refine routes back to Phase 1 with feedback; save anyway runs Phase 4 + emits Mode A output with warnings
 - Mode C → user sees diagnostic; no commit action available
 - Mode D → user gets follow-up question; pipeline halts pending answer
@@ -483,7 +481,7 @@ Living at `tl-cli/docs/`:
 - [ ] M7+: Mixpanel corpus eval (~100 real user queries), refinement pipeline (Creator/Judge/Coder), shadow-mode calibration vs v1, Python port, v1 sunset
 - [ ] M4: validation loop logic (translate FilterSet to SQL, run db_count/db_sample, retry rules)
 - [ ] M5: `prompts/column_widget_builder.md` — Phase 4 columns/widgets
-- [ ] M6: end-to-end output (display config; suggest `tl reports create`)
+- [ ] M6: end-to-end output (display config; save action TBD pending new policy-compliant save mechanism)
 
 ---
 

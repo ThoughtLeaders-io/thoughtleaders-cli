@@ -1,5 +1,9 @@
 # AI Report Builder v2 — Visual Architecture
 
+
+> ⚠️ **Policy update (2026-05-02)**: `tl reports create` was removed from the CLI by policy. References to it in this doc reflect the architecture as designed before the change. Phase 5 now displays JSON only; saving is handled outside the skill (platform UI / TBD internal mechanism). See [SKILL.md](../skills/tl-report-build/SKILL.md) Phase 5 for current behavior.
+
+
 Quick-reference diagrams for the daily. Companion to `SKILL_ARCHITECTURE.md`.
 
 ---

@@ -504,8 +504,7 @@ The skill's final output is a complete report config JSON, displayed for the use
 > - Phase 2b generated 7 ES-validated keywords from scratch
 > - Phase 3 confirms the filterset returns sensible data
 >
-> If this looks right, run:
->   `tl reports create "Find me crypto / Web3 channels"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 > to commit it as a saved report. Otherwise tell me what to change.
 
 ---

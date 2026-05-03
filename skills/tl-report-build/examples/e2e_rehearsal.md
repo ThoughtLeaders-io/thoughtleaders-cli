@@ -43,8 +43,7 @@
 >
 > Top samples by reach: MrBeast Gaming (56M), Techno Gamerz (51M), Total Gaming (45M), Frost Diamond (47M), LankyBox (42M).
 >
-> If this looks right, run:
->   `tl reports create "Build me a report of gaming channels with 100K+ subscribers in English"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 >
 > Refinement suggestions:
 > 1. Add a 'Views Per Subscriber' custom formula column to spot high-engagement channels
@@ -72,8 +71,7 @@
 >
 > 📌 The result is narrow (9 matches). The AI ∩ Cooking intersection is genuinely small in our data. Top match: **Rotimatic** (41.6K — automated roti-making appliance). Other clear matches: NEURA Robotics, NextGen factory.
 >
-> If this looks right, run:
->   `tl reports create "AI cooking shows for product placements"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 >
 > Or broaden to drop the AND (search AI OR Cooking — much larger set ~8,500 channels).
 >
@@ -103,8 +101,7 @@
 >
 > Top widgets: total deals, sum price, sum revenue, count channels.
 >
-> If this looks right, run:
->   `tl reports create "Pull me Q1 2026 sold sponsorships for personal investing channels"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 >
 > Refinement suggestions:
 > 1. Add a 'Brand CPV vs Publisher CPV ratio' custom formula to spot deal margin outliers
@@ -130,8 +127,7 @@
 >
 > Top channels by views: Psych2Go, Roshan Zindagi, Chef Rush (fitness), FitnessBlender, Bodybuilding.com, Dr. Sten Ekberg.
 >
-> If this looks right, run:
->   `tl reports create "Wellness videos but exclude anything sponsored by Nike or Adidas"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 >
 > Refinement suggestions:
 > 1. Add a 'Views Per Subscriber' custom formula to find break-out videos
@@ -159,8 +155,7 @@
 >
 > Top samples are crypto-clear: Hamster Kombat (33.3M, crypto-tap game), TapSwap Official (4.74M, crypto game), CoinCu (4.34M, crypto news). 1–2 lifestyle channels (Mo Vlogs, A2 Motivation) appear in the top 10 — likely incidental matches; flag for manual review.
 >
-> If this looks right, run:
->   `tl reports create "Find me crypto / Web3 channels"`
+> ⚠️ Save mechanism TBD: `tl reports create` was removed by policy. The config above is ready — copy it into the platform UI (or use whichever internal save mechanism is current) to commit.
 >
 > Refinement suggestions:
 > 1. Add a 'Views Per Subscriber' custom formula column

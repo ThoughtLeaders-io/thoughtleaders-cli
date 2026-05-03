@@ -1,5 +1,9 @@
 # AI Report Builder v2 — Skill-First Architecture
 
+
+> ⚠️ **Policy update (2026-05-02)**: `tl reports create` was removed from the CLI by policy. References to it in this doc reflect the architecture as designed before the change. Phase 5 now displays JSON only; saving is handled outside the skill (platform UI / TBD internal mechanism). See [SKILL.md](../skills/tl-report-build/SKILL.md) Phase 5 for current behavior.
+
+
 **Status as of 2026-04-29**: Topics cache live in prod (and actively migrating). Channel-field bypass fix in review (PR #3937). `thoughtleaders-cli` shipped to PyPI; **raw SQL endpoint `tl db pg` is live in sandbox** (read-only, sandboxed, mandatory `LIMIT/OFFSET`). Skill prototype work begins now — the data plane is `tl db pg`, no new CLI subcommands required.
 
 This document captures the v2 architecture as agreed across:
