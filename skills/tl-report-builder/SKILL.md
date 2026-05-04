@@ -319,12 +319,13 @@ Compose an ES search body. The index is fixed server-side; the client only sends
             "fields":  ["name", "description", "ai.description", "ai.topic_descriptions"]
           }
         }
-        // ... one multi_match per keyword, combined per keyword_operator (AND → all in `must`; OR → wrap in `should` with minimum_should_match: 1)
       ]
     }
   }
 }
 ```
+
+The `must` array carries one `multi_match` entry per keyword, combined per `keyword_operator`: AND → list every `multi_match` inside `must` (each is required); OR → move them to a sibling `should` array and add `"minimum_should_match": 1`. The example above shows the single-keyword case; multi-keyword extensions follow that pattern.
 
 For `db_sample` (size 10) on type 3: same query body with `size: 10`, `sort: [{ "reach": "desc" }]`, and `_source: ["id", "name", "reach", "description"]`. **Note**: ES returns `name` for channels; the orchestration aliases it to `channel_name` before passing to `sample_judge` so the row shape matches the contract.
 
@@ -369,9 +370,8 @@ Then enriches each sample row: `{ id: <article id>, title: <title>, channel_name
 
 ##### Type 2 (BRANDS) — aggregate over articles, group by brand
 
-Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search:
+Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search.
 
-```json
 **`tl db es` accepts at most one aggregation per request, recursively.** Top-level + sub-agg counts as 2 and is rejected (per `skills/tl/references/elasticsearch-schema.md` line 28). Type-2 validation therefore needs **multiple separate ES calls**, not one nested aggregation. The orchestration runs them in sequence and merges client-side.
 
 ##### Call 1 — distinct-brand count (`db_count`)
@@ -428,20 +428,33 @@ Each `by_brand` bucket has `key` (brand ID) and `doc_count` (mentions count for 
 
 ##### Optional Call 3 — channels-count per brand (one extra call per brand if needed)
 
-If `sample_judge` needs the distinct-channels count per brand for richer judgment, the orchestration can run one additional ES call per top brand (small N, ≤ 10):
+If `sample_judge` needs the distinct-channels count per brand for richer judgment, the orchestration can run one additional ES call per top brand (small N, ≤ 10). **Reuse the full Call 2 query body and add the brand-ID filter** — otherwise the count covers all channels mentioning that brand in the date/language scope, ignoring the report's content predicate.
 
 ```json
 {
   "size": 0,
-  "query": { "bool": { "filter": [
-    { "term": { "sponsored_brand_mentions": "<brand_id>" } },
-    /* same date / language filters as Call 2 */
-  ] } },
-  "aggs": { "channels_count": { "cardinality": { "field": "channel.id" } } }
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "doc_type": "article" } },
+        { "terms": { "channel.language": ["en"] } },
+        { "range": { "publication_date": { "gte": "now-180d/d" } } },
+        { "term":  { "sponsored_brand_mentions": "<brand_id>" } }
+      ],
+      "must": [
+        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
+      ]
+    }
+  },
+  "aggs": {
+    "channels_count": { "cardinality": { "field": "channel.id" } }
+  }
 }
 ```
 
-**Most type-2 validations skip Call 3** — the bucket `doc_count` from Call 2 is sufficient signal for `sample_judge` to judge whether the brands look on-target for `USER_QUERY`. Run Call 3 only when a per-brand drill-down is part of the user's intent.
+The query body is identical to Call 2 except (1) the `terms` agg over `sponsored_brand_mentions` is replaced by a `term` filter on a single brand ID, and (2) the aggregation is now `cardinality` over `channel.id`. The result lives in `aggregations.channels_count.value`.
+
+**Most type-2 validations skip Call 3** — the bucket `doc_count` from Call 2 is sufficient signal for `sample_judge` to judge whether the brands look on-target for `USER_QUERY`. Run Call 3 only when a per-brand drill-down is part of the user's intent (e.g., the user explicitly asked "which brands are mentioned across the most channels").
 
 ---
 
@@ -569,7 +582,9 @@ Cap at **3 retries total**. After 3, `decision: "fail"` with diagnostic — bett
 
 ### Step 2.V6 — Compose decision output
 
-```json
+Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are placeholders for the actual values the orchestration emits):
+
+```text
 {
   "decision": "proceed" | "alternatives" | "fail",
   "_validation": {
@@ -766,7 +781,9 @@ Keep it tight: 2–4 takeaways total. Don't write essays. Cite specific numbers/
 
 ### Output (the deliverable)
 
-```json
+Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are placeholders for the actual values the orchestration emits):
+
+```text
 {
   "campaign_config_json": {
     "type": 2,
