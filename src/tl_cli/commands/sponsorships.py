@@ -1,5 +1,6 @@
 """tl sponsorships — List, show, and create sponsorships."""
 
+import json as _json
 from typing import Optional
 
 import typer
@@ -191,3 +192,40 @@ def create_cmd(
     """
     fmt = detect_format(json_output, False, False, toon_output)
     do_create(channel, brand, price, fmt, status="proposed")
+
+
+@app.command("update")
+def update_cmd(
+    sponsorship_id: int = typer.Argument(..., help="Sponsorship (adlink) ID"),
+    fields: str = typer.Argument(..., help='JSON object of fields to update, e.g. \'{"publish_status": "sold"}\''),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Update whitelisted sponsorship fields.
+
+    Editable fields: publish_status (int code or status label, e.g. 'sold',
+    'pending', 'matched'). Non-full-access users may only update sponsorships
+    tied to their own organization.
+
+    Examples:
+        tl sponsorships update 98765 '{"publish_status": "sold"}'
+        tl sponsorships update 98765 '{"publish_status": 3}'
+    """
+    fmt = detect_format(json_output, False, False, toon_output)
+    try:
+        body = _json.loads(fields)
+    except _json.JSONDecodeError as exc:
+        Console(stderr=True).print(f"[red]Error:[/red] fields argument must be a JSON object: {exc}")
+        raise typer.Exit(1)
+    if not isinstance(body, dict):
+        Console(stderr=True).print("[red]Error:[/red] fields argument must be a JSON object.")
+        raise typer.Exit(1)
+
+    client = get_client()
+    try:
+        data = client.post(f"/sponsorships/{sponsorship_id}/edit", json_body=body)
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()

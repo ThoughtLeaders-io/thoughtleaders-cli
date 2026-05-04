@@ -1,5 +1,6 @@
 """tl channels — Search and show YouTube channels."""
 
+import json as _json
 import urllib.parse
 
 import typer
@@ -228,6 +229,43 @@ def history_cmd(
         )
     except ApiError as e:
         _handle_channel_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("update")
+def update_cmd(
+    channel_id: int = typer.Argument(..., help="Channel ID (numeric)"),
+    fields: str = typer.Argument(..., help='JSON object of fields to update, e.g. \'{"demographic_male_share": 62}\''),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Update whitelisted channel fields (demographics; full-access only).
+
+    Editable fields: demographic_usa_share, demographic_male_share,
+    demographic_age, demographic_device, demographic_geo. The
+    demographics_updated_at timestamp is refreshed automatically.
+
+    Examples:
+        tl channels update 12345 '{"demographic_male_share": 62}'
+        tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12}}'
+    """
+    fmt = detect_format(json_output, False, False, toon_output)
+    try:
+        body = _json.loads(fields)
+    except _json.JSONDecodeError as exc:
+        Console(stderr=True).print(f"[red]Error:[/red] fields argument must be a JSON object: {exc}")
+        raise typer.Exit(1)
+    if not isinstance(body, dict):
+        Console(stderr=True).print("[red]Error:[/red] fields argument must be a JSON object.")
+        raise typer.Exit(1)
+
+    client = get_client()
+    try:
+        data = client.post(f"/channels/{channel_id}/edit", json_body=body)
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
     finally:
         client.close()
 
