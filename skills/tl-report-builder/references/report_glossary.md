@@ -71,16 +71,19 @@ When the user uses one of these, mirror their language in the *clarifying questi
 
 When users describe deals informally, map to `filters_json.publish_status` IDs. The status enum values are integer IDs the platform recognizes.
 
-| User says | `publish_status` ID(s) | Status name |
-|---|---|---|
-| "booked" / "sold" / "closed" / "won" | `3` | Sold |
-| "proposed" / "approved by creator" | `0` | Creator Approved |
-| "pending" | `2` | Pending |
-| "rejected" *(any side)* | `4, 5, 9` | Rejected by Brand / Creator / Agency |
-| "matched" | `7` | Matched |
-| "reached out" / "outreach" | `8` | Reached Out |
-| **"pipeline"** *(default scope)* | `0, 2, 6, 7, 8` | All active non-sold statuses |
-| **"in progress"** / **"active"** | `0, 2, 3, 6` | Active deal statuses (incl. sold) |
+| User says | `publish_status` ID(s) | Other `filters_json` | Status name / meaning |
+|---|---|---|---|
+| "booked" / "sold" / "closed" / "won" | `3` | — | Sold |
+| "proposed" / "approved by creator" | `0` | — | Creator Approved |
+| "pending" | `2` | — | Pending |
+| "rejected" *(any side)* | `4, 5, 9` | — | Rejected by Brand / Creator / Agency |
+| "matched" | `7` | — | Matched |
+| "reached out" / "outreach" | `8` | — | Reached Out |
+| **"pipeline"** *(default scope)* | `0, 2, 6, 7, 8` | — | All active non-sold statuses |
+| **"in progress"** / **"active"** | `0, 2, 3, 6` | — | Active deal statuses (incl. sold) |
+| **"live"** / **"currently running"** | `3` | `ad_publish_status: "0"` | Sold AND published — the video is live on the channel |
+
+Note: `publish_status` values are integer IDs. The platform does NOT recognize string labels like `"live"` or `"sold"` directly — always emit numeric IDs. The string labels above are user-facing language only.
 
 Status reference (for completeness):
 

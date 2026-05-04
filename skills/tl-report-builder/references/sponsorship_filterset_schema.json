@@ -178,8 +178,9 @@
   },
 
   "_tl_rules": [
-    "Type 8 ALWAYS needs a date scope. If the user gives no date hint, default to days_ago=365 (one year of deal history). Unbounded sponsorship queries are meaningless and will time out.",
+    "Type 8 ALWAYS needs a date scope. If the user gives NO date hint at all, surface a follow-up question rather than silently defaulting — Phase 2's edge-case logic rejects unscoped type-8 queries upfront with `decision: 'fail'`. For vague-but-nonzero date language ('recent', 'lately', 'this year'), the `default_date_scope` intent override below applies the 365-day default with judgment.",
     "Do NOT invent fields. Sponsorship status / publish_status / deal stage all live inside `filters_json` — encode them there, not as new top-level keys.",
+    "publish_status values are NUMERIC IDs (0–9), not string labels. See `report_glossary.md`'s 'Deal-stage jargon' table for the canonical user-phrase → ID mapping. The intent overrides below already use numeric IDs; never emit `publish_status: ['live']` or `['sold']` — those strings are not in the platform's enum.",
     "Resolve brand/channel names → IDs via the name_resolver tool BEFORE emitting `brands`/`channels` arrays. Type 8 with unresolved names is a hard failure mode.",
     "Keyword fields (`keywords`, `keyword_operator`, `content_fields`, `keyword_content_fields_map`, `keyword_exclude_map`) exist on the model but are inert for type 8 — sponsorships are filtered by relations, not content text. Do not emit them.",
     "Topic fields (`topics`) are inert for type 8 — same reason. Do not emit.",
@@ -189,11 +190,18 @@
   "_tl_intent_overrides": {
     "live_only_intent": {
       "trigger_phrases": ["live deals", "currently running", "active sponsorships"],
-      "set_in_filters_json": { "publish_status": ["live"] }
+      "_describes": "Currently-running campaigns: the deal is sold AND the video has been published.",
+      "set_in_filters_json": { "publish_status": [3], "ad_publish_status": "0" }
     },
     "sold_only_intent": {
-      "trigger_phrases": ["sold deals", "closed deals", "won sponsorships"],
-      "set_in_filters_json": { "publish_status": ["sold", "live"] }
+      "trigger_phrases": ["sold deals", "closed deals", "won sponsorships", "booked"],
+      "_describes": "Won deals only — regardless of whether the video has aired yet.",
+      "set_in_filters_json": { "publish_status": [3] }
+    },
+    "active_pipeline_intent": {
+      "trigger_phrases": ["pipeline", "active sponsorships", "in progress"],
+      "_describes": "All non-rejected, non-sold deals in motion (proposed → reached out → matched → pending → proposal approved).",
+      "set_in_filters_json": { "publish_status": [0, 2, 6, 7, 8] }
     },
     "tl_book_intent": {
       "trigger_phrases": ["our deals", "tl book of business", "deals we managed"],
@@ -201,6 +209,7 @@
     },
     "default_date_scope": {
       "trigger_phrases": ["recent deals", "lately", "this year"],
+      "_describes": "Vague-but-nonzero date language. Applies the 365-day default. NOT a fallback for queries with NO date hint at all — those go through Phase 2 rejection per `_tl_rules` rule #1.",
       "set_with_judgment": { "days_ago": 365 }
     }
   }
