@@ -1,14 +1,16 @@
 """Auth0 login flows: browser-based PKCE and headless device code."""
 
 import http.server
+import json as jsonlib
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from dataclasses import dataclass
 
-import httpx
 from rich.console import Console
 
 from tl_cli.auth.pkce import generate_pkce_pair
@@ -16,6 +18,36 @@ from tl_cli.auth.token_store import StoredTokens, save_tokens
 from tl_cli.config import get_config
 
 console = Console(stderr=True)
+
+
+@dataclass
+class _HttpResponse:
+    status_code: int
+    text: str
+
+    def json(self) -> dict:
+        return jsonlib.loads(self.text)
+
+
+def _post(url: str, *, form: dict | None = None, body_json: dict | None = None) -> _HttpResponse:
+    """Minimal stdlib POST. Avoids depending on httpx for the auth flow."""
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        content_type = "application/x-www-form-urlencoded"
+    else:
+        data = jsonlib.dumps(body_json or {}).encode()
+        content_type = "application/json"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": content_type, "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return _HttpResponse(status_code=resp.status, text=resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return _HttpResponse(status_code=exc.code, text=exc.read().decode())
 
 
 @dataclass
@@ -102,9 +134,9 @@ def login_device_code() -> StoredTokens:
     config = get_config()
 
     # Request a device code
-    response = httpx.post(
+    response = _post(
         f"https://{config.auth0_domain}/oauth/device/code",
-        data={
+        form={
             "client_id": config.auth0_client_id,
             "scope": "openid profile email offline_access",
             "audience": config.auth0_audience,
@@ -136,9 +168,9 @@ def login_device_code() -> StoredTokens:
     while time.time() < deadline:
         time.sleep(interval)
 
-        token_response = httpx.post(
+        token_response = _post(
             f"https://{config.auth0_domain}/oauth/token",
-            data={
+            form={
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": device_code,
                 "client_id": config.auth0_client_id,
@@ -188,9 +220,9 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
     """Use a refresh token to get a new access token."""
     config = get_config()
 
-    response = httpx.post(
+    response = _post(
         f"https://{config.auth0_domain}/oauth/token",
-        json={
+        body_json={
             "grant_type": "refresh_token",
             "client_id": config.auth0_client_id,
             "refresh_token": refresh_token,
@@ -219,9 +251,9 @@ def _exchange_code(
     config,
 ) -> StoredTokens:
     """Exchange authorization code for tokens."""
-    response = httpx.post(
+    response = _post(
         f"https://{config.auth0_domain}/oauth/token",
-        json={
+        body_json={
             "grant_type": "authorization_code",
             "client_id": config.auth0_client_id,
             "code": code,
