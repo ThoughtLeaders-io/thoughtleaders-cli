@@ -40,6 +40,8 @@ USER_QUERY
 │   Input:    USER_QUERY                                                  │
 │   Output:   ReportType ∈ {1 CONTENT | 2 BRANDS | 3 CHANNELS | 8 SPONS}  │
 │   Tools:    none (heuristic over USER_QUERY only)                       │
+│   Routing:  see "Phase 1 — Report Type Selection (detail)" below for   │
+│             the routing rules + authoritative G07 / G06 examples       │
 │   ↘ FOLLOW-UP TRIGGER: report type ambiguous / input invalid → ask user │
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  ReportType
@@ -641,7 +643,7 @@ Load on-demand — don't read all upfront:
 - **[tools/widget_builder.md](tools/widget_builder.md)** — Phase 4's widget-selection prompt. Mirrors v1's widget-builder approach: selection guidelines, intent-driven swaps, type-8 axis branching, and worked examples per report type. Consumes `references/widgets.md` as the catalog.
 
 **Examples & golden corpus**
-- **[examples/golden_queries.md](examples/golden_queries.md)** — Representative NL inputs covering all four report types and the full mode space (proceed / alternatives / vague). Used during M9 shadow-mode comparison.
+- **[examples/golden_queries.md](examples/golden_queries.md)** — 13 hand-curated NL inputs (G01–G13) covering all four report types and the full mode space (proceed / alternatives / vague). Documentation/regression corpus — not loaded at runtime. Test fixtures for shadow-mode comparison and skill maintenance. Note: G07 (`partnership` routing) and G11 (`IRS` substring noise) are inlined in SKILL.md's Phase 1 and Phase 2 detail sections as authoritative regression baselines.
 
 ## Pagination Defaults (Phase 3 applies these unless USER_QUERY overrides)
 
