@@ -120,10 +120,10 @@ USER_QUERY
 │   Input:    validated schema, columns, ReportType                       │
 │   Output:   FINAL { campaign_config_json, takeaways }                   │
 │   Loads:    tools/widget_builder.md (always — picks the widgets)       │
-│             references/<intel|spons>_widget_schema.json (catalog + axis │
-│                  branching + intent overrides; consumed by widget_builder) │
-│             references/<intel|spons>_filterset_schema.json + ditto       │
-│             _widget_schema.json (final JSON-shape validation sources)   │
+│             references/<intel|spons>_widget_schema.json (catalog +     │
+│                  axis branching + intent overrides; for widget_builder) │
+│             references/<intel|spons>_filterset_schema.json (final      │
+│                  JSON-shape validation source of truth)                 │
 │                                                                          │
 │   Responsibilities:                                                     │
 │     • Define aggregations (sums, averages, counts, breakdowns)          │
@@ -665,8 +665,8 @@ Claude follows this SKILL.md, executing each phase in order. No external command
 Load on-demand — don't read all upfront:
 
 **Schema canonical sources** (consulted in Phase 2 + Phase 4)
-- **[references/intelligence_filterset_schema.json](references/intelligence_filterset_schema.json)** — Filterset + filters_json shape for types 1 (CONTENT), 2 (BRANDS), 3 (CHANNELS). Filter field types, defaults (`days_ago: 730` when keyword_groups present, `channel_formats: [4]`, `sort: -reach`), enum constants (publish_status, content_aspects, channel_formats), validation rules (no `topics` field — translates to keyword_groups; required vs optional fields; mutually-exclusive options).
-- **[references/sponsorship_filterset_schema.json](references/sponsorship_filterset_schema.json)** — Filterset shape for type 8 (SPONSORSHIPS). Distinct from intelligence_filterset_schema: no keyword_groups, status IDs (0–9), owner fields (owner_sales_id, owner_advertiser_id, owner_publisher_id), filters_json conventions, date-axis branching (send_date for proposal-stage statuses; purchase_date for sold).
+- **[references/intelligence_filterset_schema.json](references/intelligence_filterset_schema.json)** — Filterset + filters_json shape for types 1 (CONTENT), 2 (BRANDS), 3 (CHANNELS). Mirrors `dashboard.models.FilterSet` 1:1: keyword fields (`keywords`, `keyword_operator`, `content_fields`, `keyword_content_fields_map`, `keyword_exclude_map`), `topics` (ChoiceArrayField IntegerField), date scopes, demographic shares, channel-formats, languages, reach / projected_views / youtube_views ranges, M2M relations (channels / brands / networks), defaults (`languages: ["en"]`, `channel_formats: [4]`), and `_tl_intent_overrides` for intent-driven population.
+- **[references/sponsorship_filterset_schema.json](references/sponsorship_filterset_schema.json)** — Filterset shape for type 8 (SPONSORSHIPS). Same model as intelligence schemas, different relevant slice: M2M relations (sponsorships / channels / brands), date scopes (send / purchase / created), `filters_json.publish_status` for deal-stage encoding, `tl_sponsorships_only` flag. Type-8 reports filter by relations, not content text — keyword fields are inert here.
 
 **Available columns per ReportType** (consulted in Phase 3)
 - **[references/columns_content.md](references/columns_content.md)** — Type 1: video-level columns. Each column block: display_name, backend_code, when-to-use, default-on flag.
@@ -703,7 +703,7 @@ Load on-demand — don't read all upfront:
 | 1 (CONTENT) | 50 | `-views` | Per-video; longer pages tolerable |
 | 2 (BRANDS) | 25 | `-doc_count` | Aggregated rows; smaller pages |
 | 3 (CHANNELS) | 25 | `-reach` (default) / `-publication_date_max` (outreach intent) | Sort branches on intent_signal |
-| 8 (SPONSORSHIPS) | 50 | `-purchase_date` (sold) / `-send_date` (proposal stages) | Axis branches on `publish_status` per sponsorship_filterset_schema |
+| 8 (SPONSORSHIPS) | 50 | `-purchase_date` (sold) / `-send_date` (proposal stages) | Axis branches on `publish_status` per `sponsorship_widget_schema.json`'s `_tl_axis_branching` |
 
 ## Safety
 
