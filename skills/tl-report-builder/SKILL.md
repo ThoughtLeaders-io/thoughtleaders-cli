@@ -299,6 +299,8 @@ Compose an ES search body. The index is fixed server-side; the client only sends
 
 ##### Type 3 (CHANNELS) — search the channel doc type
 
+**Critical**: the ES index is sharded by quarter (`tl-platform-{year}-{quarter}` per `skills/tl/references/elasticsearch-schema.md` line 38), and channel parent docs are duplicated across every quarter shard the channel was active in. Without deduplication, both `track_total_hits` and a flat sample return inflated/duplicated results — verified against live data (a 614-distinct-channel result inflated to 20,876 docs; sample of 10 returned 10 identical rows). Type-3 ES queries MUST use a `cardinality` aggregation for the count and `collapse` on `id` for the sample.
+
 ```json
 {
   "size": 0,
@@ -321,13 +323,30 @@ Compose an ES search body. The index is fixed server-side; the client only sends
         }
       ]
     }
+  },
+  "aggs": {
+    "distinct_channels": { "cardinality": { "field": "id" } }
   }
 }
 ```
 
 The `must` array carries one `multi_match` entry per keyword, combined per `keyword_operator`: AND → list every `multi_match` inside `must` (each is required); OR → move them to a sibling `should` array and add `"minimum_should_match": 1`. The example above shows the single-keyword case; multi-keyword extensions follow that pattern.
 
-For `db_sample` (size 10) on type 3: same query body with `size: 10`, `sort: [{ "reach": "desc" }]`, and `_source: ["id", "name", "reach", "description"]`. **Note**: ES returns `name` for channels; the orchestration aliases it to `channel_name` before passing to `sample_judge` so the row shape matches the contract.
+For `db_count` on type 3: read `aggregations.distinct_channels.value`, NOT `total`. The `total` field counts documents (channel-doc duplicates included); `distinct_channels` counts unique channel IDs.
+
+For `db_sample` (size 10) on type 3: same `query` body, plus:
+```json
+{
+  "size": 10,
+  "sort": [{ "reach": "desc" }],
+  "_source": ["id", "name", "reach", "description"],
+  "collapse": { "field": "id" }
+}
+```
+
+**`collapse: { field: "id" }`** returns the top doc per channel ID, deduplicating across quarter shards. Without it, the sample returns the same channel multiple times.
+
+**Note**: ES returns `name` for channels; the orchestration aliases it to `channel_name` before passing to `sample_judge` so the row shape matches the contract.
 
 ##### Type 1 (CONTENT) — search the article doc type
 

@@ -220,3 +220,33 @@ The PG smoke-check is fine as a narrow fallback (when ES is unavailable AND the 
 ⏳ **Phases 3 + 4** were not exercised in this run because Phase 2 terminated each query (G01 → uncertain, G02 → uncertain, G03 → looks_wrong, G07 → type 8 with clarifying question, G11 → looks_wrong). A clean happy-path run end-to-end through Phase 4 needs a query that produces a clean `matches_intent` verdict.
 
 ⏳ **Re-run of intelligence-report e2e tests against ES is recommended** once Step 2.V1's ES query body shape is rehearsed against the live `tl db es` endpoint — the PG-based runs above are valuable for surfacing substring/sparsity / multi-topic-intersection findings, but they don't represent the production validation path.
+
+### 🔴 Finding 6 — Type-3 ES queries inflate via channel-doc duplication across quarter shards
+
+**Surfaced by**: G08 (`"Channels covering both cooking AND wellness topics"`) — first ES-path test that triggered the duplication.
+
+**Issue**: The ES index is sharded by quarter (`tl-platform-{year}-{quarter}`). **Channel parent docs (`doc_type: channel`) are duplicated across every quarter shard the channel was active in.** A single famous channel like Chef Rush can have 10+ duplicate docs across shards. The `tl-platform` alias fans out across all quarters, returning all duplicates.
+
+The original Step 2.V1 type-3 query relied on `total` for the count and a flat `size: 10` for the sample. Both silently fail on duplication:
+
+| Method | Returned | Actual distinct channels |
+|---|---|---|
+| `track_total_hits: true` total | **20,876** | **614** (34× inflation) |
+| Sample with `size: 10`, no `collapse` | 10 rows but **all the same channel** (Chef Rush) | 10 distinct channels expected |
+
+The duplication doesn't affect:
+- Type-1 article search (article docs are unique per shard — `id` like `<channel_id>:<youtube_id>` is intrinsically unique)
+- Type-2 brand aggregations (already aggregate via `terms` over `sponsored_brand_mentions`, deduplicated by definition)
+- Sponsorship (type-8) PG queries (different data plane)
+
+It only bites type-3 channel-search queries.
+
+**Fix applied** in the same commit as this finding:
+- **Type-3 db_count**: use a `cardinality` aggregation on `id` instead of `total`. Read `aggregations.distinct_channels.value`.
+- **Type-3 db_sample**: add `collapse: { field: "id" }` to the query body. Returns the top doc per channel ID, deduplicating across shards.
+
+Both are explicitly mandated in SKILL.md Step 2.V1 with a "Critical" callout and the verified-against-live-data evidence.
+
+**Severity**: HIGH — a 34× count inflation is the kind of bug that silently makes every type-3 validation report a false `too_broad` or `broad` classification when the true count was `normal` or `narrow`. Threshold-driven retry logic would loop trying to "narrow" a query that's already narrow. The skill would either retry-cap-fail or surface a wrong narrowing suggestion. Caught here before it reached production.
+
+**Lesson**: my type-3 ES example was based on the abstract schema-doc structure (channel parent docs, doc_type filter, multi_match phrase) without testing what happens when the index is sharded. The schema doc DOES mention sharding (line 38) but doesn't explicitly call out parent-doc replication across shards. Live-data probing surfaced it; the abstract schema doc hint was easy to miss. Adding to my pre-commit checklist: **probe live data on every new query example, not just the schema doc.**
