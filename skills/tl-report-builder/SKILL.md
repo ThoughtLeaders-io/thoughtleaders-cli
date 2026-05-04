@@ -355,7 +355,17 @@ For `db_sample` (size 10) on type 3: same query body with `size: 10`, `sort: [{ 
 }
 ```
 
-For `db_sample` on type 1: `size: 10`, `sort: [{ "publication_date": "desc" }]` (or `[{ "views": "desc" }]` per intent), `_source: ["id", "title", "channel.name", "publication_date", "views"]`. **Note**: ES nests channel fields under `channel.*` on article docs; orchestration flattens `channel.name` → `channel_name` before passing to `sample_judge`.
+For `db_sample` on type 1: `size: 10`, `sort: [{ "publication_date": "desc" }]` (or `[{ "views": "desc" }]` per intent), `_source: ["id", "title", "channel.id", "publication_date", "views"]`.
+
+**Important — channel name is NOT on article docs.** Per `skills/tl/references/elasticsearch-schema.md`, the embedded `channel.*` object on article docs contains only `{ id, country, language, content_category, format, publication_id }` — no `channel.name`. Filtering or selecting `channel.name` returns nothing silently.
+
+To populate `channel_name` for the type-1 `sample_judge` row contract, the orchestration does a single PG batch lookup after the ES sample returns:
+
+```sql
+SELECT id, channel_name FROM thoughtleaders_channel WHERE id = ANY(<distinct channel.id values from ES sample>) LIMIT 50 OFFSET 0
+```
+
+Then enriches each sample row: `{ id: <article id>, title: <title>, channel_name: <from PG>, views: <views>, publication_date: <publication_date> }`. If the orchestration skips this enrichment, `sample_judge` will receive type-1 rows without `channel_name` — the contract treats it as optional secondary context (the primary identifier for type 1 is `title`), so judgment still works but with less context.
 
 ##### Type 2 (BRANDS) — aggregate over articles, group by brand
 
@@ -369,7 +379,6 @@ Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a fl
       "filter": [
         { "term":  { "doc_type": "article" } },
         { "terms": { "channel.language": ["en"] } },
-        { "term":  { "brand_mention_type": "sponsored_mentions" } },
         { "range": { "publication_date": { "gte": "now-180d/d" } } }
       ],
       "must": [
@@ -379,19 +388,25 @@ Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a fl
   },
   "aggs": {
     "by_brand": {
-      "terms": { "field": "brands.id", "size": 10 },
+      "terms": { "field": "sponsored_brand_mentions", "size": 10 },
       "aggs": {
-        "brand_name":     { "top_hits":   { "size": 1, "_source": ["brands.name"] } },
-        "channels_count": { "cardinality":{ "field": "channel.id" } },
-        "mentions_count": { "value_count":{ "field": "_id" } },
-        "last_mention":   { "max":        { "field": "publication_date" } }
+        "channels_count": { "cardinality": { "field": "channel.id" } },
+        "mentions_count": { "value_count":  { "field": "_id" } },
+        "last_mention":   { "max":          { "field": "publication_date" } }
       }
     }
   }
 }
 ```
 
-For `db_count` on type 2: count is the cardinality of distinct brands matching — read from `aggregations.by_brand.sum_other_doc_count + buckets.length` or run a separate cardinality agg. For `db_sample`, the `by_brand` buckets ARE the sample rows; the orchestration shapes each bucket into the `sample_judge` type-2 contract: `{ id: bucket.key, brand_name: bucket.brand_name.hits.hits[0]._source.brands.name, channels_count, mentions_count, last_mention_date }`.
+**Field-source notes** (per `skills/tl/references/elasticsearch-schema.md`):
+- The "sponsored vs organic" distinction is **which keyword array you aggregate over**, not a `brand_mention_type` filter. Use `sponsored_brand_mentions` (sponsored only), `organic_brand_mentions` (organic only), or `all_brand_mentions` (both). There is no `brand_mention_type` field in ES.
+- The aggregation field is the keyword array name (e.g. `sponsored_brand_mentions`), NOT `brands.id`. The bucket keys are the brand IDs.
+- **Brand names are not in ES** — neither `brands.name` nor a top_hits inside the agg will return them. After ES returns the buckets, the orchestration does a PG lookup against `thoughtleaders_brand` to resolve names: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
+
+For `db_count` on type 2: distinct-brand count is the bucket count (with `sum_other_doc_count` accounting for buckets beyond `size`). Or run a separate `cardinality` agg over `sponsored_brand_mentions`.
+
+For `db_sample`, the `by_brand` buckets ARE the sample rows; the orchestration shapes each bucket plus the PG name-lookup result into the `sample_judge` type-2 contract: `{ id: bucket.key, brand_name: <from PG lookup>, channels_count: bucket.channels_count.value, mentions_count: bucket.mentions_count.value, last_mention_date: bucket.last_mention.value_as_string }`.
 
 ---
 

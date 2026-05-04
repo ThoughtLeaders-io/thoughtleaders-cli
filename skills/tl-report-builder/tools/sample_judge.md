@@ -25,8 +25,8 @@ The orchestration injects:
    | `REPORT_TYPE` | Row shape | Identifier field for citations |
    |---|---|---|
    | **3 (CHANNELS)** | `{ id, channel_name, reach, description?, ai_topic_descriptions? }` | `channel_name` |
-   | **1 (CONTENT)** | `{ id, title, channel_name, reach?, views?, publish_date?, description? }` | `title` (with `channel_name` as secondary context) |
-   | **2 (BRANDS)** | `{ id, brand_name, channels_count?, mentions_count?, last_mention_date? }` | `brand_name` |
+   | **1 (CONTENT)** | `{ id, title, channel_name?, views?, publication_date?, description? }` — **`channel_name` is optional**, populated by the orchestration via a PG batch lookup against `thoughtleaders_channel.id` (article docs in ES carry only `channel.id`, not `channel.name`). When absent, judge from `title` alone. | `title` (with `channel_name` as secondary context if present) |
+   | **2 (BRANDS)** | `{ id, brand_name, channels_count?, mentions_count?, last_mention_date? }` — `id` is the brand ID returned as the agg bucket key; `brand_name` is populated by the orchestration via a PG batch lookup against `thoughtleaders_brand.id` (brand names are not stored in ES). | `brand_name` |
 
    Cite the appropriate identifier per type when populating `noise_signals` / `matching_signals`. For type 1, an upload titled "How to Cook AI" on the channel "Cocomelon" is unambiguously off-target; cite the title. For type 2, a brand "BrandX" with high `channels_count` but unrelated industry is the noise vector; cite the brand name.
 
