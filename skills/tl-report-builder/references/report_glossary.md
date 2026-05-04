@@ -1,6 +1,6 @@
 # Report Glossary
 
-Reference for Phases 1 + 2. Disambiguation layer for the vocabulary the skill encounters: report-type synonyms, TL terminology, field-pair choices, deal-stage jargon, and common pitfalls. The schemas (`intelligence_schema.json` / `sponsorship_schema.json`) define what's *available*; this file defines what to *prefer* when terms overlap or aliases collide.
+Reference for Phases 1 + 2. Disambiguation layer for the vocabulary the skill encounters: report-type synonyms, TL terminology, field-pair choices, deal-stage jargon, and common pitfalls. The schemas (`intelligence_filterset_schema.json` / `sponsorship_filterset_schema.json`) define what's *available*; this file defines what to *prefer* when terms overlap or aliases collide.
 
 If a term or concept isn't here, default to the schema's `_tl_intent_hints` for the field, or surface as a clarifying question.
 

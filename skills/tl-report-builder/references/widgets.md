@@ -1,8 +1,14 @@
 # Widgets
 
-Reference for Phase 4 (Widget Phase). Widgets are the dashboard charts and metric boxes that appear above the data table on a saved report. Phase 4 reads this file to pick which widgets to emit.
+Human-readable reference for Phase 4 (Widget Phase). Widgets are the dashboard charts and metric boxes that appear above the data table on a saved report.
 
-The output Phase 4 emits is a `widgets` array of `{aggregator, type, index, width, height}` objects, plus a top-level `histogram_bucket_size`.
+> **Schema source of truth**: this markdown is the readable index. The structured schemas live in:
+> - [`intelligence_widget_schema.json`](intelligence_widget_schema.json) — types 1 / 2 / 3
+> - [`sponsorship_widget_schema.json`](sponsorship_widget_schema.json) — type 8
+>
+> Both files mirror the filterset-schema structure (`*_filterset_schema.json`): JSON Schema + `_tl_*` extensions defining default sets, intent overrides, axis branching, and the per-type aggregator catalog. `widget_builder.md` consumes whichever schema matches the report type.
+
+The output Phase 4 emits is a `widgets` array of `{aggregator, type, index, width, height}` objects, plus a top-level `histogram_bucket_size`. **Every widget must add value to the user's original prompt** — don't pad to hit a higher count; emit fewer if the extras don't answer something the user implicitly cares about.
 
 ---
 

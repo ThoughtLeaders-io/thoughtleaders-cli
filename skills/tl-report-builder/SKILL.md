@@ -51,7 +51,7 @@ USER_QUERY
 │   Input:    USER_QUERY, ReportType                                      │
 │   Output:   { filterset, filters_json, cross_references,                │
 │               _routing_metadata, _validation }                          │
-│   Loads:    references/<intelligence|sponsorship>_schema.json           │
+│   Loads:    references/<intel|sponsorship>_filterset_schema.json        │
 │             references/report_glossary.md (on-demand)                   │
 │             tools/sample_judge.md (validation sub-step)                 │
 │                                                                          │
@@ -120,8 +120,10 @@ USER_QUERY
 │   Input:    validated schema, columns, ReportType                       │
 │   Output:   FINAL { campaign_config_json, takeaways }                   │
 │   Loads:    tools/widget_builder.md (always — picks the widgets)       │
-│             references/widgets.md (catalog consumed by widget_builder)  │
-│             references/<schema>.json (final-validation source of truth) │
+│             references/<intel|spons>_widget_schema.json (catalog + axis │
+│                  branching + intent overrides; consumed by widget_builder) │
+│             references/<intel|spons>_filterset_schema.json + ditto       │
+│             _widget_schema.json (final JSON-shape validation sources)   │
 │                                                                          │
 │   Responsibilities:                                                     │
 │     • Define aggregations (sums, averages, counts, breakdowns)          │
@@ -202,11 +204,17 @@ Phase 2 doesn't fire until the user picks.
 
 ### Hand-off to Phase 2
 
-Phase 1 emits `{ report_type: <int>, clarifying_questions: [...] | [] }`. Phase 2 reads `report_type` to pick the right schema (`intelligence_schema.json` for 1/2/3, `sponsorship_schema.json` for 8) and to gate which Phase 2 tools fire (e.g., `topic_matcher` skips for type 8; `keyword_research` skips for type 8).
+Phase 1 emits `{ report_type: <int>, clarifying_questions: [...] | [] }`. Phase 2 reads `report_type` to pick the right schema (`intelligence_filterset_schema.json` for 1/2/3, `sponsorship_filterset_schema.json` for 8) and to gate which Phase 2 tools fire (e.g., `topic_matcher` skips for type 8; `keyword_research` skips for type 8).
 
 ## Conditional Tool Invocation
 
-Tools are optional enrichments invoked from inside Phase 2. Each fires only when its criteria are explicitly met. Each may emit `warnings: [...]` that propagate to Phase 4's takeaways.
+Tools are invoked **from inside Phase 2 to figure out what the filter should be** — not as reactions to an existing filter. The user's natural-language request rarely names every filter field directly; tools resolve the gaps:
+- The user said "gaming channels" — `topic_matcher` figures out which topic ID(s) and curated keywords expand from that.
+- The user said "channels we've already proposed to Logitech" — `database_query` figures out which channel IDs the cross-reference condition resolves to.
+- The user said "MrBeast and PewDiePie" — `name_resolver` figures out the corresponding `channels` IDs.
+- The user said "no strong topic match" — `keyword_research` figures out a keyword candidate set from scratch.
+
+Each tool fires only when its criteria are explicitly met (no automatic / speculative invocation). Each may emit `warnings: [...]` that propagate through `_routing_metadata` to Phase 4's takeaways. Tools never reshape filters that have already been composed; they inform composition before validation.
 
 ### T1 — `tools/topic_matcher.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
@@ -253,12 +261,22 @@ Tools are optional enrichments invoked from inside Phase 2. Each fires only when
 ### Phase 4 sub-tool
 
 **`tools/widget_builder.md`** — always fires in Phase 4. Phase 2's validation already cleared the FilterSet, so widget_builder runs unconditionally.
-**Behavior**: mirrors v1's widget-builder approach. Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, plus `references/widgets.md`. Picks 4–6 widgets from the type's catalog, applies intent-driven swaps, handles type-8 axis branching, sets `histogram_bucket_size`.
+**Behavior**: mirrors v1's widget-builder approach. Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, plus the matching widget schema (`intelligence_widget_schema.json` for types 1/2/3, `sponsorship_widget_schema.json` for type 8). Picks 4–6 widgets that add value to the user's prompt; applies intent-driven swaps per the schema's `_tl_intent_overrides`; handles type-8 axis branching per `_tl_axis_branching`; sets `histogram_bucket_size`.
 **Output**: `{ widgets: [...], histogram_bucket_size: "week"|"month"|"year", _widget_metadata: {...} }`.
+
+## Sort field — which phase owns it
+
+`sort` is a `FilterSet` field on the Django model, so **Phase 2 picks the value when composing the FilterSet** — defaulting to the type's pagination default (`-reach` for type 3, `-views` for type 1, `-doc_count` for type 2, `-purchase_date` / `-send_date` for type 8 per axis branching) unless the user's intent overrides (e.g., outreach intent on type 3 → `-publication_date_max`).
+
+**Phase 3 doesn't pick the sort value — it validates it.** The sort field must reference a column that's both (a) present in the emitted `columns` dict AND (b) has an allowed direction per `sortable_columns.json`. If a mismatch exists, Phase 3 either adds the column (so the sort is valid) or surfaces a follow-up. Phase 3 never silently changes the sort value Phase 2 set.
+
+This split means: **sort value = Phase 2; sort viability = Phase 3**.
 
 ## Phase 2 — Validation step (detail)
 
 Phase 2's validation step is the **mandatory gate** between FilterSet composition and downstream phases. The skill MUST validate the composed FilterSet against live data before handing off to Phase 3 — silent emission of a broken FilterSet is the failure mode this step exists to prevent.
+
+**What validation actually does** (in plain terms): once the FilterSet is composed, run a script that fetches the data those filters would actually return — both the **count of matching entities** (how many channels / uploads / brands / deals the predicate matches) and a **small sample of representative rows** (10 rows, ordered by the canonical sort). Then compare both back against the user's original prompt and judge: *would shipping this FilterSet plausibly complete the user's request?* If yes → proceed. If no → surface alternatives or fail rather than silently emit. The judgment is the validation gate's whole point.
 
 ### Step 2.V1 — Translate FilterSet to count + sample SQL
 
@@ -477,8 +495,13 @@ Phase 3 picks the columns the saved report displays and the dataset shape that h
 
 ### Process
 
-1. **Pick columns via `tools/column_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, the `references/columns_<type>.md` content, and `references/sortable_columns.json`. The builder emits `{ columns, dataset_structure, pending_refinement_suggestions, _column_metadata }`. The builder handles default sets, intent-driven additions, niche-driven additions, sort validation, and custom-formula proactivity internally — don't pre-process those signals.
-2. **Hand off to Phase 4.** The `pending_refinement_suggestions` carry through to Phase 4's takeaway message; the `columns` dict and `dataset_structure` feed `widget_builder` and final composition.
+1. **Pick columns via `tools/column_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, the `references/columns_<type>.md` content, and `references/sortable_columns.json`. The builder owns four explicit decisions:
+   - **Which columns to emit** — defaults + intent-driven additions + niche-driven additions, capped at 5–10 standard (up to 13 with intent justification).
+   - **Column order** — anchors first (e.g. `Channel`, `TL Channel Summary` for type 3; `Channel`, `Advertiser`, `Status` for type 8), then identity columns, then the data columns the user's intent emphasizes (outreach surface / engagement surface / pricing surface), then context columns last. The order in the emitted `columns` dict IS the display order.
+   - **Column width** — most columns use the platform's default width. Wide-text columns (`TL Channel Summary`, `Topic Descriptions`, `Channel Description`, `Talking Points`, `Adops Notes`) get wider; numeric / status columns get narrower. The builder emits a `width` hint per column when it deviates from the default.
+   - **Custom column formulas** — propose at least one per type's "Suggested formulas" table (e.g. `{Avg. Views} / {Subscribers}` for type-3 engagement, `{Price} - {Cost}` for type-8 TL profit). Custom columns are surfaced as `pending_refinement_suggestions` for the user to opt into — never silently activated.
+   The builder also validates the sort viability (per "Sort field — which phase owns it" above) and emits a `dataset_structure` with pagination defaults.
+2. **Hand off to Phase 4.** The `pending_refinement_suggestions` carry through to Phase 4's takeaway message; the `columns` dict (with order and widths) plus `dataset_structure` feed `widget_builder` and final composition.
 
 ### Follow-up triggers (Phase 3)
 
@@ -500,12 +523,13 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
 - All Phase 2 + Phase 3 outputs (Phase 2's output is already validated against live data — no re-validation here).
 - **Loaded on demand**:
   - `tools/widget_builder.md` — the widget-selection prompt (always invoked).
-  - `references/widgets.md` — aggregator catalog + intent-driven widget patterns + type-8 axis branching (consumed by `widget_builder`).
-  - `references/intelligence_schema.json` and `references/sponsorship_schema.json` — final JSON-shape validation source of truth.
+  - `references/intelligence_widget_schema.json` (types 1/2/3) and `references/sponsorship_widget_schema.json` (type 8) — JSON Schemas defining widget shape, the disjoint aggregator catalogs, default sets, intent overrides, and (for sponsorship) axis-branching rules. Consumed by `widget_builder`.
+  - `references/widgets.md` — readable index pointing at the two schemas above.
+  - `references/intelligence_filterset_schema.json` and `references/sponsorship_filterset_schema.json` — final JSON-shape validation source of truth.
 
 ### Process
 
-1. **Pick widgets via `tools/widget_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, and the `references/widgets.md` content. The builder emits `{ widgets, histogram_bucket_size, _widget_metadata }`. The builder handles type-8 axis branching and intent-driven swaps internally — don't pre-process those signals.
+1. **Pick widgets via `tools/widget_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, and the matching widget schema (`references/intelligence_widget_schema.json` for types 1/2/3; `references/sponsorship_widget_schema.json` for type 8). The builder emits `{ widgets, histogram_bucket_size, _widget_metadata }`. **The selection rule is: emit only widgets that add value to the user's original prompt.** A widget earns its slot if it answers a question the user implicitly cares about (intent), surfaces a metric tied to a filter the user named (niche), or shows a trend over the date scope they specified. Don't pad to hit 6 — emit fewer (down to 4) if the extras don't answer something. The builder handles type-8 axis branching and intent-driven swaps per the schema's `_tl_intent_overrides`.
 2. **FINAL JSON-shape validation pass.** Verify the composed config:
    - Every field in `filterset` exists in the schema and matches its declared type.
    - Every column in `columns` is in the type's column file.
@@ -584,7 +608,7 @@ Keep it tight: 2–4 takeaways total. Don't write essays. Cite specific numbers/
 4. **JSON-shape validation rejection is a stop, not a warn.** If the final-shape validation finds an unfixable problem (column doesn't exist, aggregator from wrong catalog, missing required field), Phase 4 emits an error follow-up rather than emitting a partial config.
 5. **Takeaways cite specifics.** Numbers, names, intent labels. Vague takeaways ("the report looks good") add no value.
 6. **No new filters or columns in Phase 4.** Phase 4 doesn't reshape the FilterSet or add columns — it picks widgets, validates, and composes. Reshape requires looping back to Phase 2 or 3.
-7. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same type-8 report use the SAME axis (per widgets.md type-8 axis branching).
+7. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same type-8 report use the SAME axis (per `sponsorship_widget_schema.json`'s `_tl_axis_branching`).
 
 ## Follow-Up Interactions
 
@@ -613,10 +637,12 @@ Skills that follow up are skills users trust. Silent assumptions are silent regr
 | Source | Authoritative For | Connection |
 |---|---|---|
 | **`tl db pg`** | Live data: topics, channels, brands, sponsorships, sponsorship-history M2M | tl-cli ≥ v0.6.2; sandboxed read-only SELECT, mandatory `LIMIT/OFFSET`, max 500 rows |
-| **`references/intelligence_schema.json`** | Canonical filterset shape for types 1/2/3 (filter fields, defaults, validation rules) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
-| **`references/sponsorship_schema.json`** | Canonical filterset shape for type 8 (status IDs, owner fields, date filters, filters_json semantics) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
+| **`references/intelligence_filterset_schema.json`** | Canonical filterset shape for types 1/2/3 (filter fields, defaults, validation rules) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
+| **`references/sponsorship_filterset_schema.json`** | Canonical filterset shape for type 8 (status IDs, owner fields, date filters, filters_json semantics) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
 | **`references/columns_<type>.md`** | Available columns + intent-driven default sets per ReportType | Static; consulted in Phase 3 |
-| **`references/widgets.md`** | Widget aggregator catalog (intelligence + sponsorship), default sets, type-8 axis branching | Static; consulted in Phase 4 |
+| **`references/intelligence_widget_schema.json`** | Widget shape + aggregator catalog + default sets + intent overrides for types 1/2/3 | Static file; consulted in Phase 4 (compose) and Phase 4 (final JSON-shape validation) |
+| **`references/sponsorship_widget_schema.json`** | Widget shape + aggregator catalog + default set + intent overrides + axis-branching rules for type 8 | Static file; consulted in Phase 4 (compose) and Phase 4 (final JSON-shape validation) |
+| **`references/widgets.md`** | Readable index pointing at the two widget schemas | Static; convenience reference |
 | **Conditional tools** (T1–T5) | Dynamic enrichment of the unified schema | Markdown files in `tools/` |
 
 **Trust hierarchy:** `tl db pg` for any "does this row exist / how many" question; the schema files for filter shape and validation rules; the column files for "what's available to display." If a tool's resolved ID disagrees with the user's name (e.g., emoji-stripped match), surface the discrepancy rather than silently substitute.
@@ -638,8 +664,8 @@ Claude follows this SKILL.md, executing each phase in order. No external command
 Load on-demand — don't read all upfront:
 
 **Schema canonical sources** (consulted in Phase 2 + Phase 4)
-- **[references/intelligence_schema.json](references/intelligence_schema.json)** — Filterset + filters_json shape for types 1 (CONTENT), 2 (BRANDS), 3 (CHANNELS). Filter field types, defaults (`days_ago: 730` when keyword_groups present, `channel_formats: [4]`, `sort: -reach`), enum constants (publish_status, content_aspects, channel_formats), validation rules (no `topics` field — translates to keyword_groups; required vs optional fields; mutually-exclusive options).
-- **[references/sponsorship_schema.json](references/sponsorship_schema.json)** — Filterset shape for type 8 (SPONSORSHIPS). Distinct from intelligence_schema: no keyword_groups, status IDs (0–9), owner fields (owner_sales_id, owner_advertiser_id, owner_publisher_id), filters_json conventions, date-axis branching (send_date for proposal-stage statuses; purchase_date for sold).
+- **[references/intelligence_filterset_schema.json](references/intelligence_filterset_schema.json)** — Filterset + filters_json shape for types 1 (CONTENT), 2 (BRANDS), 3 (CHANNELS). Filter field types, defaults (`days_ago: 730` when keyword_groups present, `channel_formats: [4]`, `sort: -reach`), enum constants (publish_status, content_aspects, channel_formats), validation rules (no `topics` field — translates to keyword_groups; required vs optional fields; mutually-exclusive options).
+- **[references/sponsorship_filterset_schema.json](references/sponsorship_filterset_schema.json)** — Filterset shape for type 8 (SPONSORSHIPS). Distinct from intelligence_filterset_schema: no keyword_groups, status IDs (0–9), owner fields (owner_sales_id, owner_advertiser_id, owner_publisher_id), filters_json conventions, date-axis branching (send_date for proposal-stage statuses; purchase_date for sold).
 
 **Available columns per ReportType** (consulted in Phase 3)
 - **[references/columns_content.md](references/columns_content.md)** — Type 1: video-level columns. Each column block: display_name, backend_code, when-to-use, default-on flag.
@@ -648,7 +674,9 @@ Load on-demand — don't read all upfront:
 - **[references/columns_sponsorships.md](references/columns_sponsorships.md)** — Type 8: deal-level columns. Includes Channel-info columns reused from type 3 (TL Channel Summary, Topic Descriptions, Subscribers, USA Share, Demographics - Age Median).
 
 **Widget catalog** (consulted in Phase 4)
-- **[references/widgets.md](references/widgets.md)** — Aggregator keys split by intelligence (types 1/2/3) vs sponsorship (type 8) catalog. Default 5-widget sets per ReportType, intent-driven swap patterns, type-8 axis branching (`send_date` for pipeline, `purchase_date` for won deals), `histogram_bucket_size` rules.
+- **[references/intelligence_widget_schema.json](references/intelligence_widget_schema.json)** — JSON Schema for widget objects on types 1/2/3 reports. Disjoint aggregator catalog; per-type default 5-widget sets (`_tl_default_widget_set_by_type`); intent overrides (`_tl_intent_overrides`); selection rules.
+- **[references/sponsorship_widget_schema.json](references/sponsorship_widget_schema.json)** — JSON Schema for widget objects on type 8 reports. Disjoint aggregator catalog (sponsorship pipeline / live ads / performance / assets-drafts groupings); axis-branching rules (`_tl_axis_branching`: pipeline → `send_date`, sold → `purchase_date`); default 5-widget set; intent overrides for the major sponsorship views (forecasting / won-deals / ROI / assets QA).
+- **[references/widgets.md](references/widgets.md)** — Readable index pointing at the two schemas above.
 
 **Filter semantics (cross-cutting)**
 - **[references/report_glossary.md](references/report_glossary.md)** — Vocabulary disambiguation across the whole skill: report-type synonyms (uploads = content; channels = creators; campaign report ⇒ ambiguous), TL-specific terminology (Reach / PV / VG / MSN / TPP / MBN), deal-stage jargon (booked = sold = status 3; pipeline = active non-sold), field-pair disambiguation (reach vs projected_views vs youtube_views), defaults, filter-source decisions (typed field vs `filters_json`), common pitfalls.
@@ -662,7 +690,7 @@ Load on-demand — don't read all upfront:
 - **[tools/similar_channels.md](tools/similar_channels.md)** — Look-alike helper: emits `filters_json.similar_to_channels` for the platform's vector-similarity engine.
 - **[tools/sample_judge.md](tools/sample_judge.md)** — Sample inspection inside Phase 2's validation step (channel-name based; intelligence reports only). Catches substring noise (G11-class) before the FilterSet ships to Phase 3.
 - **[tools/column_builder.md](tools/column_builder.md)** — Phase 3's column-selection prompt. Same builder-prompt pattern as `widget_builder`: explicit inputs, JSON output schema, selection process (defaults → intent additions → niche additions → sort validation → formula proactivity), worked examples per report type, hard rules. Consumes `references/columns_<type>.md` as the catalog.
-- **[tools/widget_builder.md](tools/widget_builder.md)** — Phase 4's widget-selection prompt. Mirrors v1's widget-builder approach: selection guidelines, intent-driven swaps, type-8 axis branching, and worked examples per report type. Consumes `references/widgets.md` as the catalog.
+- **[tools/widget_builder.md](tools/widget_builder.md)** — Phase 4's widget-selection prompt. Mirrors v1's widget-builder approach: selection guidelines, intent-driven swaps, type-8 axis branching, and worked examples per report type. Consumes the matching `*_widget_schema.json` (intelligence or sponsorship) as the catalog.
 
 **Examples & golden corpus**
 - **[examples/golden_queries.md](examples/golden_queries.md)** — 13 hand-curated NL inputs (G01–G13) covering all four report types and the full mode space (proceed / alternatives / vague). Documentation/regression corpus — not loaded at runtime. Test fixtures for shadow-mode comparison and skill maintenance. Note: G07 (`partnership` routing) and G11 (`IRS` substring noise) are inlined in SKILL.md's Phase 1 and Phase 2 detail sections as authoritative regression baselines.
@@ -674,7 +702,7 @@ Load on-demand — don't read all upfront:
 | 1 (CONTENT) | 50 | `-views` | Per-video; longer pages tolerable |
 | 2 (BRANDS) | 25 | `-doc_count` | Aggregated rows; smaller pages |
 | 3 (CHANNELS) | 25 | `-reach` (default) / `-publication_date_max` (outreach intent) | Sort branches on intent_signal |
-| 8 (SPONSORSHIPS) | 50 | `-purchase_date` (sold) / `-send_date` (proposal stages) | Axis branches on `publish_status` per sponsorship_schema |
+| 8 (SPONSORSHIPS) | 50 | `-purchase_date` (sold) / `-send_date` (proposal stages) | Axis branches on `publish_status` per sponsorship_filterset_schema |
 
 ## Safety
 
@@ -686,7 +714,7 @@ Load on-demand — don't read all upfront:
 
 After every significant report-build task, ask:
 
-1. **New filter field encountered or schema mismatch with the dashboard?** → Update `references/intelligence_schema.json` or `references/sponsorship_schema.json`.
+1. **New filter field encountered or schema mismatch with the dashboard?** → Update `references/intelligence_filterset_schema.json` or `references/sponsorship_filterset_schema.json`.
 2. **New column requested that isn't in the column list?** → Add to `references/columns_<type>.md` with `display_name`, `backend_code`, when-to-use.
 3. **Conditional tool fired wrongly (false positive or false negative)?** → Refine the criterion in this SKILL.md's "Conditional Tool Invocation" section AND in the tool's own front-matter.
 4. **Name resolution failed silently?** → Update `tools/name_resolver.md` matching strategy. Surface the discrepancy in tool warnings; never silently substitute.

@@ -34,12 +34,13 @@ The Phase 3 orchestration injects:
 ```json
 {
   "columns": {
-    "<Display Name>": { "display": true },
+    "<Display Name>": { "display": true, "width": "default" | "wide" | "narrow" },
     "<Custom Column>": {
       "display": true,
       "custom": true,
       "formula": "{Variable} / {Other}",
-      "cellType": "regular" | "usd" | "percent" | "textbox"
+      "cellType": "regular" | "usd" | "percent" | "textbox",
+      "width": "default" | "wide" | "narrow"
     }
   },
   "dataset_structure": {
@@ -54,7 +55,8 @@ The Phase 3 orchestration injects:
     "intent_consumed": "<echo of ROUTING_METADATA.intent_signal>" | null,
     "column_count": <int>,
     "default_set_used": <bool>,
-    "concerns_surfaced": [/* tool_warnings + validation_concerns to surface in takeaways */]
+    "concerns_surfaced": [/* tool_warnings + validation_concerns to surface in takeaways */],
+    "ordering_strategy": "anchors_first_then_intent_then_context"
   }
 }
 ```
@@ -123,7 +125,30 @@ The FilterSet's `sort` MUST reference a column that's both:
 
 If the FilterSet's `sort` references a column you didn't emit, **add the column** (don't drop the sort) and flag in `_column_metadata.concerns_surfaced`. If the direction is invalid, surface a follow-up rather than silently fix.
 
-### Step 6 — Custom-formula proactivity
+### Step 6 — Order the columns
+
+The order in the emitted `columns` dict IS the display order on the saved report. Apply this ordering strategy:
+
+1. **Anchors first** — type-mandated default columns. For type 3: `Channel`, `TL Channel Summary`, `Subscribers`. For type 8: `Channel`, `Advertiser`, `Status`, `Price`, `Scheduled Date`. For type 1: `Date`, `Channel`, `Title`, `Views`. For type 2: `Brand`, `Mentions`, `Avg. Views`.
+2. **Intent-driven block** — the columns added per `ROUTING_METADATA.intent_signal` (outreach surface / engagement surface / pricing surface / etc.). Group by theme so the user reading left-to-right sees the report's purpose.
+3. **Niche-driven additions** — columns added because of specific FilterSet anchors (a brand-mention filter → `Brands`; a recent-activity filter → `Last Published`).
+4. **Context columns last** — `Country`, `Language`, `Channel URL`, `Topic Descriptions`, generic identifiers. These are useful for verification but aren't the report's headline.
+
+If a sort field references a column, it should be visible — pull it forward into the intent-driven block when needed.
+
+### Step 7 — Set column widths
+
+Most columns use the platform's default width. Deviate when the column's content is unusually wide or unusually narrow:
+
+| Width | When to use | Examples |
+|---|---|---|
+| `wide` | Long-text or multi-line content | `TL Channel Summary`, `Topic Descriptions`, `Channel Description`, `Talking Points`, `Adops Notes`, `Publisher Notes`, `Sponsorship Example` |
+| `narrow` | Compact numerics or single-tag fields | `Status`, `Match Grade`, `Performance Grade`, `Face On Screen`, `Country`, `Language` |
+| `default` | Everything else | most columns |
+
+Emit `"width": "wide"` or `"width": "narrow"` only when deviating; omit the key (or set `"width": "default"`) for everything else.
+
+### Step 8 — Custom-formula proactivity
 
 Per `COLUMNS_REFERENCE`'s "Suggested formulas" table, queue at least one custom-formula suggestion in `pending_refinement_suggestions`. Examples per intent:
 
@@ -132,12 +157,12 @@ Per `COLUMNS_REFERENCE`'s "Suggested formulas" table, queue at least one custom-
 | Engagement spotting (type 3) | `{Avg. Views} / {Subscribers}` | `percent` |
 | Outreach efficiency (type 3) | `{Cost} / {Projected Views}` | `usd` |
 | ROAS check (type 8) | `{Price} ? {Revenue} / {Price} : 'N/A'` | `regular` |
-| Margin/profit signal (type 8) | `{Price} - {Cost}` (TL profit, not "margin") | `usd` |
+| Profit signal (type 8) | `{Price} - {Cost}` (TL profit, not "margin") | `usd` |
 | Default (no specific intent) | `{Avg. Views} / {Subscribers}` | `percent` |
 
 **Do NOT silently activate a custom column.** Surface as a refinement suggestion; the user opts in (Phase 4 surfaces them in the takeaways message).
 
-### Step 7 — Compose the dataset structure
+### Step 9 — Compose the dataset structure
 
 Set `dataset_structure.report_type` and `dataset_structure.sort` (echoing the FilterSet's sort, or the type's default if unset). Set `page_size` per the pagination defaults:
 
@@ -338,6 +363,8 @@ Look-alike report (similar-to-channels intent). Added `Topic Descriptions` since
 9. **TL terminology in formula labels.** Use `TL profit` (not "margin"), `Net revenue` (not "margin"), `Reach` (not raw "subscribers"). Per `report_glossary.md`'s don't-use list.
 10. **Echo `intent_signal` when consumed.** `_column_metadata.intent_consumed` is non-null whenever you swapped from the default set due to intent.
 11. **Surface tool warnings.** `_column_metadata.concerns_surfaced` includes every entry from `ROUTING_METADATA.tool_warnings` and `ROUTING_METADATA.validation_concerns` that affected your column choices — Phase 4 reads this for takeaways.
+12. **Order is part of the contract.** The order in the emitted `columns` dict IS the display order. Apply the anchors-first → intent-block → niche-additions → context-last strategy from Step 6. Don't shuffle randomly.
+13. **Width hints only when deviating.** Only emit `"width": "wide"` for long-text columns and `"width": "narrow"` for compact ones. Default-width columns omit the key. Don't emit a width on every column — that's noise.
 
 ---
 
@@ -347,9 +374,11 @@ Look-alike report (similar-to-channels intent). Added `Topic Descriptions` since
 2. Every key in `columns` matches a display name in the type's column file exactly (case-sensitive, including spaces).
 3. Type-mandated anchors are present (type 3: `TL Channel Summary`; type 8: `Channel`, `Advertiser`, `Status`, `Price`, `Scheduled Date`).
 4. Column count is 5–13. `_column_metadata.column_count` is set.
-5. No `custom: true` columns unless the user explicitly asked for one.
-6. `dataset_structure.sort` references a column present in `columns` with an allowed direction.
-7. `pending_refinement_suggestions` has at least one entry — typically a custom-formula suggestion.
-8. `_column_metadata.intent_consumed` echoes the intent signal verbatim when you swapped from defaults; null otherwise.
-9. `_column_metadata.concerns_surfaced` includes every tool_warning that affected column choice.
-10. No cross-catalog mixing — type 1/2/3 columns and type-8 columns are not interchangeable.
+5. **Column order follows the strategy** — anchors first, then intent block, then niche additions, then context columns. Sort-target column is visible (in the intent block or earlier).
+6. **Width hints only on deviation** — `"width": "wide"` for long-text content (`TL Channel Summary`, `Topic Descriptions`, `Channel Description`, etc.); `"width": "narrow"` for compact fields (`Status`, `Match Grade`, `Country`, `Language`); no width key for default.
+7. No `custom: true` columns unless the user explicitly asked for one.
+8. `dataset_structure.sort` references a column present in `columns` with an allowed direction.
+9. `pending_refinement_suggestions` has at least one entry — typically a custom-formula suggestion.
+10. `_column_metadata.intent_consumed` echoes the intent signal verbatim when you swapped from defaults; null otherwise.
+11. `_column_metadata.concerns_surfaced` includes every tool_warning that affected column choice.
+12. No cross-catalog mixing — type 1/2/3 columns and type-8 columns are not interchangeable.

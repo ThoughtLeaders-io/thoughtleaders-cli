@@ -24,7 +24,7 @@ The Phase 4 orchestration injects:
 4. **`ROUTING_METADATA`** — Phase 2's `_routing_metadata`. Critically:
    - **`intent_signal`**: phrases like `"product placements (outreach)"` or `"sponsorship outreach"`. When non-null, drives intent-based swaps (see widgets.md "Intent-driven patterns").
    - **`validation_concerns`**: noise warnings inherited from `keyword_research` / `sample_judge`. Don't shape widgets around them, but echo them in `_widget_metadata.concerns_inherited` so Phase 4 surfaces them in takeaways.
-5. **`WIDGETS_REFERENCE`** — content of [`references/widgets.md`](../references/widgets.md). The aggregator catalog, default sets per type, intent-driven patterns, and type-8 axis branching all live there. **Do NOT inline this catalog into your reasoning; consult it.**
+5. **`WIDGETS_SCHEMA`** — content of either `references/intelligence_widget_schema.json` (types 1/2/3) OR `references/sponsorship_widget_schema.json` (type 8) — picked by the orchestration based on `REPORT_TYPE`. Each schema contains: the per-widget JSON Schema (`$defs/widget`), the disjoint aggregator catalog (`_tl_aggregator_catalog`), the default 5-widget set (`_tl_default_widget_set_by_type` for intelligence; `_tl_default_widget_set` for sponsorship), the intent overrides (`_tl_intent_overrides`), and (for sponsorship) the axis-branching rules (`_tl_axis_branching`). **Do NOT inline these into your reasoning; consult the loaded schema.**
 
 ---
 
@@ -250,15 +250,15 @@ Pre-sale `publish_status` set → `send_date` axis. 12-month range → `"month"`
 
 ## Hard rules
 
-1. **Never cross catalogs.** Type 1/2/3 reports use intelligence aggregators ONLY; type 8 uses sponsorship aggregators ONLY. The catalogs are disjoint.
-2. **First widget = primary aggregate.** Don't bury the headline metric.
-3. **Histograms last.** Higher `index` than metrics-boxes.
-4. **`width: 2` for metrics-boxes, `width: 3` for histograms.** The grid is 6 columns wide.
-5. **`height: 1` always.** Multi-row widgets aren't part of the catalog.
-6. **`index` is 1-based and sequential.** No gaps.
-7. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same report use the SAME axis. Pick by `publish_status` per Step 4.
-8. **`histogram_bucket_size` is top-level**, not per-widget. Set it once.
-9. **4–6 widgets total.** 4 is OK; 5 is the sweet spot; 6 is the max. Don't pad to hit a higher number.
+1. **Every widget must add value to the user's original prompt.** A widget earns its slot if it answers a question the user implicitly cares about (intent), surfaces a metric tied to a filter the user named (niche), or shows a trend over the date scope they specified. The 4–6 range is a budget, not a target — emit fewer if the extras don't pull weight.
+2. **Never cross catalogs.** Type 1/2/3 reports use intelligence aggregators ONLY; type 8 uses sponsorship aggregators ONLY. The catalogs are disjoint.
+3. **First widget = primary aggregate.** Don't bury the headline metric.
+4. **Histograms last.** Higher `index` than metrics-boxes.
+5. **`width: 2` for metrics-boxes, `width: 3` for histograms.** The grid is 6 columns wide.
+6. **`height: 1` always.** Multi-row widgets aren't part of the catalog.
+7. **`index` is 1-based and sequential.** No gaps.
+8. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same report use the SAME axis. Pick by `publish_status` per Step 4.
+9. **`histogram_bucket_size` is top-level**, not per-widget. Set it once.
 10. **Don't invent aggregator keys.** If the user's request can't be expressed by the catalog, surface that in `_widget_metadata.concerns_inherited` and stick to the closest catalog match.
 11. **Echo `intent_signal` when consumed.** `_widget_metadata.intent_consumed` is non-null whenever you swapped from the default set.
 
