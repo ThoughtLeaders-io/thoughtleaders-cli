@@ -145,6 +145,63 @@ USER_QUERY
 
 There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. Display + save are runtime concerns around the output (handled by the calling environment: SantaClaw commits via campaign_maker; humans copy JSON).
 
+## Phase 1 — Report Type Selection (detail)
+
+Phase 1 is heuristic-only — no `tl db pg`, no tool prompts. It reads `USER_QUERY` and emits one of `{1, 2, 3, 8}` (or asks a clarifying question). Phase 1's correctness is the foundation everything downstream rests on; getting the type wrong forces the wrong schema, the wrong column catalog, and the wrong widget catalog.
+
+### Routing logic
+
+Read `USER_QUERY` and apply in order:
+
+1. **Explicit type signals** — if the user said "uploads / videos / individual videos / per-video" → type 1. "Brands report / advertisers report / competitor research" → type 2. "Channels / creators / youtubers / publishers" → type 3. "Sponsorships / deals / adlinks / pipeline / sales pipeline / sponsorship management" → type 8.
+2. **Deal-stage jargon** — see `report_glossary.md` "Deal-stage jargon" table. If the user says "booked / sold / won / closed / proposed / pending / matched / reached out / partnership / partnerships", they almost certainly mean type 8 — the deal pipeline. **Don't let "channels" / "creators" inside the same sentence override this** — "partnerships with beauty creators" is type 8 with a clarification opportunity, not type 3 with keyword-routing.
+3. **Ambiguous terms from `report_glossary.md` "Ambiguous / dangerous terms"** → surface a clarifying question rather than guess. Examples: "campaign report", "sponsors report", "creator report" (singular), "performance report", "pipeline" without context.
+4. **Default when "report" is unqualified + the request is about creators** → type 3.
+5. **Vague / under-specified** ("Build me a report") → ask: "What kind of report? Channels (creators), uploads (videos), brands, or sponsorship deals?"
+
+### Authoritative routing examples
+
+These two examples anchor the highest-risk routing failures. The skill MUST handle them per the expected behavior.
+
+#### G07 — partnership routing (silent-ship trap)
+
+**`USER_QUERY`**: `"Show me partnerships from last quarter for beauty creators"`
+
+**Trap**: a naïve heuristic sees "creators" → routes to type 3 (CHANNELS). That's wrong.
+
+**Correct routing**: type 8 (SPONSORSHIPS). "Partnerships" is type-8 deal-stage jargon per `report_glossary.md`. The "beauty creators" phrase is a *channel-filter clarification opportunity*, not a topic-keyword for a channels report.
+
+**Phase 1 output**:
+```
+report_type: 8
+clarifying_question (optional): "Which beauty creators specifically — by name, or filter by content_categories: ['beauty']?"
+```
+
+This is a v1-known weakness (`_SPONSORSHIP_KEYWORDS = {pipeline, deal, deals, adlink, adlinks}` did NOT contain "partnership") that the v2 skill must catch.
+
+#### G06 — vague query (ask, don't guess)
+
+**`USER_QUERY`**: `"Build me a report"`
+
+**Trap**: hallucinate a default report type and start emitting filters.
+
+**Correct routing**: surface a follow-up question, do not proceed to Phase 2.
+
+**Phase 1 output**:
+```
+follow_up: "What kind of report would you like? Choose one:
+  - Channels (creators) — find YouTube channels matching some criteria
+  - Uploads (videos) — find specific videos
+  - Brands — find advertisers / sponsors aggregated across mentions
+  - Sponsorships — track deal pipeline and sold deals"
+```
+
+Phase 2 doesn't fire until the user picks.
+
+### Hand-off to Phase 2
+
+Phase 1 emits `{ report_type: <int>, clarifying_questions: [...] | [] }`. Phase 2 reads `report_type` to pick the right schema (`intelligence_schema.json` for 1/2/3, `sponsorship_schema.json` for 8) and to gate which Phase 2 tools fire (e.g., `topic_matcher` skips for type 8; `keyword_research` skips for type 8).
+
 ## Conditional Tool Invocation
 
 Tools are optional enrichments invoked from inside Phase 2. Each fires only when its criteria are explicitly met. Each may emit `warnings: [...]` that propagate to Phase 4's takeaways.
@@ -298,6 +355,88 @@ Phase 3 reads `decision == "proceed"` to know it's safe to run. The `_validation
 | Cross-references present | Resolve cross-reference IDs first via T3, then count/sample the main predicate. Adds 1–2 preliminary queries. |
 | Brand/channel name lookups | All string-name resolutions happen via T4 BEFORE this validation step. The FilterSet entering validation has IDs, not names. |
 | Inherited `validation_concerns` from T2 | Pass through to `sample_judge`'s `VALIDATION_CONCERNS` input verbatim. The judge biases toward `looks_wrong` when these are present and confirmed in samples. |
+
+### Authoritative validation example — G11 (substring noise → Mode B)
+
+This example anchors the canonical silent-ship-risk that Phase 2 validation exists to prevent. The skill MUST handle it per the expected behavior.
+
+**`USER_QUERY`**: `"channels about IRS tax debt forgiveness programs"`
+
+**Phase 2 composes a FilterSet**:
+```json
+{
+  "filterset": {
+    "keywords": ["IRS", "tax debt", "tax debt forgiveness", "tax debt relief"],
+    "keyword_operator": "OR",
+    "content_fields": ["channel_description", "channel_description_ai", "channel_topic_description"],
+    "languages": ["en"],
+    "channel_formats": [4],
+    "sort": "-reach"
+  },
+  "_routing_metadata": {
+    "intent_signal": null,
+    "tool_warnings": [],
+    "validation_concerns": [
+      "'IRS' is a 3-character keyword and risks substring noise (matches 'first', 'irish', etc.) — keyword_research flagged this"
+    ]
+  }
+}
+```
+
+**Step 2.V2 — `db_count`**:
+```sql
+SELECT COUNT(*) FROM thoughtleaders_channel
+WHERE is_active = TRUE
+  AND (description ILIKE '%IRS%' OR channel_name ILIKE '%IRS%' OR ...)
+  AND language = 'en'
+```
+Returns `6,601`. Classification: `normal` (51–10000 bucket).
+
+**Step 2.V4 — `db_sample` + `sample_judge`**:
+
+`db_sample` returns the top 10 channels by reach. Top results include:
+```
+Cocomelon, Bad Bunny, Bruno Mars, BRIGHT SIDE, Selena Gomez,
+That Little Puff, Taarak Mehta Ka Ooltah Chashmah, ...
+```
+
+`sample_judge` is invoked with `USER_QUERY` + `DB_SAMPLE` + `VALIDATION_CONCERNS`. It returns:
+
+```json
+{
+  "judgment": "looks_wrong",
+  "reasoning": "All 10 samples are music artists, children's content, or general entertainment — none are about IRS tax debt or financial services. Confirms the substring-noise warning from keyword_research: 'IRS' is matching inside 'first', 'irish', etc.",
+  "noise_signals": ["3-char keyword 'IRS' matching unrelated channel descriptions"],
+  "matching_signals": []
+}
+```
+
+**Step 2.V6 — Decision**:
+
+```json
+{
+  "decision": "alternatives",
+  "_validation": {
+    "db_count": 6601,
+    "count_classification": "normal",
+    "sample_judgment": "looks_wrong",
+    "sample_judgment_reasoning": "Top 10 by reach: Cocomelon, Bad Bunny, Bruno Mars... — none about IRS tax debt; substring noise from short keyword 'IRS'",
+    "validation_concerns": ["'IRS' substring noise confirmed in samples"]
+  },
+  "alternatives_for_user": {
+    "mode": "B",
+    "options": [
+      "Save anyway — useful if you want to inspect the long tail manually",
+      "Refine — drop 'IRS' as a standalone keyword; keep 'tax debt' / 'tax debt forgiveness' / 'tax debt relief' (longer phrases, less noise)",
+      "Cancel — TL data may not have meaningful coverage for this niche"
+    ]
+  }
+}
+```
+
+**Phase 3 and Phase 4 do NOT fire.** The skill surfaces the Mode-B prompt to the user. This is the architectural promise: catch substring-noise silent ships at validation time, before columns and widgets are wasted on a broken FilterSet.
+
+This is the canonical regression test. Whenever Phase 2 validation changes, walk this example through and verify the outcome is still `decision: "alternatives"` with a Mode-B prompt — not a silent emit.
 
 ## Phase 3 — Columns Phase (detail)
 
