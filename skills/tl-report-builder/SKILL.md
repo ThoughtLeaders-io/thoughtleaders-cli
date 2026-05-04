@@ -280,53 +280,108 @@ Phase 2's validation step is the **mandatory gate** between FilterSet compositio
 
 **What validation actually does** (in plain terms): once the FilterSet is composed, run a script that fetches the data those filters would actually return — both the **count of matching entities** (how many channels / uploads / brands / deals the predicate matches) and a **small sample of representative rows** (10 rows, ordered by the canonical sort). Then compare both back against the user's original prompt and judge: *would shipping this FilterSet plausibly complete the user's request?* If yes → proceed. If no → surface alternatives or fail rather than silently emit. The judgment is the validation gate's whole point.
 
-### Step 2.V1 — Translate FilterSet to count + sample SQL
+### Step 2.V1 — Translate FilterSet to count + sample query
 
-Determined by `report_type`. Phase 2 builds two queries: `db_count` (scalar) and `db_sample` (LIMIT 10).
+Determined by `report_type`. Phase 2 builds two queries: `db_count` (scalar) and `db_sample` (LIMIT 10). **The data plane depends on the report type:**
 
-**CRITICAL: use a CTE that applies the indexed filters first, then the ILIKE keyword predicate.** A flat `WHERE description ILIKE ... OR ... AND reach >= ... AND ...` predicate times out on the full channels table — Postgres scans `description` before the indexed columns can prune it. The CTE pattern forces filter-first → keyword-second and completes in seconds.
+| ReportType | Primary engine | Why |
+|---|---|---|
+| 1 (CONTENT) | **Elasticsearch** (`tl db es`) | Content text search at scale — keyword/phrase matching across uploads is what ES is built for. |
+| 2 (BRANDS) | **Elasticsearch** (`tl db es`) | Same — brand mention detection and aggregation runs on ES. |
+| 3 (CHANNELS) | **Elasticsearch** (`tl db es`) | Channel description/topic search at scale. |
+| 8 (SPONSORSHIPS) | **Postgres** (`tl db pg`) | AdLink relations + status / owner / date filters live in PG; sponsorships are not text-searched. |
 
-For type 3 (CHANNELS):
+The skill's previous "everything via `tl db pg`" framing was the v1 prototype's smoke-check assumption. Postgres lacks trigram / FTS indexes on `description` and times out on multi-keyword OR predicates against the full channels table. **Use ES as the primary plane for intelligence reports**; PG remains a narrow fallback only when (a) the report type is 8, or (b) ES is unavailable AND the FilterSet has tight indexed-column predicates (reach floor, single keyword, narrow language) so the PG CTE workaround can complete.
+
+#### Intelligence reports (1 / 2 / 3) — Elasticsearch query
+
+Compose an ES search body. The index is fixed server-side; the client only sends the search body.
+
+```json
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "is_active": true } },
+        { "terms": { "language": ["en"] } },
+        { "terms": { "format":   [4] } },
+        { "range": { "reach": { "gte": 100000 } } }
+      ],
+      "must": [
+        {
+          "multi_match": {
+            "query":   "<keyword>",
+            "type":    "phrase",
+            "fields":  ["description", "channel_name", "channel_topic_description"]
+          }
+        }
+        // ... one multi_match per keyword, combined per keyword_operator (AND → all in `must`; OR → wrap in `should` with minimum_should_match: 1)
+      ]
+    }
+  },
+  "aggs": {
+    "total": { "value_count": { "field": "_id" } }
+  }
+}
+```
+
+The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous phrase in any of the listed fields (no substring noise — phrase matching respects word boundaries). This is the architectural fix for the G03-class noise (`AI` matching `Tamil`/`captain`). For type 1, target the upload index fields (`title`, `summary`, `transcript`); for type 3 use channel-level fields.
+
+For `db_sample` (LIMIT 10): same query body with `size: 10`, `sort: [{ "reach": "desc" }]`, and `_source: ["id", "channel_name", "reach"]`.
+
+#### Sponsorship reports (8) — Postgres query
+
+Type 8 stays on Postgres because the data plane is `thoughtleaders_adlink` (relations + status + dates), not text search.
+
 ```sql
 -- db_count
-WITH filtered AS (
-  SELECT id, channel_name, description, reach
-  FROM thoughtleaders_channel
-  WHERE is_active = TRUE
-    AND <indexed-column predicates: reach_from/reach_to, language, format, country, etc.>
-)
-SELECT COUNT(*) FROM filtered
-WHERE <keyword ILIKE predicate combining keywords with keyword_operator>
+SELECT COUNT(*) FROM thoughtleaders_adlink al
+LEFT JOIN thoughtleaders_brand b   ON al.brand_id   = b.id
+LEFT JOIN thoughtleaders_channel c ON al.channel_id = c.id
+WHERE al.publish_status = ANY(<filters_json.publish_status>)
+  AND al.created_at BETWEEN <start> AND <end>
+  AND b.id = ANY(<resolved brand_ids>)        -- if brands set
+  AND c.id = ANY(<resolved channel_ids>)      -- if channels set
 LIMIT 1 OFFSET 0
+```
 
--- db_sample
+Date filter required (per Phase 2 edge-case rule — type-8 without dates is rejected upfront). No keyword ILIKE pattern; sponsorships filter by relations, not content text.
+
+#### Postgres CTE fallback (smoke-check only)
+
+If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern:
+
+```sql
 WITH filtered AS (
   SELECT id, channel_name, description, reach
   FROM thoughtleaders_channel
   WHERE is_active = TRUE
     AND <indexed-column predicates>
 )
-SELECT id, channel_name, reach FROM filtered
+SELECT COUNT(*) FROM filtered
 WHERE <keyword ILIKE predicate>
-ORDER BY reach DESC NULLS LAST LIMIT 10 OFFSET 0
+LIMIT 1 OFFSET 0
 ```
 
-The `<keyword ILIKE predicate>` combines `description ILIKE '%<text>%' OR channel_name ILIKE '%<text>%'` per keyword, joined by `AND` or `OR` per `keyword_operator`. For `exclude: true` keywords, wrap in `AND NOT (...)`.
+This pattern works only with substantial pre-filter pruning. **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE) are real and surfaced in the e2e findings. ES is the right tool.
 
-When the FilterSet has no reach floor (or any indexed column to filter on), the CTE's `filtered` set is too large for the `channel_name ILIKE` half — drop it and search description-only. The Step 2.V2 retry rule already handles this; mention it inline so the initial query is fast.
-
-For types 1 / 2: same CTE pattern against `thoughtleaders_channel` as a channel-level proxy (production runs against ES; the proxy is sufficient for a Phase 2 smoke check).
-
-For type 8: predicate against `thoughtleaders_adlink` joined to brand + channel; date filter required (`al.created_at` or `al.send_date` BETWEEN ...). Type-8 queries don't use the keyword ILIKE pattern — sponsorships filter by relations, not content text.
-
-### Step 2.V2 — Run `db_count` (with timeout retry)
+### Step 2.V2 — Run the count query (with timeout / fallback handling)
 
 ```
+# Intelligence report (1 / 2 / 3):
+tl db es --json '<es_query_body>'
+
+# Sponsorship report (8):
 tl db pg --json "<count_sql>"
 ```
 
-If the query times out:
-1. Drop the `channel_name ILIKE` half of each keyword predicate (description-only).
+For ES queries:
+- ES timeouts on intelligence searches are rare with proper `bool.filter` use; if one occurs, narrow the keyword set or tighten the indexed filters.
+- ES phrase matching (`type: "phrase"`) handles substring-noise risk by default — no equivalent of the PG ILIKE `AI`-matches-`Tamil` problem.
+
+For PG queries (type 8 or smoke-check fallback):
+1. If a PG query times out, drop the `channel_name ILIKE` half of each keyword predicate (description-only).
 2. Retry once.
 3. If still timing out: split predicate by `AND`, run sides separately, estimate intersection arithmetically.
 4. If that fails too: `decision: "fail"` with diagnostic.
@@ -637,7 +692,8 @@ Skills that follow up are skills users trust. Silent assumptions are silent regr
 
 | Source | Authoritative For | Connection |
 |---|---|---|
-| **`tl db pg`** | Live data: topics, channels, brands, sponsorships, sponsorship-history M2M | tl-cli ≥ v0.6.2; sandboxed read-only SELECT, mandatory `LIMIT/OFFSET`, max 500 rows |
+| **`tl db es`** | Live content / channel / brand text search at scale (intelligence reports — types 1/2/3 primary validation engine) | tl-cli ≥ v0.6.2; sandboxed read-only ES search bodies; phrase-matching avoids the PG-ILIKE substring-noise problem |
+| **`tl db pg`** | Live data: topics, sponsorships (AdLink relations — type 8 primary), small lookup queries; smoke-check fallback for intelligence reports when ES is unavailable AND the FilterSet pre-filters narrowly | tl-cli ≥ v0.6.2; sandboxed read-only SELECT, mandatory `LIMIT/OFFSET`, max 500 rows; CTE pattern required for any keyword-bearing intelligence query |
 | **`references/intelligence_filterset_schema.json`** | Canonical filterset shape for types 1/2/3 (filter fields, defaults, validation rules) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
 | **`references/sponsorship_filterset_schema.json`** | Canonical filterset shape for type 8 (status IDs, owner fields, date filters, filters_json semantics) | Static file; consulted in Phase 2 (compose + validate) and Phase 4 (final JSON-shape validation) |
 | **`references/columns_<type>.md`** | Available columns + intent-driven default sets per ReportType | Static; consulted in Phase 3 |
@@ -708,6 +764,7 @@ Load on-demand — don't read all upfront:
 ## Safety
 
 - **`tl db pg`**: read-only SELECT only. The skill never attempts INSERT/UPDATE/DELETE through this surface. Mandatory `LIMIT n OFFSET m`, max 500 rows. Forbidden function list: `random`, `pg_sleep`, `current_user`, `version`, `pg_read_file`, `lo_export`, `dblink`, `current_setting`, `set_config`.
+- **`tl db es`**: read-only search bodies only. Index is fixed server-side (no client-side index selection). Always include explicit `size` (default to small values; cap at the ES sandbox's allowed maximum). Use `bool.filter` for non-scoring constraints and `must` / `should` for keyword scoring. Never request `_source: false` then rely on stored fields the sandbox doesn't expose.
 - **Tool warnings**: every tool that resolves names with non-exact matching MUST surface the match-quality in `_routing_metadata.tool_warnings`. Phase 4 surfaces these in takeaway insights — silent name-substitution is forbidden.
 - **Follow-ups over assumptions**: when a phase encounters ambiguity that affects the output, the skill MUST ask rather than guess. Phase-by-phase trigger list is in the "Follow-Up Interactions" section above.
 

@@ -181,14 +181,42 @@ Phase 3 + Phase 4 do NOT fire. ✓
 
 **Severity**: NONE — informational. The architecture handles it correctly; just expect this path to fire often.
 
+### 🔴 Finding 5 — Validation engine routing: ES for intelligence, PG for sponsorships
+
+**Surfaced by**: G02 + G03 (both repeatedly timed out on PG keyword scans).
+
+**Issue**: The original SKILL.md spec used `tl db pg` as the universal validation engine. That's wrong for intelligence reports (types 1/2/3). PG has no trigram or full-text index on `description` / `channel_name`, so multi-keyword OR predicates time out even with the CTE workaround at moderate reach floors. The G01 / G02 / G03 e2e runs spent more time fighting timeouts than running validations.
+
+The production data plane is split:
+- **Intelligence (1/2/3)** → Elasticsearch (`tl db es`). Phrase-matching, scoring, no substring noise.
+- **Sponsorship (8)** → Postgres (`tl db pg`). Relations + status + dates; no text search.
+
+The PG smoke-check is fine as a narrow fallback (when ES is unavailable AND the FilterSet pre-filters tightly) but is not the production validation path.
+
+**Fix applied**: SKILL.md Step 2.V1 + V2 + Data Sources table updated to:
+- Route intelligence-report validation through `tl db es` with a `bool.filter` + `multi_match phrase` body shape.
+- Keep `tl db pg` for type 8 and as the smoke-check fallback for intelligence.
+- Note that ES phrase matching architecturally avoids the G11/G03 substring-noise class — `multi_match type: "phrase"` respects word boundaries.
+
+**Implications for prior e2e tests** (G01 / G02 / G03):
+- The PG timeouts those runs surfaced are **expected** for the wrong-tool-for-the-job case; they don't invalidate the architectural findings (substring noise, multi-topic intersection limits, data sparsity).
+- Re-running G01–G03 against `tl db es` would produce different and likely cleaner results — the substring noise from `AI` matching `Tamil` etc. would not occur with ES phrase matching.
+- The CTE workaround (Bug 1) is still correct and still applicable when PG IS used (type 8 or explicit smoke-check fallback).
+
+**Severity**: HIGH — the validation engine choice was architecturally wrong for the most common report types (1/2/3). Fix landed in the same commit as this finding.
+
 ---
 
 ## Net e2e verdict
 
-✅ **Architecture sound.** All three test queries route correctly through Phases 1–2. The validation gate catches silent-ship risks (G11) and surfaces ambiguity (G01) instead of emitting bad configs. The deal-stage jargon mapping catches the v1 weakness (G07).
+✅ **Architecture sound at the orchestration level.** All test queries route correctly through Phases 1–2. The validation gate catches silent-ship risks (G11, G03) and surfaces ambiguity (G01, G02) instead of emitting bad configs. The deal-stage jargon mapping catches the v1 weakness (G07).
 
-✅ **Bug 1 fixed** in the same commit as this file. The CTE pattern is now the documented SQL shape for Phase 2 validation.
+✅ **Bug 1 fixed** — CTE pattern documented for the PG smoke-check path.
+
+✅ **Bug 5 fixed** — validation engine now routes ES (intelligence) vs PG (sponsorships) per report type.
 
 ⏳ **Findings 3 + 4** are calibration items, not bugs — flagged for future tuning when shadow-mode begins.
 
-⏳ **Phases 3 + 4** were not exercised in this run because all three test queries terminated at Phase 2 (G01 → uncertain, G07 → type 8 with clarifying question, G11 → looks_wrong). A clean happy-path run end-to-end through Phase 4 would need a query that produces a clean `matches_intent` verdict — e.g., G07 with explicit channel-name resolution, or G01 with a tighter keyword set after the user refines.
+⏳ **Phases 3 + 4** were not exercised in this run because Phase 2 terminated each query (G01 → uncertain, G02 → uncertain, G03 → looks_wrong, G07 → type 8 with clarifying question, G11 → looks_wrong). A clean happy-path run end-to-end through Phase 4 needs a query that produces a clean `matches_intent` verdict.
+
+⏳ **Re-run of intelligence-report e2e tests against ES is recommended** once Step 2.V1's ES query body shape is rehearsed against the live `tl db es` endpoint — the PG-based runs above are valuable for surfacing substring/sparsity / multi-topic-intersection findings, but they don't represent the production validation path.
