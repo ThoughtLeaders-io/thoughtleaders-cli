@@ -19,8 +19,18 @@ After `database_query` has run a sample query (LIMIT ~10) for a candidate Filter
 The orchestration injects:
 
 1. **`USER_QUERY`** — the original NL request string.
-2. **`DB_SAMPLE`** — array of up to 10 channel objects from Phase 3's `db_sample` query. Each: `{ id, channel_name, reach }` (production may also include `description` snippet — handle both shapes).
-3. **`VALIDATION_CONCERNS`** (optional, possibly empty) — any noise warnings inherited from the `keyword_research` tool's validation. Example: `["DeFi keyword has substring-noise warning — db_count of 6601 inflated by partial matches"]`. Bias judgment toward `looks_wrong` when these are present and you see signs of the noise in the samples.
+2. **`REPORT_TYPE`** — integer enum: `1` (CONTENT) | `2` (BRANDS) | `3` (CHANNELS). The row shape in `DB_SAMPLE` follows the type's natural row shape (see contracts below). `sample_judge` does not fire for type 8 — sponsorship rows are AdLink relations, not text-search outputs, so a count check + standard PG-side validation is sufficient.
+3. **`DB_SAMPLE`** — array of up to 10 row objects. Shape depends on `REPORT_TYPE`:
+
+   | `REPORT_TYPE` | Row shape | Identifier field for citations |
+   |---|---|---|
+   | **3 (CHANNELS)** | `{ id, channel_name, reach, description?, ai_topic_descriptions? }` | `channel_name` |
+   | **1 (CONTENT)** | `{ id, title, channel_name, reach?, views?, publish_date?, description? }` | `title` (with `channel_name` as secondary context) |
+   | **2 (BRANDS)** | `{ id, brand_name, channels_count?, mentions_count?, last_mention_date? }` | `brand_name` |
+
+   Cite the appropriate identifier per type when populating `noise_signals` / `matching_signals`. For type 1, an upload titled "How to Cook AI" on the channel "Cocomelon" is unambiguously off-target; cite the title. For type 2, a brand "BrandX" with high `channels_count` but unrelated industry is the noise vector; cite the brand name.
+
+4. **`VALIDATION_CONCERNS`** (optional, possibly empty) — any noise warnings inherited from the `keyword_research` tool's validation. Example: `["DeFi keyword has substring-noise warning — db_count of 6601 inflated by partial matches"]`. Bias judgment toward `looks_wrong` when these are present and you see signs of the noise in the samples.
 
 ---
 
@@ -29,13 +39,13 @@ The orchestration injects:
 ```json
 {
   "judgment": "matches_intent" | "looks_wrong" | "uncertain",
-  "reasoning": "<one sentence; cite at least 2 specific channel-name values from DB_SAMPLE>",
+  "reasoning": "<one sentence; cite at least 2 specific identifier values from DB_SAMPLE — channel_name for type 3, title for type 1, brand_name for type 2>",
   "noise_signals": [
-    "<channel_name>: <why it doesn't fit USER_QUERY>",
+    "<identifier>: <why it doesn't fit USER_QUERY>",
     "..."
   ],
   "matching_signals": [
-    "<channel_name>: <why it does fit USER_QUERY>",
+    "<identifier>: <why it does fit USER_QUERY>",
     "..."
   ]
 }

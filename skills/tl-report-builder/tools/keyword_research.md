@@ -53,7 +53,7 @@ Return a single JSON object:
 }
 ```
 
-**You do NOT emit a `validated` field.** Phase 2 runs `tl db pg COUNT(*)` against the relevant fact table for each candidate, prunes zero-count entries (and `junk_test` entries that DO unexpectedly hit), and consumes the resulting validated `KeywordSet` for filter assembly.
+**You do NOT emit a `validated` field.** Phase 2 validates each candidate via the report-type's primary engine — for intelligence reports (1/2/3) that's an `tl db es` probe per candidate (a small `bool.filter` + `multi_match phrase` body returning `total` only); for sponsorship reports (8) keyword research doesn't fire at all. The orchestration prunes zero-count entries (and `junk_test` entries that DO unexpectedly hit) and consumes the resulting validated `KeywordSet` for filter assembly. The pruning logic is the same regardless of engine — only the probe shape changes. **Do not emit PG-specific assumptions** (no `ILIKE`, no CTE patterns, no `description ILIKE` references) — keyword candidates are content-search probes, and content search lives on ES.
 
 ---
 
@@ -117,11 +117,13 @@ Return a single JSON object:
 }
 ```
 
-The orchestration then runs `tl db pg COUNT(*)` per candidate (head + sub + long-tail + junk_test) against `thoughtleaders_channel.description ILIKE '%<kw>%' OR channel_name ILIKE '%<kw>%'`. Expected outcomes:
-- `crypto`, `bitcoin`, `ethereum` — high counts (thousands), kept
-- `Web3`, `DeFi`, `NFT`, `blockchain` — medium counts (hundreds), kept
-- `how to buy bitcoin`, `best crypto wallet` — likely low counts (<10), often pruned
-- `rugpull` — count = 1, pruned (junk_test confirms validation works)
+The orchestration then runs an ES probe (`tl db es` with `size: 0` + `bool.filter` + `multi_match type: "phrase"`) per candidate against the channel index (or article index for type 1). Expected outcomes:
+- `crypto`, `bitcoin`, `ethereum` — high totals (thousands), kept
+- `Web3`, `DeFi`, `NFT`, `blockchain` — medium totals (hundreds), kept
+- `how to buy bitcoin`, `best crypto wallet` — likely low totals (<10), often pruned
+- `rugpull` — total = 1, pruned (junk_test confirms validation works)
+
+ES phrase matching means a candidate like `"AI"` won't generate inflated false totals from substring matches inside `"Tamil"` / `"captain"` — phrase boundaries respect word boundaries by default. For type 8, `keyword_research` doesn't fire (sponsorships filter by relations, not content text); validation goes straight to the PG date+status query.
 - `hopium` — count = 0 or 1, pruned (junk_test)
 
 ### Example B — anti-overlap with weak match
@@ -195,7 +197,7 @@ The orchestration then runs `tl db pg COUNT(*)` per candidate (head + sub + long
 
 ## What you do NOT do
 
-- **No SQL.** The orchestration runs `tl db pg COUNT(*)` per candidate; you just propose them.
+- **No engine-specific probe code.** The orchestration runs the per-candidate validation probe via the report-type's primary engine (`tl db es` for intelligence types 1/2/3; `tl db pg` for sponsorship type 8 — though keyword research doesn't fire for type 8). You just propose the keyword candidates; the engine choice is upstream of you.
 - **No `validated` field.** Orchestration adds it.
 - **No filter assembly.** That happens in Phase 2 after this tool returns.
 - **No topic IDs** in your output. Topic IDs are the `topic_matcher` tool's surface; you operate downstream.

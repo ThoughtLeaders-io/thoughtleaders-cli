@@ -147,9 +147,9 @@ USER_QUERY
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, via a `POST` (create) or `PUT` (edit) to the report-creation API endpoint. The skill itself never writes to the database directly — reads use raw `tl db pg`, writes go through the API.
+There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, via a `POST` (create) or `PUT` (edit) to the report-creation API endpoint. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through the API.
 
-> **Save-mechanism policy**: A new API endpoint is required for report creation. It will support both `POST` (initial create) and `PUT` (subsequent edits) so reports can be modified without redoing the four phases from scratch. Until the endpoint is built, the skill stops at producing the JSON config + takeaways; the calling environment handles whatever save mechanism is current. **Reads via `tl db pg`, writes via the API** is the architectural split.
+> **Save-mechanism policy**: A new API endpoint is required for report creation. It will support both `POST` (initial create) and `PUT` (subsequent edits) so reports can be modified without redoing the four phases from scratch. Until the endpoint is built, the skill stops at producing the JSON config + takeaways; the calling environment handles whatever save mechanism is current. **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the API** is the architectural split.
 
 ## Phase 1 — Report Type Selection (detail)
 
@@ -397,13 +397,24 @@ For PG queries (type 8 or smoke-check fallback):
 | 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest |
 | > 50000 | `too_broad` | Step 2.V5 (retry — narrow) |
 
-### Step 2.V4 — Run `db_sample`, then `sample_judge`
+### Step 2.V4 — Run sample query, then `sample_judge`
+
+The sample runner branches by report type, mirroring Step 2.V2's count runner:
 
 ```
+# Intelligence reports (1 / 2 / 3) — primary path:
+tl db es --json '<es_query_body_with_size_10_and_sort>'
+
+# Sponsorship reports (8) — primary path:
 tl db pg --json "<sample_sql>"
+
+# PG smoke-check fallback (intelligence only, when ES unavailable AND tight pre-filters):
+tl db pg --json "<cte_sample_sql>"
 ```
 
-Pipe the sample (≤ 10 rows) into `tools/sample_judge.md` with `USER_QUERY`, `DB_SAMPLE`, and `VALIDATION_CONCERNS` (inherited from `keyword_research`'s warnings, if any).
+For ES intelligence samples: same `bool.filter` + `multi_match phrase` body as the count, but `size: 10`, `sort: [{ "reach": "desc" }]` (or the canonical sort per type), and `_source` listing the type-appropriate fields (see `sample_judge` row-shape contract below).
+
+Pipe the sample (≤ 10 rows) into `tools/sample_judge.md` with `USER_QUERY`, `DB_SAMPLE`, `REPORT_TYPE`, and `VALIDATION_CONCERNS` (inherited from `keyword_research`'s warnings, if any). The row shape in `DB_SAMPLE` differs per report type — see `tools/sample_judge.md` "Inputs" section for the type-specific contracts.
 
 Decision based on judgment:
 - `matches_intent` → `decision: "proceed"` — emit validated FilterSet to Phase 3.
@@ -702,7 +713,12 @@ Skills that follow up are skills users trust. Silent assumptions are silent regr
 | **`references/widgets.md`** | Readable index pointing at the two widget schemas | Static; convenience reference |
 | **Conditional tools** (T1–T5) | Dynamic enrichment of the unified schema | Markdown files in `tools/` |
 
-**Trust hierarchy:** `tl db pg` for any "does this row exist / how many" question; the schema files for filter shape and validation rules; the column files for "what's available to display." If a tool's resolved ID disagrees with the user's name (e.g., emoji-stripped match), surface the discrepancy rather than silently substitute.
+**Trust hierarchy:**
+- For "does this row exist / how many" questions: **`tl db es`** for intelligence-report content / channel / brand search (types 1/2/3); **`tl db pg`** for sponsorship deal counts and small lookup queries (type 8 + topic / brand / channel name resolution).
+- For filter shape and validation rules: the filterset + widget schema files (`*_filterset_schema.json` / `*_widget_schema.json`) — they're the ground truth for what's valid.
+- For "what's available to display": the column files (`columns_<type>.md`) — they're the canonical list per report type.
+
+If a tool's resolved ID disagrees with the user's name (e.g., emoji-stripped match), surface the discrepancy rather than silently substitute.
 
 ## Quick Start
 
