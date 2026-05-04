@@ -29,7 +29,7 @@ The orchestration injects:
 ```json
 {
   "judgment": "matches_intent" | "looks_wrong" | "uncertain",
-  "reasoning": "<one sentence; cite at least 2 specific channel_names from DB_SAMPLE>",
+  "reasoning": "<one sentence; cite at least 2 specific channel-name values from DB_SAMPLE>",
   "noise_signals": [
     "<channel_name>: <why it doesn't fit USER_QUERY>",
     "..."

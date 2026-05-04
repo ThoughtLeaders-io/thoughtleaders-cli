@@ -60,9 +60,9 @@ Return a single JSON object:
 ## Hard rules
 
 ### R1 — Stay generic (no brand or channel names)
-- ✗ DON'T propose specific brand names (e.g. `"Coinbase"`, `"Binance"`, `"NordVPN"`). Brand names go in v1's `brand_names` filterset field, not in keyword_groups.
-- ✗ DON'T propose specific channel names (e.g. `"MrBeast"`, `"Joma Tech"`). Channel names go in `channel_names`.
-- ✓ DO propose topic/category/concept terms (`"crypto"`, `"DeFi"`, `"smart contract"`, `"yield farming"`).
+- ✗ DON'T propose specific brand names (e.g. `"Coinbase"`, `"Binance"`, `"NordVPN"`). Brands resolve through the `name_resolver` tool to integer IDs that populate the FilterSet's `brands` array — not via keyword text matching.
+- ✗ DON'T propose specific channel names (e.g. `"MrBeast"`, `"Joma Tech"`). Same path: `name_resolver` → `channels` array.
+- ✓ DO propose topic/category/concept terms (`"crypto"`, `"DeFi"`, `"smart contract"`, `"yield farming"`) — those go into the FilterSet's `keywords` field.
 
 ### R2 — Tier discipline
 - **`core_head`** (2–4 entries): the dominant terms a viewer would say first. Single words or short phrases. For "crypto/Web3 channels": `["crypto", "bitcoin"]`.
