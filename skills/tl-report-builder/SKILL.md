@@ -89,9 +89,10 @@ USER_QUERY
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ PHASE 3 — Columns Phase                                                 │
-│   Input:    unified schema, ReportType                                  │
-│   Output:   { columns, dataset_structure, pagination_settings }         │
-│   Loads:    references/columns_<type>.md                                │
+│   Input:    validated schema, ReportType                                │
+│   Output:   { columns, dataset_structure, pending_refinement_sugg. }    │
+│   Loads:    tools/column_builder.md (always — picks the columns)        │
+│             references/columns_<type>.md (catalog)                      │
 │             references/sortable_columns.json                            │
 │                                                                          │
 │   Responsibilities:                                                     │
@@ -183,6 +184,12 @@ Tools are optional enrichments invoked from inside Phase 2. Each fires only when
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND `db_count` classification is `narrow` / `normal` / `broad` (i.e., not `empty` and not `too_broad` — those go straight to retry without sample inspection).
 **Skipped when**: type 8 (deal sample shape ≠ channel sample shape) OR `db_count` was `empty` / `too_broad` (retry path).
 **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
+
+### Phase 3 sub-tool
+
+**`tools/column_builder.md`** — always fires in Phase 3.
+**Behavior**: same builder-prompt pattern as `widget_builder`. Reads `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, plus `references/columns_<type>.md` and `references/sortable_columns.json`. Picks 5–10 standard columns (up to 13 with intent), validates sort, queues custom-formula refinement suggestions.
+**Output**: `{ columns: {...}, dataset_structure: {...}, pending_refinement_suggestions: [...], _column_metadata: {...} }`.
 
 ### Phase 4 sub-tool
 
@@ -299,71 +306,27 @@ Phase 3 picks the columns the saved report displays and the dataset shape that h
 ### Inputs
 
 - `REPORT_TYPE` (1 / 2 / 3 / 8) from Phase 1.
-- The unified schema produced by Phase 2: `filterset` + `filters_json` + `cross_references` (if any) + `_routing_metadata` (carries `intent_signal`, tool warnings, etc.).
+- The validated schema produced by Phase 2: `filterset` + `filters_json` + `cross_references` (if any) + `_routing_metadata` (carries `intent_signal`, tool warnings, etc.).
 - **Loaded on demand**:
-  - `references/columns_<type>.md` — full column catalog for the report type, with intent-driven default sets.
-  - `references/sortable_columns.json` — sort metadata (asc-only / desc-only / both) used to validate the FilterSet's `sort` field.
+  - `tools/column_builder.md` — the column-selection prompt (always invoked).
+  - `references/columns_<type>.md` — full column catalog for the report type, consumed by `column_builder`.
+  - `references/sortable_columns.json` — sort metadata, consumed by `column_builder` for sort validation.
 
 ### Process
 
-1. **Load the type-specific column file.** `references/columns_<channels|content|brands|sponsorships>.md`.
-2. **Start from the type's default set.** The "Defaults — always include" section of the column file gives the anchors (e.g., for type 3: `Channel`, `TL Channel Summary`, `Subscribers`).
-3. **Layer intent-driven additions.** Read `_routing_metadata.intent_signal` from Phase 2. Use the column file's intent table to add columns:
-   - Outreach / product-placements intent → outreach surface (`Sponsorship Score`, `Sponsorships Sold`, `Outreach Email`, demographic columns).
-   - Audience-quality / engagement intent → engagement surface (`Engagement`, `Median Evergreenness`, `Trend`).
-   - Pricing / efficiency intent → pricing surface (`Latest AdSpot Price`, `CPV Today`).
-   - (etc. — full table in each column file.)
-4. **Apply niche-driven additions.** When Phase 2 anchored the FilterSet to specific filters (a topic, a brand mention, a date scope), pick 1–2 columns that surface those (e.g., a brand-mention filter → `Brands` column; a recent-activity filter → `Last Published` / `Last 28 Days Views %`).
-5. **Validate sort.** The FilterSet's `sort` MUST reference a column that's present in the emitted `columns` dict AND whose direction is allowed per `references/sortable_columns.json`. If a mismatch exists, surface a follow-up rather than silently fix.
-6. **Custom-formula proactivity.** Per the column file's "Suggested formulas" table, queue at least one custom-formula suggestion for Phase 4 to surface to the user as a refinement option. Do NOT silently activate a custom column — surface as an option.
-7. **Compose the dataset structure** — pagination defaults (see "Pagination Defaults" table below) and the column-display dict.
+1. **Pick columns via `tools/column_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, the `references/columns_<type>.md` content, and `references/sortable_columns.json`. The builder emits `{ columns, dataset_structure, pending_refinement_suggestions, _column_metadata }`. The builder handles default sets, intent-driven additions, niche-driven additions, sort validation, and custom-formula proactivity internally — don't pre-process those signals.
+2. **Hand off to Phase 4.** The `pending_refinement_suggestions` carry through to Phase 4's takeaway message; the `columns` dict and `dataset_structure` feed `widget_builder` and final composition.
 
 ### Follow-up triggers (Phase 3)
+
+These triggers are surfaced by `column_builder` when conditions arise:
 
 - The user enumerated specific columns AND the type's default set differs → ask: "Use the template's columns, the columns you listed, or both?"
 - A requested column doesn't exist for the report type (e.g., user asked for `Views` on a type-3 report) → ask: "[column] isn't available for [report type]; closest is [alternative]"
 - No columns specified AND no clear intent → ask: "I'll use [type]'s default set unless you want a different focus (outreach / discovery / sponsorship-pitch)"
-- Sort field references a column not in the emitted set → ask: "Sort by [field] needs [column] to be displayed — add it?"
+- Sort field references a column not in the emitted set → `column_builder` adds the column and flags in `_column_metadata.concerns_surfaced`; if the direction is invalid, surfaces a follow-up.
 
-### Output
-
-```json
-{
-  "columns": {
-    "<Display Name>": { "display": true },
-    "<Custom Column>": {
-      "display": true,
-      "custom": true,
-      "formula": "{Variable} / {Other}",
-      "cellType": "regular" | "usd" | "percent" | "textbox"
-    }
-  },
-  "dataset_structure": {
-    "report_type": <int>,
-    "page_size": <int>,
-    "sort": "<field>" | "-<field>"
-  },
-  "pending_refinement_suggestions": [
-    "Add a 'Views Per Subscriber' custom formula column ({Avg. Views} / {Subscribers}) to spot high-engagement channels",
-    "..."
-  ],
-  "_phase3_metadata": {
-    "intent_consumed": "<echo of intent_signal that drove choices>",
-    "column_count": <int>,
-    "concerns_surfaced": ["...inherited from _routing_metadata.tool_warnings..."]
-  }
-}
-```
-
-### Hard rules (Phase 3)
-
-1. **Display names match the column file exactly.** Case-sensitive, including spaces. The platform key-matches; typos silently drop.
-2. **Pick 5–10 standard columns.** Intent-heavy reports may go up to 13; flag in `_phase3_metadata.column_count`.
-3. **`TL Channel Summary` is required** for type 3 reports (per columns_channels.md). `Channel`, `Advertiser`, `Status` are the type-8 anchors.
-4. **Don't cross catalogs.** Type 8 columns (`Status`, `Price`, `Cost`, `Match Grade`) are not interchangeable with type 1/2/3 columns. Each type's column file is the canonical list.
-5. **Custom columns are suggestions, not silent additions.** Queue them as refinement suggestions for Phase 4; never emit `custom: true` columns unless the user asked for one explicitly.
-6. **Sort validation is mandatory.** `dataset_structure.sort` must reference a column that's both present in `columns` AND has an allowed direction in `sortable_columns.json`.
-7. **`Latest AdSpot Price` over `TL Sponsorship Calc. Price`** when both could apply (the calc price is unreliable; column file enforces this).
+(The full output schema, hard rules, worked examples, and self-check live in [`tools/column_builder.md`](tools/column_builder.md). SKILL.md owns orchestration; the tool file owns the selection rules.)
 
 ## Phase 4 — Widget Phase + FINAL Validation (detail)
 
@@ -535,6 +498,7 @@ Load on-demand — don't read all upfront:
 - **[tools/name_resolver.md](tools/name_resolver.md)** — Progressive name → entity_id matching with ambiguity surface.
 - **[tools/similar_channels.md](tools/similar_channels.md)** — Look-alike helper: emits `filters_json.similar_to_channels` for the platform's vector-similarity engine.
 - **[tools/sample_judge.md](tools/sample_judge.md)** — Sample inspection inside Phase 2's validation step (channel-name based; intelligence reports only). Catches substring noise (G11-class) before the FilterSet ships to Phase 3.
+- **[tools/column_builder.md](tools/column_builder.md)** — Phase 3's column-selection prompt. Same builder-prompt pattern as `widget_builder`: explicit inputs, JSON output schema, selection process (defaults → intent additions → niche additions → sort validation → formula proactivity), worked examples per report type, hard rules. Consumes `references/columns_<type>.md` as the catalog.
 - **[tools/widget_builder.md](tools/widget_builder.md)** — Phase 4's widget-selection prompt. Mirrors v1's widget-builder approach: selection guidelines, intent-driven swaps, type-8 axis branching, and worked examples per report type. Consumes `references/widgets.md` as the catalog.
 
 **Examples & golden corpus**
