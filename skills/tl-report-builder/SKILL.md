@@ -264,18 +264,40 @@ Phase 2's validation step is the **mandatory gate** between FilterSet compositio
 
 Determined by `report_type`. Phase 2 builds two queries: `db_count` (scalar) and `db_sample` (LIMIT 10).
 
+**CRITICAL: use a CTE that applies the indexed filters first, then the ILIKE keyword predicate.** A flat `WHERE description ILIKE ... OR ... AND reach >= ... AND ...` predicate times out on the full channels table — Postgres scans `description` before the indexed columns can prune it. The CTE pattern forces filter-first → keyword-second and completes in seconds.
+
 For type 3 (CHANNELS):
 ```sql
 -- db_count
-SELECT COUNT(*) FROM thoughtleaders_channel WHERE <predicate> LIMIT 1 OFFSET 0
+WITH filtered AS (
+  SELECT id, channel_name, description, reach
+  FROM thoughtleaders_channel
+  WHERE is_active = TRUE
+    AND <indexed-column predicates: reach_from/reach_to, language, format, country, etc.>
+)
+SELECT COUNT(*) FROM filtered
+WHERE <keyword ILIKE predicate combining keywords with keyword_operator>
+LIMIT 1 OFFSET 0
+
 -- db_sample
-SELECT id, channel_name, reach FROM thoughtleaders_channel WHERE <predicate>
+WITH filtered AS (
+  SELECT id, channel_name, description, reach
+  FROM thoughtleaders_channel
+  WHERE is_active = TRUE
+    AND <indexed-column predicates>
+)
+SELECT id, channel_name, reach FROM filtered
+WHERE <keyword ILIKE predicate>
 ORDER BY reach DESC NULLS LAST LIMIT 10 OFFSET 0
 ```
 
-For types 1 / 2: same predicate against `thoughtleaders_channel` as a channel-level proxy (production runs against ES; the proxy is sufficient for a Phase 2 smoke check).
+The `<keyword ILIKE predicate>` combines `description ILIKE '%<text>%' OR channel_name ILIKE '%<text>%'` per keyword, joined by `AND` or `OR` per `keyword_operator`. For `exclude: true` keywords, wrap in `AND NOT (...)`.
 
-For type 8: predicate against `thoughtleaders_adlink` joined to brand + channel; date filter required.
+When the FilterSet has no reach floor (or any indexed column to filter on), the CTE's `filtered` set is too large for the `channel_name ILIKE` half — drop it and search description-only. The Step 2.V2 retry rule already handles this; mention it inline so the initial query is fast.
+
+For types 1 / 2: same CTE pattern against `thoughtleaders_channel` as a channel-level proxy (production runs against ES; the proxy is sufficient for a Phase 2 smoke check).
+
+For type 8: predicate against `thoughtleaders_adlink` joined to brand + channel; date filter required (`al.created_at` or `al.send_date` BETWEEN ...). Type-8 queries don't use the keyword ILIKE pattern — sponsorships filter by relations, not content text.
 
 ### Step 2.V2 — Run `db_count` (with timeout retry)
 
