@@ -372,6 +372,36 @@ Then enriches each sample row: `{ id: <article id>, title: <title>, channel_name
 Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search:
 
 ```json
+**`tl db es` accepts at most one aggregation per request, recursively.** Top-level + sub-agg counts as 2 and is rejected (per `skills/tl/references/elasticsearch-schema.md` line 28). Type-2 validation therefore needs **multiple separate ES calls**, not one nested aggregation. The orchestration runs them in sequence and merges client-side.
+
+##### Call 1 — distinct-brand count (`db_count`)
+
+```json
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "doc_type": "article" } },
+        { "terms": { "channel.language": ["en"] } },
+        { "range": { "publication_date": { "gte": "now-180d/d" } } }
+      ],
+      "must": [
+        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
+      ]
+    }
+  },
+  "aggs": {
+    "distinct_brands": { "cardinality": { "field": "sponsored_brand_mentions" } }
+  }
+}
+```
+
+The cardinality aggregation returns the count of distinct sponsored-brand IDs matching the query in `aggregations.distinct_brands.value`. **This is the canonical type-2 `db_count` path**; do NOT use `sum_other_doc_count` from a `terms` agg as a count proxy — it counts documents (mentions) outside the returned buckets, not distinct omitted brands.
+
+##### Call 2 — top brands and per-brand mention counts (`db_sample`)
+
+```json
 {
   "size": 0,
   "query": {
@@ -388,25 +418,44 @@ Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a fl
   },
   "aggs": {
     "by_brand": {
-      "terms": { "field": "sponsored_brand_mentions", "size": 10 },
-      "aggs": {
-        "channels_count": { "cardinality": { "field": "channel.id" } },
-        "mentions_count": { "value_count":  { "field": "_id" } },
-        "last_mention":   { "max":          { "field": "publication_date" } }
-      }
+      "terms": { "field": "sponsored_brand_mentions", "size": 10 }
     }
   }
 }
 ```
 
+Each `by_brand` bucket has `key` (brand ID) and `doc_count` (mentions count for that brand within the filter set). **The bucket's `doc_count` IS the per-brand mentions count — use it directly; don't add a `value_count` sub-agg (would violate the one-agg limit).**
+
+##### Optional Call 3 — channels-count per brand (one extra call per brand if needed)
+
+If `sample_judge` needs the distinct-channels count per brand for richer judgment, the orchestration can run one additional ES call per top brand (small N, ≤ 10):
+
+```json
+{
+  "size": 0,
+  "query": { "bool": { "filter": [
+    { "term": { "sponsored_brand_mentions": "<brand_id>" } },
+    /* same date / language filters as Call 2 */
+  ] } },
+  "aggs": { "channels_count": { "cardinality": { "field": "channel.id" } } }
+}
+```
+
+**Most type-2 validations skip Call 3** — the bucket `doc_count` from Call 2 is sufficient signal for `sample_judge` to judge whether the brands look on-target for `USER_QUERY`. Run Call 3 only when a per-brand drill-down is part of the user's intent.
+
+---
+
 **Field-source notes** (per `skills/tl/references/elasticsearch-schema.md`):
 - The "sponsored vs organic" distinction is **which keyword array you aggregate over**, not a `brand_mention_type` filter. Use `sponsored_brand_mentions` (sponsored only), `organic_brand_mentions` (organic only), or `all_brand_mentions` (both). There is no `brand_mention_type` field in ES.
 - The aggregation field is the keyword array name (e.g. `sponsored_brand_mentions`), NOT `brands.id`. The bucket keys are the brand IDs.
-- **Brand names are not in ES** — neither `brands.name` nor a top_hits inside the agg will return them. After ES returns the buckets, the orchestration does a PG lookup against `thoughtleaders_brand` to resolve names: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
+- **Brand names are not in ES** — neither `brands.name` nor a top_hits inside the agg will return them. After Call 2 returns the buckets, the orchestration does a PG batch lookup against `thoughtleaders_brand` to resolve names: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
 
-For `db_count` on type 2: distinct-brand count is the bucket count (with `sum_other_doc_count` accounting for buckets beyond `size`). Or run a separate `cardinality` agg over `sponsored_brand_mentions`.
-
-For `db_sample`, the `by_brand` buckets ARE the sample rows; the orchestration shapes each bucket plus the PG name-lookup result into the `sample_judge` type-2 contract: `{ id: bucket.key, brand_name: <from PG lookup>, channels_count: bucket.channels_count.value, mentions_count: bucket.mentions_count.value, last_mention_date: bucket.last_mention.value_as_string }`.
+**Sample-row shaping for `sample_judge`** — orchestration merges Call 2's buckets + PG name lookup into the type-2 contract:
+```
+{ id: bucket.key, brand_name: <from PG lookup>, mentions_count: bucket.doc_count,
+  channels_count: <from Call 3 if run, else null>, last_mention_date: null }
+```
+`last_mention_date` is omitted in the standard path (would require yet another ES call per brand and isn't critical for `sample_judge`'s judgment).
 
 ---
 
