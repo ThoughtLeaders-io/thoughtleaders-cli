@@ -11,7 +11,7 @@ Translate natural-language report requests into the campaign config JSON the TL 
 
 Produce two artifacts on every successful run:
 
-1. **A valid campaign config JSON** matching the platform's `dashboard.models.Campaign` + `dashboard.models.FilterSet` schemas. Ready to commit via the campaign_maker INSERT path when running in a TL_DATABASE_URI-equipped runtime; otherwise displayed for manual save.
+1. **A valid campaign config JSON** matching the platform's `dashboard.models.Campaign` + `dashboard.models.FilterSet` schemas. Ready to be POSTed to the report-creation API endpoint (and PUT for subsequent edits); the skill itself never writes to the database directly.
 2. **A short list of key takeaway insights** about the resulting dataset — db_count, count_classification, top sample channels/deals, noise warnings, narrow-result notes, tool-output flags worth surfacing, and any unresolved follow-ups the user should know about.
 
 ## Architecture & Separation of Concerns
@@ -134,8 +134,8 @@ USER_QUERY
 │     • histogram_bucket_size set per date range                         │
 │     • PERFORM FINAL JSON-SHAPE VALIDATION of the campaign config:      │
 │         – All Phase 2 + Phase 3 + Phase 4 outputs compose validly      │
-│         – campaign_maker RLS pre-check (created_by_campaign_maker=TRUE,│
-│           type=2 DYNAMIC, valid report_type, non-empty columns)        │
+│         – API-contract pre-check (type=2 DYNAMIC, valid report_type,   │
+│           non-empty columns, sort references an emitted column)        │
 │     • Generate report_title + report_description from final config     │
 │     • Compose key takeaway insights                                    │
 │                                                                          │
@@ -147,7 +147,9 @@ USER_QUERY
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. Display + save are runtime concerns around the output (handled by the calling environment: SantaClaw commits via campaign_maker; humans copy JSON).
+There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, via a `POST` (create) or `PUT` (edit) to the report-creation API endpoint. The skill itself never writes to the database directly — reads use raw `tl db pg`, writes go through the API.
+
+> **Save-mechanism policy**: A new API endpoint is required for report creation. It will support both `POST` (initial create) and `PUT` (subsequent edits) so reports can be modified without redoing the four phases from scratch. Until the endpoint is built, the skill stops at producing the JSON config + takeaways; the calling environment handles whatever save mechanism is current. **Reads via `tl db pg`, writes via the API** is the architectural split.
 
 ## Phase 1 — Report Type Selection (detail)
 
@@ -538,7 +540,7 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
    - Type 8 has a date scope (`days_ago` or `start_date`/`end_date`).
    - When `cross_references` is present, `report_type ∈ {1, 3}`.
    - When `filters_json.similar_to_channels` is present, no overlapping `keywords` / `topics` fields.
-   - `created_by_campaign_maker = TRUE`, `type = 2` (DYNAMIC), `report_type ∈ {1, 2, 3, 8}` — campaign_maker RLS prerequisites.
+   - `type = 2` (DYNAMIC) and `report_type ∈ {1, 2, 3, 8}` — Campaign-model contract for the API endpoint.
 3. **Generate `report_title` and `report_description`** from the FilterSet + the user's original NL request. Title ≤ 60 chars; description 1–3 sentences summarizing intent + key filters.
 4. **Compose key takeaway insights** — see "Takeaway-composition rules" below. These are the headline observations the user reads in the Phase 4 message. The `_validation` block from Phase 2 carries through here — narrow-result notes, sample_judge reasoning, and validation_concerns are all surfaced as takeaways.
 5. **Emit the final deliverable.**
@@ -579,8 +581,7 @@ Keep it tight: 2–4 takeaways total. Don't write essays. Cite specific numbers/
     "cross_references": [ /* optional, from T3 */ ],
     "columns": { /* from Phase 3 */ },
     "widgets": [ /* from Phase 4 */ ],
-    "histogram_bucket_size": "week" | "month" | "year",
-    "created_by_campaign_maker": true
+    "histogram_bucket_size": "week" | "month" | "year"
   },
   "takeaways": [
     "<insight 1>",
@@ -603,7 +604,7 @@ Keep it tight: 2–4 takeaways total. Don't write essays. Cite specific numbers/
 ### Hard rules (Phase 4)
 
 1. **`campaign_config_json` is the deliverable**, not a draft. After Phase 4, no further skill steps modify it.
-2. **`type: 2` (DYNAMIC) and `created_by_campaign_maker: true`** are non-negotiable for the direct-DB-write path. Both are enforced by RLS server-side; emitting them keeps the skill consistent with the platform.
+2. **`type: 2` (DYNAMIC) is the Campaign-model contract** for the reports the skill produces. The skill always emits `type: 2`; server-side fields like `created_by_campaign_maker` are filled by the API endpoint, not by the skill.
 3. **Trust Phase 2's validation.** Phase 4 does NOT re-run db_count / db_sample / sample_judge — those already passed upstream. If Phase 2 emitted `decision: "proceed"`, the FilterSet is good. (Sample-judging is the architectural promise to catch silent ships of bad samples — it just lives in Phase 2 now.)
 4. **JSON-shape validation rejection is a stop, not a warn.** If the final-shape validation finds an unfixable problem (column doesn't exist, aggregator from wrong catalog, missing required field), Phase 4 emits an error follow-up rather than emitting a partial config.
 5. **Takeaways cite specifics.** Numbers, names, intent labels. Vague takeaways ("the report looks good") add no value.
