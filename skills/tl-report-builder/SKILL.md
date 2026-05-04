@@ -295,7 +295,9 @@ The skill's previous "everything via `tl db pg`" framing was the v1 prototype's 
 
 #### Intelligence reports (1 / 2 / 3) — Elasticsearch query
 
-Compose an ES search body. The index is fixed server-side; the client only sends the search body.
+Compose an ES search body. The index is fixed server-side; the client only sends the search body. **The doc-type filter, target fields, sort, and `_source` differ per report type — pick the matching block below.**
+
+##### Type 3 (CHANNELS) — search the channel doc type
 
 ```json
 {
@@ -303,6 +305,7 @@ Compose an ES search body. The index is fixed server-side; the client only sends
   "query": {
     "bool": {
       "filter": [
+        { "term":  { "doc_type": "channel" } },
         { "term":  { "is_active": true } },
         { "terms": { "language": ["en"] } },
         { "terms": { "format":   [4] } },
@@ -313,22 +316,86 @@ Compose an ES search body. The index is fixed server-side; the client only sends
           "multi_match": {
             "query":   "<keyword>",
             "type":    "phrase",
-            "fields":  ["description", "channel_name", "channel_topic_description"]
+            "fields":  ["name", "description", "ai.description", "ai.topic_descriptions"]
           }
         }
         // ... one multi_match per keyword, combined per keyword_operator (AND → all in `must`; OR → wrap in `should` with minimum_should_match: 1)
       ]
     }
-  },
-  "aggs": {
-    "total": { "value_count": { "field": "_id" } }
   }
 }
 ```
 
-The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous phrase in any of the listed fields (no substring noise — phrase matching respects word boundaries). This is the architectural fix for the G03-class noise (`AI` matching `Tamil`/`captain`). For type 1, target the upload index fields (`title`, `summary`, `transcript`); for type 3 use channel-level fields.
+For `db_sample` (size 10) on type 3: same query body with `size: 10`, `sort: [{ "reach": "desc" }]`, and `_source: ["id", "name", "reach", "description"]`. **Note**: ES returns `name` for channels; the orchestration aliases it to `channel_name` before passing to `sample_judge` so the row shape matches the contract.
 
-For `db_sample` (LIMIT 10): same query body with `size: 10`, `sort: [{ "reach": "desc" }]`, and `_source: ["id", "channel_name", "reach"]`.
+##### Type 1 (CONTENT) — search the article doc type
+
+```json
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "doc_type": "article" } },
+        { "terms": { "channel.language": ["en"] } },
+        { "terms": { "channel.format":   [4] } },
+        { "range": { "publication_date": { "gte": "now-180d/d" } } }
+      ],
+      "must": [
+        {
+          "multi_match": {
+            "query":   "<keyword>",
+            "type":    "phrase",
+            "fields":  ["title", "summary", "content"]
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+For `db_sample` on type 1: `size: 10`, `sort: [{ "publication_date": "desc" }]` (or `[{ "views": "desc" }]` per intent), `_source: ["id", "title", "channel.name", "publication_date", "views"]`. **Note**: ES nests channel fields under `channel.*` on article docs; orchestration flattens `channel.name` → `channel_name` before passing to `sample_judge`.
+
+##### Type 2 (BRANDS) — aggregate over articles, group by brand
+
+Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search:
+
+```json
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "doc_type": "article" } },
+        { "terms": { "channel.language": ["en"] } },
+        { "term":  { "brand_mention_type": "sponsored_mentions" } },
+        { "range": { "publication_date": { "gte": "now-180d/d" } } }
+      ],
+      "must": [
+        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
+      ]
+    }
+  },
+  "aggs": {
+    "by_brand": {
+      "terms": { "field": "brands.id", "size": 10 },
+      "aggs": {
+        "brand_name":     { "top_hits":   { "size": 1, "_source": ["brands.name"] } },
+        "channels_count": { "cardinality":{ "field": "channel.id" } },
+        "mentions_count": { "value_count":{ "field": "_id" } },
+        "last_mention":   { "max":        { "field": "publication_date" } }
+      }
+    }
+  }
+}
+```
+
+For `db_count` on type 2: count is the cardinality of distinct brands matching — read from `aggregations.by_brand.sum_other_doc_count + buckets.length` or run a separate cardinality agg. For `db_sample`, the `by_brand` buckets ARE the sample rows; the orchestration shapes each bucket into the `sample_judge` type-2 contract: `{ id: bucket.key, brand_name: bucket.brand_name.hits.hits[0]._source.brands.name, channels_count, mentions_count, last_mention_date }`.
+
+---
+
+The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous phrase in any of the listed fields (no substring noise — phrase matching respects word boundaries). This is the architectural fix for the G03-class noise (`AI` matching `Tamil`/`captain`).
 
 #### Sponsorship reports (8) — Postgres query
 
@@ -761,7 +828,7 @@ Load on-demand — don't read all upfront:
 - **[tools/database_query.md](tools/database_query.md)** — Cross-reference query: resolves a prerequisite condition into a set of IDs that the main FilterSet includes/excludes.
 - **[tools/name_resolver.md](tools/name_resolver.md)** — Progressive name → entity_id matching with ambiguity surface.
 - **[tools/similar_channels.md](tools/similar_channels.md)** — Look-alike helper: emits `filters_json.similar_to_channels` for the platform's vector-similarity engine.
-- **[tools/sample_judge.md](tools/sample_judge.md)** — Sample inspection inside Phase 2's validation step (channel-name based; intelligence reports only). Catches substring noise (G11-class) before the FilterSet ships to Phase 3.
+- **[tools/sample_judge.md](tools/sample_judge.md)** — Sample inspection inside Phase 2's validation step. Type-aware row contract: type 3 cites `channel_name`, type 1 cites `title`, type 2 cites `brand_name`. Intelligence reports only (skipped for type 8). Catches substring noise and intent mismatch (G11-class) before the FilterSet ships to Phase 3.
 - **[tools/column_builder.md](tools/column_builder.md)** — Phase 3's column-selection prompt. Same builder-prompt pattern as `widget_builder`: explicit inputs, JSON output schema, selection process (defaults → intent additions → niche additions → sort validation → formula proactivity), worked examples per report type, hard rules. Consumes `references/columns_<type>.md` as the catalog.
 - **[tools/widget_builder.md](tools/widget_builder.md)** — Phase 4's widget-selection prompt. Mirrors v1's widget-builder approach: selection guidelines, intent-driven swaps, type-8 axis branching, and worked examples per report type. Consumes the matching `*_widget_schema.json` (intelligence or sponsorship) as the catalog.
 

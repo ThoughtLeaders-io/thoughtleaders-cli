@@ -58,28 +58,34 @@ The orchestration injects:
 
 ## How to judge
 
-For each sample, ask: **could this channel reasonably produce content matching `USER_QUERY`?**
+The core question depends on `REPORT_TYPE`:
 
-Use only the `channel_name` (and `description` if provided). If the name is ambiguous (e.g., "John Smith Vlogs"), count it as neutral — neither `noise` nor `matching`.
+| `REPORT_TYPE` | Question to ask per sample row | Identifier to use in citations |
+|---|---|---|
+| **3 (CHANNELS)** | Could this **channel** reasonably produce content matching `USER_QUERY`? | `channel_name` (plus `description` snippet if present) |
+| **1 (CONTENT)** | Could this **upload** plausibly be about `USER_QUERY`? | `title` (plus `channel_name` as secondary context) |
+| **2 (BRANDS)** | Could this **brand** plausibly be sponsoring content related to `USER_QUERY`? | `brand_name` (plus `channels_count` / `mentions_count` for sanity) |
+
+If the identifier is ambiguous (e.g., a channel named "John Smith Vlogs"; an upload titled "My Day"; a brand with no clear category), count it as neutral — neither `noise` nor `matching`.
 
 ### Threshold for `matches_intent`
 - ≥ 5 of 10 samples plausibly match (or are neutral)
 - AND no glaring red flags from `VALIDATION_CONCERNS`
 
 ### Threshold for `looks_wrong`
-- ≥ 6 of 10 samples obviously *don't* match (e.g., cartoon channels for a tax-debt query, music artists for a gaming query, news anchors for a cooking query)
+- ≥ 6 of 10 samples obviously *don't* match. Type-3 examples: cartoon channels for a tax-debt query, music artists for a gaming query, news anchors for a cooking query. Type-1 examples: video titled "How to Cook Pasta" surfacing for an "AI tutorials" query. Type-2 examples: a fast-food brand surfacing for a fintech-sponsorship query.
 - OR `VALIDATION_CONCERNS` flagged a substring-noise risk and the samples confirm it
 
 ### Threshold for `uncertain`
-- The samples are mostly ambiguous channel names that could be anything
+- The samples are mostly ambiguous identifiers that could be anything (generic channel names, vague upload titles, brands without obvious category)
 - OR the matches and noise are roughly balanced
 - This routes to "ask user" downstream, not silent failure
 
 ### What "plausibly match" means
 
-Be generous on edge cases — production will use better matching (ES word-boundary, topic M2M) than the prototype's `ILIKE`. Don't reject samples just because the channel name doesn't *literally contain* the query terms. A channel named "Pewdiepie" plausibly matches "gaming channels" without "gaming" appearing in the name.
+Be generous on edge cases — production search uses ES phrase matching with word boundaries, so don't reject samples just because the identifier doesn't *literally contain* the query terms. A channel named "Pewdiepie" plausibly matches "gaming channels" without "gaming" appearing in the name. An upload titled "How I Built This" plausibly matches "founder interviews" without "founder" in the title.
 
-But don't be over-generous on obvious red flags. **Cocomelon is not about IRS tax debt forgiveness, period.** Music labels are not about gaming hardware. News networks are not about cooking recipes.
+But don't be over-generous on obvious red flags. **Cocomelon is not about IRS tax debt forgiveness, period.** Music labels are not about gaming hardware. News networks are not about cooking recipes. Doja Cat is not an AI-cooking channel. A snack-food brand is not sponsoring crypto content.
 
 ---
 
@@ -208,7 +214,10 @@ But don't be over-generous on obvious red flags. **Cocomelon is not about IRS ta
 
 1. Output is a single valid JSON object — no fences, no extra text.
 2. `judgment` is one of `matches_intent` / `looks_wrong` / `uncertain` (no other values).
-3. `reasoning` cites at least 2 specific `channel_name`s from `DB_SAMPLE` (in single quotes).
-4. `noise_signals` and `matching_signals` use exact `channel_name` strings from `DB_SAMPLE`.
+3. `reasoning` cites at least 2 specific identifier values from `DB_SAMPLE` (in single quotes), using the type-correct identifier:
+   - Type 3 → quote `channel_name` values (e.g. `'Cocomelon'`).
+   - Type 1 → quote `title` values (e.g. `'How to Build a Gaming PC'`).
+   - Type 2 → quote `brand_name` values (e.g. `'Surfshark'`).
+4. `noise_signals` and `matching_signals` use exact identifier strings (matching the type-correct field) from `DB_SAMPLE`.
 5. If `VALIDATION_CONCERNS` was non-empty AND you saw signs of the noise in samples, you mentioned it in `reasoning`.
 6. Threshold rules followed: ≥5 plausible→`matches_intent`, ≥6 obviously-wrong→`looks_wrong`, ambiguous mix→`uncertain`.
