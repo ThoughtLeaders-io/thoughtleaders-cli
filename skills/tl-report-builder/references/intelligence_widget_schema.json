@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tl-report-builder/intelligence_widget_schema",
+  "title": "Intelligence widgets (report_type ∈ {1, 2, 3})",
+  "description": "Schema for widget objects emitted by Phase 4 for CONTENT (1), BRANDS (2), and THOUGHTLEADERS/CHANNELS (3) reports. Defines the per-widget shape, the disjoint aggregator catalog for intelligence reports, and selection constraints. Pair file: sponsorship_widget_schema.json (type 8).",
+  "type": "object",
+  "additionalProperties": false,
+
+  "_tl_source_of_truth": {
+    "applies_to_report_types": [1, 2, 3],
+    "catalog_origin": "v1 system prompt — widget aggregator section for content/brands/channels reports",
+    "catalog_disjoint_with": "sponsorship_widget_schema.json — never mix",
+    "platform_consumer": "TL dashboard widget renderer; aggregator keys are server-side identifiers"
+  },
+
+  "properties": {
+    "widgets": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 6,
+      "description": "Array of widget objects. 4–6 total. First (index: 1) is the type's primary aggregate; histograms occupy the highest indices.",
+      "items": { "$ref": "#/$defs/widget" }
+    },
+    "histogram_bucket_size": {
+      "type": "string",
+      "enum": ["week", "month", "year"],
+      "description": "Top-level bucket size applied to every histogram in the report. `week` for date scopes < 90 days; `month` (default) for 90 days – 2 years; `year` for multi-year scopes."
+    }
+  },
+  "required": ["widgets", "histogram_bucket_size"],
+
+  "$defs": {
+    "widget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aggregator": {
+          "type": "string",
+          "description": "Aggregator key from the intelligence catalog. See _tl_aggregator_catalog below.",
+          "enum": [
+            "views_sum_metric", "views_sum_histogram",
+            "views_avg_metric", "views_avg_histogram",
+            "views_median_metric", "views_median_histogram",
+            "views_last_value_metric",
+            "total", "uploads_histogram",
+            "channels_count_metric", "channel_count", "channels_count_histogram",
+            "brands_count_metric", "brand_count", "brands_count_histogram",
+            "sponsored_brands_count_metric", "sponsored_brands_count_histogram",
+            "likes_sum_metric", "likes_sum_histogram",
+            "likes_avg_metric", "likes_avg_histogram",
+            "comments_sum_metric", "comments_avg_metric",
+            "duration_avg_metric", "duration_avg_histogram",
+            "duration_median_metric",
+            "channel_reach_at_scrape_metric", "channel_reach_at_scrape_histogram",
+            "channel_reach_at_scrape_difference_histogram",
+            "channel_reach_last_28_days",
+            "channel_total_views_at_scrape_metric", "channel_total_views_at_scrape_histogram",
+            "channel_total_views_last_28_days",
+            "evergreenness_avg_metric", "evergreenness_median_metric",
+            "publication_date_max_metric", "publication_date_min_metric",
+            "views_7_avg_histogram", "views_30_avg_histogram"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["metrics-box", "histogram", "histogram-category"],
+          "description": "Visual element. `metrics-box` for single big number; `histogram` for time series; `histogram-category` for categorical distribution."
+        },
+        "index": { "type": "integer", "minimum": 1, "description": "1-based display order. Sequential, no gaps." },
+        "width": { "type": "integer", "enum": [2, 3], "description": "Grid columns. 2 for metrics-box; 3 for histogram. Grid is 6 columns wide." },
+        "height": { "type": "integer", "const": 1, "description": "Always 1." }
+      },
+      "required": ["aggregator", "type", "index", "width", "height"]
+    }
+  },
+
+  "_tl_aggregator_catalog": {
+    "views_on_videos": {
+      "views_sum_metric":           { "type": "metrics-box", "describes": "Total views across all matching content" },
+      "views_sum_histogram":        { "type": "histogram",   "describes": "Views over time by publish date" },
+      "views_avg_metric":           { "type": "metrics-box", "describes": "Average views per video" },
+      "views_avg_histogram":        { "type": "histogram",   "describes": "Average views over time" },
+      "views_median_metric":        { "type": "metrics-box", "describes": "Median views per video" },
+      "views_median_histogram":     { "type": "histogram",   "describes": "Median views over time" },
+      "views_last_value_metric":    { "type": "metrics-box", "describes": "Views on the most recent video" }
+    },
+    "uploads_and_counts": {
+      "total":                          { "type": "metrics-box", "describes": "Total matching uploads" },
+      "uploads_histogram":              { "type": "histogram",   "describes": "Upload count over time" },
+      "channels_count_metric":          { "type": "metrics-box", "describes": "Unique channels (alias: channel_count)" },
+      "channels_count_histogram":       { "type": "histogram",   "describes": "Channel count over time" },
+      "brands_count_metric":            { "type": "metrics-box", "describes": "Unique brands mentioned (alias: brand_count)" },
+      "brands_count_histogram":         { "type": "histogram",   "describes": "Brands mentioned over time" },
+      "sponsored_brands_count_metric":  { "type": "metrics-box", "describes": "Sponsoring brands" },
+      "sponsored_brands_count_histogram":{"type": "histogram",   "describes": "Sponsoring brands over time" }
+    },
+    "engagement": {
+      "likes_sum_metric":        { "type": "metrics-box", "describes": "Total likes" },
+      "likes_sum_histogram":     { "type": "histogram",   "describes": "Likes over time" },
+      "likes_avg_metric":        { "type": "metrics-box", "describes": "Avg likes per video" },
+      "likes_avg_histogram":     { "type": "histogram",   "describes": "Avg likes over time" },
+      "comments_sum_metric":     { "type": "metrics-box", "describes": "Total comments" },
+      "comments_avg_metric":     { "type": "metrics-box", "describes": "Avg comments per video" }
+    },
+    "duration": {
+      "duration_avg_metric":     { "type": "metrics-box", "describes": "Avg video duration" },
+      "duration_avg_histogram":  { "type": "histogram",   "describes": "Avg duration over time" },
+      "duration_median_metric":  { "type": "metrics-box", "describes": "Median video duration" }
+    },
+    "subscribers_channel_level": {
+      "channel_reach_at_scrape_metric":             { "type": "metrics-box", "describes": "Total subscribers across channels" },
+      "channel_reach_at_scrape_histogram":          { "type": "histogram",   "describes": "Subscriber growth over time" },
+      "channel_reach_at_scrape_difference_histogram":{"type": "histogram",   "describes": "Subscriber gains over time" },
+      "channel_reach_last_28_days":                 { "type": "metrics-box", "describes": "Subscriber change in last 28 days" }
+    },
+    "channel_total_views": {
+      "channel_total_views_at_scrape_metric":    { "type": "metrics-box", "describes": "Total channel views" },
+      "channel_total_views_at_scrape_histogram": { "type": "histogram",   "describes": "Channel views over time" },
+      "channel_total_views_last_28_days":        { "type": "metrics-box", "describes": "Channel views change in 28 days" }
+    },
+    "evergreen": {
+      "evergreenness_avg_metric":    { "type": "metrics-box", "describes": "Avg evergreen score" },
+      "evergreenness_median_metric": { "type": "metrics-box", "describes": "Median evergreen score" }
+    },
+    "publish_date": {
+      "publication_date_max_metric": { "type": "metrics-box", "describes": "Most recent publish date" },
+      "publication_date_min_metric": { "type": "metrics-box", "describes": "Earliest publish date" }
+    },
+    "early_life_performance": {
+      "views_7_avg_histogram":  { "type": "histogram", "describes": "Avg views at 7 days, over time" },
+      "views_30_avg_histogram": { "type": "histogram", "describes": "Avg views at 30 days, over time" }
+    }
+  },
+
+  "_tl_default_widget_set_by_type": {
+    "1": [
+      { "aggregator": "total",                "type": "metrics-box", "index": 1, "width": 2, "height": 1 },
+      { "aggregator": "views_sum_metric",     "type": "metrics-box", "index": 2, "width": 2, "height": 1 },
+      { "aggregator": "views_avg_metric",     "type": "metrics-box", "index": 3, "width": 2, "height": 1 },
+      { "aggregator": "uploads_histogram",    "type": "histogram",   "index": 4, "width": 3, "height": 1 },
+      { "aggregator": "views_sum_histogram",  "type": "histogram",   "index": 5, "width": 3, "height": 1 }
+    ],
+    "2": [
+      { "aggregator": "brands_count_metric",     "type": "metrics-box", "index": 1, "width": 2, "height": 1 },
+      { "aggregator": "total",                   "type": "metrics-box", "index": 2, "width": 2, "height": 1 },
+      { "aggregator": "views_sum_metric",        "type": "metrics-box", "index": 3, "width": 2, "height": 1 },
+      { "aggregator": "brands_count_histogram",  "type": "histogram",   "index": 4, "width": 3, "height": 1 },
+      { "aggregator": "views_sum_histogram",     "type": "histogram",   "index": 5, "width": 3, "height": 1 }
+    ],
+    "3": [
+      { "aggregator": "channels_count_metric",              "type": "metrics-box", "index": 1, "width": 2, "height": 1 },
+      { "aggregator": "channel_reach_at_scrape_metric",     "type": "metrics-box", "index": 2, "width": 2, "height": 1 },
+      { "aggregator": "views_avg_metric",                   "type": "metrics-box", "index": 3, "width": 2, "height": 1 },
+      { "aggregator": "channel_reach_at_scrape_histogram",  "type": "histogram",   "index": 4, "width": 3, "height": 1 },
+      { "aggregator": "uploads_histogram",                  "type": "histogram",   "index": 5, "width": 3, "height": 1 }
+    ]
+  },
+
+  "_tl_intent_overrides": {
+    "outreach_or_product_placements_type3": {
+      "trigger_phrases": ["outreach", "product placements", "pitch list"],
+      "swap": [
+        { "remove": "views_avg_metric", "add": "sponsored_brands_count_metric" },
+        { "remove": "channel_reach_at_scrape_histogram", "add": "channel_reach_at_scrape_difference_histogram" }
+      ]
+    },
+    "engagement_focus_type1": {
+      "trigger_phrases": ["engagement", "high-engagement", "viral"],
+      "swap": [
+        { "remove": "views_avg_metric", "add": "likes_sum_metric" }
+      ]
+    },
+    "sponsor_surfacing_type1": {
+      "trigger_phrases": ["who sponsors", "brand mentions", "sponsored by"],
+      "swap": [
+        { "add": "sponsored_brands_count_metric" }
+      ]
+    },
+    "recency_focus_type2": {
+      "trigger_phrases": ["recent", "lately", "active brands"],
+      "swap": [
+        { "add": "publication_date_max_metric" }
+      ]
+    }
+  },
+
+  "_tl_rules": [
+    "Pick 4–6 widgets total. First widget is the primary aggregate for the report type. Histograms last (highest index).",
+    "Every widget MUST add value to the user's original prompt. Don't pad to hit 6 — emit fewer if the extras don't answer something the user implicitly cares about.",
+    "Never mix this catalog with sponsorship_widget_schema.json. Crossing catalogs fails server-side.",
+    "histogram_bucket_size matches the date scope: < 90 days → week; 90 days–2 years → month (default); multi-year → year.",
+    "Echo intent_signal in the widget_builder's _widget_metadata.intent_consumed when swaps were applied."
+  ]
+}

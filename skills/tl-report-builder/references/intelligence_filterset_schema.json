@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tl-report-builder/intelligence_schema",
+  "title": "Intelligence FilterSet (report_type ∈ {1, 2, 3})",
+  "description": "Schema for the FilterSet payload of CONTENT (1), BRANDS (2), and THOUGHTLEADERS/CHANNELS (3) reports. Field names and types mirror dashboard.models.FilterSet 1:1 — no invented fields. Phase 2 emits a JSON object that conforms to this schema.",
+  "type": "object",
+  "additionalProperties": false,
+
+  "_tl_source_of_truth": {
+    "django_model": "dashboard.models.FilterSet",
+    "django_enums_module": "dashboard.enums",
+    "taxonomies_module": "thoughtleaders.taxonomies",
+    "applies_to_report_types": [1, 2, 3],
+    "report_type_meanings": {
+      "1": "CONTENT — videos / articles / uploads (ES content index)",
+      "2": "BRANDS — brand-level intelligence",
+      "3": "THOUGHTLEADERS — channels (most common path)"
+    },
+    "note": "All three types share the same FilterSet model. Field relevance differs per type — see each field's _tl_intent_hints and _tl_default_by_report_type, plus the columns_<type>.md and _tl_intent_overrides for intent-driven population."
+  },
+
+  "properties": {
+
+    "keywords": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Free-text keywords. Each entry is a phrase that will be ILIKE-matched against the fields listed in `content_fields` (or the per-keyword override in `keyword_content_fields_map`).",
+      "_tl_django_field": "keywords (ArrayField TextField)",
+      "_tl_intent_hints": [
+        "Lowercase, no quotes around phrases.",
+        "Multi-word phrases stay as a single array entry — they will match as a substring, not be tokenized.",
+        "Use sub-segment terms when the head term is noisy (e.g. ['printful t-shirt', 'print on demand store'] instead of just ['print'])."
+      ]
+    },
+
+    "keyword_operator": {
+      "type": ["string", "null"],
+      "enum": ["AND", "OR", null],
+      "description": "How multiple `keywords` entries combine. AND = every keyword must match; OR = any.",
+      "_tl_django_enum": "dashboard.enums.KeywordOperator",
+      "_tl_default_when_unset": "OR",
+      "_tl_intent_hints": [
+        "Use AND when the user explicitly wants all terms present (e.g. 'channels that talk about both X AND Y').",
+        "Use OR for synonym sets ('printful OR teespring OR print on demand')."
+      ]
+    },
+
+    "content_fields": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string",
+        "enum": [
+          "content", "title", "summary", "transcript",
+          "channel.channel_name", "hashtags",
+          "channel_description", "channel_description_ai", "channel_topic_description",
+          "channel_outreach_email", "channel_social_links"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Default fields against which `keywords` are matched. Overridable per-keyword via `keyword_content_fields_map`.",
+      "_tl_django_enum": "dashboard.enums.ContentField",
+      "_tl_default_by_report_type": {
+        "1": ["content", "title", "transcript"],
+        "2": ["content", "title", "transcript"],
+        "3": ["channel_description", "channel_description_ai", "channel_topic_description", "channel.channel_name"]
+      }
+    },
+
+    "keyword_content_fields_map": {
+      "type": ["object", "null"],
+      "description": "Per-keyword content_fields override. Keys are stringified positions in the `keywords` array ('0', '1', ...); values are arrays of ContentField values.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "_tl_django_field": "keyword_content_fields_map (JSONField)",
+      "_tl_emit_only_when": "A specific keyword needs a different match surface than the default `content_fields`."
+    },
+
+    "keyword_exclude_map": {
+      "type": ["object", "null"],
+      "description": "Per-keyword exclude flag. Keys are stringified positions in the `keywords` array; values are booleans. Excluded keywords are NOT-matched (substring negation).",
+      "additionalProperties": { "type": "boolean" },
+      "_tl_django_field": "keyword_exclude_map (JSONField)",
+      "_tl_emit_only_when": "User says 'but not X' / 'exclude Y' — encode as a keyword entry plus an exclude flag at the same position."
+    },
+
+    "topics": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "description": "Topic IDs from `thoughtleaders_topics`. Used to anchor a report to one or more curated topic clusters.",
+      "_tl_django_field": "topics (ChoiceArrayField IntegerField)",
+      "_tl_intent_hints": [
+        "Phase 2 may emit topic IDs when the topic_matcher tool returns at least one strong match.",
+        "When emitted, downstream still expands the topic's curated keywords[] into `keywords`/`content_fields` — `topics` is not a self-sufficient filter."
+      ]
+    },
+
+    "channel_formats": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "enum": [1, 3, 4, 5, 7, 8, 9, 10] },
+      "uniqueItems": true,
+      "description": "Restrict to specific channel formats. 1=Newsletter, 3=Podcast, 4=Video, 5=Blog post, 7=Twitch, 8=TikTok, 9=Instagram, 10=LinkedIn.",
+      "_tl_taxonomy": "thoughtleaders.taxonomies.ChannelFormat",
+      "_tl_default_when_unset": [4],
+      "_tl_default_meaning": "YouTube Video — current TL focus is YouTube only."
+    },
+
+    "content_categories": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1, "maximum": 22 },
+      "uniqueItems": true,
+      "description": "Include channels whose content_category matches any of these IDs.",
+      "_tl_taxonomy": "thoughtleaders.taxonomies.ContentCategory"
+    },
+
+    "exclude_content_categories": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1, "maximum": 22 },
+      "uniqueItems": true,
+      "_tl_taxonomy": "thoughtleaders.taxonomies.ContentCategory"
+    },
+
+    "content_types": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Free-string array of ES content_type values."
+    },
+
+    "content_aspects": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+
+    "exclude_content_aspects": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+
+    "languages": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 10 },
+      "uniqueItems": true,
+      "description": "ISO language codes (e.g. 'en', 'es'). Resolved against YoutubeLanguages.get_language_list().",
+      "_tl_default_when_unset": ["en"]
+    },
+
+    "exclude_languages": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 10 },
+      "uniqueItems": true
+    },
+
+    "creator_countries": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 10 },
+      "uniqueItems": true,
+      "description": "ISO country codes from YoutubeCountries.get_country_list()."
+    },
+
+    "exclude_creator_countries": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 10 },
+      "uniqueItems": true
+    },
+
+    "start_date": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Publish date lower bound (inclusive). YYYY-MM-DD."
+    },
+    "end_date": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Publish date upper bound (inclusive). YYYY-MM-DD."
+    },
+    "days_ago": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Rolling lower bound: only items from the last N days."
+    },
+    "days_ago_to": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Rolling upper bound: items at most N days old."
+    },
+    "createdat_from": {
+      "type": ["string", "null"],
+      "format": "date"
+    },
+    "createdat_to": {
+      "type": ["string", "null"],
+      "format": "date"
+    },
+
+    "sort": {
+      "type": ["string", "null"],
+      "description": "Sortable column key from references/sortable_columns.json. Format: 'field' (asc) or '-field' (desc).",
+      "_tl_default_by_report_type": {
+        "1": "-publish_date",
+        "2": "-mentions_count",
+        "3": "-reach"
+      }
+    },
+
+    "brand_mention_type": {
+      "type": ["string", "null"],
+      "enum": ["sponsored_mentions", "organic_mentions", null],
+      "_tl_django_enum": "dashboard.enums.MentionType"
+    },
+
+    "outreach_email": {
+      "type": ["string", "null"],
+      "enum": ["exists", "absent", null],
+      "_tl_django_enum": "dashboard.enums.OutreachEmail",
+      "_tl_intent_hints": [
+        "Set to 'exists' when the user's intent is outreach (e.g. 'find me channels we can email')."
+      ]
+    },
+
+    "youtube_views_from": { "type": ["integer", "null"], "minimum": 0 },
+    "youtube_views_to":   { "type": ["integer", "null"], "minimum": 0 },
+    "youtube_likes_from": { "type": ["integer", "null"], "minimum": 0 },
+    "youtube_likes_to":   { "type": ["integer", "null"], "minimum": 0 },
+    "duration_from":      { "type": ["integer", "null"], "minimum": 0, "description": "Seconds." },
+    "duration_to":        { "type": ["integer", "null"], "minimum": 0 },
+
+    "demographic_usa_share":   { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "demographic_male_share":  { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "demographic_age": {
+      "type": ["object", "array", "null"],
+      "description": "Age-bucket distribution constraint. Shape preserved as JSONField from the platform."
+    },
+
+    "min_demographic_male_share":         { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_male_share":         { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_usa_share":          { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_usa_share":          { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_mobile_share":       { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_mobile_share":       { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_computer_share":     { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_computer_share":     { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_tv_share":           { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_tv_share":           { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_tablet_share":       { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_tablet_share":       { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "min_demographic_game_console_share": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "max_demographic_game_console_share": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+
+    "demographic_age_median": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 10 }
+    },
+    "demographic_device_primary": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 15 }
+    },
+
+    "agg_min_doc_count": { "type": ["integer", "null"], "minimum": 0, "description": "ES aggregation min_doc_count threshold." },
+    "agg_max_doc_count": { "type": ["integer", "null"], "minimum": 0 },
+
+    "projected_views_from": { "type": ["integer", "null"], "minimum": 0, "description": "Projected Views (PV) lower bound." },
+    "projected_views_to":   { "type": ["integer", "null"], "minimum": 0 },
+
+    "evergreenness_from": { "type": ["number", "null"], "minimum": 0 },
+    "evergreenness_to":   { "type": ["number", "null"], "minimum": 0 },
+
+    "reach_from": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Channel reach lower bound. Reach is TL's rolling audience-size metric (not raw subs).",
+      "_tl_intent_hints": [
+        "Set when user gives a size signal ('mid-size channels', 'big channels', '50k–500k reach')."
+      ]
+    },
+    "reach_to": { "type": ["number", "null"], "minimum": 0 },
+
+    "trend_from": { "type": ["number", "null"] },
+    "trend_to":   { "type": ["number", "null"] },
+
+    "posts_per_90_days_from":         { "type": ["number", "null"], "minimum": 0 },
+    "posts_per_90_days_to":           { "type": ["number", "null"], "minimum": 0 },
+    "posts_per_90_days_shorts_from":  { "type": ["number", "null"], "minimum": 0 },
+    "posts_per_90_days_shorts_to":    { "type": ["number", "null"], "minimum": 0 },
+
+    "is_offline": {
+      "type": ["string", "null"],
+      "maxLength": 5,
+      "description": "Stored as a short string in the model — preserve the platform's encoding rather than transforming."
+    },
+
+    "tl_sponsorships_only": {
+      "type": ["boolean", "null"],
+      "description": "Restrict to channels TL has sponsorship history with."
+    },
+
+    "performance_grade": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 0 },
+      "uniqueItems": true,
+      "description": "TL's internal performance grade buckets. Numeric IDs as stored."
+    },
+
+    "msn_start_date": { "type": ["string", "null"], "format": "date" },
+    "msn_end_date":   { "type": ["string", "null"], "format": "date" },
+    "msn_channels_only": {
+      "type": ["boolean", "null"],
+      "description": "Restrict to MSN (Media Selling Network) channels only."
+    },
+
+    "face_on_screen": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "enum": ["true", "false", "unknown"] },
+      "uniqueItems": true,
+      "_tl_django_enum": "dashboard.enums.FaceOnScreen"
+    },
+
+    "filters_json": {
+      "type": ["object", "null"],
+      "description": "Catch-all JSONField the platform interprets directly. Use for filter signals that don't have a first-class column. Phase 2 should prefer a typed field whenever one exists.",
+      "_tl_emit_only_when": "No first-class field maps to the user's intent."
+    },
+
+    "channels": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "description": "Resolved channel IDs (M2M). The skill resolves channel names → IDs via the name_resolver tool before emitting.",
+      "_tl_django_m2m": "FilterSet.channels via FilterSetChannel"
+    },
+    "exclude_channels": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "_tl_django_m2m": "FilterSet.exclude_channels via FilterSetExcludeChannel"
+    },
+
+    "brands": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "_tl_django_m2m": "FilterSet.brands via FilterSetBrand"
+    },
+    "exclude_brands": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "_tl_django_m2m": "FilterSet.exclude_brands via FilterSetExcludeBrand"
+    },
+
+    "networks": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true,
+      "_tl_django_m2m": "FilterSet.networks → thoughtleaders.Publication"
+    },
+    "exclude_networks": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true
+    }
+  },
+
+  "_tl_rules": [
+    "Do NOT invent fields. If the user's intent has no matching field, encode it in `filters_json` (last resort) or surface it as a clarifying question.",
+    "When emitting a date range, prefer days_ago/days_ago_to for rolling intent and start_date/end_date for absolute intent.",
+    "Always set `languages: ['en']` and `channel_formats: [4]` (YouTube Video) unless the user explicitly contradicts them — these are TL's working defaults.",
+    "Resolve channel/brand names → IDs via the name_resolver tool BEFORE emitting `channels`/`brands` arrays.",
+    "When `keyword_operator` is unset and `keywords` has more than one entry, downstream defaults to OR — set it explicitly to AND if intent calls for it.",
+    "Keep `keywords` tight — better to ship 3 high-precision phrases than 12 noisy ones (Phase 3 sample_judge will catch noise either way, but tighter is faster)."
+  ],
+
+  "_tl_intent_overrides": {
+    "outreach_intent": {
+      "trigger_phrases": ["outreach", "email", "contact", "reach out"],
+      "set": { "outreach_email": "exists" }
+    },
+    "msn_only_intent": {
+      "trigger_phrases": ["msn", "our network", "media selling network"],
+      "set": { "msn_channels_only": true }
+    },
+    "tl_history_intent": {
+      "trigger_phrases": ["channels we worked with", "tl sponsored", "previous tl deals"],
+      "set": { "tl_sponsorships_only": true }
+    },
+    "size_floor_intent": {
+      "trigger_phrases": ["mid-size or bigger", "decent reach", "not tiny"],
+      "set_with_judgment": { "reach_from": 50000 }
+    }
+  }
+}
