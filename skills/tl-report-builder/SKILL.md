@@ -495,21 +495,41 @@ The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous p
 
 #### Sponsorship reports (8) — Postgres query
 
-Type 8 stays on Postgres because the data plane is `thoughtleaders_adlink` (relations + status + dates), not text search.
+Type 8 stays on Postgres because the data plane is the sponsorship deal record (relations + status + dates), not text search.
+
+**Use the denormalized view `v_adspot_brand_profiles`, not raw `thoughtleaders_adlink`.** The base adlink table does NOT carry `brand_id` or `channel_id` columns — those relations live on the view. Direct joins like `JOIN thoughtleaders_brand ON adlink.brand_id = ...` will be rejected by the planner because the FK doesn't exist on adlink.
+
+The view exposes one row per (adlink × brand × channel) and surfaces these columns the skill cares about:
+- `adlink_id`, `adlink_publish_status`, `adlink_created_at`, `adlink_updated_at`
+- `brand_id`, `brand_name`
+- `channel_id`, `channel_name`, `channel_msn_join_date`
+- `organization_id`, `organization_name`, `organization_is_managed_services`
+- `adlink_owner_advertiser_email`, `adlink_owner_sales_email`
 
 ```sql
 -- db_count
-SELECT COUNT(*) FROM thoughtleaders_adlink al
-LEFT JOIN thoughtleaders_brand b   ON al.brand_id   = b.id
-LEFT JOIN thoughtleaders_channel c ON al.channel_id = c.id
-WHERE al.publish_status = ANY(<filters_json.publish_status>)
-  AND al.created_at BETWEEN <start> AND <end>
-  AND b.id = ANY(<resolved brand_ids>)        -- if brands set
-  AND c.id = ANY(<resolved channel_ids>)      -- if channels set
+SELECT COUNT(*) FROM v_adspot_brand_profiles
+WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
+  AND adlink_created_at BETWEEN <start> AND <end>
+  AND brand_id   = ANY(<resolved brand_ids>)     -- if brands set
+  AND channel_id = ANY(<resolved channel_ids>)   -- if channels set
 LIMIT 1 OFFSET 0
 ```
 
+```sql
+-- db_sample
+SELECT adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
+FROM v_adspot_brand_profiles
+WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
+  AND adlink_created_at BETWEEN <start> AND <end>
+  AND brand_id = ANY(<resolved brand_ids>)
+ORDER BY adlink_created_at DESC
+LIMIT 10 OFFSET 0
+```
+
 Date filter required (per Phase 2 edge-case rule — type-8 without dates is rejected upfront). No keyword ILIKE pattern; sponsorships filter by relations, not content text.
+
+**Date column mapping** for type 8: `created_at` → `adlink_created_at`, `updated_at` → `adlink_updated_at`. Other date scopes (`send_date`, `purchase_date`, `publish_date`, `sold_date`, `outreach_date`, etc.) are NOT on the view — for those, query `thoughtleaders_adlink` by `id` after first resolving the IDs through the view: `SELECT id, send_date, ... FROM thoughtleaders_adlink WHERE id = ANY(<adlink_ids_from_view>) AND send_date BETWEEN ... LIMIT N OFFSET 0`. The view's `adlink_id` is the FK back to `thoughtleaders_adlink.id`.
 
 #### Postgres CTE fallback (smoke-check only)
 
