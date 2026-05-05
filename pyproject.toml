@@ -23,12 +23,19 @@ classifiers = [
     "Topic :: Office/Business",
 ]
 dependencies = [
-    "typer[all]>=0.12",
+    # `typer` >= 0.16 made click/rich/shellingham required — the `[all]` extra
+    # was removed and uv warns about it. Drop the extra to silence the warning;
+    # behaviour is identical because the bundled deps are pulled either way.
+    "typer>=0.16",
     "rich>=13.0",
     "httpx>=0.27",
     "keyring>=25.0",
     "authlib>=1.3",
-    "toon-format>=0.9.0b1",
+    # `toon-format` only publishes pre-releases (0.9.0b1 is the only modern
+    # release; 0.1.0 is the lone stable). pip/pipx accept `>=0.9.0b1` and pull
+    # the beta, but uv refuses pre-releases under `>=` when a stable exists.
+    # An exact pin is the one form uv will resolve without `--prerelease=allow`.
+    "toon-format==0.9.0b1",
 ]
 
 [project.scripts]
