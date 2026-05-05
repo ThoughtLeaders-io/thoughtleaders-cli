@@ -167,6 +167,7 @@
       "description": "Catch-all JSONField the platform interprets directly. For type 8 this is the primary place to encode publish_status, deal_status, price ranges, and any sponsorship-specific signals that don't have a first-class column on FilterSet.",
       "_tl_intent_hints": [
         "publish_status: encode the user's intent ('live', 'pending', 'sold', 'proposed') here; the platform reads it.",
+        "ad_publish_status: live/currently-running intent uses string value '0' together with publish_status [3]; Phase 2 validation maps this to base-table publish_date IS NOT NULL and therefore must use SKILL.md Path B.",
         "Deal-stage filtering (matches → proposals → deals) goes through filters_json — there is no first-class status field on FilterSet."
       ]
     }

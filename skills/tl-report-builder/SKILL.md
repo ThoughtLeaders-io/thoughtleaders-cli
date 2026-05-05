@@ -508,6 +508,23 @@ The view exposes one row per (adlink × brand × channel) and surfaces these col
 
 **Important: count and sample MUST be deduped by `adlink_id`.** The view holds one row per `(adlink × brand × channel)` — a single sponsorship that involves multiple brands or multiple channel relations produces multiple rows. Type-8 reports count sponsorship records (AdLinks), not view rows. **Always use `COUNT(DISTINCT adlink_id)` for `db_count` and dedupe samples by `adlink_id`.** A globally-confirmed 184 view rows correspond to fewer underlying adlinks — direct `COUNT(*)` overcounts those cases.
 
+##### Filter predicate mapping (must mirror the saved FilterSet)
+
+The validation SQL must apply every populated type-8 FilterSet predicate that affects deal inclusion. It is not enough to validate only date + publish status; otherwise Phase 2 can approve rows the saved report will later exclude.
+
+| FilterSet / `filters_json` input | SQL predicate pattern | Notes |
+|---|---|---|
+| `sponsorships` | `v.adlink_id = ANY(<resolved sponsorship_ids>)` | Direct AdLink include list. |
+| `exclude_sponsorships` | `NOT (v.adlink_id = ANY(<excluded sponsorship_ids>))` | Direct AdLink exclude list. |
+| `brands` | `v.brand_id = ANY(<resolved brand_ids>)` | Row-level include is OK because the view contains brand rows per adlink. |
+| `channels` | `v.channel_id = ANY(<resolved channel_ids>)` | Row-level include is OK for the same reason. |
+| `exclude_brands` | `NOT EXISTS (SELECT 1 FROM v_adspot_brand_profiles vx WHERE vx.adlink_id = v.adlink_id AND vx.brand_id = ANY(<excluded brand_ids>))` | Must be adlink-level. Row-level `v.brand_id <> ...` is wrong for multi-brand adlinks. |
+| `exclude_channels` | `NOT EXISTS (SELECT 1 FROM v_adspot_brand_profiles vx WHERE vx.adlink_id = v.adlink_id AND vx.channel_id = ANY(<excluded channel_ids>))` | Must be adlink-level for multi-channel adlinks. |
+| `filters_json.publish_status` | `v.adlink_publish_status = ANY(<publish_status ids>)` | Conditional; omit entirely when unset. |
+| `filters_json.ad_publish_status: "0"` | `al.publish_date IS NOT NULL` | "Live/currently running" means sold AND published. This is base-table only, so it forces Path B. |
+
+If a populated FilterSet field has no documented SQL predicate yet (for example a future `filters_json` key), Phase 2 should surface a follow-up / validation gap instead of silently dropping it from validation.
+
 ##### Date-scope mapping (deterministic — no intent branching)
 
 The FilterSet exposes exactly TWO date pairs for type 8, each pinned to a single underlying column. Validation never tries to infer a "smart" date axis from intent — that would be undefined when intent is unset and would silently disagree with the user's framing.
@@ -609,7 +626,7 @@ Two notes on the table:
 
 **SELECT-list addition:** the sort column must appear in the inner SELECT (PostgreSQL requires `DISTINCT ON` columns and `ORDER BY` columns to all be projected, AND the outer ORDER BY references the projected name). When the inner SELECT doesn't already include the sort column (e.g., `al.purchase_date` for sold reports), Phase 2 adds it. See Worked Example C below for the resolved shape.
 
-##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent AND canonical sort is a view column)
+##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent AND canonical sort is a view column AND no base-table-only filters are set)
 
 All predicates wrapped in `[ ... ]` are conditional — emit them ONLY when the corresponding FilterSet input is set and non-empty. Bare predicates outside brackets are unconditional. (`publish_status` is conditional too: when `filters_json.publish_status` is unset, the SQL must omit the clause entirely — `= ANY(NULL)` matches nothing and would silently zero the count.)
 
@@ -617,27 +634,54 @@ All predicates wrapped in `[ ... ]` are conditional — emit them ONLY when the 
 -- db_count
 SELECT COUNT(DISTINCT adlink_id) FROM v_adspot_brand_profiles
 WHERE 1=1
+  [AND adlink_id = ANY(<resolved sponsorship_ids>)]                   -- if sponsorships set
+  [AND NOT (adlink_id = ANY(<excluded sponsorship_ids>))]              -- if exclude_sponsorships set
   [AND adlink_publish_status = ANY(<filters_json.publish_status>)]   -- emit only if publish_status set
   [AND adlink_created_at >= '<created_lo>']                           -- emit only if created_lo set
   [AND adlink_created_at <  '<created_hi_next>']                      -- emit only if created_hi_next set
   [AND brand_id   = ANY(<resolved brand_ids>)]                        -- if brands set
   [AND channel_id = ANY(<resolved channel_ids>)]                      -- if channels set
+  [AND NOT EXISTS (                                                    -- if exclude_brands set
+        SELECT 1 FROM v_adspot_brand_profiles vx
+        WHERE vx.adlink_id = v_adspot_brand_profiles.adlink_id
+          AND vx.brand_id = ANY(<excluded brand_ids>)
+      )]
+  [AND NOT EXISTS (                                                    -- if exclude_channels set
+        SELECT 1 FROM v_adspot_brand_profiles vx
+        WHERE vx.adlink_id = v_adspot_brand_profiles.adlink_id
+          AND vx.channel_id = ANY(<excluded channel_ids>)
+      )]
 LIMIT 1 OFFSET 0
 ```
 
 ```sql
 -- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
 -- Path A canonical sort is necessarily a view column (adlink_created_at / adlink_updated_at).
+-- The SELECT list MUST include the resolved sort column; add adlink_updated_at when
+-- sorting by updated_at (adlink_created_at is already projected below).
 SELECT * FROM (
   SELECT DISTINCT ON (adlink_id)
-         adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
+         adlink_id, brand_name, channel_name, adlink_publish_status,
+         adlink_created_at  -- add adlink_updated_at here when canonical sort is updated_at
   FROM v_adspot_brand_profiles
   WHERE 1=1
+    [AND adlink_id = ANY(<resolved sponsorship_ids>)]
+    [AND NOT (adlink_id = ANY(<excluded sponsorship_ids>))]
     [AND adlink_publish_status = ANY(<filters_json.publish_status>)]
     [AND adlink_created_at >= '<created_lo>']
     [AND adlink_created_at <  '<created_hi_next>']
     [AND brand_id   = ANY(<resolved brand_ids>)]
     [AND channel_id = ANY(<resolved channel_ids>)]
+    [AND NOT EXISTS (                                                  -- if exclude_brands set
+          SELECT 1 FROM v_adspot_brand_profiles vx
+          WHERE vx.adlink_id = v_adspot_brand_profiles.adlink_id
+            AND vx.brand_id = ANY(<excluded brand_ids>)
+        )]
+    [AND NOT EXISTS (                                                  -- if exclude_channels set
+          SELECT 1 FROM v_adspot_brand_profiles vx
+          WHERE vx.adlink_id = v_adspot_brand_profiles.adlink_id
+            AND vx.channel_id = ANY(<excluded channel_ids>)
+        )]
   ORDER BY adlink_id, <inner_sort_expr>         -- inner: qualified; required for DISTINCT ON
 ) deduped
 ORDER BY <outer_sort_expr>                      -- outer: unqualified (aliases out of scope)
@@ -654,13 +698,26 @@ SELECT COUNT(DISTINCT v.adlink_id)
 FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
 WHERE 1=1
+  [AND v.adlink_id = ANY(<resolved sponsorship_ids>)]
+  [AND NOT (v.adlink_id = ANY(<excluded sponsorship_ids>))]
   [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
+  [AND al.publish_date IS NOT NULL]                                  -- if filters_json.ad_publish_status = "0"
   [AND al.send_date >= '<send_lo>']                                   -- send axis: emit only if send_lo set
   [AND al.send_date <  '<send_hi_next>']                              -- send axis: emit only if send_hi_next set
   [AND v.adlink_created_at >= '<created_lo>']                         -- created axis: emit only if created_lo set
   [AND v.adlink_created_at <  '<created_hi_next>']                    -- created axis: emit only if created_hi_next set
   [AND v.brand_id   = ANY(<resolved brand_ids>)]
   [AND v.channel_id = ANY(<resolved channel_ids>)]
+  [AND NOT EXISTS (                                                    -- if exclude_brands set
+        SELECT 1 FROM v_adspot_brand_profiles vx
+        WHERE vx.adlink_id = v.adlink_id
+          AND vx.brand_id = ANY(<excluded brand_ids>)
+      )]
+  [AND NOT EXISTS (                                                    -- if exclude_channels set
+        SELECT 1 FROM v_adspot_brand_profiles vx
+        WHERE vx.adlink_id = v.adlink_id
+          AND vx.channel_id = ANY(<excluded channel_ids>)
+      )]
 LIMIT 1 OFFSET 0
 ```
 
@@ -675,13 +732,26 @@ SELECT * FROM (
   FROM v_adspot_brand_profiles v
   JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
   WHERE 1=1
+    [AND v.adlink_id = ANY(<resolved sponsorship_ids>)]
+    [AND NOT (v.adlink_id = ANY(<excluded sponsorship_ids>))]
     [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
+    [AND al.publish_date IS NOT NULL]                                -- if filters_json.ad_publish_status = "0"
     [AND al.send_date >= '<send_lo>']
     [AND al.send_date <  '<send_hi_next>']
     [AND v.adlink_created_at >= '<created_lo>']
     [AND v.adlink_created_at <  '<created_hi_next>']
     [AND v.brand_id   = ANY(<resolved brand_ids>)]
     [AND v.channel_id = ANY(<resolved channel_ids>)]
+    [AND NOT EXISTS (                                                  -- if exclude_brands set
+          SELECT 1 FROM v_adspot_brand_profiles vx
+          WHERE vx.adlink_id = v.adlink_id
+            AND vx.brand_id = ANY(<excluded brand_ids>)
+        )]
+    [AND NOT EXISTS (                                                  -- if exclude_channels set
+          SELECT 1 FROM v_adspot_brand_profiles vx
+          WHERE vx.adlink_id = v.adlink_id
+            AND vx.channel_id = ANY(<excluded channel_ids>)
+        )]
   ORDER BY v.adlink_id, <inner_sort_expr>       -- inner: qualified (e.g. al.purchase_date DESC NULLS LAST)
 ) deduped
 ORDER BY <outer_sort_expr>                      -- outer: unqualified (e.g. purchase_date DESC NULLS LAST)
@@ -692,19 +762,20 @@ LIMIT 10 OFFSET 0
 
 | FilterSet bounds populated | Canonical sort column | Path | Why |
 |---|---|---|---|
-| `created_at` only | view column (e.g. `adlink_created_at`) | A (view-only) | Optimization — skip the base-table join when not needed |
+| `created_at` only and no base-table-only filters | view column (e.g. `adlink_created_at`) | A (view-only) | Optimization — skip the base-table join when not needed |
 | `created_at` only | base-table column (e.g. `purchase_date`) | B | Sort column lives on `al`; join required to project + ORDER BY it |
+| `created_at` only plus `filters_json.ad_publish_status` | any | B | Live-only validation needs `al.publish_date IS NOT NULL` |
 | `send_date` only | any | B | Join required for `send_date` predicate |
 | Both axes | any | B | Join required for `send_date`; created-axis predicates emit on top |
 | Neither | — | (Phase 2 emits `decision: "fail"` upstream) | Unscoped type-8 is rejected per the hard rule |
 
-In practice Path A only fires for the narrow case "created_at-only AND sort is a view column" — a real but uncommon shape. Most type-8 reports take Path B.
+In practice Path A only fires for the narrow case "created_at-only AND sort is a view column AND no base-table-only filter is populated" — a real but uncommon shape. Most type-8 reports take Path B.
 
 **Why `WHERE 1=1`:** all the bracketed predicates are conditional, and the type-8 unscoped-rejection rule only guarantees one DATE bound resolves — every other clause (publish_status, brands, channels) may be entirely absent. The `1=1` placeholder lets every conditional clause omit independently while keeping the SQL valid. Cosmetic; the planner discards it.
 
-##### Channel filter applies to BOTH paths
+##### Include/exclude relation filters apply to BOTH paths
 
-If `<resolved channel_ids>` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`. Earlier drafts dropped it from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set.
+If `sponsorships`, `exclude_sponsorships`, `brands`, `exclude_brands`, `channels`, or `exclude_channels` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`, and in BOTH Path A and Path B when that path is eligible. Earlier drafts dropped channel filters from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set. Exclude filters are even riskier because the view is multi-row per adlink; apply them at adlink level with `NOT EXISTS`, not as row-local `<>` checks.
 
 ##### Worked example A — `days_ago: 365` (the schema's default scope, no publish_status)
 
