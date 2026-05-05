@@ -508,22 +508,22 @@ The view exposes one row per (adlink × brand × channel) and surfaces these col
 
 **Important: count and sample MUST be deduped by `adlink_id`.** The view holds one row per `(adlink × brand × channel)` — a single sponsorship that involves multiple brands or multiple channel relations produces multiple rows. Type-8 reports count sponsorship records (AdLinks), not view rows. **Always use `COUNT(DISTINCT adlink_id)` for `db_count` and dedupe samples by `adlink_id`.** A globally-confirmed 184 view rows correspond to fewer underlying adlinks — direct `COUNT(*)` overcounts those cases.
 
-##### Date-scope branching
+##### Date-scope mapping (deterministic — no intent branching)
 
-`thoughtleaders_adlink` has many date columns (`created_at`, `updated_at`, `send_date`, `publish_date`, `purchase_date`, `sold_date`, `outreach_date`, `presented_date`, `proposal_approved_date`, `rejected_date`, `actual_end_date`, `scheduled_end_date`, `view_guarantee_hit_date`, `draft_expected_date`). Only `adlink_created_at` and `adlink_updated_at` are exposed on `v_adspot_brand_profiles` — every other date scope requires joining the view to the base `thoughtleaders_adlink` table on `adlink_id`.
+The FilterSet exposes exactly TWO date pairs for type 8, each pinned to a single underlying column. Validation never tries to infer a "smart" date axis from intent — that would be undefined when intent is unset and would silently disagree with the user's framing.
 
 Per `references/sponsorship_filterset_schema.json`:
 
-| FilterSet field | Underlying date column | Where it lives |
+| FilterSet field | Underlying column on `thoughtleaders_adlink` | Where it lives |
 |---|---|---|
-| `start_date` / `end_date` / `days_ago` | `send_date` | base `thoughtleaders_adlink` (NOT on view) |
-| `createdat_from` / `createdat_to` | `created_at` | view as `adlink_created_at` |
-| Sold-only views (intent: `won-deals`, "deals we sold") | `purchase_date` | base `thoughtleaders_adlink` |
-| Live-only views (intent: `live-tracking`) | `publish_date` | base `thoughtleaders_adlink` |
+| `start_date` / `end_date` / `days_ago` | `send_date` | base table only (NOT on view) |
+| `createdat_from` / `createdat_to` | `created_at` | exposed on the view as `adlink_created_at` |
 
-##### Path A — date scope is `created_at` (view-only)
+**Hard rule: `start_date`/`end_date`/`days_ago` ALWAYS validate against `send_date`, regardless of report intent (sold, live, pipeline, anything).** Intent affects column choices and widget axis branching (per `_tl_axis_branching` in `sponsorship_widget_schema.json`) — it does NOT affect the validation date column. If a user genuinely needs a different date axis for filtering (purchase_date, publish_date, outreach_date, etc.), that has to be encoded in `filters_json` (server-interpreted) — the FilterSet itself has no first-class field for it, and validation should not invent one. v1's `_tl_axis_branching` is for displayed widgets, not for the data plane filter predicate.
 
-When the FilterSet uses `createdat_from` / `createdat_to`, the view alone is sufficient:
+This means there is exactly ONE branch in the validation query, based on which date pair the FilterSet uses:
+
+##### Path A — `createdat_from` / `createdat_to` set (view-only)
 
 ```sql
 -- db_count
@@ -536,24 +536,25 @@ LIMIT 1 OFFSET 0
 ```
 
 ```sql
--- db_sample (deduped by adlink_id; DISTINCT ON keeps the first row per adlink)
-SELECT DISTINCT ON (adlink_id)
-       adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
-FROM v_adspot_brand_profiles
-WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
-  AND adlink_created_at BETWEEN <createdat_from> AND <createdat_to>
-  AND brand_id   = ANY(<resolved brand_ids>)
-  AND channel_id = ANY(<resolved channel_ids>)
-ORDER BY adlink_id, adlink_created_at DESC
+-- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
+SELECT * FROM (
+  SELECT DISTINCT ON (adlink_id)
+         adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
+  FROM v_adspot_brand_profiles
+  WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
+    AND adlink_created_at BETWEEN <createdat_from> AND <createdat_to>
+    AND brand_id   = ANY(<resolved brand_ids>)
+    AND channel_id = ANY(<resolved channel_ids>)
+  ORDER BY adlink_id, adlink_created_at DESC   -- inner: required for DISTINCT ON
+) deduped
+ORDER BY adlink_created_at DESC                 -- outer: canonical sort (newest first)
 LIMIT 10 OFFSET 0
 ```
 
-##### Path B — date scope is `send_date` / `purchase_date` / `publish_date` / etc. (join required)
-
-When the FilterSet uses `start_date`/`end_date`/`days_ago` (= `send_date`) or any sold/live/etc. date scope, join the view to `thoughtleaders_adlink` on `adlink_id` for the date predicate while keeping the view for relation filters:
+##### Path B — `start_date` / `end_date` / `days_ago` set (join base table for `send_date`)
 
 ```sql
--- db_count (date scope: send_date — corresponds to start_date / end_date / days_ago)
+-- db_count
 SELECT COUNT(DISTINCT v.adlink_id)
 FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
@@ -565,24 +566,29 @@ LIMIT 1 OFFSET 0
 ```
 
 ```sql
--- db_sample (same shape; swap send_date → purchase_date / publish_date for those date scopes)
-SELECT DISTINCT ON (v.adlink_id)
-       v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status, al.send_date
-FROM v_adspot_brand_profiles v
-JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
-  AND al.send_date BETWEEN <start_date> AND <end_date>
-  AND v.brand_id   = ANY(<resolved brand_ids>)
-  AND v.channel_id = ANY(<resolved channel_ids>)
-ORDER BY v.adlink_id, al.send_date DESC
+-- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
+SELECT * FROM (
+  SELECT DISTINCT ON (v.adlink_id)
+         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status, al.send_date
+  FROM v_adspot_brand_profiles v
+  JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
+  WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
+    AND al.send_date BETWEEN <start_date> AND <end_date>
+    AND v.brand_id   = ANY(<resolved brand_ids>)
+    AND v.channel_id = ANY(<resolved channel_ids>)
+  ORDER BY v.adlink_id, al.send_date DESC      -- inner: required for DISTINCT ON
+) deduped
+ORDER BY send_date DESC                          -- outer: canonical sort (newest first)
 LIMIT 10 OFFSET 0
 ```
-
-The same Path-B shape applies for `purchase_date` (sold-only views), `publish_date` (live-only views), `outreach_date`, `sold_date`, etc. — substitute the date column on `al` and the corresponding FilterSet field as the predicate.
 
 ##### Channel filter applies to BOTH paths
 
 If `<resolved channel_ids>` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`. Earlier drafts dropped it from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set.
+
+##### Why the inner/outer split
+
+`DISTINCT ON (adlink_id)` in PostgreSQL forces `ORDER BY adlink_id, ...` in the same SELECT — that's a syntactic requirement, not a stylistic choice. Putting `LIMIT 10` on that same query returns the 10 smallest adlink IDs (oldest pipeline entries by surrogate key), not the 10 most recent rows by date. Wrapping the dedupe in a subquery and applying the canonical sort + LIMIT in the outer SELECT is the only way to honor both the dedupe contract AND Phase 2's contract (line ~281: "10 rows, ordered by the canonical sort").
 
 Date filter required (per Phase 2 edge-case rule — type-8 without dates is rejected upfront). No keyword ILIKE pattern; sponsorships filter by relations, not content text.
 
@@ -866,7 +872,7 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
    - Every column in `columns` is in the type's column file.
    - Every aggregator in `widgets` is in the matching catalog (intelligence for 1/2/3, sponsorship for 8).
    - `sort` references an emitted column with allowed direction.
-   - Type 8 has a date scope (`days_ago` or `start_date`/`end_date`).
+   - Type 8 has at least one date scope: `days_ago`, `start_date`/`end_date`, or `createdat_from`/`createdat_to`. (Either pair satisfies the requirement — they map to different underlying columns; see Step 2.V1's date-scope mapping. Phase 2 already enforces this upstream.)
    - When `cross_references` is present, `report_type ∈ {1, 3}`.
    - When `filters_json.similar_to_channels` is present, no overlapping `keywords` / `topics` fields.
    - `type = 2` (DYNAMIC) and `report_type ∈ {1, 2, 3, 8}` — Campaign-model contract for the API endpoint.
