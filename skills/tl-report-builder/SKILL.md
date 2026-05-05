@@ -523,17 +523,42 @@ Per `references/sponsorship_filterset_schema.json`:
 
 **Out of scope for the FilterSet today:** filtering by `purchase_date`, `publish_date`, `outreach_date`, `sold_date`, etc. as a primary date predicate. These columns exist on the base table but the FilterSet exposes no first-class field for them, and the skill must NOT invent one (`purchase_date_from`, `publish_date_from`, etc. are unknown to the server and would be silently dropped). `filters_json` is the platform's catch-all and *might* be a future home for these scopes, but no concrete keys are documented today — if a user explicitly needs one of those axes as a filter (not just as a widget axis), surface a Phase 2 follow-up explaining the gap rather than guessing at keys. Track as a server-side gap, not a skill bug.
 
-This means there is exactly ONE branch in the validation query, based on which date pair the FilterSet uses:
+There is exactly ONE branch in the validation query, based on which date axis the FilterSet uses (`send_date` axis or `created_at` axis). But before composing SQL, Phase 2 must materialize the FilterSet's date inputs into a normalized lower/upper bound pair — the FilterSet exposes four overlapping inputs that all collapse to (≤ 1 lower bound, ≤ 1 upper bound) per axis.
 
-##### Path A — `createdat_from` / `createdat_to` set (view-only)
+##### Bounds materialization (preprocessing — Phase 2 does this BEFORE composing SQL)
+
+Each axis has up to two FilterSet inputs for the lower bound and up to two for the upper bound. Resolve them in this order, picking the first non-null on each side:
+
+**`send_date` axis (Path B)**
+
+| Bound | Resolution order (first wins) |
+|---|---|
+| Lower (`send_lo`) | `start_date` → `CURRENT_DATE - INTERVAL '<days_ago> days'` → unbounded |
+| Upper (`send_hi`) | `end_date` → `CURRENT_DATE - INTERVAL '<days_ago_to> days'` → unbounded |
+
+**`created_at` axis (Path A)**
+
+| Bound | Resolution order (first wins) |
+|---|---|
+| Lower (`created_lo`) | `createdat_from` → unbounded |
+| Upper (`created_hi`) | `createdat_to` → unbounded |
+
+**Hard rule (carried over from the type-8 edge-case in Phase 2):** at least ONE bound must resolve to a concrete value across the chosen axis — otherwise the request is unscoped and Phase 2 emits `decision: "fail"`. One-sided is legal: "since 2025-01-01" → only `send_lo`; "before Q4" → only `send_hi`; "in the last 30 days" → only `send_lo` (materialized from `days_ago`).
+
+**Materialization choice — date literal vs. `NOW()`/`CURRENT_DATE`:** Phase 2 substitutes the materialized date as a literal (e.g., `'2026-04-05'`) computed at query-build time, NOT inline `CURRENT_DATE - INTERVAL` SQL. This gives the validation count a stable definition the orchestration can log and reproduce; rolling-window drift between `db_count` and a slow follow-up `db_sample` is a real bug class otherwise. Use `CURRENT_DATE - INTERVAL` only if the orchestration cannot resolve the date locally.
+
+After materialization, the SQL templates emit only the predicates whose bound is non-null:
+
+##### Path A — `created_at` axis (view-only)
 
 ```sql
 -- db_count
 SELECT COUNT(DISTINCT adlink_id) FROM v_adspot_brand_profiles
 WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
-  AND adlink_created_at BETWEEN <createdat_from> AND <createdat_to>
-  AND brand_id   = ANY(<resolved brand_ids>)     -- if brands set
-  AND channel_id = ANY(<resolved channel_ids>)   -- if channels set
+  [AND adlink_created_at >= '<created_lo>']     -- emit only if created_lo set
+  [AND adlink_created_at <= '<created_hi>']     -- emit only if created_hi set
+  AND brand_id   = ANY(<resolved brand_ids>)    -- if brands set
+  AND channel_id = ANY(<resolved channel_ids>)  -- if channels set
 LIMIT 1 OFFSET 0
 ```
 
@@ -544,7 +569,8 @@ SELECT * FROM (
          adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
   FROM v_adspot_brand_profiles
   WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
-    AND adlink_created_at BETWEEN <createdat_from> AND <createdat_to>
+    [AND adlink_created_at >= '<created_lo>']
+    [AND adlink_created_at <= '<created_hi>']
     AND brand_id   = ANY(<resolved brand_ids>)
     AND channel_id = ANY(<resolved channel_ids>)
   ORDER BY adlink_id, adlink_created_at DESC   -- inner: required for DISTINCT ON
@@ -553,7 +579,7 @@ ORDER BY adlink_created_at DESC                 -- outer: canonical sort (newest
 LIMIT 10 OFFSET 0
 ```
 
-##### Path B — `start_date` / `end_date` / `days_ago` set (join base table for `send_date`)
+##### Path B — `send_date` axis (join base table)
 
 ```sql
 -- db_count
@@ -561,7 +587,8 @@ SELECT COUNT(DISTINCT v.adlink_id)
 FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
 WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
-  AND al.send_date BETWEEN <start_date> AND <end_date>
+  [AND al.send_date >= '<send_lo>']             -- emit only if send_lo set
+  [AND al.send_date <= '<send_hi>']             -- emit only if send_hi set
   AND v.brand_id   = ANY(<resolved brand_ids>)
   AND v.channel_id = ANY(<resolved channel_ids>)
 LIMIT 1 OFFSET 0
@@ -575,7 +602,8 @@ SELECT * FROM (
   FROM v_adspot_brand_profiles v
   JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
   WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
-    AND al.send_date BETWEEN <start_date> AND <end_date>
+    [AND al.send_date >= '<send_lo>']
+    [AND al.send_date <= '<send_hi>']
     AND v.brand_id   = ANY(<resolved brand_ids>)
     AND v.channel_id = ANY(<resolved channel_ids>)
   ORDER BY v.adlink_id, al.send_date DESC      -- inner: required for DISTINCT ON
@@ -587,6 +615,23 @@ LIMIT 10 OFFSET 0
 ##### Channel filter applies to BOTH paths
 
 If `<resolved channel_ids>` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`. Earlier drafts dropped it from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set.
+
+##### Worked example — `days_ago: 365` (the schema's default scope)
+
+Input: `filterset = { days_ago: 365, brands: [29332] }`, no other date inputs.
+
+Materialization: `send_lo` = `'2025-05-05'` (today minus 365 days, computed at query-build time); `send_hi` unbounded.
+
+Resulting `db_count`:
+```sql
+SELECT COUNT(DISTINCT v.adlink_id)
+FROM v_adspot_brand_profiles v
+JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
+WHERE al.send_date >= '2025-05-05'
+  AND v.brand_id = ANY(ARRAY[29332])
+LIMIT 1 OFFSET 0
+```
+(Only the lower-bound predicate is emitted; no `send_hi` clause; no publish_status clause if the user didn't specify one.)
 
 ##### Why the inner/outer split
 
