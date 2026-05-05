@@ -8,10 +8,12 @@ from rich.console import Console
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
+from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
 app = typer.Typer(help="Brand intelligence (detail, sponsorship history, channel mentions)")
+register_comment_commands(app, "brand", "brand")
 
 
 @app.callback(invoke_without_command=True)

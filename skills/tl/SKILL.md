@@ -169,26 +169,16 @@ tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) load
 tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (25 credits; Intelligence)
 tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (25 credits; Intelligence)
 tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal profile (25 credits; Intelligence)
-tl snapshots channel <id>              # Channel metrics over time — list curve, mult 1.2 (Firebolt-backed)
-tl snapshots video <id> --channel <id> # Video view curve — list curve, mult 1.2 (--channel required!)
-tl reports                             # List saved reports — list curve, mult 1.3
+tl snapshots channel <id>              # Channel metrics over time (Firebolt-backed)
+tl snapshots video <id> --channel <id> # Video view curve (--channel required!)
+tl reports                             # List saved reports
 tl reports run <id>                    # Run a saved report (credits vary)
-tl comments list <adlink-id>           # List comments — list curve, mult 1.0
-tl comments add <adlink-id> "msg"      # Add comment (free)
+tl <entity> comment-list <id>          # List comments on a sponsorship/channel/brand/upload
+tl <entity> comment-add <id> "msg"     # Add a comment (free)
+tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser; free)
 ```
 
-**"List curve"** above means non-linear pricing: `cost = 1 + mult × 0.126 × n^1.2`. The flat 1-credit setup applies to every list call; the `mult` reflects per-resource complexity. `tl db {pg,fb,es}` shares the same curve at mult=1.4. Concrete totals:
-
-| Rows | mult=1.0 (comments, uploads, sponsorships) | mult=1.2 (snapshots) | mult=1.3 (reports) | mult=1.4 (db.pg / db.fb / db.es) |
-|---:|---:|---:|---:|---:|
-| 1 | 1 | 1 | 1 | 1 |
-| 10 | 3 | 3 | 4 | 4 |
-| 50 | 15 | 18 | 19 | 20 |
-| 100 | 33 | 39 | 42 | 45 |
-| 200 | 74 | 88 | 96 | 103 |
-| 500 | 219 | 263 | 285 | 307 |
-
-The marginal per-row cost is exactly proportional to `mult` — a 1.4× resource costs 1.4× the row part of a 1.0× resource at any size. Splitting a 500-row pull into ten 50-row calls saves ~30% but burns 10 setup floors instead of 1; "narrow the query" is almost always the better move than "fragment the pagination."
+**Credit costs are server-authoritative — run `tl describe` (overview) or `tl describe show <resource>` (one resource) to see the current rates and multipliers for every endpoint. Do not memorise rate values — they change.**
 
 ### Updating records
 

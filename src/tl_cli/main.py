@@ -17,7 +17,6 @@ from tl_cli.commands.balance import app as balance_app
 from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
 from tl_cli.commands.channels import app as channels_app
-from tl_cli.commands.comments import app as comments_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
 from tl_cli.commands.matches import app as matches_app
@@ -94,7 +93,6 @@ app.add_typer(brands_app, name="brands")
 app.add_typer(recommender_app, name="recommender")
 app.add_typer(snapshots_app, name="snapshots")
 app.add_typer(reports_app, name="reports")
-app.add_typer(comments_app, name="comments")
 app.add_typer(db_app, name="db")
 
 # Discoverability

@@ -8,11 +8,13 @@ from rich.console import Console
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
+from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
 app = typer.Typer(help="YouTube channels (detail, history, and similar-channel recommendations)")
+register_comment_commands(app, "channel", "channel")
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.

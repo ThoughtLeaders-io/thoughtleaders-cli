@@ -8,6 +8,7 @@ from rich.console import Console
 
 from tl_cli.client.errors import handle_api_error, ApiError
 from tl_cli.client.http import get_client
+from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
@@ -229,3 +230,6 @@ def update_cmd(
         handle_api_error(e)
     finally:
         client.close()
+
+
+register_comment_commands(app, "sponsorship", "sponsorship")

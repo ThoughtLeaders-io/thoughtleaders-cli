@@ -56,8 +56,9 @@ All data commands use explicit subcommands: `list`, `show`, `create`/`add`. Runn
 | `tl brands similar <brand>` | Find similar brands (similarity search, 25 credits) |
 | `tl snapshots channel <id>` | Channel metrics over time (Firebolt channel_metrics) |
 | `tl snapshots video <id> --channel <id>` | Video view curve (Firebolt article_metrics, --channel required) |
-| `tl comments list <adlink-id>` | List comments on a sponsorship (free) |
-| `tl comments add <adlink-id> "message"` | Add a comment (free) |
+| `tl <entity> comment-list <id>` | List comments on a sponsorship/channel/brand/upload (free) |
+| `tl <entity> comment-add <id> "message"` | Add a comment (free) |
+| `tl <entity> comment-edit <comment-id> "message"` | Edit one of your own comments (author or superuser; free) |
 
 ### Raw database access (escape hatch for joins / aggregations / complex filters)
 
@@ -180,7 +181,7 @@ tools: [Bash, Read]
 
 What the agent does:
 - **Multi-step research**: "Find channels similar to the ones Nike sponsors and compare their pricing" → `tl brands show Nike --json` → extract initial channel IDs → `tl channels similar <initial-id> --json` for each (enriched with cpm) → union + dedupe → compile comparison table
-- **Cross-resource analysis**: "Show me deal slippage and add comments" → `tl sponsorships status:pending send-date-end:2026-03 --json` → identify slipping sponsorships → `tl comments add <id> "flagged for slippage"` for each
+- **Cross-resource analysis**: "Show me deal slippage and add comments" → `tl sponsorships status:pending send-date-end:2026-03 --json` → identify slipping sponsorships → `tl sponsorships comment-add <id> "flagged for slippage"` for each
 - **Report comparison**: "Compare my Q1 report to Q4" → `tl reports run <id> --since 2026-01 --until 2026-03 --json` → `tl reports run <id> --since 2025-10 --until 2025-12 --json` → synthesize
 - **Discovery workflows**: "What's my best performing brand this quarter" → `tl sponsorships status:sold purchase-date-start:2026-01 --json` → aggregate by brand → `tl brands show <top_brand> --json` → full picture
 - **Credit-aware**: checks balance before multi-query workflows, estimates total cost, asks user to confirm if expensive
@@ -315,7 +316,7 @@ tl-cli/
 │   │   ├── brands.py                 # tl brands (show/history/similar)
 │   │   ├── snapshots.py              # tl snapshots (Firebolt metrics)
 │   │   ├── reports.py                # tl reports / tl reports run
-│   │   ├── comments.py               # tl comments (list/add)
+│   │   ├── _comments_common.py       # comment-list/add/edit subcommands shared across entity apps
 │   │   ├── db.py                     # tl db pg|fb|es (raw read-only queries)
 │   │   ├── schema.py                 # tl schema pg|fb|es (live schema docs)
 │   │   ├── describe.py               # tl describe list/show (schema/filter/pricing discovery)
@@ -394,8 +395,9 @@ Most CLI endpoints can reuse existing views/utilities rather than being built fr
 | **`GET /api/cli/v1/snapshots/video/<id>`** | `api/v2/article-history` (`ArticleHistoryView`) — already queries Firebolt `article_metrics` with pagination, enforces `channel_id:article_id` format. | Direct reuse — already enforces channel_id requirement |
 | **`GET /api/cli/v1/reports`** | `api/campaigns` (`CampaignViewSet.list`) — returns user's saved campaigns with ownership filtering | Filter to user's campaigns, add CLI envelope |
 | **`GET /api/cli/v1/reports/<id>/run`** | `api/campaigns/<id>` detail + the view's existing data loading via `load_campaign_data()` in `data_api_utils.py` — campaigns store their filter config, which gets passed to the appropriate data view (SponsorshipsView, ArticlesView, ThoughtleadersView) | Load campaign config → dispatch to appropriate existing view → wrap results |
-| **`GET /api/cli/v1/comments/<adlink_id>`** | `api/comments/adlink/<id>` (`CommentsView` GET) — already paginated with read status | Add CLI envelope |
-| **`POST /api/cli/v1/comments/<adlink_id>`** | `api/comments/adlink/<id>` (`CommentsView` POST) — creates comment | Pass through |
+| **`GET /api/cli/v1/<entity_type>/<entity_id>/comments`** | Same query against the `Comment` table; entity_type ∈ {sponsorship, channel, brand, upload} | List comments scoped to caller's organization |
+| **`POST /api/cli/v1/<entity_type>/<entity_id>/comments`** | Insert into `Comment` with the matching FK column | Create comment for the named entity |
+| **`PATCH /api/cli/v1/comment/<comment_id>`** | Update `Comment.content` after author/superuser check | Edit a single comment by ID |
 | **`GET /api/cli/v1/whoami`** | New — reads Profile, Organization, brands M2M | New (joins Profile → User, Organization → Plan, Profile.brands → ChannelList) |
 | **`GET /api/cli/v1/balance`** | New — reads `CliCreditAccount` | New (simple model read) |
 | **`GET /api/cli/v1/describe`** | New — static metadata | New (hardcoded resource definitions) |
@@ -563,7 +565,7 @@ Build each command + its server endpoint together:
 11. `tl snapshots video abc --channel 12345` returns view curve
 12. `tl reports` lists saved reports (free)
 13. `tl reports run 789` executes saved report (credits based on results)
-14. `tl comments list 12345` lists comments (free)
+14. `tl sponsorships comment-list 12345` lists comments (free) — same shape under `tl channels`, `tl brands`, `tl uploads`
 15. `tl sponsorships create --channel 1 --brand 2` creates proposal (free)
 16. `tl setup claude` installs plugin
 17. Claude Code skill triggers on data questions, uses `tl describe` for discovery

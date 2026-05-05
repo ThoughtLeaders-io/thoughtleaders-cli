@@ -98,9 +98,10 @@ tl brands show Nike
 # Run a saved report
 tl reports run 42
 
-# Comments on a sponsorship
-tl comments list 12345
-tl comments add 12345 "Looks good"
+# Comments — available on sponsorships, channels, brands, and uploads
+tl sponsorships comment-list 12345
+tl sponsorships comment-add 12345 "Looks good"
+tl channels comment-add 7890 "Strong recent winners"
 
 # Show information about the logged-in user
 tl whoami

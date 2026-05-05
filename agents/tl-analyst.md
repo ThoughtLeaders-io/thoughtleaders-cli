@@ -64,7 +64,7 @@ tl db pg "SELECT a.id, a.send_date, a.publish_status, b.name AS brand, ch.channe
           ORDER BY a.send_date
           LIMIT 100 OFFSET 0"
 ```
-Then suggest `tl comments add <id> "..."` for each.
+Then suggest `tl sponsorships comment-add <id> "..."` for each.
 
 ### Multi-step research (mix raw + similarity)
 "Find channels similar to the ones Nike sponsors and compare their pricing"
