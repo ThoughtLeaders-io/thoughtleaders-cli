@@ -10,7 +10,7 @@
     "django_model": "dashboard.models.FilterSet",
     "django_enums_module": "dashboard.enums",
     "applies_to_report_types": [8],
-    "report_type_meaning": "CAMPAIGN_MANAGEMENT — sponsorship/AdLink-level reporting. Filters are evaluated against thoughtleaders_adlink (joined to Brand and Channel).",
+    "report_type_meaning": "CAMPAIGN_MANAGEMENT — sponsorship/AdLink-level reporting. Filters are evaluated against the denormalized view v_adspot_brand_profiles, which already joins adlink, brand, channel, and organization. Direct joins from thoughtleaders_adlink to thoughtleaders_brand or thoughtleaders_channel are NOT possible — those FKs do not exist on the adlink table. See SKILL.md Step 2.V1 (Sponsorship reports section) for the canonical query shape.",
     "note": "Same Django model as the intelligence schema, but only a subset of fields is meaningful for sponsorship reporting. Fields not listed here exist on the model but are inert for type 8."
   },
 
@@ -167,6 +167,7 @@
       "description": "Catch-all JSONField the platform interprets directly. For type 8 this is the primary place to encode publish_status, deal_status, price ranges, and any sponsorship-specific signals that don't have a first-class column on FilterSet.",
       "_tl_intent_hints": [
         "publish_status: encode the user's intent ('live', 'pending', 'sold', 'proposed') here; the platform reads it.",
+        "ad_publish_status: live/currently-running intent uses string value '0' together with publish_status [3]; Phase 2 validation maps this to base-table publish_date IS NOT NULL and therefore must use SKILL.md Path B.",
         "Deal-stage filtering (matches → proposals → deals) goes through filters_json — there is no first-class status field on FilterSet."
       ]
     }
