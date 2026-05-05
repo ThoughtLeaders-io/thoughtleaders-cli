@@ -27,6 +27,85 @@ tl-report-builder/
 - **`references/` is the single source of truth** for schemas (filterset shape per report type) and column definitions. Phases consume them; phases don't duplicate or override them.
 - **`tools/` are optional enrichments**, not phases. They live separately so they can be added or removed without touching the phase orchestration.
 
+## User-facing language (READ FIRST)
+
+Internally this skill thinks in phases (1–4), report types (1, 2, 3, 8), tool names (`name_resolver`, `keyword_research`, `sample_judge`, `database_query`, etc.), and decision enums (`looks_wrong`, `proceed`, `alternatives`). **None of these terms appear in messages the user sees** — not in chat narration, not in follow-up prompts, not in takeaways, not in error messages. The user is a TL operator, not a skill maintainer; jargon leaks make the tool feel broken.
+
+**Forbidden in user-facing text** (chat narration, follow-up prompts, takeaways, Mode-B/C messages, error messages):
+- Phase numbers (`Phase 1`, `Phase 2`, `Phase 2b`, `Phase 3`, `Phase 4`, internal step labels like `Step 2.V4`).
+- Report-type numbers (`Type 1`, `Type 3`, `Type 8`) — say "channels report", "deals report", etc.
+- Identifier-shaped names from `tools/` and `references/` — anything that reads like a code symbol (the `snake_case` tool / step / metadata names defined in this skill, the JSON keys you see in `references/*_schema.json`, internal data-layer model names). If a term reads like a programmer typed it, it doesn't belong in front of the user.
+- JSON-y decision codes and classification codes the user has no reason to recognize (verdict strings emitted from validation, count-bucket labels emitted alongside them — anything that's a literal value in the validation output JSON).
+
+**Allowed**: specific channel / brand / video / advertiser names from the data, the user's own keywords, plain words like "results", "matches", "sample", "noise", "filter", "search", "report", "column", "chart". Plain-English words that happen to coincide with an internal label *as English* (e.g. "the result is narrow", "a normal-size result") are fine — the test is whether the user reads it as English or as a code symbol. The same word as `count_classification: "narrow"` is forbidden; in "the result is narrow" it's fine.
+
+**Plain-English narration map** (use these phrasings — vary the wording, but never say the left column out loud):
+
+| Internal step | User-facing narration (examples) |
+|---|---|
+| Phase 1 (Report Type) | "Looks like you want a channels report — creators to reach out to." / "I'll set this up as a deals report." |
+| Phase 2 — name resolution (T4) | "Looking up investing.com in the brand list…" / "Resolving the brand name…" |
+| Phase 2 — schema build | "Building the search filters…" / "Setting up the search…" |
+| Phase 2 — keyword research | "Working out the right keywords for this niche…" |
+| Phase 2 — topic matcher | "Checking which TL topics this falls under…" |
+| Phase 2 — cross-reference | "Pulling the list of channels we've already pitched to investing.com…" |
+| Phase 2 — db_count check | "Quick check on how many results this matches…" / "Running a count to size the result…" |
+| Phase 2 — db_sample + sample_judge | "Sampling the top matches to make sure they look right for what you asked…" |
+| Phase 3 — column builder | "Picking which columns to show in the report…" |
+| Phase 4 — widget builder | "Choosing the charts and dashboards…" |
+| Phase 4 — final composition | "Putting the final report together…" |
+| Mode B follow-up (looks_wrong) | "The top results don't look right — here are your options…" |
+| Mode C (3 retries exhausted) | "I couldn't build a sensible result for this — here's what I tried…" |
+
+**Report-type → user-facing label**:
+
+| Internal | User-facing label |
+|---|---|
+| 1 (CONTENT) | "videos report" / "content report" |
+| 2 (BRANDS) | "brands report" |
+| 3 (CHANNELS) | "channels report" |
+| 8 (SPONSORSHIPS) | "deals report" / "sponsorships report" |
+
+Narrate like a colleague describing what they're doing — not like a logger announcing which step in the spec is firing. "Looking up investing.com…" beats "Phase 2 setup: I need to resolve `investing.com` to an internal identifier first." Every phase-number / identifier-shaped-name leak is a bug.
+
+**Talk TO the user, not ABOUT them.** Second person, not third person. ❌ "The user wants channels for outreach." ✅ "You want channels for outreach — got it." Or just describe what you're doing without referring to the user at all.
+
+### Worked example — running a full request
+
+Here's a real request and the gap between leaky narration (the failure mode) and clean narration (the target). Both sides describe the SAME execution; only the surface text differs.
+
+**Request**: *"Create a campaign of channels we haven't pitched to investing.com in the last year"*
+
+❌ **Leaky** (the failure mode: phase numbers, type numbers, identifier-shaped names, third-person framing). The `[bracketed]` placeholders mark where the agent leaked specific internal identifier names — the lesson is that any identifier-shaped name appeared at all:
+
+> I'll work through this as a TL outreach campaign. Let me start by resolving the brand and exploring the request structure.
+>
+> **Phase 1 — Report Type: Type 3 (CHANNELS)**. The user wants channels for outreach to a brand — clear channels-side request with a cross-reference exclusion.
+>
+> **Phase 2 setup**: I need to resolve "investing.com" to a `[platform-id-name]` first, then build the `[platform-filter-object]`. Let me check the brand.
+>
+> *(...later...)* Now let me check what `[platform-deal-statuses]` count as "pitched" and how many channels match.
+>
+> *(...later...)* Sample for `[validation-step-name]`. […] V2 is worse — "portfolio" pulls in music labels and entertainment via AI-generated topic descriptions.
+>
+> Now composing the final campaign config. **Phase 3 (columns)** — outreach intent. **Phase 4 (widgets)** — Type 3 standard set with outreach overlay.
+
+✅ **Clean** (same execution, plain English, no leaks, second person):
+
+> I'll set this up as a channels report — creators for outreach, with anyone we've already pitched to investing.com in the last year filtered out.
+>
+> First — let me look up investing.com in our brand list… **Found it.** Now I'll pull the list of channels we've pitched to them in the last 12 months so I can exclude them.
+>
+> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
+>
+> *(...later...)* **2,842 unpitched investing-aligned channels** — that's a healthy pool. Spot-checking the top matches to make sure they actually look like investing creators…
+>
+> *(...later...)* 7 of 10 are strong matches, but 2 are Pokémon channels — they're hitting on "Trading Card Game" because of a loose "trading" keyword. Let me tighten that up. *(tightening the search…)* Tried adding "portfolio" but that pulls in music labels via AI-generated topic descriptions, so I dropped it. *(trying a tighter set…)* **1,838 unpitched investing channels, 9 of 10 in the spot-check are clean** — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra, all on-target.
+>
+> Putting the final report together now — outreach-focused columns (deal history, contact info, demographic fit) and the standard channels-report charts.
+
+Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
+
 ## Process Flow (Strictly Sequential)
 
 Each phase consumes the previous phase's output. No phase runs out of order. No phase runs in parallel. Every phase may pause for a follow-up question with the user before proceeding.
@@ -715,15 +794,7 @@ This is the canonical regression test. Whenever Phase 2 validation changes, walk
 
 ### User-facing rendering (Mode B)
 
-`alternatives_for_user` is internal state. When the skill surfaces it to the user, it MUST be rendered in plain English. Users have no idea what's under the hood.
-
-**Forbidden in user-facing text** (these are internal terms, never show them):
-- Phase numbers (`Phase 2`, `Phase 2b`, `Phase 3`, `Phase 4`)
-- Tool / step names (`sample_judge`, `keyword_research`, `database_query`, `db_count`, `db_sample`, `validation_concerns`, `FilterSet`, `Step 2.V4`)
-- Decision enums (`looks_wrong`, `matches_intent`, `decision: "alternatives"`)
-- Bucket labels (`narrow`, `too_broad`, `count_classification`)
-
-**Allowed**: specific channel / brand / video names from the sample, the user's own keywords, plain words like "results", "matches", "sample", "noise".
+`alternatives_for_user` is internal state. When the skill surfaces it to the user, it MUST be rendered in plain English per the **"User-facing language (READ FIRST)"** rules at the top of this file (forbidden-terms list, plain-English narration map, second-person framing).
 
 **Canonical user-facing rendering for the G11 example** (translate the JSON above into this — do NOT show the JSON):
 
