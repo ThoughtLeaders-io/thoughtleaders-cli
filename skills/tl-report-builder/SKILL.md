@@ -713,6 +713,29 @@ That Little Puff, Taarak Mehta Ka Ooltah Chashmah, ...
 
 This is the canonical regression test. Whenever Phase 2 validation changes, walk this example through and verify the outcome is still `decision: "alternatives"` with a Mode-B prompt — not a silent emit.
 
+### User-facing rendering (Mode B)
+
+`alternatives_for_user` is internal state. When the skill surfaces it to the user, it MUST be rendered in plain English. Users have no idea what's under the hood.
+
+**Forbidden in user-facing text** (these are internal terms, never show them):
+- Phase numbers (`Phase 2`, `Phase 2b`, `Phase 3`, `Phase 4`)
+- Tool / step names (`sample_judge`, `keyword_research`, `database_query`, `db_count`, `db_sample`, `validation_concerns`, `FilterSet`, `Step 2.V4`)
+- Decision enums (`looks_wrong`, `matches_intent`, `decision: "alternatives"`)
+- Bucket labels (`narrow`, `too_broad`, `count_classification`)
+
+**Allowed**: specific channel / brand / video names from the sample, the user's own keywords, plain words like "results", "matches", "sample", "noise".
+
+**Canonical user-facing rendering for the G11 example** (translate the JSON above into this — do NOT show the JSON):
+
+> Hmm — I ran the search but the top results don't look right for **"channels about IRS tax debt forgiveness programs"**. The first 10 by reach are channels like **Cocomelon**, **Bad Bunny**, **Bruno Mars**, and **Selena Gomez** — music and kids' content, not tax/finance. The short word "IRS" is matching inside unrelated words in channel descriptions, which is pulling in a lot of noise.
+>
+> How do you want to proceed?
+> 1. **Save it anyway** — if you want to dig through the long tail manually.
+> 2. **Refine the search** — for example, drop "IRS" on its own and keep the longer phrases ("tax debt", "tax debt forgiveness", "tax debt relief").
+> 3. **Cancel** — there may not be much coverage for this niche in the data.
+
+Notice what's preserved (the actual sample names, the user's keywords, what went wrong in human terms) and what's stripped (every internal label). The same translation rule applies to Mode-C (failure) and any other follow-up message — name what the user sees, never name the machinery.
+
 ## Phase 3 — Columns Phase (detail)
 
 Phase 3 picks the columns the saved report displays and the dataset shape that hangs off them. It runs after Phase 2 has produced a validated FilterSet and before Phase 4 emits widgets.
@@ -856,7 +879,7 @@ Every phase has explicit conditions where it must pause and ask the user, rather
 | **2** | Filter input vague (e.g., "high-engagement channels" — what threshold?) | "Define [threshold]: by [metric A] above N? by [metric B]?" |
 | **2** | T4 returned ambiguous name resolution (>1 active candidate per name) | "Which one of these did you mean?" + option list |
 | **2** | T3 cross-reference returned unexpectedly large or zero result set | "The preliminary query matched [N] entities — narrow the date range or status filter?" |
-| **2** | Validation: sample_judge returned `looks_wrong` (G11-class noise) | Mode B prompt: save anyway / refine / cancel — with reason citing 2–3 specific noise samples |
+| **2** | Validation: sample_judge returned `looks_wrong` (G11-class noise) | Mode B prompt: save anyway / refine / cancel — plain English only, citing 2–3 specific sample names; never expose internal terms (phase numbers, tool names, `validation_concerns`, `db_count`, `looks_wrong`). See "User-facing rendering (Mode B)" in the Phase 2 section. |
 | **2** | Validation: 3 retries exhausted on empty/too_broad | Surface diagnostic + suggest the user reformulate the request |
 | **3** | Column template + extra columns the user listed differ from each other | "Use the template's columns, the columns you listed, or both?" |
 | **3** | Selected columns incompatible (e.g., requested `Views` on a type 3 report) | "[column] isn't available for [report type]; closest is [alternative]" |
