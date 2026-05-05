@@ -551,9 +551,30 @@ Each axis has up to two FilterSet inputs for the lower bound and up to two for t
 
 **Materialization choice — date literal vs. `NOW()`/`CURRENT_DATE`:** Phase 2 substitutes both materialized dates as literals (e.g., `'2026-04-05'`) computed at query-build time, NOT inline `CURRENT_DATE - INTERVAL` SQL. This gives the validation count a stable definition the orchestration can log and reproduce; rolling-window drift between `db_count` and a slow follow-up `db_sample` is a real bug class otherwise. Use `CURRENT_DATE - INTERVAL` only if the orchestration cannot resolve the date locally.
 
-After materialization, the SQL templates emit only the predicates whose corresponding FilterSet input is set:
+After materialization, the SQL templates emit only the predicates whose corresponding FilterSet input is set.
 
-##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent)
+##### Canonical-sort resolution (parameterizes `db_sample` ORDER BY)
+
+`db_sample` MUST order rows by the FilterSet's canonical sort — the same `sort` field Phase 3 surfaces and the saved report uses. Phase 2's contract on this is in line ~281: *"a small sample of representative rows (10 rows, ordered by the canonical sort)"*. Hard-coding `ORDER BY send_date DESC` violates the contract for sold-only reports (`-purchase_date`), live-only reports (`-publish_date`), or anything with an explicit user-set sort.
+
+Phase 2 reads `filterset.sort` (default `"-send_date"` per `references/sponsorship_filterset_schema.json`) and resolves it into a SQL ORDER BY expression `<canonical_sort_expr>` injected into both the inner `DISTINCT ON` ORDER BY (after `adlink_id`) and the outer ORDER BY:
+
+| `filterset.sort` | Source column | Path A allowed? | `<canonical_sort_expr>` (Path A) | `<canonical_sort_expr>` (Path B) |
+|---|---|---|---|---|
+| `-send_date` (schema default) | `al.send_date` | ❌ — column not on view | n/a (forces Path B) | `al.send_date DESC NULLS LAST` |
+| `-purchase_date` (sold-only intent default) | `al.purchase_date` | ❌ | n/a (forces Path B) | `al.purchase_date DESC NULLS LAST` |
+| `-publish_date` (live-only intent default) | `al.publish_date` | ❌ | n/a (forces Path B) | `al.publish_date DESC NULLS LAST` |
+| `-sold_date` / `-outreach_date` / `-presented_date` / `-proposal_approved_date` / `-rejected_date` / `-actual_end_date` / `-scheduled_end_date` | `al.<col>` | ❌ | n/a (forces Path B) | `al.<col> DESC NULLS LAST` |
+| `-adlink_created_at` / `created_at` | `adlink_created_at` (view) or `al.created_at` (base) | ✅ | `adlink_created_at DESC NULLS LAST` | `v.adlink_created_at DESC NULLS LAST` |
+| `-price` / `-cost` / `-revenue` / `-weighted_price` | `al.<col>` | ❌ | n/a (forces Path B) | `al.<col> DESC NULLS LAST` |
+
+**`NULLS LAST` is non-negotiable.** Many sponsorship date columns are populated only at specific lifecycle stages (e.g. `purchase_date` is null until sold, `publish_date` is null until live). Without `NULLS LAST` the sample fills with NULL-date rows that are uninformative for `sample_judge`.
+
+**Path-selection consequence:** if the canonical sort references a column not on the view (i.e. anything other than `adlink_id`/`adlink_publish_status`/`adlink_created_at`/`adlink_updated_at`/`brand_id`/`brand_name`/`channel_id`/`channel_name`), Phase 2 MUST take Path B even when only the created axis is populated. Path A's "view-only optimization" is only valid when the canonical sort is also a view column. Update the path-selection table in the next section accordingly.
+
+**SELECT-list addition:** the sort column must appear in the inner SELECT (PostgreSQL requires `DISTINCT ON` columns and `ORDER BY` columns to all be projected). When `<canonical_sort_expr>` references a column not already in the inner SELECT (e.g., `al.purchase_date` for sold reports), Phase 2 adds it. The outer ORDER BY uses the same column name (unaliased) — see Path B's worked example below.
+
+##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent AND canonical sort is a view column)
 
 All predicates wrapped in `[ ... ]` are conditional — emit them ONLY when the corresponding FilterSet input is set and non-empty. Bare predicates outside brackets are unconditional. (`publish_status` is conditional too: when `filters_json.publish_status` is unset, the SQL must omit the clause entirely — `= ANY(NULL)` matches nothing and would silently zero the count.)
 
@@ -571,6 +592,7 @@ LIMIT 1 OFFSET 0
 
 ```sql
 -- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
+-- Path A canonical sort is necessarily a view column (adlink_created_at by default).
 SELECT * FROM (
   SELECT DISTINCT ON (adlink_id)
          adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
@@ -581,9 +603,9 @@ SELECT * FROM (
     [AND adlink_created_at <  '<created_hi_next>']
     [AND brand_id   = ANY(<resolved brand_ids>)]
     [AND channel_id = ANY(<resolved channel_ids>)]
-  ORDER BY adlink_id, adlink_created_at DESC   -- inner: required for DISTINCT ON
+  ORDER BY adlink_id, <canonical_sort_expr>     -- inner: required for DISTINCT ON
 ) deduped
-ORDER BY adlink_created_at DESC                 -- outer: canonical sort (newest first)
+ORDER BY <canonical_sort_expr>                  -- outer: canonical sort from filterset.sort
 LIMIT 10 OFFSET 0
 ```
 
@@ -609,9 +631,12 @@ LIMIT 1 OFFSET 0
 
 ```sql
 -- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
+-- The inner SELECT MUST project the column referenced by <canonical_sort_expr>; for
+-- non-default sorts (e.g. -purchase_date for sold reports), add `al.<col>` to the SELECT.
 SELECT * FROM (
   SELECT DISTINCT ON (v.adlink_id)
-         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status, al.send_date
+         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status,
+         al.send_date  -- replace with al.purchase_date / al.publish_date / etc. per canonical sort
   FROM v_adspot_brand_profiles v
   JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
   WHERE 1=1
@@ -622,20 +647,23 @@ SELECT * FROM (
     [AND v.adlink_created_at <  '<created_hi_next>']
     [AND v.brand_id   = ANY(<resolved brand_ids>)]
     [AND v.channel_id = ANY(<resolved channel_ids>)]
-  ORDER BY v.adlink_id, al.send_date DESC      -- inner: required for DISTINCT ON
+  ORDER BY v.adlink_id, <canonical_sort_expr>   -- inner: required for DISTINCT ON
 ) deduped
-ORDER BY send_date DESC                          -- outer: canonical sort (newest first)
+ORDER BY <canonical_sort_expr>                  -- outer: canonical sort from filterset.sort
 LIMIT 10 OFFSET 0
 ```
 
 **When to take which path:**
 
-| FilterSet bounds populated | Path | Why |
-|---|---|---|
-| `created_at` only (no send-axis bounds) | A (view-only) | Optimization — skip the base-table join when not needed |
-| `send_date` only | B | Join required; created-axis predicates omit |
-| Both axes | B | Join required for `send_date`; created-axis predicates emit on top |
-| Neither | (Phase 2 emits `decision: "fail"` upstream) | Unscoped type-8 is rejected per the hard rule |
+| FilterSet bounds populated | Canonical sort column | Path | Why |
+|---|---|---|---|
+| `created_at` only | view column (e.g. `adlink_created_at`) | A (view-only) | Optimization — skip the base-table join when not needed |
+| `created_at` only | base-table column (e.g. `purchase_date`) | B | Sort column lives on `al`; join required to project + ORDER BY it |
+| `send_date` only | any | B | Join required for `send_date` predicate |
+| Both axes | any | B | Join required for `send_date`; created-axis predicates emit on top |
+| Neither | — | (Phase 2 emits `decision: "fail"` upstream) | Unscoped type-8 is rejected per the hard rule |
+
+In practice Path A only fires for the narrow case "created_at-only AND sort is a view column" — a real but uncommon shape. Most type-8 reports take Path B.
 
 **Why `WHERE 1=1`:** all the bracketed predicates are conditional, and the type-8 unscoped-rejection rule only guarantees one DATE bound resolves — every other clause (publish_status, brands, channels) may be entirely absent. The `1=1` placeholder lets every conditional clause omit independently while keeping the SQL valid. Cosmetic; the planner discards it.
 
@@ -677,6 +705,31 @@ WHERE 1=1
 LIMIT 1 OFFSET 0
 ```
 This includes the entirety of Feb 28 — every timestamp from `'2026-02-28 00:00:00'` through `'2026-02-28 23:59:59.999'` — matching what a user means by "through Feb 28". A `<= '2026-02-28'` predicate would only match timestamps at exactly midnight at the start of Feb 28 (~0% of expected matches).
+
+##### Worked example C — sold-only intent with `sort: "-purchase_date"`
+
+Input: `filterset = { days_ago: 365, brands: [29332], sort: "-purchase_date", filters_json: { publish_status: [3] } }` (intent: won-deals; sort defaults to `-purchase_date`).
+
+Materialization: `send_lo` = `'2025-05-05'`; `send_hi_next` unbounded; `<canonical_sort_expr>` = `al.purchase_date DESC NULLS LAST`.
+
+Resulting `db_sample` (Path B, sort column added to inner SELECT, NULLS LAST so unsold deals don't crowd out sold ones):
+```sql
+SELECT * FROM (
+  SELECT DISTINCT ON (v.adlink_id)
+         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status,
+         al.purchase_date
+  FROM v_adspot_brand_profiles v
+  JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
+  WHERE 1=1
+    AND v.adlink_publish_status = ANY(ARRAY[3])
+    AND al.send_date >= '2025-05-05'
+    AND v.brand_id = ANY(ARRAY[29332])
+  ORDER BY v.adlink_id, al.purchase_date DESC NULLS LAST
+) deduped
+ORDER BY purchase_date DESC NULLS LAST
+LIMIT 10 OFFSET 0
+```
+The samples surface the brand's most-recently-sold deals, matching what the saved sold-only report will show — `sample_judge` evaluates whether the recent-sold mix looks right for the user's prompt, not whether the most-recently-pitched mix does.
 
 ##### Why the inner/outer split
 
