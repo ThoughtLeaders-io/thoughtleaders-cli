@@ -56,6 +56,36 @@ def add_comment(
     client = get_client()
     try:
         data = client.post(f"/comments/{adlink_id}", json_body={"text": message})
+        for r in data.get("results", []):
+            r["comment_id"] = r.pop("id", None)
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("edit")
+def edit_comment(
+    comment_id: int = typer.Argument(..., help="Comment ID"),
+    message: str = typer.Argument(..., help="New comment text"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Edit an existing comment (free, no credits).
+
+    Only the comment's author can edit it (superusers can edit any comment).
+
+    Examples:
+        tl comments edit 789 "Updated note: ready for AdOps"
+    """
+    fmt = detect_format(json_output, False, False, toon_output)
+
+    client = get_client()
+    try:
+        data = client.patch(f"/comment/{comment_id}", json_body={"text": message})
+        for r in data.get("results", []):
+            r["comment_id"] = r.pop("id", None)
         output_single(data, fmt)
     except ApiError as e:
         handle_api_error(e)

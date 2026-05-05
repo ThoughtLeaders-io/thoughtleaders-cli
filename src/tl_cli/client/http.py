@@ -29,6 +29,9 @@ class TLClient:
     def post(self, path: str, json_body: dict | None = None) -> dict:
         return self._request("POST", path, json_body=json_body)
 
+    def patch(self, path: str, json_body: dict | None = None) -> dict:
+        return self._request("PATCH", path, json_body=json_body)
+
     def _request(
         self,
         method: str,
