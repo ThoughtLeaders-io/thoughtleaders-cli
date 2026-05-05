@@ -557,22 +557,57 @@ After materialization, the SQL templates emit only the predicates whose correspo
 
 `db_sample` MUST order rows by the FilterSet's canonical sort — the same `sort` field Phase 3 surfaces and the saved report uses. Phase 2's contract on this is in line ~281: *"a small sample of representative rows (10 rows, ordered by the canonical sort)"*. Hard-coding `ORDER BY send_date DESC` violates the contract for sold-only reports (`-purchase_date`), live-only reports (`-publish_date`), or anything with an explicit user-set sort.
 
-Phase 2 reads `filterset.sort` (default `"-send_date"` per `references/sponsorship_filterset_schema.json`) and resolves it into a SQL ORDER BY expression `<canonical_sort_expr>` injected into both the inner `DISTINCT ON` ORDER BY (after `adlink_id`) and the outer ORDER BY:
+Phase 2 reads `filterset.sort` (default `"-send_date"` per `references/sponsorship_filterset_schema.json`) and resolves it into TWO SQL ORDER BY fragments:
 
-| `filterset.sort` | Source column | Path A allowed? | `<canonical_sort_expr>` (Path A) | `<canonical_sort_expr>` (Path B) |
-|---|---|---|---|---|
-| `-send_date` (schema default) | `al.send_date` | ❌ — column not on view | n/a (forces Path B) | `al.send_date DESC NULLS LAST` |
-| `-purchase_date` (sold-only intent default) | `al.purchase_date` | ❌ | n/a (forces Path B) | `al.purchase_date DESC NULLS LAST` |
-| `-publish_date` (live-only intent default) | `al.publish_date` | ❌ | n/a (forces Path B) | `al.publish_date DESC NULLS LAST` |
-| `-sold_date` / `-outreach_date` / `-presented_date` / `-proposal_approved_date` / `-rejected_date` / `-actual_end_date` / `-scheduled_end_date` | `al.<col>` | ❌ | n/a (forces Path B) | `al.<col> DESC NULLS LAST` |
-| `-adlink_created_at` / `created_at` | `adlink_created_at` (view) or `al.created_at` (base) | ✅ | `adlink_created_at DESC NULLS LAST` | `v.adlink_created_at DESC NULLS LAST` |
-| `-price` / `-cost` / `-revenue` / `-weighted_price` | `al.<col>` | ❌ | n/a (forces Path B) | `al.<col> DESC NULLS LAST` |
+- `<inner_sort_expr>` — table-qualified, used inside the `DISTINCT ON` subquery. The inner SELECT references columns through table aliases (`v.<col>` from the view, `al.<col>` from the base table), so the inner ORDER BY must use the same qualified form.
+- `<outer_sort_expr>` — UNqualified, used in the outer `ORDER BY ... LIMIT` after the subquery. The aliases `v` / `al` are out of scope outside the subquery; only the projected column names are visible. So the outer expression references the column by its bare name (e.g. `purchase_date`, not `al.purchase_date`).
 
-**`NULLS LAST` is non-negotiable.** Many sponsorship date columns are populated only at specific lifecycle stages (e.g. `purchase_date` is null until sold, `publish_date` is null until live). Without `NULLS LAST` the sample fills with NULL-date rows that are uninformative for `sample_judge`.
+The two fragments share direction (`DESC` / `ASC`) and `NULLS LAST` — they only differ in qualification.
 
-**Path-selection consequence:** if the canonical sort references a column not on the view (i.e. anything other than `adlink_id`/`adlink_publish_status`/`adlink_created_at`/`adlink_updated_at`/`brand_id`/`brand_name`/`channel_id`/`channel_name`), Phase 2 MUST take Path B even when only the created axis is populated. Path A's "view-only optimization" is only valid when the canonical sort is also a view column. Update the path-selection table in the next section accordingly.
+**Direction:** `filterset.sort` uses the same convention as `sortable_columns.json`'s `backend_code` — a leading `-` means descending, no prefix means ascending. Both directions are legal for every type-8 sort column (`sortability: "both"` in `sortable_columns.json`). Phase 2 strips the `-` prefix to identify the column and uses it to pick the direction:
 
-**SELECT-list addition:** the sort column must appear in the inner SELECT (PostgreSQL requires `DISTINCT ON` columns and `ORDER BY` columns to all be projected). When `<canonical_sort_expr>` references a column not already in the inner SELECT (e.g., `al.purchase_date` for sold reports), Phase 2 adds it. The outer ORDER BY uses the same column name (unaliased) — see Path B's worked example below.
+```
+sort: "-purchase_date"  → DESC NULLS LAST  (sold-only default, newest-sold first)
+sort:  "purchase_date"  → ASC  NULLS LAST  (oldest-sold first; legal but less common)
+sort: "-price"          → DESC NULLS LAST  (most expensive first)
+sort:  "price"          → ASC  NULLS LAST  (cheapest first)
+sort: "-send_date"      → DESC NULLS LAST  (schema default — newest-scheduled first)
+sort:  "send_date"      → ASC  NULLS LAST  (chronological forward — oldest-scheduled first)
+```
+
+**Sort-key → SQL column mapping** (sort key as it appears in `filterset.sort`, stripped of the `-` prefix; matches `sortable_columns.json` `backend_code`):
+
+| `filterset.sort` key | Path-A column | Path-B column | Path A allowed? |
+|---|---|---|---|
+| `send_date` (schema default) | n/a | `al.send_date` | ❌ — column not on view; forces Path B |
+| `purchase_date` (sold-only intent default) | n/a | `al.purchase_date` | ❌ |
+| `publish_date` (live-only intent default) | n/a | `al.publish_date` | ❌ |
+| `created_at` | `adlink_created_at` | `v.adlink_created_at` | ✅ — view exposes it as `adlink_created_at` |
+| `updated_at` | `adlink_updated_at` | `v.adlink_updated_at` | ✅ |
+| `price` / `cost` / `weighted_price` / `matching_engine_score` | n/a | `al.<col>` | ❌ |
+| `creator` (Advertiser) / `ad_spot__channel__channel_name` (Channel) / `ad_spot__channel__impression` (Projected Views) / `publish_status` | n/a | resolve via `al` joins or view columns; Phase 2 falls back to `<send_date> DESC NULLS LAST` if the column path is ambiguous and surfaces a follow-up | ❌ |
+
+Two notes on the table:
+
+1. **The `filterset.sort` key is the `backend_code` from `sortable_columns.json`, NOT the view's column name.** A user / Phase 3 emitting `sort: "created_at"` is a normal sort against the AdLink creation date. Phase 2 maps that backend_code onto `adlink_created_at` (Path A) or `v.adlink_created_at` (Path B) when composing SQL — the sort *value itself* stays `created_at`, matching the saved report's serialized form.
+2. **Joined-relation sort keys (`creator`, `ad_spot__channel__channel_name`, `ad_spot__channel__impression`)** are platform ORM paths that don't translate cleanly to a single PG column. Phase 2 either resolves them via existing joins (`al.creator_id`, `v.channel_name`, etc.) or falls back to the schema default (`-send_date`) and surfaces a Phase 2 follow-up — silent rewrite to a different sort would mislead `sample_judge`.
+
+**Concrete `<inner_sort_expr>` / `<outer_sort_expr>` examples:**
+
+| `filterset.sort` | Path | `<inner_sort_expr>` | `<outer_sort_expr>` |
+|---|---|---|---|
+| `-purchase_date` | B | `al.purchase_date DESC NULLS LAST` | `purchase_date DESC NULLS LAST` |
+| `purchase_date` (ASC) | B | `al.purchase_date ASC NULLS LAST` | `purchase_date ASC NULLS LAST` |
+| `-send_date` (default) | B | `al.send_date DESC NULLS LAST` | `send_date DESC NULLS LAST` |
+| `-price` | B | `al.price DESC NULLS LAST` | `price DESC NULLS LAST` |
+| `-created_at` | A | `adlink_created_at DESC NULLS LAST` | `adlink_created_at DESC NULLS LAST` |
+| `-created_at` | B | `v.adlink_created_at DESC NULLS LAST` | `adlink_created_at DESC NULLS LAST` |
+
+**`NULLS LAST` is non-negotiable.** Many sponsorship date columns are populated only at specific lifecycle stages (e.g. `purchase_date` is null until sold, `publish_date` is null until live). Without `NULLS LAST` the sample fills with NULL-date rows that are uninformative for `sample_judge`. Apply `NULLS LAST` to every sort, both directions.
+
+**Path-selection consequence:** if the canonical-sort key references a base-table column not on the view (anything in the table above whose Path-A column is `n/a`), Phase 2 MUST take Path B even when only the created axis is populated. Path A's "view-only optimization" is only valid when the canonical sort is also a view column (`created_at` / `updated_at`).
+
+**SELECT-list addition:** the sort column must appear in the inner SELECT (PostgreSQL requires `DISTINCT ON` columns and `ORDER BY` columns to all be projected, AND the outer ORDER BY references the projected name). When the inner SELECT doesn't already include the sort column (e.g., `al.purchase_date` for sold reports), Phase 2 adds it. See Worked Example C below for the resolved shape.
 
 ##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent AND canonical sort is a view column)
 
@@ -592,7 +627,7 @@ LIMIT 1 OFFSET 0
 
 ```sql
 -- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
--- Path A canonical sort is necessarily a view column (adlink_created_at by default).
+-- Path A canonical sort is necessarily a view column (adlink_created_at / adlink_updated_at).
 SELECT * FROM (
   SELECT DISTINCT ON (adlink_id)
          adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
@@ -603,9 +638,9 @@ SELECT * FROM (
     [AND adlink_created_at <  '<created_hi_next>']
     [AND brand_id   = ANY(<resolved brand_ids>)]
     [AND channel_id = ANY(<resolved channel_ids>)]
-  ORDER BY adlink_id, <canonical_sort_expr>     -- inner: required for DISTINCT ON
+  ORDER BY adlink_id, <inner_sort_expr>         -- inner: qualified; required for DISTINCT ON
 ) deduped
-ORDER BY <canonical_sort_expr>                  -- outer: canonical sort from filterset.sort
+ORDER BY <outer_sort_expr>                      -- outer: unqualified (aliases out of scope)
 LIMIT 10 OFFSET 0
 ```
 
@@ -631,7 +666,7 @@ LIMIT 1 OFFSET 0
 
 ```sql
 -- db_sample (DISTINCT ON dedupes by adlink_id; outer ORDER BY enforces canonical sort)
--- The inner SELECT MUST project the column referenced by <canonical_sort_expr>; for
+-- The inner SELECT MUST project the column referenced by <inner_sort_expr>; for
 -- non-default sorts (e.g. -purchase_date for sold reports), add `al.<col>` to the SELECT.
 SELECT * FROM (
   SELECT DISTINCT ON (v.adlink_id)
@@ -647,9 +682,9 @@ SELECT * FROM (
     [AND v.adlink_created_at <  '<created_hi_next>']
     [AND v.brand_id   = ANY(<resolved brand_ids>)]
     [AND v.channel_id = ANY(<resolved channel_ids>)]
-  ORDER BY v.adlink_id, <canonical_sort_expr>   -- inner: required for DISTINCT ON
+  ORDER BY v.adlink_id, <inner_sort_expr>       -- inner: qualified (e.g. al.purchase_date DESC NULLS LAST)
 ) deduped
-ORDER BY <canonical_sort_expr>                  -- outer: canonical sort from filterset.sort
+ORDER BY <outer_sort_expr>                      -- outer: unqualified (e.g. purchase_date DESC NULLS LAST)
 LIMIT 10 OFFSET 0
 ```
 
@@ -710,7 +745,11 @@ This includes the entirety of Feb 28 — every timestamp from `'2026-02-28 00:00
 
 Input: `filterset = { days_ago: 365, brands: [29332], sort: "-purchase_date", filters_json: { publish_status: [3] } }` (intent: won-deals; sort defaults to `-purchase_date`).
 
-Materialization: `send_lo` = `'2025-05-05'`; `send_hi_next` unbounded; `<canonical_sort_expr>` = `al.purchase_date DESC NULLS LAST`.
+Materialization: `send_lo` = `'2025-05-05'`; `send_hi_next` unbounded.
+
+Sort resolution (sort key `purchase_date`, descending direction from the leading `-`):
+- `<inner_sort_expr>` = `al.purchase_date DESC NULLS LAST` (table-qualified; inner ORDER BY)
+- `<outer_sort_expr>` = `purchase_date DESC NULLS LAST` (unqualified; outer ORDER BY references the projected column name, since `al` is out of scope outside the subquery)
 
 Resulting `db_sample` (Path B, sort column added to inner SELECT, NULLS LAST so unsold deals don't crowd out sold ones):
 ```sql
