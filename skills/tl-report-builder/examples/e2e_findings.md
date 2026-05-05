@@ -250,3 +250,15 @@ Both are explicitly mandated in SKILL.md Step 2.V1 with a "Critical" callout and
 **Severity**: HIGH — a 34× count inflation is the kind of bug that silently makes every type-3 validation report a false `too_broad` or `broad` classification when the true count was `normal` or `narrow`. Threshold-driven retry logic would loop trying to "narrow" a query that's already narrow. The skill would either retry-cap-fail or surface a wrong narrowing suggestion. Caught here before it reached production.
 
 **Lesson**: my type-3 ES example was based on the abstract schema-doc structure (channel parent docs, doc_type filter, multi_match phrase) without testing what happens when the index is sharded. The schema doc DOES mention sharding (line 38) but doesn't explicitly call out parent-doc replication across shards. Live-data probing surfaced it; the abstract schema doc hint was easy to miss. Adding to my pre-commit checklist: **probe live data on every new query example, not just the schema doc.**
+
+### 🟡 Finding 7 — `multi_step_query` source extraction needs pagination
+
+**Surfaced by**: G10 (`"Tech channels we haven't pitched in the last 12 months"`).
+
+**Issue**: The source-query side of a `multi_step_query` (extract channel IDs from a sponsorship-history query, inject as `exclude_channels` on the main report) routinely returns thousands of IDs. Empirically: 4,502 distinct channels in active pipeline (publish_status ∈ [0, 2, 6, 7, 8]) over the last 12 months. The sandboxed `tl db pg` read endpoint **caps every SELECT at `LIMIT 500`** (returns `Error (400): Query rejected: LIMIT_OUT_OF_RANGE` for higher values). A single-page extraction misses 89% of the IDs.
+
+**Fix applied**: `database_query.md` `multi_step_query` path step 4 now mandates pagination — `LIMIT 500 OFFSET 0`, `LIMIT 500 OFFSET 500`, ..., concatenate pages, cap at `MAX_IDS` (default 10000). Verified against live data: page-1-only run produced 6,140 → 6,078 main-query distinct channels (62 excluded); a full 4,502-ID exclude would remove proportionally more.
+
+**Otherwise the architecture works correctly**: source query (PG) → extracted ID list → main query (ES) with `must_not.terms.id` injection → cardinality + collapse for the count and sample. The mechanism is sound; pagination is the only operational gap.
+
+**Severity**: MEDIUM — without pagination, every multi_step_query report silently under-includes excluded channels (or over-includes if the orchestration hits `apply_as: "channels"` with a partial list). Caught here before reaching production.

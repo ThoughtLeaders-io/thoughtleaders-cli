@@ -115,7 +115,8 @@ The caller provides:
 1. Validate the source query shape: `report_type` is one of {1, 2, 3, 8}, `filterset` is present, `extract == "channel_ids"`.
 2. **Date enforcement** for sponsorship-side source queries (`source_query.report_type == 8`): if the user's framing is "currently / active / right now / in the pipeline" without explicit dates, default `source_query.filterset.start_date = <one year ago>`. If the user said "ever / all-time", omit the date filter (rare).
 3. Validate `apply_as ∈ {"channels", "exclude_channels"}`.
-4. Compose the wrapper.
+4. **Page through the source query if it can return more than 500 IDs.** The sandboxed read endpoints cap a single SELECT at `LIMIT 500`. A source query like "channels we've pitched in the last 12 months" routinely returns thousands of IDs (verified against live data: ~4,500 distinct channels in active pipeline last 12 months). The orchestration paginates: `LIMIT 500 OFFSET 0`, `LIMIT 500 OFFSET 500`, ... until a page returns fewer than 500 rows. Concatenate the pages into one ID list before injecting as `apply_as`. Cap total IDs at `MAX_IDS` (default 10000); surface a warning if truncated.
+5. Compose the wrapper.
 
 ---
 
