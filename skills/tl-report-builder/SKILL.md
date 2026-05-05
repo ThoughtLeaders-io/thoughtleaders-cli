@@ -523,33 +523,37 @@ Per `references/sponsorship_filterset_schema.json`:
 
 **Out of scope for the FilterSet today:** filtering by `purchase_date`, `publish_date`, `outreach_date`, `sold_date`, etc. as a primary date predicate. These columns exist on the base table but the FilterSet exposes no first-class field for them, and the skill must NOT invent one (`purchase_date_from`, `publish_date_from`, etc. are unknown to the server and would be silently dropped). `filters_json` is the platform's catch-all and *might* be a future home for these scopes, but no concrete keys are documented today — if a user explicitly needs one of those axes as a filter (not just as a widget axis), surface a Phase 2 follow-up explaining the gap rather than guessing at keys. Track as a server-side gap, not a skill bug.
 
-There is exactly ONE branch in the validation query, based on which date axis the FilterSet uses (`send_date` axis or `created_at` axis). But before composing SQL, Phase 2 must materialize the FilterSet's date inputs into a normalized lower/upper bound pair — the FilterSet exposes four overlapping inputs that all collapse to (≤ 1 lower bound, ≤ 1 upper bound) per axis.
+The validation query branches on which axes the FilterSet populates: `send_date` axis (`start_date`/`end_date`/`days_ago`/`days_ago_to`), `created_at` axis (`createdat_from`/`createdat_to`), or both. Before composing SQL, Phase 2 materializes the FilterSet's date inputs into a normalized lower/upper bound pair per axis — the FilterSet exposes four overlapping send-axis inputs that collapse to (≤ 1 lower bound, ≤ 1 upper bound), and similarly two created-axis inputs.
 
 ##### Bounds materialization (preprocessing — Phase 2 does this BEFORE composing SQL)
 
-Each axis has up to two FilterSet inputs for the lower bound and up to two for the upper bound. Resolve them in this order, picking the first non-null on each side:
+Each axis has up to two FilterSet inputs for the lower bound and up to two for the upper bound. Resolve them in this order, picking the first non-null on each side. **Upper bounds always materialize as the next calendar day (lower-bound-of-next-day) for half-open `<` semantics — see "Half-open upper bound" below; this applies to every upper-bound input on every axis.**
 
-**`send_date` axis (Path B)**
+**`send_date` axis** — column type `timestamp with time zone`
 
-| Bound | Resolution order (first wins) |
-|---|---|
-| Lower (`send_lo`) | `start_date` → `CURRENT_DATE - INTERVAL '<days_ago> days'` → unbounded |
-| Upper (`send_hi`) | `end_date` → `CURRENT_DATE - INTERVAL '<days_ago_to> days'` → unbounded |
+| Bound | Resolution order (first wins) | Predicate shape |
+|---|---|---|
+| Lower (`send_lo`) | `start_date` → `today - <days_ago> days` → unbounded | `send_date >= '<send_lo>'` |
+| Upper (`send_hi_next`) | (`end_date` + 1 day) → (`today - <days_ago_to> days` + 1 day) → unbounded | `send_date < '<send_hi_next>'` |
 
-**`created_at` axis (Path A)**
+**`created_at` axis** — column type `timestamp with time zone`
 
-| Bound | Resolution order (first wins) |
-|---|---|
-| Lower (`created_lo`) | `createdat_from` → unbounded |
-| Upper (`created_hi`) | `createdat_to` → unbounded |
+| Bound | Resolution order (first wins) | Predicate shape |
+|---|---|---|
+| Lower (`created_lo`) | `createdat_from` → unbounded | `adlink_created_at >= '<created_lo>'` |
+| Upper (`created_hi_next`) | (`createdat_to` + 1 day) → unbounded | `adlink_created_at < '<created_hi_next>'` |
 
-**Hard rule (carried over from the type-8 edge-case in Phase 2):** at least ONE bound must resolve to a concrete value across the chosen axis — otherwise the request is unscoped and Phase 2 emits `decision: "fail"`. One-sided is legal: "since 2025-01-01" → only `send_lo`; "before Q4" → only `send_hi`; "in the last 30 days" → only `send_lo` (materialized from `days_ago`).
+**Half-open upper bound (`< next_day`, NOT `<= upper`)** — per `references/report_glossary.md` "Date upper bounds": the platform's underlying DateTime filtering uses `__lt next_day`, not `__lte`. Using `<= '2026-02-28'` against a timestamp column matches only midnight at the *start* of Feb 28 — silently dropping 23h59m of the user's intended last day. Apply this rule to BOTH `createdat_to` AND `days_ago_to` AND `end_date` — every upper-bound input on every axis materializes the same way: take the user's date, add 1 calendar day, emit a `<` predicate. So `createdat_to: "2026-02-28"` → `created_hi_next = '2026-03-01'` → `adlink_created_at < '2026-03-01'`. Same for `end_date` (→ `send_hi_next`) and `days_ago_to: 7` (→ `send_hi_next = today - 7d + 1d = today - 6d`). Lower bounds use `>=` unchanged.
 
-**Materialization choice — date literal vs. `NOW()`/`CURRENT_DATE`:** Phase 2 substitutes the materialized date as a literal (e.g., `'2026-04-05'`) computed at query-build time, NOT inline `CURRENT_DATE - INTERVAL` SQL. This gives the validation count a stable definition the orchestration can log and reproduce; rolling-window drift between `db_count` and a slow follow-up `db_sample` is a real bug class otherwise. Use `CURRENT_DATE - INTERVAL` only if the orchestration cannot resolve the date locally.
+**Hard rule (carried over from the type-8 edge-case in Phase 2):** at least ONE bound must resolve to a concrete value across one of the two axes — otherwise the request is unscoped and Phase 2 emits `decision: "fail"`. One-sided is legal: "since 2025-01-01" → only `send_lo`; "before Q4" → only `send_hi_next`; "in the last 30 days" → only `send_lo` (materialized from `days_ago`).
 
-After materialization, the SQL templates emit only the predicates whose bound is non-null:
+**When both axes are populated:** the FilterSet schema permits a single FilterSet to set BOTH a send-axis bound AND a created-axis bound simultaneously (e.g., "deals with `send_date` in Q1 2026 that were entered into the pipeline before Dec 2025"). The platform applies both as typed AND filters on the underlying columns. **The validation query MUST do the same** — emit predicates for every axis whose bounds resolved. There is no precedence, no silent dropping, no axis selection by intent. The composed SQL takes the joined-base-table shape (Path B's join is required because send_date isn't on the view) and adds `adlink_created_at` predicates from the created axis on top of `send_date` predicates from the send axis. The "Path A" view-only shape applies ONLY when the send axis has zero resolved bounds.
 
-##### Path A — `created_at` axis (view-only)
+**Materialization choice — date literal vs. `NOW()`/`CURRENT_DATE`:** Phase 2 substitutes both materialized dates as literals (e.g., `'2026-04-05'`) computed at query-build time, NOT inline `CURRENT_DATE - INTERVAL` SQL. This gives the validation count a stable definition the orchestration can log and reproduce; rolling-window drift between `db_count` and a slow follow-up `db_sample` is a real bug class otherwise. Use `CURRENT_DATE - INTERVAL` only if the orchestration cannot resolve the date locally.
+
+After materialization, the SQL templates emit only the predicates whose corresponding FilterSet input is set:
+
+##### Path A — `created_at` axis ONLY (view-only optimization; use only when send-axis bounds are absent)
 
 All predicates wrapped in `[ ... ]` are conditional — emit them ONLY when the corresponding FilterSet input is set and non-empty. Bare predicates outside brackets are unconditional. (`publish_status` is conditional too: when `filters_json.publish_status` is unset, the SQL must omit the clause entirely — `= ANY(NULL)` matches nothing and would silently zero the count.)
 
@@ -583,7 +587,9 @@ ORDER BY adlink_created_at DESC                 -- outer: canonical sort (newest
 LIMIT 10 OFFSET 0
 ```
 
-##### Path B — `send_date` axis (join base table)
+##### Path B — `send_date` axis (join base table; also handles both-axes FilterSets)
+
+Path B is the canonical shape whenever the send axis has any resolved bound. It also covers the both-axes case: simply emit predicates from BOTH axes, since the platform applies them as AND filters and a both-axis FilterSet must validate the same way the server will execute it.
 
 ```sql
 -- db_count
@@ -592,8 +598,10 @@ FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
 WHERE 1=1
   [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
-  [AND al.send_date >= '<send_lo>']                                   -- emit only if send_lo set
-  [AND al.send_date <  '<send_hi_next>']                              -- emit only if send_hi_next set
+  [AND al.send_date >= '<send_lo>']                                   -- send axis: emit only if send_lo set
+  [AND al.send_date <  '<send_hi_next>']                              -- send axis: emit only if send_hi_next set
+  [AND v.adlink_created_at >= '<created_lo>']                         -- created axis: emit only if created_lo set
+  [AND v.adlink_created_at <  '<created_hi_next>']                    -- created axis: emit only if created_hi_next set
   [AND v.brand_id   = ANY(<resolved brand_ids>)]
   [AND v.channel_id = ANY(<resolved channel_ids>)]
 LIMIT 1 OFFSET 0
@@ -610,6 +618,8 @@ SELECT * FROM (
     [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
     [AND al.send_date >= '<send_lo>']
     [AND al.send_date <  '<send_hi_next>']
+    [AND v.adlink_created_at >= '<created_lo>']
+    [AND v.adlink_created_at <  '<created_hi_next>']
     [AND v.brand_id   = ANY(<resolved brand_ids>)]
     [AND v.channel_id = ANY(<resolved channel_ids>)]
   ORDER BY v.adlink_id, al.send_date DESC      -- inner: required for DISTINCT ON
@@ -617,6 +627,15 @@ SELECT * FROM (
 ORDER BY send_date DESC                          -- outer: canonical sort (newest first)
 LIMIT 10 OFFSET 0
 ```
+
+**When to take which path:**
+
+| FilterSet bounds populated | Path | Why |
+|---|---|---|
+| `created_at` only (no send-axis bounds) | A (view-only) | Optimization — skip the base-table join when not needed |
+| `send_date` only | B | Join required; created-axis predicates omit |
+| Both axes | B | Join required for `send_date`; created-axis predicates emit on top |
+| Neither | (Phase 2 emits `decision: "fail"` upstream) | Unscoped type-8 is rejected per the hard rule |
 
 **Why `WHERE 1=1`:** all the bracketed predicates are conditional, and the type-8 unscoped-rejection rule only guarantees one DATE bound resolves — every other clause (publish_status, brands, channels) may be entirely absent. The `1=1` placeholder lets every conditional clause omit independently while keeping the SQL valid. Cosmetic; the planner discards it.
 
@@ -945,7 +964,7 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
    - Every column in `columns` is in the type's column file.
    - Every aggregator in `widgets` is in the matching catalog (intelligence for 1/2/3, sponsorship for 8).
    - `sort` references an emitted column with allowed direction.
-   - Type 8 has at least one date scope: `days_ago`, `start_date`/`end_date`, or `createdat_from`/`createdat_to`. (Either pair satisfies the requirement — they map to different underlying columns; see Step 2.V1's date-scope mapping. Phase 2 already enforces this upstream.)
+   - Type 8 has at least one resolved date bound across the two axes (`send_date` axis from `days_ago` / `start_date` / `end_date` / `days_ago_to`, or `created_at` axis from `createdat_from` / `createdat_to`). Both axes MAY be populated simultaneously — the platform applies both as typed AND filters; final validation accepts that and does not reject coexistence. (See Step 2.V1's "When both axes are populated" rule.)
    - When `cross_references` is present, `report_type ∈ {1, 3}`.
    - When `filters_json.similar_to_channels` is present, no overlapping `keywords` / `topics` fields.
    - `type = 2` (DYNAMIC) and `report_type ∈ {1, 2, 3, 8}` — Campaign-model contract for the API endpoint.
