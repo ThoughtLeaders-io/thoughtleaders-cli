@@ -5,24 +5,17 @@ description: Query and analyze ThoughtLeaders business data using the `tl` CLI. 
 
 # ThoughtLeaders Data Analyst
 
-You have access to the `tl` CLI which queries ThoughtLeaders' sponsorship platform data. Run it to answer questions about deals, channels, brands, uploads, metrics, and more.
+Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc.
 
 ## Core Principles
 
-**You are the intelligence layer.** Don't use `tl ask` — that's a server-side LLM fallback for users without Claude. Translate the user's question into the right `tl` invocation yourself.
+**Default to raw database queries.** For anything beyond a trivially simple lookup, reach for `tl db pg|fb|es`. Avoid the structured `tl <resource>` commands (`sponsorships list`, `channels show`, `brands history`, etc.).
 
-**Default to raw database queries.** For anything beyond a trivially simple lookup, reach for `tl db pg|fb|es` first. The structured `tl <resource>` commands (`sponsorships list`, `channels show`, `brands history`, etc.) are convenient shorthands for single-record lookups and plain filtered lists — but the moment the question involves joins, aggregations, multi-condition filtering, or anything you'd otherwise post-process client-side, the right tool is a single raw query. One server-side aggregation beats N paginated client-side roll-ups on cost, latency, and the `from+size = 10000` ES cap.
+Always run `tl schema pg|fb|es` before writing a raw query.
 
-Decision rule:
+**When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`) — never the unscoped form**, to reduce token counts. ES has no per-table form (the index is a single document shape) — `tl schema es` is the only call there.
 
-- **Trivially simple** (use a structured command): "show sponsorship 12345", "list deals for Nike", "show channel 5607", "run report 42".
-- **Anything else** (use `tl db pg|fb|es`): aggregations, joins, conditions the structured filters don't expose, comparing across resources, computing rates / shares / percentiles, anything that would otherwise need a paginated walk + client-side reduce.
-
-Always run `tl describe show <resource>` before using a structured command, and `tl schema pg|fb|es` before writing a raw query.
-
-**When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`) — never the unscoped form.** The unscoped `tl schema pg` returns *every* table visible to your role, which is dozens of tables and tens of thousands of tokens; the single-table form returns only the section you need, in the same markdown layout. Reaching for the unscoped form when you already know the table name is a tokens/latency tax with zero benefit. ES has no per-table form (the index is a single document shape) — `tl schema es` is the only call there.
-
-**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field — that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`) into `jq`, `yq`, `rg`, or `duckdb` and read only the answer back. Pick the tool by shape:
+**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field — that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq`, `yq`, `rg`, or `duckdb`, as appropriate, and read only the answer back. Pick the tool by shape:
 
 - **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
   ```bash
@@ -68,6 +61,13 @@ Other key concepts:
 - **Reports** — saved report configurations that can be re-run
 - **Comments** — notes attached to sponsorships
 - **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
+- **Profiles** — per-organization actors that own sponsorship records on behalf of either side of a deal. A profile is buyer-side or seller-side:
+  - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `creator_profile` is the buyer-side profile.
+  - *Seller-side (publisher) profiles* — attached to a `Publication`, which in turn owns one or more `Channel` records. A channel's adspots therefore inherit ownership through `channel.publication.profile`.
+  - **How to tell them apart** — three signals on the `thoughtleaders_profile` row, used in this order:
+    1. **`persona`** (canonical) — `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
+    2. **`is_advertiser` / `is_publisher`** booleans — feature flags; either or both can be true for staff-style profiles, but on normal user profiles they reliably mark side.
+  - Org scoping for sponsorships is profile-mediated: a sponsorship belongs to your org if **either** `creator_profile.organization` (brand side) **or** `ad_spot.channel.publication.profile.organization` (publisher side) matches yours.
 - **MSN** (Media Selling Network) — the ~11k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
 - **MBN** (Media Buying Network) — the brand-side counterpart to MSN: brand profiles that have opted in to receive proposed sponsorships. A profile is in the MBN group if the `profile.media_buying_network_join_date` field is not null.
 - **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the smaller, exclusive ~169 channels TL manages directly. A channel is in the TPP group if the `channel.is_tl_channel` is True.
