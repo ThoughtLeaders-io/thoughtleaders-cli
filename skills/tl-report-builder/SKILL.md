@@ -551,14 +551,17 @@ After materialization, the SQL templates emit only the predicates whose bound is
 
 ##### Path A — `created_at` axis (view-only)
 
+All predicates wrapped in `[ ... ]` are conditional — emit them ONLY when the corresponding FilterSet input is set and non-empty. Bare predicates outside brackets are unconditional. (`publish_status` is conditional too: when `filters_json.publish_status` is unset, the SQL must omit the clause entirely — `= ANY(NULL)` matches nothing and would silently zero the count.)
+
 ```sql
 -- db_count
 SELECT COUNT(DISTINCT adlink_id) FROM v_adspot_brand_profiles
-WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
-  [AND adlink_created_at >= '<created_lo>']     -- emit only if created_lo set
-  [AND adlink_created_at <= '<created_hi>']     -- emit only if created_hi set
-  AND brand_id   = ANY(<resolved brand_ids>)    -- if brands set
-  AND channel_id = ANY(<resolved channel_ids>)  -- if channels set
+WHERE 1=1
+  [AND adlink_publish_status = ANY(<filters_json.publish_status>)]   -- emit only if publish_status set
+  [AND adlink_created_at >= '<created_lo>']                           -- emit only if created_lo set
+  [AND adlink_created_at <  '<created_hi_next>']                      -- emit only if created_hi_next set
+  [AND brand_id   = ANY(<resolved brand_ids>)]                        -- if brands set
+  [AND channel_id = ANY(<resolved channel_ids>)]                      -- if channels set
 LIMIT 1 OFFSET 0
 ```
 
@@ -568,11 +571,12 @@ SELECT * FROM (
   SELECT DISTINCT ON (adlink_id)
          adlink_id, brand_name, channel_name, adlink_publish_status, adlink_created_at
   FROM v_adspot_brand_profiles
-  WHERE adlink_publish_status = ANY(<filters_json.publish_status>)
+  WHERE 1=1
+    [AND adlink_publish_status = ANY(<filters_json.publish_status>)]
     [AND adlink_created_at >= '<created_lo>']
-    [AND adlink_created_at <= '<created_hi>']
-    AND brand_id   = ANY(<resolved brand_ids>)
-    AND channel_id = ANY(<resolved channel_ids>)
+    [AND adlink_created_at <  '<created_hi_next>']
+    [AND brand_id   = ANY(<resolved brand_ids>)]
+    [AND channel_id = ANY(<resolved channel_ids>)]
   ORDER BY adlink_id, adlink_created_at DESC   -- inner: required for DISTINCT ON
 ) deduped
 ORDER BY adlink_created_at DESC                 -- outer: canonical sort (newest first)
@@ -586,11 +590,12 @@ LIMIT 10 OFFSET 0
 SELECT COUNT(DISTINCT v.adlink_id)
 FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
-  [AND al.send_date >= '<send_lo>']             -- emit only if send_lo set
-  [AND al.send_date <= '<send_hi>']             -- emit only if send_hi set
-  AND v.brand_id   = ANY(<resolved brand_ids>)
-  AND v.channel_id = ANY(<resolved channel_ids>)
+WHERE 1=1
+  [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
+  [AND al.send_date >= '<send_lo>']                                   -- emit only if send_lo set
+  [AND al.send_date <  '<send_hi_next>']                              -- emit only if send_hi_next set
+  [AND v.brand_id   = ANY(<resolved brand_ids>)]
+  [AND v.channel_id = ANY(<resolved channel_ids>)]
 LIMIT 1 OFFSET 0
 ```
 
@@ -601,37 +606,58 @@ SELECT * FROM (
          v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status, al.send_date
   FROM v_adspot_brand_profiles v
   JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-  WHERE v.adlink_publish_status = ANY(<filters_json.publish_status>)
+  WHERE 1=1
+    [AND v.adlink_publish_status = ANY(<filters_json.publish_status>)]
     [AND al.send_date >= '<send_lo>']
-    [AND al.send_date <= '<send_hi>']
-    AND v.brand_id   = ANY(<resolved brand_ids>)
-    AND v.channel_id = ANY(<resolved channel_ids>)
+    [AND al.send_date <  '<send_hi_next>']
+    [AND v.brand_id   = ANY(<resolved brand_ids>)]
+    [AND v.channel_id = ANY(<resolved channel_ids>)]
   ORDER BY v.adlink_id, al.send_date DESC      -- inner: required for DISTINCT ON
 ) deduped
 ORDER BY send_date DESC                          -- outer: canonical sort (newest first)
 LIMIT 10 OFFSET 0
 ```
 
+**Why `WHERE 1=1`:** all the bracketed predicates are conditional, and the type-8 unscoped-rejection rule only guarantees one DATE bound resolves — every other clause (publish_status, brands, channels) may be entirely absent. The `1=1` placeholder lets every conditional clause omit independently while keeping the SQL valid. Cosmetic; the planner discards it.
+
 ##### Channel filter applies to BOTH paths
 
 If `<resolved channel_ids>` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`. Earlier drafts dropped it from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set.
 
-##### Worked example — `days_ago: 365` (the schema's default scope)
+##### Worked example A — `days_ago: 365` (the schema's default scope, no publish_status)
 
-Input: `filterset = { days_ago: 365, brands: [29332] }`, no other date inputs.
+Input: `filterset = { days_ago: 365, brands: [29332] }`, no other date inputs, no publish_status.
 
-Materialization: `send_lo` = `'2025-05-05'` (today minus 365 days, computed at query-build time); `send_hi` unbounded.
+Materialization: `send_lo` = `'2025-05-05'` (today minus 365 days, computed at query-build time); `send_hi_next` unbounded.
 
-Resulting `db_count`:
+Resulting `db_count` (only `send_lo` and `brands` predicates emit; publish_status, send_hi_next, channels all omitted):
 ```sql
 SELECT COUNT(DISTINCT v.adlink_id)
 FROM v_adspot_brand_profiles v
 JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE al.send_date >= '2025-05-05'
+WHERE 1=1
+  AND al.send_date >= '2025-05-05'
   AND v.brand_id = ANY(ARRAY[29332])
 LIMIT 1 OFFSET 0
 ```
-(Only the lower-bound predicate is emitted; no `send_hi` clause; no publish_status clause if the user didn't specify one.)
+
+##### Worked example B — `end_date: "2026-02-28"` (half-open upper bound)
+
+Input: `filterset = { end_date: "2026-02-28", brands: [29332] }`.
+
+Materialization: `send_lo` unbounded; `send_hi_next` = `'2026-03-01'` (the calendar day AFTER `end_date`).
+
+Resulting `db_count` (note `<` not `<=`):
+```sql
+SELECT COUNT(DISTINCT v.adlink_id)
+FROM v_adspot_brand_profiles v
+JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
+WHERE 1=1
+  AND al.send_date < '2026-03-01'
+  AND v.brand_id = ANY(ARRAY[29332])
+LIMIT 1 OFFSET 0
+```
+This includes the entirety of Feb 28 — every timestamp from `'2026-02-28 00:00:00'` through `'2026-02-28 23:59:59.999'` — matching what a user means by "through Feb 28". A `<= '2026-02-28'` predicate would only match timestamps at exactly midnight at the start of Feb 28 (~0% of expected matches).
 
 ##### Why the inner/outer split
 
