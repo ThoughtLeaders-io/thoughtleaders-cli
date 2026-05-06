@@ -196,8 +196,9 @@ By default, output is a styled table in the terminal and JSON when piped.
 ```bash
 tl sponsorships list status:sold                          # Pretty table
 tl sponsorships list status:sold --json                   # JSON
-tl sponsorships list status:sold --csv > sponsorships.csv # CSV
 tl sponsorships list status:sold --json | jq '.results'   # Pipe to jq
+tl sponsorships list status:sold --csv > sponsorships.csv # CSV
+tl sponsorships list status:sold --toon                   # TOON (token-efficient for LLMs)
 ```
 
 ## Documentation
