@@ -141,7 +141,7 @@ Prefer writing Python code, shell code, or `jq` commands that fetche or analysis
 tl sponsorships list [filters...]      # Sponsorships — list curve, mult 1.0
 tl sponsorships show <id>              # Sponsorship detail (2 credits)
 tl sponsorships create --channel <id> --brand <id>  # Create proposal (free)
-tl sponsorships update <id> '<json>'   # Update whitelisted fields (2 credits) — only `publish_status` editable; non-full-access users can only edit sponsorships in their own org
+tl sponsorships update <id> '<json>'   # Update a sponsorship (2 credits)
 tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal); same curve as sponsorships list
 tl deals show <id>                     # Deal detail (2 credits)
 tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match); same curve
@@ -153,7 +153,7 @@ tl proposals create --channel <id> --brand <id>  # Create proposal (free)
 tl uploads list [filters...]           # Video uploads from ES — list curve, mult 1.0
 tl uploads show <id>                   # Upload detail (2 credits)
 tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
-tl channels update <id> '<json>'       # Update whitelisted demographic fields (2 credits; full-access only)
+tl channels update <id> '<json>'       # Update a channel (2 credits)
 tl channels history <id-or-name>       # Sponsorship history (5 credits/result, linear)
 tl channels similar <id-or-name>       # Similarity recommender (25 credits flat; Intelligence plan)
 tl brands show <id-or-name>            # Brand detail (1 credit)
@@ -182,16 +182,10 @@ tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or super
 
 ### Updating records
 
-A narrow write surface is exposed for two resources. Each command takes the record id and a single JSON object with the fields to change; the server enforces a hard-coded field whitelist and rejects anything else with a 400. Each call costs 2 credits.
-
 ```bash
 tl sponsorships update <id> '<json>'   # Edit a sponsorship (adlink)
 tl channels update <id> '<json>'       # Edit a channel
 ```
-
-**Sponsorships** — only `publish_status` is editable. Accepts either an int code or a status label (`proposed`, `pending`, `sold`, `matched`, `outreach`, `proposal_approved`, `advertiser_reject`, `publisher_reject`, `agency_reject`, `unavailable`). Non-full-access users may only update sponsorships tied to their own organization (either through `creator_profile` or through the channel's `publication`). Trying to edit a sponsorship outside the user's org returns 403.
-
-**Channels** — only the demographic fields are editable: `demographic_usa_share` and `demographic_male_share` (integers 0–100), `demographic_age` / `demographic_device` / `demographic_geo` (JSON objects with numeric values). Requires full-access permission; non-full-access users get a 403. The `demographics_updated_at` timestamp is refreshed automatically when any whitelisted demographic field changes.
 
 Examples:
 ```bash
@@ -202,7 +196,7 @@ tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
 ```
 
-Anything outside these whitelists — price, cost, owner, channel name, etc. — is not editable through the CLI and must be done in the app or by a human with DB access.
+Each call costs 2 credits. If a request is rejected with a 400, the response body names the offending key — read it and retry with a smaller body. If the user wants to edit something the API rejects, the change has to be made in the app or by a human with DB access.
 
 ### Raw queries (`tl db`)
 
@@ -326,8 +320,6 @@ See [references/business-glossary.md](references/business-glossary.md) for reven
 | Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 500` + `OFFSET`, only certain SQL forms are allowed. See `references/postgres-schema.md`. |
 | Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Available** via `tl db pg`. | Write the join: `thoughtleaders_adlink` ↔ `adspot` ↔ `channel` ↔ `profile` ↔ `profile_brands` ↔ `brand`. Filter by `publish_status` for proposed/sold and by date range as needed. See `references/postgres-schema.md` for the exact column names. |
 | **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a free *proposal* between a channel and a brand. The `tl db pg` sanitizer accepts SELECT only — no INSERT/UPDATE. | Done in the app or by a human with DB access. |
-| **AdLink UPDATE** of any field other than `publish_status` (price, cost, owner, send_date, …) | **Unavailable** — `tl sponsorships update` only accepts `publish_status` and only for sponsorships in the user's org (full-access bypasses the org check). | Done in the app or by a human with DB access. |
-| **Channel UPDATE** of any field other than the demographic fields (`demographic_usa_share`, `demographic_male_share`, `demographic_age`, `demographic_device`, `demographic_geo`) | **Unavailable** — `tl channels update` only accepts those fields, and only for full-access users. | Done in the app or by a human with DB access. |
 | Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Available** via `tl db pg`. | One SELECT joining the four tables. Use `thoughtleaders_channel.media_selling_network_join_date IS NOT NULL` for MSN, `thoughtleaders_adspot.integration = 1` for mention adspots, `thoughtleaders_profile.persona` for the persona code (see persona constants in `references/postgres-schema.md`). |
 | Firebolt cross-table or join queries; filtering on non-indexed columns in WHERE | **Unavailable** — not accepted. | Fetch a wider slice keyed on `channel_id` (and optionally `id`), filter the rest in `jq`/Python. |
 | ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (server-implemented similarity search). |

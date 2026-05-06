@@ -95,6 +95,7 @@ The version string is defined in three files and all three must be updated toget
 ## Coding
 
 * Do not reference internal architecture of the ThoughtLeaders app in comments or skills. Specifially: do not reference internal table names, field names, API endpoints, Python modules or functions (including the sanitizer).
+* Do not let server implementation details into skill files (anything under `skills/`). Skills describe *what the CLI does* from the user's seat — observable command surface, inputs, outputs, examples. Do not say "the server enforces X", "the API validates Y on its side", "the backend rejects Z" — those are mechanism notes that drift the moment the server changes. State the user-visible behaviour ("unknown keys come back as 400") without naming where it's enforced.
 * Place all imports at the start of the Python module file
 
 # Git commit rules

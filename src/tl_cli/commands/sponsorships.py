@@ -198,19 +198,13 @@ def create_cmd(
 @app.command("update")
 def update_cmd(
     sponsorship_id: int = typer.Argument(..., help="Sponsorship (adlink) ID"),
-    fields: str = typer.Argument(..., help='JSON object of fields to update, e.g. \'{"publish_status": "sold"}\''),
+    fields: str = typer.Argument(..., help='JSON object of fields to update'),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Update whitelisted sponsorship fields.
+    """Update a sponsorship.
 
-    Editable fields: publish_status (int code or status label, e.g. 'sold',
-    'pending', 'matched'). Non-full-access users may only update sponsorships
-    tied to their own organization.
-
-    Examples:
-        tl sponsorships update 98765 '{"publish_status": "sold"}'
-        tl sponsorships update 98765 '{"publish_status": 3}'
+    Unknown fields are rejected with a 400 listing the offending key.
     """
     fmt = detect_format(json_output, False, False, toon_output)
     try:
