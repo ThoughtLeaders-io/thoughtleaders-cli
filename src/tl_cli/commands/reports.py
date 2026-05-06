@@ -10,9 +10,9 @@ from rich.text import Text
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
-from tl_cli.output.formatter import detect_format, output
+from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Saved reports (list, run, create)")
+app = typer.Typer(help="Saved reports (list, run, create, update)")
 err = Console(stderr=True)
 
 # Report type labels matching Django's ReportType enum
@@ -226,75 +226,120 @@ def _handle_follow_up(result: dict) -> str:
     return answer
 
 
+def _parse_config_arg(config_json: str) -> dict:
+    """Parse the --config argument string into a dict, exiting cleanly on bad input."""
+    try:
+        config = json.loads(config_json)
+    except json.JSONDecodeError as exc:
+        err.print(f"[red]--config is not valid JSON: {exc}[/red]")
+        raise typer.Exit(1)
+    if not isinstance(config, dict):
+        err.print("[red]--config must be a JSON object.[/red]")
+        raise typer.Exit(1)
+    return config
+
+
+def _orchestrate_via_server(
+    client,
+    prompt: str,
+    timeout: int,
+) -> dict:
+    """Run the server-side AI Report Builder loop and return the resulting config."""
+    conversation: list[dict[str, str]] = []
+    current_prompt = prompt
+
+    while True:
+        # Send prompt to server, poll for result
+        try:
+            create_data = client.post("/reports/create", json_body={
+                "prompt": current_prompt,
+                "conversation": conversation,
+            })
+        except ApiError as e:
+            if e.status_code == 503:
+                err.print("[red]AI Report Builder is temporarily unavailable. Please try again later.[/red]")
+                raise typer.Exit(1)
+            handle_api_error(e)
+            raise typer.Exit(1)
+
+        task_id = create_data.get("task_id")
+        if not task_id:
+            err.print("[red]Server did not return a task ID.[/red]")
+            raise typer.Exit(1)
+
+        result = _poll_for_result(client, task_id, timeout)
+        action = result.get("action", "")
+
+        if action == "follow_up":
+            answer = _handle_follow_up(result)
+            conversation.append({"role": "user", "content": current_prompt})
+            conversation.append({"role": "assistant", "content": result.get("question", "")})
+            current_prompt = answer
+            continue
+
+        if action in ("error", "unsupported"):
+            message = result.get("message", "Request could not be processed.")
+            err.print(f"\n[red]{message}[/red]")
+            raise typer.Exit(1)
+
+        if action == "preview":
+            return result.get("config", {})
+        if action == "create_report":
+            return result
+
+        err.print(f"[yellow]Unexpected action: {action}[/yellow]")
+        err.print(json.dumps(result, indent=2, default=str))
+        raise typer.Exit(1)
+
+
 @app.command("create")
 def create_report(
-    prompt: str = typer.Argument(..., help="Natural language description of the report you want"),
+    prompt: str | None = typer.Argument(
+        None,
+        help="Natural language description of the report you want. Omit when using --config.",
+    ),
+    config_json: str | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "Pre-built report config as JSON. Skips the AI Report Builder "
+            "pipeline and saves the config directly. Mutually exclusive with "
+            "the prompt argument."
+        ),
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON config"),
     timeout: int = typer.Option(300, "--timeout", help="Max orchestration time in seconds"),
 ) -> None:
-    """Create a report from a natural language description.
+    """Create a report from a natural-language prompt or a pre-built config.
 
-    Sends your prompt to the ThoughtLeaders server, which runs the AI Report
-    Builder pipeline (keyword research, config generation, review). Then
-    confirms with the server to create the campaign.
+    With a prompt, runs the AI Report Builder pipeline (keyword research, config
+    generation, review) and saves the resulting campaign.
+
+    With --config '<json>', skips the orchestration pipeline and saves the
+    provided config directly. Useful when an external agent (e.g. the
+    tl-report-builder Claude Code skill) has already produced a validated
+    config and you just want to persist it.
 
     Examples:
         tl reports create "gaming channels sponsoring energy drinks"
         tl reports create "tech review channels with 100K+ subscribers" --yes
-        tl reports create "beauty brands on YouTube" --json
+        tl reports create --config "$(cat config.json)" --yes
     """
+    if (prompt is None) == (config_json is None):
+        err.print(
+            "[red]Provide either a natural-language prompt OR --config '<json>', not both.[/red]"
+        )
+        raise typer.Exit(1)
+
     client = get_client()
     try:
-        conversation: list[dict[str, str]] = []
-        current_prompt = prompt
-
-        while True:
-            # Send prompt to server, poll for result
-            try:
-                create_data = client.post("/reports/create", json_body={
-                    "prompt": current_prompt,
-                    "conversation": conversation,
-                })
-            except ApiError as e:
-                if e.status_code == 503:
-                    err.print("[red]AI Report Builder is temporarily unavailable. Please try again later.[/red]")
-                    raise typer.Exit(1)
-                handle_api_error(e)
-                raise typer.Exit(1)
-
-            task_id = create_data.get("task_id")
-            if not task_id:
-                err.print("[red]Server did not return a task ID.[/red]")
-                raise typer.Exit(1)
-
-            result = _poll_for_result(client, task_id, timeout)
-            action = result.get("action", "")
-
-            # Server wraps response: "preview" → config in result["config"]
-            if action == "follow_up":
-                answer = _handle_follow_up(result)
-                conversation.append({"role": "user", "content": current_prompt})
-                conversation.append({"role": "assistant", "content": result.get("question", "")})
-                current_prompt = answer
-                continue
-
-            if action in ("error", "unsupported"):
-                message = result.get("message", "Request could not be processed.")
-                err.print(f"\n[red]{message}[/red]")
-                raise typer.Exit(1)
-
-            if action == "preview":
-                config = result.get("config", {})
-            elif action == "create_report":
-                config = result
-            else:
-                err.print(f"[yellow]Unexpected action: {action}[/yellow]")
-                if json_output:
-                    print(json.dumps(result, indent=2, default=str))
-                raise typer.Exit(1)
-
-            break
+        if config_json is not None:
+            config = _parse_config_arg(config_json)
+            saved_prompts: list[str] = []
+        else:
+            config = _orchestrate_via_server(client, prompt, timeout)
+            saved_prompts = [prompt]
 
         # --- Show preview ---
         if json_output:
@@ -315,7 +360,7 @@ def create_report(
         # --- Save to server ---
         data = client.post("/reports/confirm", json_body={
             "config": config,
-            "prompts": [prompt],
+            "prompts": saved_prompts,
             "reasoning": "",
         })
 
@@ -340,6 +385,37 @@ def create_report(
             if usage:
                 err.print(f"\n  [dim]{usage.get('credits_charged', 0)} credits · {usage.get('balance_remaining', '?')} remaining[/dim]")
 
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("update")
+def update_report(
+    report_id: int = typer.Argument(..., help="Report ID"),
+    fields: str = typer.Argument(..., help='JSON object of fields to update'),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Update a saved report.
+
+    Unknown fields are rejected with a 400 listing the offending key.
+    """
+    fmt = detect_format(json_output, False, False, toon_output)
+    try:
+        body = json.loads(fields)
+    except json.JSONDecodeError as exc:
+        err.print(f"[red]Error:[/red] fields argument must be a JSON object: {exc}")
+        raise typer.Exit(1)
+    if not isinstance(body, dict):
+        err.print("[red]Error:[/red] fields argument must be a JSON object.")
+        raise typer.Exit(1)
+
+    client = get_client()
+    try:
+        data = client.post(f"/reports/{report_id}/edit", json_body=body)
+        output_single(data, fmt)
     except ApiError as e:
         handle_api_error(e)
     finally:
