@@ -226,9 +226,9 @@ USER_QUERY
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, via a `POST` (create) or `PUT` (edit) to the report-creation API endpoint. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through the API.
+There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, by handing the JSON to `tl reports create --config '<json>' --yes`. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through the CLI command, which posts to the report-creation API.
 
-> **Save-mechanism policy**: A new API endpoint is required for report creation. It will support both `POST` (initial create) and `PUT` (subsequent edits) so reports can be modified without redoing the four phases from scratch. Until the endpoint is built, the skill stops at producing the JSON config + takeaways; the calling environment handles whatever save mechanism is current. **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the API** is the architectural split.
+> **Save-mechanism policy**: After Phase 4 emits the config, the skill instructs the user to run `tl reports create --config '<json>' --yes` to persist it. Edits to a saved report use `tl reports update <id> '<json>'`. Both commands route to the report-creation API endpoint, which delegates to the canonical campaign-update path. **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the CLI** is the architectural split. Do NOT instruct the user to paste the JSON into the platform UI — that's an obsolete pre-v0.6.12 fallback.
 
 ## Phase 1 — Report Type Selection (detail)
 
@@ -1327,7 +1327,7 @@ USER: Build me a report of gaming channels with 100K+ subscribers in English
 
 Claude follows this SKILL.md, executing each phase in order. No external command needed — the skill IS the orchestration; `tl db pg` is invoked from within Phase 2/3/4 as needed; tools fire conditionally per their criteria.
 
-> **Note**: how the final config is committed (DB insert path vs. UI paste vs. another mechanism) is being addressed separately. For now Phase 4 produces the validated JSON + takeaways and stops there.
+> **Saving the config**: after Phase 4 prints the JSON, instruct the user to run `tl reports create --config '<paste the JSON>' --yes` (tl-cli ≥ v0.6.12). For edits to an existing saved report, use `tl reports update <report_id> '<json patch>'`. Do NOT tell users to paste into the platform UI — that's an obsolete fallback from before the CLI commands existed.
 
 ## Reference Files
 
