@@ -201,7 +201,7 @@ tl sponsorships list status:sold --csv > sponsorships.csv # CSV
 tl sponsorships list status:sold --toon                   # TOON (token-efficient for LLMs)
 ```
 
-TOON (Token-Oriented Object Notation) is a compact text format designed to encode structured data with fewer tokens than JSON when feeding output back into an LLM. See [What the TOON format is](https://openapi.com/blog/what-the-toon-format-is-token-oriented-object-notation) for the specification.
+TOON (Token-Oriented Object Notation) is a compact text format designed to encode structured data with fewer tokens than JSON when feeding output back into an LLM. See [the TOON format repository](https://github.com/toon-format/toon) for the specification.
 
 ## Documentation
 
