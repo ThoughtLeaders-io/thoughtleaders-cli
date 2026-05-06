@@ -243,7 +243,6 @@ def _orchestrate_via_server(
     client,
     prompt: str,
     timeout: int,
-    json_output: bool,
 ) -> dict:
     """Run the server-side AI Report Builder loop and return the resulting config."""
     conversation: list[dict[str, str]] = []
@@ -289,8 +288,7 @@ def _orchestrate_via_server(
             return result
 
         err.print(f"[yellow]Unexpected action: {action}[/yellow]")
-        if json_output:
-            print(json.dumps(result, indent=2, default=str))
+        err.print(json.dumps(result, indent=2, default=str))
         raise typer.Exit(1)
 
 
@@ -340,7 +338,7 @@ def create_report(
             config = _parse_config_arg(config_json)
             saved_prompts: list[str] = []
         else:
-            config = _orchestrate_via_server(client, prompt, timeout, json_output)
+            config = _orchestrate_via_server(client, prompt, timeout)
             saved_prompts = [prompt]
 
         # --- Show preview ---
@@ -395,24 +393,14 @@ def create_report(
 
 @app.command("update")
 def update_report(
-    report_id: int = typer.Argument(..., help="Report (Campaign) ID"),
-    fields: str = typer.Argument(
-        ...,
-        help='JSON object of fields to update, e.g. \'{"title": "Q4 gaming pipeline"}\'',
-    ),
+    report_id: int = typer.Argument(..., help="Report ID"),
+    fields: str = typer.Argument(..., help='JSON object of fields to update'),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Update fields on a saved report.
+    """Update a saved report.
 
-    Edits route through the canonical campaign-update path. The owner of the
-    report (or a full-access user) may update fields like title, description,
-    columns, widgets, histogram_bucket_size. Unknown fields come back as 400.
-
-    Examples:
-        tl reports update 12345 '{"title": "Q4 gaming pipeline"}'
-        tl reports update 12345 '{"description": "Refreshed Apr 2026"}'
-        tl reports update 12345 '{"columns": {"Channel": {"display": true}}}'
+    Unknown fields are rejected with a 400 listing the offending key.
     """
     fmt = detect_format(json_output, False, False, toon_output)
     try:
