@@ -296,7 +296,7 @@ def _orchestrate_via_server(
 def create_report(
     prompt: str | None = typer.Argument(
         None,
-        help="Natural language description of the report you want. Omit when using --config.",
+        help="Natural language description of the report you want. Omit when using --config or --config-file.",
     ),
     config_json: str | None = typer.Option(
         None,
@@ -304,7 +304,18 @@ def create_report(
         help=(
             "Pre-built report config as JSON. Skips the AI Report Builder "
             "pipeline and saves the config directly. Mutually exclusive with "
-            "the prompt argument."
+            "the prompt argument and --config-file."
+        ),
+    ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config-file",
+        help=(
+            "Path to a file containing a pre-built report config in JSON. "
+            "Use this instead of --config when the config may contain "
+            "characters that are awkward to shell-escape (apostrophes in "
+            "titles or keywords, etc.). Mutually exclusive with --config "
+            "and the prompt argument."
         ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
@@ -316,27 +327,40 @@ def create_report(
     With a prompt, runs the AI Report Builder pipeline (keyword research, config
     generation, review) and saves the resulting campaign.
 
-    With --config '<json>', skips the orchestration pipeline and saves the
-    provided config directly. Useful when an external agent (e.g. the
-    tl-report-builder Claude Code skill) has already produced a validated
-    config and you just want to persist it.
+    With --config '<json>' or --config-file <path>, skips the orchestration
+    pipeline and saves the provided config directly. Useful when an external
+    agent (e.g. the tl-report-builder Claude Code skill) has already produced a
+    validated config and you just want to persist it. Prefer --config-file when
+    the config might contain apostrophes, dollar signs, or backticks — file
+    transport sidesteps shell quoting entirely.
 
     Examples:
         tl reports create "gaming channels sponsoring energy drinks"
         tl reports create "tech review channels with 100K+ subscribers" --yes
+        tl reports create --config-file /tmp/config.json --yes
         tl reports create --config "$(cat config.json)" --yes
     """
-    if (prompt is None) == (config_json is None):
+    sources_provided = sum(x is not None for x in (prompt, config_json, config_file))
+    if sources_provided != 1:
         err.print(
-            "[red]Provide either a natural-language prompt OR --config '<json>', not both.[/red]"
+            "[red]Provide exactly one of: a natural-language prompt, --config '<json>', or --config-file <path>.[/red]"
         )
         raise typer.Exit(1)
 
     client = get_client()
     try:
-        if config_json is not None:
-            config = _parse_config_arg(config_json)
+        if config_file is not None:
+            try:
+                with open(config_file, encoding="utf-8") as fh:
+                    config_text = fh.read()
+            except OSError as exc:
+                err.print(f"[red]Could not read --config-file: {exc}[/red]")
+                raise typer.Exit(1)
+            config = _parse_config_arg(config_text)
             saved_prompts: list[str] = []
+        elif config_json is not None:
+            config = _parse_config_arg(config_json)
+            saved_prompts = []
         else:
             config = _orchestrate_via_server(client, prompt, timeout)
             saved_prompts = [prompt]
