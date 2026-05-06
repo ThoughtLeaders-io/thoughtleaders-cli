@@ -139,6 +139,13 @@ the pool of Proposals is yet smaller, and the pool of Deals is the smallest.
 
 # Integrations
 
+## Requirements
+
+- Python 3.12+
+- [jq](https://stedolan.github.io/jq/)
+- [ripgrep](https://github.com/BurntSushi/ripgrep)
+- [duckdb](https://duckdb.org/)
+
 ## Claude Code Integration
 
 If you use Claude Code, install the plugin for natural language access:
