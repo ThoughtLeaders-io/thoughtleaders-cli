@@ -134,7 +134,7 @@ ThoughtLeaders has its internal terminology that's exposed throughout this tool.
 
 Sponsorships are the centre of attention in ThoughtLeaders - all other analytics and operations serve to produce or optimise sponsorships.
 Note that the term "Sponsorship" is wide, and can encompass deals that yet need to be approved by either side. There is a funnel of
-sponsorship types: the pool of Sponsorships is large, the pool of Metches (considered from either Brand or Channel side) is smaller,
+sponsorship types: the pool of Sponsorships is large, the pool of Matches (considered from either Brand or Channel side) is smaller,
 the pool of Proposals is yet smaller, and the pool of Deals is the smallest.
 
 # Integrations
