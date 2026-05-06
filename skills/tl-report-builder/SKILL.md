@@ -54,6 +54,9 @@ Internally this skill thinks in phases (1–4), report types (1, 2, 3, 8), tool 
 | Phase 3 — column builder | "Picking which columns to show in the report…" |
 | Phase 4 — widget builder | "Choosing the charts and dashboards…" |
 | Phase 4 — final composition | "Putting the final report together…" |
+| Save step (write JSON to temp file, then `tl reports create --config-file <path> --yes`) | "Saving the report…" |
+| Save success | "Report saved." + link (do NOT echo the JSON config back) |
+| Save failure | "Couldn't save the report: <plain-English reason>" — surface the CLI's stderr verbatim if it's user-readable, otherwise summarise |
 | Mode B follow-up (looks_wrong) | "The top results don't look right — here are your options…" |
 | Mode C (3 retries exhausted) | "I couldn't build a sensible result for this — here's what I tried…" |
 
@@ -102,9 +105,16 @@ Here's a real request and the gap between leaky narration (the failure mode) and
 >
 > *(...later...)* 7 of 10 are strong matches, but 2 are Pokémon channels — they're hitting on "Trading Card Game" because of a loose "trading" keyword. Let me tighten that up. *(tightening the search…)* Tried adding "portfolio" but that pulls in music labels via AI-generated topic descriptions, so I dropped it. *(trying a tighter set…)* **1,838 unpitched investing channels, 9 of 10 in the spot-check are clean** — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra, all on-target.
 >
-> Putting the final report together now — outreach-focused columns (deal history, contact info, demographic fit) and the standard channels-report charts.
+> Putting the final report together now — outreach-focused columns (deal history, contact info, demographic fit) and the standard channels-report charts. *(saving…)*
+>
+> **Report saved.** [Investing — unpitched investing channels](https://app.thoughtleaders.io/...) (Campaign #12345)
+>
+> **Worth knowing**:
+> - 668 channels already pitched to investing.com are excluded.
+> - Topic anchored on the curated investing keyword set; spot-check looked clean.
+> - Sort is most-recently-active first so dormant channels don't crowd the top.
 
-Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
+Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names, the saved-report link, the takeaways) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see, **and the campaign-config JSON itself** — the JSON is written to a temp file and handed to `tl reports create --config-file <path> --yes`, not echoed back into the chat where it's just noise once the report is saved). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
 
 ## Process Flow (Strictly Sequential)
 
@@ -226,9 +236,19 @@ USER_QUERY
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The save step happens **outside the skill**, by handing the JSON to `tl reports create --config '<json>' --yes`. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through the CLI command, which posts to the report-creation API.
+There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through `tl reports create --config-file <path> --yes`, which posts to the report-creation API.
 
-> **Save-mechanism policy**: After Phase 4 emits the config, the skill instructs the user to run `tl reports create --config '<json>' --yes` to persist it. Edits to a saved report use `tl reports update <id> '<json>'`. Both commands route to the report-creation API endpoint, which delegates to the canonical campaign-update path. **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the CLI** is the architectural split. Do NOT instruct the user to paste the JSON into the platform UI — that's an obsolete pre-v0.6.12 fallback.
+> **Save-mechanism policy**: After Phase 4 produces the config, the agent **saves the report automatically** by:
+> 1. **Writing the JSON to a temp file** via the `Write` tool (e.g. `/tmp/tl-report-builder-config.json` or any path the agent has write access to). Never inline the JSON inside a shell command — apostrophes in titles, keywords, or descriptions ("McDonald's", "L'Oréal", "channels we've worked with") break shell quoting and the command fails before `tl` runs.
+> 2. **Invoking `tl reports create --config-file <path> --yes`** via the `Bash` tool. The file transport is shell-quote-safe regardless of what the JSON contains.
+>
+> The user sees only the takeaways and the resulting campaign link — the raw JSON config stays out of the conversation, because it's noise once the report is saved.
+>
+> **Skip auto-save** when the user's wording signals they want to review the config first (e.g. "draft a config", "preview a report", "show me the config first", "what would the JSON look like", "without saving"). In that case, emit the JSON inline + the "to save, run …" hint and stop. The default for "build / create / make / save / report / campaign" wordings is auto-save.
+>
+> **Edits** to a saved report use `tl reports update <id> '<json>'` — same auto-invoke pattern, with the same shell-quoting caveat: when the patch contains apostrophes, write to a temp file and use `tl reports update <id> "$(cat <path>)"`. Don't tell users to paste JSON into the platform UI; that's an obsolete pre-v0.6.12 fallback.
+>
+> **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the CLI** is the architectural split.
 
 ## Phase 1 — Report Type Selection (detail)
 
@@ -1273,6 +1293,8 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 5. **Takeaways cite specifics.** Numbers, names, intent labels. Vague takeaways ("the report looks good") add no value.
 6. **No new filters or columns in Phase 4.** Phase 4 doesn't reshape the FilterSet or add columns — it picks widgets, validates, and composes. Reshape requires looping back to Phase 2 or 3.
 7. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same type-8 report use the SAME axis (per `sponsorship_widget_schema.json`'s `_tl_axis_branching`).
+8. **Don't echo `campaign_config_json` back to chat.** The JSON is written to a temp file and passed to `tl reports create --config-file <path> --yes`; once the report is saved the JSON is implementation noise. The user-facing reply is takeaways + the resulting campaign link. Only show the JSON inline when the user has explicitly asked to review-before-save (see "Save-mechanism policy" above).
+9. **Use `--config-file <path>`, not `--config '<json>'`, for auto-save.** Passing JSON inline through a single-quoted shell argument breaks the moment any string value contains an apostrophe (which is common — "McDonald's", "L'Oréal", channel/title text). The temp-file transport sidesteps shell quoting entirely.
 
 ## Follow-Up Interactions
 
@@ -1327,7 +1349,7 @@ USER: Build me a report of gaming channels with 100K+ subscribers in English
 
 Claude follows this SKILL.md, executing each phase in order. No external command needed — the skill IS the orchestration; `tl db pg` is invoked from within Phase 2/3/4 as needed; tools fire conditionally per their criteria.
 
-> **Saving the config**: after Phase 4 prints the JSON, instruct the user to run `tl reports create --config '<paste the JSON>' --yes` (tl-cli ≥ v0.6.12). For edits to an existing saved report, use `tl reports update <report_id> '<json patch>'`. Do NOT tell users to paste into the platform UI — that's an obsolete fallback from before the CLI commands existed.
+> **Saving the config**: after Phase 4 produces the JSON, the agent saves it automatically by (1) writing the JSON to a temp file with the `Write` tool, then (2) running `tl reports create --config-file <path> --yes` via `Bash`. The file transport is shell-safe — passing the JSON inline as `--config '<json>'` breaks the moment any value contains an apostrophe ("McDonald's", "L'Oréal"). The user sees the takeaways and the resulting campaign link, not the raw config. **Skip auto-save** only when the user's wording explicitly asks to review first ("draft", "preview", "show me the config", "without saving"). For edits to an existing saved report, use `tl reports update <report_id> '<json patch>'` (same auto-invoke pattern; same shell-quoting caveat — use `"$(cat <path>)"` when the patch contains apostrophes). Do NOT tell users to paste into the platform UI — that's an obsolete fallback from before the CLI commands existed.
 
 ## Reference Files
 
