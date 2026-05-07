@@ -54,9 +54,12 @@ Internally this skill thinks in phases (1–4), report types (1, 2, 3, 8), tool 
 | Phase 3 — column builder | "Picking which columns to show in the report…" |
 | Phase 4 — widget builder | "Choosing the charts and dashboards…" |
 | Phase 4 — final composition | "Putting the final report together…" |
-| Save step (write JSON to temp file, then `tl reports create --config-file <path> --yes`) | "Saving the report…" |
-| Save success | "Report saved." + link (do NOT echo the JSON config back) |
+| Preview path (default) — show takeaways + sample table | "Here's what matches…" / "Found N channels — top by reach:" / "Top videos that match:" |
+| Preview tail (ambiguous middle — close with this) | *"If you want this saved as a campaign you can come back to, say save."* |
+| Save step (write JSON to `/tmp/<name>.json`, then `tl reports create --config-file /tmp/<name>.json --yes`) | "Saving the report…" |
+| Save success (only after the CLI command returns success) | "Report saved." + link from the CLI response (do NOT echo the JSON config back; do NOT say "saved as <path>.json" — the temp file is transport, not the deliverable) |
 | Save failure | "Couldn't save the report: <plain-English reason>" — surface the CLI's stderr verbatim if it's user-readable, otherwise summarise |
+| User says "save" / "yes save it" / "save it" after a preview | "Saving…" — re-use the config from working memory; do NOT re-run Phases 1–4 |
 | Mode B follow-up (looks_wrong) | "The top results don't look right — here are your options…" |
 | Mode C (3 retries exhausted) | "I couldn't build a sensible result for this — here's what I tried…" |
 
@@ -75,9 +78,7 @@ Narrate like a colleague describing what they're doing — not like a logger ann
 
 ### Worked example — running a full request
 
-Here's a real request and the gap between leaky narration (the failure mode) and clean narration (the target). Both sides describe the SAME execution; only the surface text differs.
-
-**Request**: *"Create a campaign of channels we haven't pitched to investing.com in the last year"*
+Here's a real request and the gap between leaky narration (the failure mode) and clean narration (the target). Both sides describe the SAME execution; only the surface text differs. **The intent here is "save" (not preview)** — the prompt says "Create a campaign", which is one of the explicit save-intent phrases listed in the Save-or-preview policy.
 
 ❌ **Leaky** (the failure mode: phase numbers, type numbers, identifier-shaped names, third-person framing). The `[bracketed]` placeholders mark where the agent leaked specific internal identifier names — the lesson is that any identifier-shaped name appeared at all:
 
@@ -115,6 +116,55 @@ Here's a real request and the gap between leaky narration (the failure mode) and
 > - Sort is most-recently-active first so dormant channels don't crowd the top.
 
 Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names, the saved-report link, the takeaways) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see, **and the campaign-config JSON itself** — the JSON is written to a temp file and handed to `tl reports create --config-file <path> --yes`, not echoed back into the chat where it's just noise once the report is saved). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
+
+### Worked example — preview-by-default (no save)
+
+Same architecture, different intent. The prompt is exploratory; the policy says default to preview.
+
+**Request**: *"Find me investing/finance channels we haven't pitched to investing.com in the last year"*
+
+✅ **Clean preview output** (same Phase 1–4 execution, but no temp file, no `tl reports create`, no Campaign row):
+
+> Pulling investing/finance channels we haven't pitched to investing.com lately.
+>
+> First — let me look up investing.com in our brand list… **Found it.** Pulling the list of channels we've pitched to them in the last 12 months so I can exclude them.
+>
+> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
+>
+> *(...later...)* **1,838 unpitched investing channels.** Spot-checked the top 10; 9 of 10 are clearly on-target.
+>
+> **Top by reach (sample):**
+>
+> | Channel | Subscribers | Last published |
+> |---|---|---|
+> | Pushkar Raj Thakur | 11.4M | 2 days ago |
+> | Mark Tilbury | 4.2M | yesterday |
+> | warikoo | 3.8M | today |
+> | Pranjal Kamra | 6.1M | 4 days ago |
+> | Meet Kevin | 1.9M | 6 days ago |
+> | New Money | 870K | yesterday |
+> | Hamish Hodder | 250K | 3 days ago |
+> | … | … | … |
+>
+> **Worth knowing**:
+> - 668 channels already pitched to investing.com are excluded.
+> - Topic anchored on the curated investing keyword set; the spot-check looked clean (1 Pokémon channel slipped in via a "trading" keyword match — easy to filter further if needed).
+> - Sort is most-recently-active first so dormant channels don't crowd the top.
+>
+> *If you want this saved as a campaign you can come back to, just say save.*
+
+If the user replies *"yes save it"* or *"save"* → run the save step (write to `/tmp/`, invoke `tl reports create --config-file …`) using the **same config that's already in working memory**. Don't re-run Phases 1–4. The follow-up reply is just the takeaways + saved-report link.
+
+What changes between save-mode and preview-mode:
+
+| | Save (explicit intent) | Preview (default) |
+|---|---|---|
+| Phases 1–4 run? | Yes | Yes (identical) |
+| Campaign row in DB? | Yes | No |
+| What ends in chat | Takeaways + saved-report URL | Takeaways + sample table + "say save" tail |
+| `/tmp/<slug>.json` written? | Yes (transport for `tl reports create`) | No (config stays in working memory) |
+| `tl reports create` invoked? | Yes (`--config-file <path> --yes`) | No |
+| Campaign-config JSON in chat? | **No** | **No** |
 
 ## Process Flow (Strictly Sequential)
 
@@ -236,17 +286,45 @@ USER_QUERY
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable: a complete, validated campaign config + takeaways. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through `tl reports create --config-file <path> --yes`, which posts to the report-creation API.
+There is no fifth phase. Phase 4's output IS the deliverable. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through `tl reports create --config-file <path> --yes`, which posts to the report-creation API.
 
-> **Save-mechanism policy**: After Phase 4 produces the config, the agent **saves the report automatically** by:
-> 1. **Writing the JSON to a temp file** via the `Write` tool (e.g. `/tmp/tl-report-builder-config.json` or any path the agent has write access to). Never inline the JSON inside a shell command — apostrophes in titles, keywords, or descriptions ("McDonald's", "L'Oréal", "channels we've worked with") break shell quoting and the command fails before `tl` runs.
-> 2. **Invoking `tl reports create --config-file <path> --yes`** via the `Bash` tool. The file transport is shell-quote-safe regardless of what the JSON contains.
+**The deliverable can land in the chat in two shapes — pick the right one based on the user's intent:**
+
+> **Save-or-preview policy** (READ THIS — saving has been over-eager in the past):
 >
-> The user sees only the takeaways and the resulting campaign link — the raw JSON config stays out of the conversation, because it's noise once the report is saved.
+> Every request goes through Phases 1–4 and ends up with a fully-formed campaign config in working memory. The only branching is whether to **save** it (write a Campaign row to the DB) or **preview** it (show the takeaways + sample results in chat without persisting). **Default to preview.** Only save when the user's wording is **explicit and unambiguous** about wanting a saved deliverable.
 >
-> **Skip auto-save** when the user's wording signals they want to review the config first (e.g. "draft a config", "preview a report", "show me the config first", "what would the JSON look like", "without saving"). In that case, emit the JSON inline + the "to save, run …" hint and stop. The default for "build / create / make / save / report / campaign" wordings is auto-save.
+> **Save** (auto-invoke `tl reports create --config-file`) when the prompt contains explicit save intent:
+> - "save", "save it as a campaign", "save a report", "create the report", "create the campaign", "build me a saved report", "make a campaign for me", "publish", "persist", "store this", "I'll need to come back to this"
+> - The user explicitly references the saved deliverable: "set up a campaign for", "make a dashboard for", "set up a report I can revisit"
+> - The user's follow-up after a preview ("yes save it", "save", "do it", "go ahead", "create it now") — re-use the config that's already in working memory; do NOT re-run the phases
 >
-> **Edits** to a saved report use `tl reports update <id> '<json>'` — same auto-invoke pattern, with the same shell-quoting caveat: when the patch contains apostrophes, write to a temp file and use `tl reports update <id> "$(cat <path>)"`. Don't tell users to paste JSON into the platform UI; that's an obsolete pre-v0.6.12 fallback.
+> **Preview** (default — show results in chat, do NOT save) when the prompt is exploratory, informational, or search-oriented:
+> - "find me", "show me", "give me", "list", "who are", "what are", "are there any", "look up", "search for", "check"
+> - "build me X channels / videos / brands / deals" — bare noun, no "report" / "campaign" / "save"
+> - "tell me about", "explore", "scan", "analyse"
+>
+> **Ambiguous middle** ("build a report on X", "create a campaign for Y", "report on Z", "campaign for X"):
+> - The user said "report" / "campaign" but didn't say "save" / "create the report" / "I'll come back to this".
+> - **Default to preview**, then close the reply with one line: *"If you want to save this as a campaign you can come back to, just say save."*
+> - Conservative move — never persist on ambiguity. If the user wanted it saved they will say so.
+>
+> **Save mechanics** (when save is triggered): two strict steps. **Step 1 alone is not the save** — the file write is just transport for step 2. Saying "Saved as foo.json" or "Saved to <path>" after only doing step 1 is a regression bug.
+>
+> 1. **Write the JSON to `/tmp/`** via the `Write` tool. The path **MUST** be under the system temp directory (`/tmp/` on Linux/macOS, `%TEMP%` / `$TMPDIR` on whatever platform the agent is running on). Use a name like `/tmp/tl-report-builder-<short-slug>.json`. **Never write to the user's current working directory or any project path** — the file is a transport, not a deliverable, and leaving `foo_report.json` in the user's repo or cwd pollutes their workspace. If the system temp dir isn't writable, fall back to another temp-shaped location, never to cwd.
+> 2. **Invoke `tl reports create --config-file <that-same-tmp-path> --yes`** via the `Bash` tool. This is what actually saves the report. Read the CLI's response: success returns a `campaign_id` and `report_url` to echo to the user; failure returns a non-zero exit and an error message — surface that error verbatim, do NOT silently mark the report as saved.
+>
+> **Preview mechanics** (default): show takeaways + a small results table directly in chat. Use the `db_sample` rows Phase 2 already collected (top 10 by sort key). Format as a tight Markdown table with 2–4 type-relevant columns:
+> - Type 3 (channels): `Channel | Subscribers | Last published`
+> - Type 1 (videos/uploads): `Title | Channel | Views | Date`
+> - Type 2 (brands): `Brand | Mentions | Channels`
+> - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
+>
+> Then 2–4 takeaways (count, niche fit, noise warnings, sort note). Then a closing one-liner: *"If you want this saved as a campaign you can come back to, say save."* (Skip the line when the user's prompt was clearly purely informational like "are there any …".)
+>
+> **The JSON config never appears in chat in either path.** In save mode it's in the `/tmp/` file; in preview mode it stays in working memory. JSON in chat is implementation noise and a regression we already shipped a fix for once.
+>
+> **Edits** to a saved report use `tl reports update <id> '<json>'` — same shell-quoting caveat as save: when the patch contains apostrophes, write to a `/tmp/` file and use `tl reports update <id> "$(cat /tmp/<patch>.json)"`. Don't tell users to paste JSON into the platform UI; that's an obsolete pre-v0.6.12 fallback.
 >
 > **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the CLI** is the architectural split.
 
@@ -1293,8 +1371,12 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 5. **Takeaways cite specifics.** Numbers, names, intent labels. Vague takeaways ("the report looks good") add no value.
 6. **No new filters or columns in Phase 4.** Phase 4 doesn't reshape the FilterSet or add columns — it picks widgets, validates, and composes. Reshape requires looping back to Phase 2 or 3.
 7. **Type-8 axis consistency.** Both `_over_<axis>` histograms in the same type-8 report use the SAME axis (per `sponsorship_widget_schema.json`'s `_tl_axis_branching`).
-8. **Don't echo `campaign_config_json` back to chat.** The JSON is written to a temp file and passed to `tl reports create --config-file <path> --yes`; once the report is saved the JSON is implementation noise. The user-facing reply is takeaways + the resulting campaign link. Only show the JSON inline when the user has explicitly asked to review-before-save (see "Save-mechanism policy" above).
-9. **Use `--config-file <path>`, not `--config '<json>'`, for auto-save.** Passing JSON inline through a single-quoted shell argument breaks the moment any string value contains an apostrophe (which is common — "McDonald's", "L'Oréal", channel/title text). The temp-file transport sidesteps shell quoting entirely.
+8. **Don't echo `campaign_config_json` back to chat — ever.** In save mode the JSON lives in the `/tmp/` transport file passed to `tl reports create --config-file <path> --yes`. In preview mode it stays in working memory. **There is no flow where the campaign-config JSON belongs in the chat output.** See the Save-or-preview policy at the top of this file for the full split between save mode and preview mode.
+9. **When saving, use `--config-file <path>`, not `--config '<json>'`.** Passing JSON inline through a single-quoted shell argument breaks the moment any string value contains an apostrophe (which is common — "McDonald's", "L'Oréal", channel/title text). The temp-file transport sidesteps shell quoting entirely.
+10. **Temp file MUST be under `/tmp/`** (or `$TMPDIR` / `%TEMP%` — the system temp directory). Never write the transport file to the user's current working directory, project root, repo, or any other path they might be looking at. Pollution of cwd with `foo_report.json` is a regression bug.
+11. **Writing the file is NOT saving the report.** The save happens when `tl reports create --config-file <path> --yes` returns success. Until that command's exit code is read, the report does not exist. **Never tell the user "saved as <path>.json"** — that confuses the transport file (which is throwaway) with the saved Campaign (which is what they asked for). The save-success message must come from the CLI response: a `campaign_id` and `report_url`.
+12. **Default to preview, not save.** Phases 1–4 always run, but the chat output is takeaways + a sample-rows table by default. **Only save when the user's prompt contains explicit save intent** — see the Save-or-preview policy near the top for the trigger word lists. Ambiguous middle ("build a report on X", "create a campaign for Y") → preview + the closing "say save" tail. Save is the explicit, opt-in path; preview is the conservative default.
+13. **In preview mode the agent does not invoke `tl reports create`** and does not write a temp file. The campaign config stays in working memory. If the user follows up with "save" / "yes" / "go ahead", re-use that same in-memory config — do not re-run Phases 1–4.
 
 ## Follow-Up Interactions
 
@@ -1349,7 +1431,7 @@ USER: Build me a report of gaming channels with 100K+ subscribers in English
 
 Claude follows this SKILL.md, executing each phase in order. No external command needed — the skill IS the orchestration; `tl db pg` is invoked from within Phase 2/3/4 as needed; tools fire conditionally per their criteria.
 
-> **Saving the config**: after Phase 4 produces the JSON, the agent saves it automatically by (1) writing the JSON to a temp file with the `Write` tool, then (2) running `tl reports create --config-file <path> --yes` via `Bash`. The file transport is shell-safe — passing the JSON inline as `--config '<json>'` breaks the moment any value contains an apostrophe ("McDonald's", "L'Oréal"). The user sees the takeaways and the resulting campaign link, not the raw config. **Skip auto-save** only when the user's wording explicitly asks to review first ("draft", "preview", "show me the config", "without saving"). For edits to an existing saved report, use `tl reports update <report_id> '<json patch>'` (same auto-invoke pattern; same shell-quoting caveat — use `"$(cat <path>)"` when the patch contains apostrophes). Do NOT tell users to paste into the platform UI — that's an obsolete fallback from before the CLI commands existed.
+> **Save vs preview**: by default the skill runs Phases 1–4 and replies with takeaways + a sample-rows table — **no save**. Only when the user's prompt contains explicit save intent ("save", "create the report", "make a campaign for me to come back to") does the skill (1) write the JSON to a `/tmp/<slug>.json` file via the `Write` tool, then (2) run `tl reports create --config-file /tmp/<slug>.json --yes` via `Bash`. The file transport is shell-safe; passing the JSON inline as `--config '<json>'` breaks the moment any value contains an apostrophe ("McDonald's", "L'Oréal"). The user sees the takeaways and (in save mode) the resulting campaign link. **The JSON config never appears in chat in either mode.** For edits to an existing saved report, use `tl reports update <report_id> '<json patch>'` (same shell-quoting caveat — use a `/tmp/` file when the patch contains apostrophes). Do NOT tell users to paste into the platform UI — that's an obsolete fallback from before the CLI commands existed. See the Save-or-preview policy near the top for the full trigger word lists.
 
 ## Reference Files
 
