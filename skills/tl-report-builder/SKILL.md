@@ -1383,6 +1383,14 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
     - Type 2 (brands): `Brand | Mentions | Channels`
     - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
     **Takeaways alone are not a preview** — the user asked for results; takeaways describe the result, the table IS the result. Skipping the sample table because the result feels narrow, or because the prompt felt "report-y", is a regression bug. The table comes from data Phase 2 already pulled; it costs nothing extra to render.
+15. **When save intent is detected, the agent MUST invoke `tl reports create` itself.** Telling the user "Save it via POST to the report-creation API endpoint when ready" or "to save, run `tl reports create --config '<json>'`" or any other form of "you save it yourself" is a regression bug — that's the obsolete pre-v0.6.12 fallback. If the prompt contains any save-intent word (see Save-or-preview policy: "save", "create the report", "create a campaign", "make a campaign for me to come back to", "publish", "persist") the flow is: write to `/tmp/<slug>.json` with the `Write` tool → run `tl reports create --config-file /tmp/<slug>.json --yes` with `Bash` → echo the campaign_id + report_url from the CLI's response. The user never sees the JSON, never gets told to do something themselves. If the CLI returns an error, surface it; do not fall back to "here's the JSON, you do it".
+16. **Forbidden phrases** (these are regression markers — if you see yourself about to type any of these, stop and re-read rule 15):
+    - "Save it via POST to the report-creation API endpoint when ready"
+    - "Save it via the report-creation API endpoint when ready"
+    - "to save, run `tl reports create --config '<json>'`"
+    - "Saved as <path>.json" (without a campaign_id from the CLI)
+    - "Saved to <path>" (without a campaign_id)
+    - Any instruction telling the user to take a save action themselves when the original prompt was a save-intent prompt.
 
 ## Follow-Up Interactions
 
