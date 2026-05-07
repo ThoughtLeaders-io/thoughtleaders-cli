@@ -314,13 +314,13 @@ There is no fifth phase. Phase 4's output IS the deliverable. The skill itself n
 > 1. **Write the JSON to `/tmp/`** via the `Write` tool. The path **MUST** be under the system temp directory (`/tmp/` on Linux/macOS, `%TEMP%` / `$TMPDIR` on whatever platform the agent is running on). Use a name like `/tmp/tl-report-builder-<short-slug>.json`. **Never write to the user's current working directory or any project path** — the file is a transport, not a deliverable, and leaving `foo_report.json` in the user's repo or cwd pollutes their workspace. If the system temp dir isn't writable, fall back to another temp-shaped location, never to cwd.
 > 2. **Invoke `tl reports create --config-file <that-same-tmp-path> --yes`** via the `Bash` tool. This is what actually saves the report. Read the CLI's response: success returns a `campaign_id` and `report_url` to echo to the user; failure returns a non-zero exit and an error message — surface that error verbatim, do NOT silently mark the report as saved.
 >
-> **Preview mechanics** (default): show takeaways + a small results table directly in chat. Use the `db_sample` rows Phase 2 already collected (top 10 by sort key). Format as a tight Markdown table with 2–4 type-relevant columns:
+> **Preview mechanics** (default): show **the sample-rows table FIRST**, then takeaways, then the closing "say save" tail. The table is the deliverable in preview mode — takeaways describe it, but the table itself is what the user asked for. **Skipping the table is a regression bug** (Phase 4 hard rule 14). Use the `db_sample` rows Phase 2 already collected (top 5–10 by sort key) and format as a tight Markdown table with 2–4 type-relevant columns:
 > - Type 3 (channels): `Channel | Subscribers | Last published`
 > - Type 1 (videos/uploads): `Title | Channel | Views | Date`
 > - Type 2 (brands): `Brand | Mentions | Channels`
 > - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
 >
-> Then 2–4 takeaways (count, niche fit, noise warnings, sort note). Then a closing one-liner: *"If you want this saved as a campaign you can come back to, say save."* (Skip the line when the user's prompt was clearly purely informational like "are there any …".)
+> After the table, give 2–4 takeaways (count, niche fit, noise warnings, sort note). Then close with a one-liner: *"If you want this saved as a campaign you can come back to, say save."* (Skip the closing line only when the user's prompt was clearly purely informational like "are there any …".)
 >
 > **The JSON config never appears in chat in either path.** In save mode it's in the `/tmp/` file; in preview mode it stays in working memory. JSON in chat is implementation noise and a regression we already shipped a fix for once.
 >
@@ -1377,6 +1377,12 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 11. **Writing the file is NOT saving the report.** The save happens when `tl reports create --config-file <path> --yes` returns success. Until that command's exit code is read, the report does not exist. **Never tell the user "saved as <path>.json"** — that confuses the transport file (which is throwaway) with the saved Campaign (which is what they asked for). The save-success message must come from the CLI response: a `campaign_id` and `report_url`.
 12. **Default to preview, not save.** Phases 1–4 always run, but the chat output is takeaways + a sample-rows table by default. **Only save when the user's prompt contains explicit save intent** — see the Save-or-preview policy near the top for the trigger word lists. Ambiguous middle ("build a report on X", "create a campaign for Y") → preview + the closing "say save" tail. Save is the explicit, opt-in path; preview is the conservative default.
 13. **In preview mode the agent does not invoke `tl reports create`** and does not write a temp file. The campaign config stays in working memory. If the user follows up with "save" / "yes" / "go ahead", re-use that same in-memory config — do not re-run Phases 1–4.
+14. **Preview output MUST include a sample-rows table.** Use the `db_sample` rows Phase 2 already collected (top 5–10 by sort key) and render them as a tight Markdown table with type-specific columns per the Save-or-preview policy:
+    - Type 3 (channels): `Channel | Subscribers | Last published`
+    - Type 1 (videos/uploads): `Title | Channel | Views | Date`
+    - Type 2 (brands): `Brand | Mentions | Channels`
+    - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
+    **Takeaways alone are not a preview** — the user asked for results; takeaways describe the result, the table IS the result. Skipping the sample table because the result feels narrow, or because the prompt felt "report-y", is a regression bug. The table comes from data Phase 2 already pulled; it costs nothing extra to render.
 
 ## Follow-Up Interactions
 
