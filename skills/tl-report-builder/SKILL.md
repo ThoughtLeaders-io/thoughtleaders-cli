@@ -1026,10 +1026,10 @@ Date filter required (per Phase 2 edge-case rule — type-8 without dates is rej
 
 #### Postgres CTE fallback (smoke-check only)
 
-If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern:
+If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern with **`AS MATERIALIZED`** (this is mandatory — Postgres 12+ inlines CTEs by default, which collapses the pattern back into a flat WHERE that the sandbox planner rejects):
 
 ```sql
-WITH filtered AS (
+WITH filtered AS MATERIALIZED (
   SELECT id, channel_name, description, reach
   FROM thoughtleaders_channel
   WHERE is_active = TRUE
@@ -1040,7 +1040,42 @@ WHERE <keyword ILIKE predicate>
 LIMIT 1 OFFSET 0
 ```
 
-This pattern works only with substantial pre-filter pruning. **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE) are real and surfaced in the e2e findings. ES is the right tool.
+`MATERIALIZED` forces the CTE to evaluate first as an optimization fence; the outer ILIKE then runs on the small pre-filtered set instead of a flattened plan over the full table.
+
+**Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT.** Postgres can't index-optimize array-element ILIKE — it expands to a sequential scan with N ILIKE comparisons per row. Use explicit `OR`-chains, or better yet skip PG entirely for keyword work (next section).
+
+This pattern works only with substantial pre-filter pruning (≤ a few thousand rows after the indexed predicates). **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE, planner rejection on wide keyword sets) are real and surfaced in the e2e findings. ES is the right tool.
+
+#### "Known ID set + keyword filter" pattern
+
+A common case: the FilterSet pins a small ID set in `channels: [...]` (TPP, similar-to-channels, cross-references) AND has keyword filters. When this happens, **don't try to do everything in PG** — the combination of `id IN (long list)` + multi-keyword ILIKE blows past the sandbox cost cap (this regression has been observed in the wild for TPP + niche-keyword queries).
+
+The correct shape is two queries on two engines:
+
+1. **PG** (already done if the IDs came from a previous resolution step): just have the ID list.
+2. **ES** (validation count + sample): use a `terms` filter on `id` to scope to the pinned set, combined with the standard intelligence-report `match_phrase` queries for keywords. ES handles keyword matching with proper indexes; passing the IDs as a filter sidesteps the missing `is_tl_channel` (or whatever scoping field) on the ES side.
+
+```json
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "terms":  { "id": [549, 1629, 2314, ...] } },
+        { "term":   { "is_active": true } },
+        { "range":  { "reach": { "gte": 100000 } } }
+      ],
+      "should": [
+        { "match_phrase": { "description":            "motorcycle" } },
+        { "match_phrase": { "channel_topic_description": "drone footage" } },
+        ...
+      ],
+      "minimum_should_match": 1
+    }
+  }
+}
+```
+
+This works whether or not ES has a `is_tl_channel`-like field — the resolved IDs are the scoping mechanism. **If you find yourself building a PG query with `id IN (long-list)` AND ILIKE keyword predicates, stop and switch to this pattern instead.**
 
 ### Step 2.V2 — Run the count query (with timeout / fallback handling)
 
