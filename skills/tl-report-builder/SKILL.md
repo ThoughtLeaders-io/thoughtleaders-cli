@@ -314,13 +314,13 @@ There is no fifth phase. Phase 4's output IS the deliverable. The skill itself n
 > 1. **Write the JSON to `/tmp/`** via the `Write` tool. The path **MUST** be under the system temp directory (`/tmp/` on Linux/macOS, `%TEMP%` / `$TMPDIR` on whatever platform the agent is running on). Use a name like `/tmp/tl-report-builder-<short-slug>.json`. **Never write to the user's current working directory or any project path** — the file is a transport, not a deliverable, and leaving `foo_report.json` in the user's repo or cwd pollutes their workspace. If the system temp dir isn't writable, fall back to another temp-shaped location, never to cwd.
 > 2. **Invoke `tl reports create --config-file <that-same-tmp-path> --yes`** via the `Bash` tool. This is what actually saves the report. Read the CLI's response: success returns a `campaign_id` and `report_url` to echo to the user; failure returns a non-zero exit and an error message — surface that error verbatim, do NOT silently mark the report as saved.
 >
-> **Preview mechanics** (default): show takeaways + a small results table directly in chat. Use the `db_sample` rows Phase 2 already collected (top 10 by sort key). Format as a tight Markdown table with 2–4 type-relevant columns:
+> **Preview mechanics** (default): show **the sample-rows table FIRST**, then takeaways, then the closing "say save" tail. The table is the deliverable in preview mode — takeaways describe it, but the table itself is what the user asked for. **Skipping the table is a regression bug** (Phase 4 hard rule 14). Use the `db_sample` rows Phase 2 already collected (top 5–10 by sort key) and format as a tight Markdown table with 2–4 type-relevant columns:
 > - Type 3 (channels): `Channel | Subscribers | Last published`
 > - Type 1 (videos/uploads): `Title | Channel | Views | Date`
 > - Type 2 (brands): `Brand | Mentions | Channels`
 > - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
 >
-> Then 2–4 takeaways (count, niche fit, noise warnings, sort note). Then a closing one-liner: *"If you want this saved as a campaign you can come back to, say save."* (Skip the line when the user's prompt was clearly purely informational like "are there any …".)
+> After the table, give 2–4 takeaways (count, niche fit, noise warnings, sort note). Then close with a one-liner: *"If you want this saved as a campaign you can come back to, say save."* (Skip the closing line only when the user's prompt was clearly purely informational like "are there any …".)
 >
 > **The JSON config never appears in chat in either path.** In save mode it's in the `/tmp/` file; in preview mode it stays in working memory. JSON in chat is implementation noise and a regression we already shipped a fix for once.
 >
@@ -1026,10 +1026,10 @@ Date filter required (per Phase 2 edge-case rule — type-8 without dates is rej
 
 #### Postgres CTE fallback (smoke-check only)
 
-If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern:
+If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern with **`AS MATERIALIZED`** (this is mandatory — Postgres 12+ inlines CTEs by default, which collapses the pattern back into a flat WHERE that the sandbox planner rejects):
 
 ```sql
-WITH filtered AS (
+WITH filtered AS MATERIALIZED (
   SELECT id, channel_name, description, reach
   FROM thoughtleaders_channel
   WHERE is_active = TRUE
@@ -1040,7 +1040,42 @@ WHERE <keyword ILIKE predicate>
 LIMIT 1 OFFSET 0
 ```
 
-This pattern works only with substantial pre-filter pruning. **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE) are real and surfaced in the e2e findings. ES is the right tool.
+`MATERIALIZED` forces the CTE to evaluate first as an optimization fence; the outer ILIKE then runs on the small pre-filtered set instead of a flattened plan over the full table.
+
+**Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT.** Postgres can't index-optimize array-element ILIKE — it expands to a sequential scan with N ILIKE comparisons per row. Use explicit `OR`-chains, or better yet skip PG entirely for keyword work (next section).
+
+This pattern works only with substantial pre-filter pruning (≤ a few thousand rows after the indexed predicates). **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE, planner rejection on wide keyword sets) are real and surfaced in the e2e findings. ES is the right tool.
+
+#### "Known ID set + keyword filter" pattern
+
+A common case: the FilterSet pins a small ID set in `channels: [...]` (TPP, similar-to-channels, cross-references) AND has keyword filters. When this happens, **don't try to do everything in PG** — the combination of `id IN (long list)` + multi-keyword ILIKE blows past the sandbox cost cap (this regression has been observed in the wild for TPP + niche-keyword queries).
+
+The correct shape is two queries on two engines:
+
+1. **PG** (already done if the IDs came from a previous resolution step): just have the ID list.
+2. **ES** (validation count + sample): use a `terms` filter on `id` to scope to the pinned set, combined with the standard intelligence-report `match_phrase` queries for keywords. ES handles keyword matching with proper indexes; passing the IDs as a filter sidesteps the missing `is_tl_channel` (or whatever scoping field) on the ES side.
+
+```json
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "terms":  { "id": [549, 1629, 2314, ...] } },
+        { "term":   { "is_active": true } },
+        { "range":  { "reach": { "gte": 100000 } } }
+      ],
+      "should": [
+        { "match_phrase": { "description":            "motorcycle" } },
+        { "match_phrase": { "channel_topic_description": "drone footage" } },
+        ...
+      ],
+      "minimum_should_match": 1
+    }
+  }
+}
+```
+
+This works whether or not ES has a `is_tl_channel`-like field — the resolved IDs are the scoping mechanism. **If you find yourself building a PG query with `id IN (long-list)` AND ILIKE keyword predicates, stop and switch to this pattern instead.**
 
 ### Step 2.V2 — Run the count query (with timeout / fallback handling)
 
@@ -1377,6 +1412,20 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 11. **Writing the file is NOT saving the report.** The save happens when `tl reports create --config-file <path> --yes` returns success. Until that command's exit code is read, the report does not exist. **Never tell the user "saved as <path>.json"** — that confuses the transport file (which is throwaway) with the saved Campaign (which is what they asked for). The save-success message must come from the CLI response: a `campaign_id` and `report_url`.
 12. **Default to preview, not save.** Phases 1–4 always run, but the chat output is takeaways + a sample-rows table by default. **Only save when the user's prompt contains explicit save intent** — see the Save-or-preview policy near the top for the trigger word lists. Ambiguous middle ("build a report on X", "create a campaign for Y") → preview + the closing "say save" tail. Save is the explicit, opt-in path; preview is the conservative default.
 13. **In preview mode the agent does not invoke `tl reports create`** and does not write a temp file. The campaign config stays in working memory. If the user follows up with "save" / "yes" / "go ahead", re-use that same in-memory config — do not re-run Phases 1–4.
+14. **Preview output MUST include a sample-rows table.** Use the `db_sample` rows Phase 2 already collected (top 5–10 by sort key) and render them as a tight Markdown table with type-specific columns per the Save-or-preview policy:
+    - Type 3 (channels): `Channel | Subscribers | Last published`
+    - Type 1 (videos/uploads): `Title | Channel | Views | Date`
+    - Type 2 (brands): `Brand | Mentions | Channels`
+    - Type 8 (deals/sponsorships): `Channel | Brand | Status | Send date`
+    **Takeaways alone are not a preview** — the user asked for results; takeaways describe the result, the table IS the result. Skipping the sample table because the result feels narrow, or because the prompt felt "report-y", is a regression bug. The table comes from data Phase 2 already pulled; it costs nothing extra to render.
+15. **When save intent is detected, the agent MUST invoke `tl reports create` itself.** Telling the user "Save it via POST to the report-creation API endpoint when ready" or "to save, run `tl reports create --config '<json>'`" or any other form of "you save it yourself" is a regression bug — that's the obsolete pre-v0.6.12 fallback. If the prompt contains any save-intent word (see Save-or-preview policy: "save", "create the report", "create a campaign", "make a campaign for me to come back to", "publish", "persist") the flow is: write to `/tmp/<slug>.json` with the `Write` tool → run `tl reports create --config-file /tmp/<slug>.json --yes` with `Bash` → echo the campaign_id + report_url from the CLI's response. The user never sees the JSON, never gets told to do something themselves. If the CLI returns an error, surface it; do not fall back to "here's the JSON, you do it".
+16. **Forbidden phrases** (these are regression markers — if you see yourself about to type any of these, stop and re-read rule 15):
+    - "Save it via POST to the report-creation API endpoint when ready"
+    - "Save it via the report-creation API endpoint when ready"
+    - "to save, run `tl reports create --config '<json>'`"
+    - "Saved as <path>.json" (without a campaign_id from the CLI)
+    - "Saved to <path>" (without a campaign_id)
+    - Any instruction telling the user to take a save action themselves when the original prompt was a save-intent prompt.
 
 ## Follow-Up Interactions
 
