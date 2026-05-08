@@ -30,6 +30,8 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
 
+The profile table is tightly coupled with the brand table for media buyers, so many reports that operate on the brand levels must access the profile data first.
+
 #### Key Columns
 
 | Column | Type | Description |
