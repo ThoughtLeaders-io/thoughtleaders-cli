@@ -36,6 +36,40 @@ Internally this skill thinks in phases (1–4), report types (1, 2, 3, 8), tool 
 - Report-type numbers (`Type 1`, `Type 3`, `Type 8`) — say "channels report", "deals report", etc.
 - Identifier-shaped names from `tools/` and `references/` — anything that reads like a code symbol (the `snake_case` tool / step / metadata names defined in this skill, the JSON keys you see in `references/*_schema.json`, internal data-layer model names). If a term reads like a programmer typed it, it doesn't belong in front of the user.
 - JSON-y decision codes and classification codes the user has no reason to recognize (verdict strings emitted from validation, count-bucket labels emitted alongside them — anything that's a literal value in the validation output JSON).
+- **Internal mechanism phrases** that describe HOW the skill works rather than WHAT the user is getting. Forbidden examples (verbatim regression markers — never say any of these to the user):
+  - *"held in working memory"*
+  - *"per the skill's rules"*
+  - *"in working memory"*
+  - *"the campaign config (held in working memory; not echoed to chat per the skill's rules)"*
+  - *"campaign config JSON"* / *"the config"* / *"the JSON"* — when describing what the report contains, name the FILTERS, not the storage shape
+  - *"per the policy"* / *"the orchestration"* / *"the FilterSet"*
+
+  These are internal terms from this SKILL.md. They describe the skill's own implementation, not the user's report. If you find yourself about to type any of these, stop and re-write the sentence as a plain-English summary of what the report does (see "Filter summary" pattern below).
+
+**Filter summary pattern** — when narrating WHAT the report (saved or previewed) actually contains, use **outcome-focused plain English**, not "the config". Translate each filter into a sentence describing what the user will see:
+
+| Internal field | User-facing summary phrasing |
+|---|---|
+| `topics: [98]` | "results will be focused on the gaming/PC games topic" |
+| `keywords` / `keyword_groups[]` | "results will be filtered to channels mentioning <keywords>" |
+| `reach_from: 100000` | "only channels with 100K+ subscribers will be included" |
+| `languages: ["en"]` | "only English-speaking channels will be included" |
+| `creator_countries: ["US"]` | "results will be limited to US creators" |
+| `min_demographic_usa_share: 50` | "only channels with strong US audiences will be included" |
+| `channel_formats: [4]` | "only YouTube long-form video channels will be included" (omit if it's the default) |
+| `msn_channels_only: true` | "results will be limited to MSN channels" |
+| `is_tl_channel = TRUE` (resolved into `channels` M2M) | "results will be limited to TPP channels" |
+| `outreach_email: "exists"` | "only outreach-ready creators (with email on file) will be included" |
+| `tl_sponsorships_only: true` | "results will prioritise creators with proven TL sponsorship history" |
+| `cross_references[].exclude_proposed_to_brand: ["Webull"]` | "channels already pitched to Webull will automatically be excluded" |
+| `cross_references[].include_sponsored_by_mbn` | "results will be limited to creators MBN brands are working with" |
+| `sort: "-reach"` | "results will be sorted by reach (largest first)" |
+| `sort: "-mentions_count"` | "results will be sorted by strongest sponsorship performance" |
+| `start_date` / `end_date` / `days_ago` | "results will cover <date range / last N days>" |
+| `columns: { ... }` (the chosen column set) | "outreach-ready columns will be included automatically" — don't list them by code-name; describe the focus (outreach / discovery / pricing / pipeline) |
+| `widgets: [...]` | "performance widgets will be added automatically" — describe the focus, not the aggregator names |
+
+Compose 4–7 of these into a short bulleted summary directly in chat. Use the user's own brand and keyword wording verbatim where possible. Don't list every filter — only the ones that meaningfully shape what the user will see.
 
 **Allowed**: specific channel / brand / video / advertiser names from the data, the user's own keywords, plain words like "results", "matches", "sample", "noise", "filter", "search", "report", "column", "chart". Plain-English words that happen to coincide with an internal label *as English* (e.g. "the result is narrow", "a normal-size result") are fine — the test is whether the user reads it as English or as a code symbol. The same word as `count_classification: "narrow"` is forbidden; in "the result is narrow" it's fine.
 
@@ -56,7 +90,7 @@ Internally this skill thinks in phases (1–4), report types (1, 2, 3, 8), tool 
 | Phase 4 — final composition | "Putting the final report together…" |
 | Preview path (default) — show takeaways + sample table | "Here's what matches…" / "Found N channels — top by reach:" / "Top videos that match:" |
 | Preview tail (ambiguous middle — close with this) | *"If you want this saved as a campaign you can come back to, say save."* |
-| Save step (write JSON to `/tmp/<name>.json`, then `tl reports create --config-file /tmp/<name>.json --yes`) | "Saving the report…" |
+| Save step (resolve portable temp path → write JSON → verify file exists → `tl reports create --config-file <path> --yes`) | "Saving the report…" |
 | Save success (only after the CLI command returns success) | "Report saved." + link from the CLI response (do NOT echo the JSON config back; do NOT say "saved as <path>.json" — the temp file is transport, not the deliverable) |
 | Save failure | "Couldn't save the report: <plain-English reason>" — surface the CLI's stderr verbatim if it's user-readable, otherwise summarise |
 | User says "save" / "yes save it" / "save it" after a preview | "Saving…" — re-use the config from working memory; do NOT re-run Phases 1–4 |
@@ -309,10 +343,19 @@ There is no fifth phase. Phase 4's output IS the deliverable. The skill itself n
 > - **Default to preview**, then close the reply with one line: *"If you want to save this as a campaign you can come back to, just say save."*
 > - Conservative move — never persist on ambiguity. If the user wanted it saved they will say so.
 >
-> **Save mechanics** (when save is triggered): two strict steps. **Step 1 alone is not the save** — the file write is just transport for step 2. Saying "Saved as foo.json" or "Saved to <path>" after only doing step 1 is a regression bug.
+> **Save mechanics** (when save is triggered): three strict steps. **Step 1 alone is not the save** — the file write is just transport for step 3. Saying "Saved as foo.json" or "Saved to <path>" after only doing step 1 is a regression bug.
 >
-> 1. **Write the JSON to `/tmp/`** via the `Write` tool. The path **MUST** be under the system temp directory (`/tmp/` on Linux/macOS, `%TEMP%` / `$TMPDIR` on whatever platform the agent is running on). Use a name like `/tmp/tl-report-builder-<short-slug>.json`. **Never write to the user's current working directory or any project path** — the file is a transport, not a deliverable, and leaving `foo_report.json` in the user's repo or cwd pollutes their workspace. If the system temp dir isn't writable, fall back to another temp-shaped location, never to cwd.
-> 2. **Invoke `tl reports create --config-file <that-same-tmp-path> --yes`** via the `Bash` tool. This is what actually saves the report. Read the CLI's response: success returns a `campaign_id` and `report_url` to echo to the user; failure returns a non-zero exit and an error message — surface that error verbatim, do NOT silently mark the report as saved.
+> 1. **Resolve a portable temp path FIRST** — never hardcode `/tmp/`. Use `Bash` to query the system temp directory at runtime so the path works on Linux, macOS, AND Windows:
+>    ```bash
+>    python -c "import tempfile, os; print(os.path.join(tempfile.gettempdir(), 'tl-report-builder-<short-slug>.json'))"
+>    ```
+>    Capture the printed path verbatim. On Linux/macOS this resolves to something like `/tmp/tl-report-builder-foo.json`; on Windows it resolves to `C:\Users\<user>\AppData\Local\Temp\tl-report-builder-foo.json`. **Hardcoding `/tmp/` on Windows silently fails** — the Write tool may report success but the file lands somewhere the CLI can't read in step 3. The `python -c "import tempfile..."` pattern works on every platform Claude Code runs on.
+> 2. **Write the JSON to that resolved path via the `Write` tool, then verify it landed.** Immediately after the write, run `Bash`:
+>    ```bash
+>    test -f "<resolved-path>" && wc -c "<resolved-path>" || echo "MISSING"
+>    ```
+>    If the verification reports `MISSING` (or the byte count is 0), STOP and surface a clean error to the user: *"Couldn't persist the report config to <resolved-path>. The save can't proceed — this usually means the temp directory is not writable. Try saving the JSON yourself: <inline JSON in a code block>."* Do not invoke the CLI; that would just produce a confusing "No such file or directory" error.
+> 3. **Invoke `tl reports create --config-file <that-same-resolved-path> --yes`** via the `Bash` tool. This is what actually saves the report. Read the CLI's response: success returns a `campaign_id` and `report_url` to echo to the user; failure returns a non-zero exit and an error message — surface that error verbatim, do NOT silently mark the report as saved. **Use the EXACT same path string** the verification step in (2) confirmed; don't paraphrase or convert slashes between Unix/Windows styles. Never write to the user's current working directory or any project path — the file is a transport, not a deliverable.
 >
 > **Preview mechanics** (default): show **the sample-rows table FIRST**, then takeaways, then the closing "say save" tail. The table is the deliverable in preview mode — takeaways describe it, but the table itself is what the user asked for. **Skipping the table is a regression bug** (Phase 4 hard rule 14). Use the `db_sample` rows Phase 2 already collected (top 5–10 by sort key) and format as a tight Markdown table with 2–4 type-relevant columns:
 > - Type 3 (channels): `Channel | Subscribers | Last published`
@@ -1425,7 +1468,13 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
     - "to save, run `tl reports create --config '<json>'`"
     - "Saved as <path>.json" (without a campaign_id from the CLI)
     - "Saved to <path>" (without a campaign_id)
+    - "held in working memory; not echoed to chat per the skill's rules"
+    - "the campaign config (held in working memory…)"
+    - "per the skill's rules" / "per the policy"
     - Any instruction telling the user to take a save action themselves when the original prompt was a save-intent prompt.
+17. **Always render a plain-English filter summary in the user-facing reply** — both in save mode and preview mode. The summary is 4–7 short bullets describing **what the report contains**, not how it's stored. Use the "Filter summary pattern" translation table in the user-facing-language section near the top of this file. Mention only the filters that meaningfully shape what the user will see; skip platform defaults (e.g. don't bullet `channel_formats: [4]` when it's the type-3 default). Use the user's own brand and keyword wording verbatim where it fits. Example: *"results will be focused on fintech creators in MSN; only English-speaking channels with strong US audiences will be included; channels already pitched to Webull will be automatically excluded; results will prioritise creators with proven sponsorship history; outreach-ready columns and performance widgets will be added automatically"*. **Don't describe the report as "the config" or "the JSON" or "held in working memory"** — those are internal terms; the user wants to know what the report does.
+18. **Save-mode preflight on the temp file is mandatory.** Per the Save-or-preview policy step 1+2: resolve a portable temp path via `python -c "import tempfile, os; print(...)"` BEFORE writing, then verify with `test -f <path>` AFTER writing. Hardcoding `/tmp/` on Windows fails silently. If the verification fails, surface a clean error explaining what happened (path, why) and offer the user the inline JSON as a fallback. Do not invoke `tl reports create --config-file` if the file isn't confirmed to exist — that just produces a confusing "No such file or directory" error.
+19. **Narrate at phase-outcome level, not tool-call level.** The user doesn't need to see "Ran 19 commands, read 2 files" enumerated, or the raw text of every `tl db pg` query the skill issued during validation. Surface the phase outcomes in plain English: "Looking up StoryBlocks in the brand list… found it (47 deals on file)." not "Ran tl db pg --json 'SELECT id, name FROM thoughtleaders_brand WHERE name ILIKE %StoryBlocks%' which returned: {results: [{id: 868, name: 'StoryBlocks'}], total: 1, ...}". The harness shows tool-call detail in collapsible UI; the skill's narration is the high-level story alongside it.
 
 ## Follow-Up Interactions
 
