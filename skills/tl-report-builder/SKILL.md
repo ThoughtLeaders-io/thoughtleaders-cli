@@ -1,6 +1,19 @@
 ---
 name: tl-report-builder
-description: Build TL saved-report configurations from natural-language requests. Generates a valid JSON campaign schema (filterset + columns + widgets + pagination) for the four report types — content (1), brands (2), channels (3), sponsorships (8) — plus a few key takeaway insights about the result. Use when a TL team member asks to build, create, or save a report. Triggers on phrasings like "build a report", "create a campaign", "make a report on", "save a dashboard for", "find me channels for outreach", "all sponsorships for X", "report on Y brand", "channels matching Z".
+description: |
+  Build TL reports from natural-language requests. Produces an in-chat preview (sample-rows table + filter summary + takeaways) by default, or auto-saves a TL report when the user's wording is explicit about it ("save", "create the report", "make a campaign for me to come back to"). Covers the four report types: content/videos (1), brands (2), channels (3), sponsorships/deals (8).
+
+  **Use this skill — NOT `tl-cli:tl` — for ANY request that returns a list of channels, videos, brands, or sponsorships with filters applied**, even when the user doesn't say "report" or "campaign". This is the canonical path for list-shaped requests.
+
+  Triggers on every variant of "list me / find me / show me / give me / pull me / build me / make me X with filters Y", including:
+  - **Channels**: "Find me gaming channels with 100K+ subs", "show me TPP fintech creators in MSN", "channels we haven't pitched to <brand>", "look-alike channels to X", "non-MSN travel channels", "build me a list of <niche> creators", "channels matching <criteria>".
+  - **Brands**: "all brands flagged as Managed Services", "brand activity report for these specific brands: ...", "brands sponsoring <channel> in the past 6 months", "competitor brands of X".
+  - **Sponsorships / deals**: "**show me partnerships from last quarter** for <niche> creators", "Q1 2026 sold sponsorships for personal investing", "all proposal_approved deals owned by <user>", "list sponsorships with status sold and send_date 2026-05-07", "sponsorships for channel <name>".
+  - **Videos / uploads**: "videos sponsored by <brand>", "wellness videos but exclude anything sponsored by Nike or Adidas".
+
+  Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
+
+  **Skip this skill** only for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
 ---
 
 # TL Report Builder Skill
