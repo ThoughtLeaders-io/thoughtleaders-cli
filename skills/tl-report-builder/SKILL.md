@@ -1482,6 +1482,25 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 20. **Save tail is mandatory in every preview reply.** The previous "skip when the prompt is purely informational" exemption was over-applied (a live FRÉ Skincare run skipped the tail even though the prompt was clearly designing a TL report — specific filters, custom column, brand-exclusion logic; a live aviation/non-MSN run skipped it again, closing only with a refinement offer — *"If you want me to tighten to fixed-wing-only or drop drones, say the word and I'll re-filter."* — which is **not** the same thing). Always close the preview with *"If you want this as a saved campaign, just say save."* The line is one ignorable sentence if the user didn't want a save; if they did, it's the only signal that telling the agent to save is even an option.
 
     **Refinement offers do NOT substitute for the save tail.** Both can appear in the same closing — refinements first ("Want to tighten to fixed-wing only? Drop drones? Add a CPM column?"), then the save tail on its own line ("If you want this as a saved campaign, just say save."). The save tail is **always last** so it's the line the user sees most recently when they read the reply bottom-up.
+20a. **Channel/video/brand names in the sample-rows table MUST be hyperlinked to the TL platform page** (not to YouTube). The user is browsing the result *in TL*; the link is the affordance to drill into a row's full TL profile. URL patterns:
+
+| Sample-table column | Link target | Slug source |
+|---|---|---|
+| **Channel** (type 3 / type 8) | `https://app.thoughtleaders.io/youtube/<slug>` | `thoughtleaders_channel.slug` (resolve in Phase 2 alongside the sample) |
+| **Brand** (type 2) | `https://app.thoughtleaders.io/brands/<slug>` | brand-side equivalent slug |
+| **Title** (type 1 / videos) | `https://app.thoughtleaders.io/articles/<id>` (or whatever the platform's video-detail URL is) | the article id |
+
+Render as Markdown links in the table cell — *not* the bare ID, *not* the YouTube URL, *not* both. Example for type 3:
+
+```
+| Channel                  | Subscribers | Last published |
+|--------------------------|------------:|----------------|
+| [Jubilee](https://app.thoughtleaders.io/youtube/jubilee) | 12.4M | 2 days ago     |
+| [PewDiePie](https://app.thoughtleaders.io/youtube/pewdiepie) | 110M  | yesterday      |
+```
+
+If the slug is missing or empty for a row, fall back to the ID-based path the platform exposes (e.g. `https://app.thoughtleaders.io/youtube/id-<channel_id>`); never fall back to the YouTube URL — that takes the user *away* from TL. The Phase 2 sample query must include the slug column alongside the rendered fields, otherwise the table can't link properly.
+
 21. **No side-channel deliverables.** The skill produces exactly two output shapes: (a) a saved TL Campaign + a campaign URL (save mode), or (b) an in-chat preview with the sample-rows table + takeaways + save tail (preview mode). It does NOT write CSVs, Markdown reports, or any other "data dump" file to disk as a deliverable. A real run for FRÉ Skincare wrote a CSV to `<temp>\fre-skincare-shortlist.csv` and pointed the user at it as the "full list" — that's a fabricated alternative deliverable that bypasses the TL report-creation flow. If the user wants more than the preview shows, the answer is "save it as a campaign and run it" — not "I'll dump CSV". The only filesystem write the skill is allowed to make is the `<system-temp>/tl-report-builder-<slug>.json` transport file used in step 1 of the save mechanics, and even that is a transport (deleted whenever) — never a deliverable.
 22. **Phases 1–4 always run; the skill never short-circuits to a chat-only data answer.** When the skill is invoked, the output is **always** a Campaign (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a verification table, an analyst summary, a list cross-check, or any other "I'll just answer this directly in chat" deliverable is a regression bug. Real example to internalise: a prompt of *"Brands sponsoring Linus Tech Tips in the past 6 months: dbrand, Private Internet Access, Squarespace, Vessi, Secretlab, UGREEN, Odoo, Dell, Razer, Saily"* should route through Phase 1 → Type 2 brands report scoped to channel 1788 + last 180 days → Phases 2/3/4 → preview with the user's seed brands as a starting filter and the takeaways calling out *"your seed list is accurate but incomplete — TL data shows 60 distinct sponsors over 131 videos; top missing are War Thunder (7), Boot.dev (6), DeleteMe (6)…"*. Instead, a recent run produced exactly that analytical content **as a free-floating markdown table in chat** — no FilterSet emitted, no columns picked, no widgets, no save option. The analytical insight is welcome as a takeaway; it is **not** a substitute for the report. If you find yourself replying with a markdown table directly, ask: am I about to ship a Phase-4 preview, or am I bypassing the phases? The answer must always be the former.
 
