@@ -474,7 +474,7 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 ### T1 — `tools/topic_matcher.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
 **Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
-**How to fetch the live topics**: see [`references/data_plane.md`](references/data_plane.md#topics-table--fetch-query-canonical) — that's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
+**How to fetch the live topics**: see the `tl-cli:tl` skill's Postgres-schema reference — [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). That's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
 ### T2 — `tools/keyword_research.md`

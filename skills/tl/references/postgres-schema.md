@@ -191,7 +191,8 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `id` | int | Primary key |
 | `channel_name` | varchar | Display name. ⚠️ The column is `channel_name`, NOT `name`. |
 | `external_channel_id` | varchar | YouTube channel ID (e.g., `UCxxxxxx`). ⚠️ There is NO `youtube_id` column — use this one. |
-| `url` | varchar | Channel URL |
+| `url` | varchar | Channel URL (external — usually the YouTube URL). |
+| `slug` | varchar | TL platform slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any AM-facing surface (reports, samples, Slack posts) — the TL URL keeps the user inside the platform and is the company's hyperlink contract. Falls back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
 | `reach` | bigint | Subscriber count. ⚠️ There is NO `subscribers` column — `reach` is the subscriber count. Many internal docs and outputs use the word "subscribers"; in SQL, always query `reach`. |
 | `media_selling_network_join_date` | date/timestamptz | When channel joined MSN. **MSN membership = this column IS NOT NULL.** |
 | `is_tl_channel` | boolean | True = TPP/VIP channel (the small VIP subset, ~144 channels at 100k+ reach). ⚠️ **`is_tl_channel` is NOT the MSN flag.** Naive `WHERE is_tl_channel = true` as an "MSN filter" silently drops ~98% of the MSN pool (8,652 → 144 at 100k+). For MSN, use `media_selling_network_join_date IS NOT NULL`. |
@@ -232,6 +233,43 @@ Source of truth: `thoughtleaders.taxonomies.ContentCategory` (Django `IntEnum` i
 | 20 | ENTERTAINMENT | Entertainment |
 | 21 | HEALTH_FITNESS | Health & Fitness |
 | 22 | MUSIC | Music |
+
+### `thoughtleaders_topics` (Curated Topic Taxonomy)
+
+A small (under 20 rows), live-edited taxonomy of curated topics. Each row bundles a topic name with a one-paragraph description and a `keywords` JSONB array of head + long-tail terms. The report-builder skill's `topic_matcher` tool consumes this table to match a user's natural-language report query against curated topics; downstream filter-building uses the matched topics' `keywords` arrays as keyword groups. The taxonomy is **actively migrating** — content drifts week to week — so consumers must fetch live, never bundle a snapshot.
+
+#### Fetch query (canonical — use verbatim)
+
+```bash
+tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
+```
+
+The table has fewer than 20 rows; client-side filtering after a full fetch is free. **Do not push name-pattern WHERE clauses into the SQL** — the agent has guessed `WHERE is_active = TRUE` and `WHERE name ILIKE ANY(...)` in past runs and burnt round-trips on hallucinated columns.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | int | Primary key |
+| `name` | varchar | Topic display name (e.g. "Artificial Intelligence", "PC Games") |
+| `description` | varchar | One-paragraph human-readable description; the matcher uses it for tie-breaks |
+| `keywords` | jsonb | Array of curated keyword strings — the matcher's primary signal. Mixes head terms (`"cooking"`) with long-tail (`"5-ingredient meals"`); long-tail matches are still strong signals, don't downgrade them. |
+| `created_at` | timestamptz | Rarely needed |
+| `updated_at` | timestamptz | Rarely needed |
+| `source` | varchar | Provenance, rarely needed |
+
+#### Columns that DO NOT exist on `thoughtleaders_topics`
+
+Common hallucinations the agent has tried in real runs (each wasted a round-trip). All return *"column '\<name\>' does not exist"*:
+
+- ❌ `is_active`
+- ❌ `type` (topics are not subtyped at the schema level)
+- ❌ `parent_id` (topics are flat, not hierarchical)
+- ❌ `slug`, `topic_id` (the PK is `id`), `archived`, `is_published`
+
+Cited regression markers from real runs:
+- AI/marketing channels run: tried `thoughtleaders_topic` (singular — table doesn't exist), then `WHERE is_active = TRUE`. Three round-trips before consulting `information_schema`.
+- Travel/digital-nomad run: tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(...)`.
+
+If a query against this table errors with *"column '\<X\>' does not exist"*, that's the regression marker — go back to the verbatim fetch above.
 
 ### `auth_user` (Django Users)
 
