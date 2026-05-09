@@ -13,6 +13,7 @@ user's actual command output.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -96,6 +97,11 @@ def _run_upgrade(method: str, latest: str) -> None:
     Uses `install --force` with the new tag URL. pipx/uv pin the original
     install spec including the git tag, so a plain `upgrade` re-installs
     the same version — `--force` is the only way to advance the pinned tag.
+
+    On a successful upgrade, re-syncs Claude Code and OpenCode skills if
+    their respective binaries are on PATH, so the new version's skills
+    land in ~/.claude/ and ~/.config/opencode/ without the user having
+    to remember to run `tl setup ...`.
     """
     tagged_url = f"git+{REPO_URL}@v{latest}"
     cmd = {
@@ -109,9 +115,41 @@ def _run_upgrade(method: str, latest: str) -> None:
         file=sys.stderr,
     )
     try:
-        subprocess.run(cmd, check=False, timeout=60)
+        result = subprocess.run(cmd, check=False, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return
+    if result.returncode == 0:
+        _resync_integrations()
+
+
+def _resync_integrations() -> None:
+    """Re-sync Claude Code and OpenCode skills after a self-upgrade.
+
+    Spawned as a subprocess against the freshly-installed `tl` binary —
+    the running process holds the OLD code in memory, so calling the
+    setup functions in-process would (depending on import caching) copy
+    the wrong assets. Subprocess re-execs the new code from disk.
+
+    Conditional on each tool's binary being on PATH; everything is
+    silent on failure (a skill resync issue must never fail the
+    upgrade itself).
+    """
+    tl_bin = shutil.which("tl")
+    if not tl_bin:
+        return
+    for tool, binary in (("claude", "claude"), ("opencode", "opencode")):
+        if not shutil.which(binary):
+            continue
+        print(f"[tl-cli] re-syncing {tool} skills…", file=sys.stderr)
+        try:
+            subprocess.run(
+                [tl_bin, "setup", tool, "--json"],
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def check_and_upgrade() -> None:
