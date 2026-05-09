@@ -44,7 +44,19 @@ Schema reference (the only columns this table has):
 | `updated_at` | timestamptz | rarely needed |
 | `source` | varchar | provenance, rarely needed |
 
-**There is no `is_active` column on this table.** If a query against `thoughtleaders_topics` errors with "column 'is_active' does not exist", that's the regression marker — you guessed a schema instead of using the verbatim query above. A real run wasted three round-trips on this exact mistake: first `thoughtleaders_topic` (singular, doesn't exist), then `WHERE is_active = TRUE` (column doesn't exist), then finally `information_schema.columns` introspection. Use the verbatim query and skip the wasted trips.
+**Columns that do NOT exist on this table** (don't guess — use the verbatim query above):
+
+- ❌ `is_active` — no such column. Don't add `WHERE is_active = TRUE`.
+- ❌ `type` — there is no per-topic type/category column. Topics aren't subtyped at the schema level.
+- ❌ `parent_id` — topics are flat, not hierarchical. There's no parent/child relationship.
+- ❌ `slug`, `topic_id` (the PK is `id`), `archived`, `is_published` — none of these exist.
+
+If a query against `thoughtleaders_topics` errors with "column '<X>' does not exist", that's the regression marker — you guessed a schema instead of using the verbatim query above. Two real runs wasted round-trips on this exact mistake:
+
+- Run A (AI/marketing channels): tried `thoughtleaders_topic` (singular — doesn't exist), then `WHERE is_active = TRUE` (column doesn't exist), then finally `information_schema.columns` introspection. Three round-trips before the right query.
+- Run B (travel/digital-nomad with competitor brands): tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(ARRAY['%travel%', ...])` — `type` and `parent_id` don't exist.
+
+Use the verbatim query above and skip the wasted trips. If you need to filter by name, do it in Python after fetching all topics — the table has fewer than 20 rows; client-side filtering is free.
 
 ---
 
