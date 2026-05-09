@@ -448,6 +448,11 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 ### T1 — `tools/topic_matcher.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
 **Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
+**How to fetch the live topics** (verbatim — don't guess column names):
+```bash
+tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
+```
+The table has exactly these columns: `id`, `name`, `description`, `keywords` (jsonb), plus `created_at`, `updated_at`, `source` you can ignore. **There is no `is_active` column.** The table name is plural (`thoughtleaders_topics`), not singular. `tools/topic_matcher.md` has the full schema reference and a regression note about wasted round-trips when these are guessed wrong.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
 ### T2 — `tools/keyword_research.md`

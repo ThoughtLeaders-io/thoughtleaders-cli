@@ -24,6 +24,28 @@ The orchestration injects two values:
    ```
    The topics list changes over time; never assume a fixed count or fixed IDs.
 
+### How to fetch the topics — exact SQL
+
+**Always use this query verbatim** when invoking `topic_matcher`. Don't guess column names; don't add a `WHERE is_active = TRUE` filter (that column does not exist on this table); don't try `thoughtleaders_topic` (singular) first (that table does not exist).
+
+```bash
+tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
+```
+
+Schema reference (the only columns this table has):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer | primary key |
+| `name` | varchar | topic display name |
+| `description` | varchar | one-paragraph description, used by `topic_matcher` for tie-breaks |
+| `keywords` | jsonb | array of curated keyword strings |
+| `created_at` | timestamptz | rarely needed |
+| `updated_at` | timestamptz | rarely needed |
+| `source` | varchar | provenance, rarely needed |
+
+**There is no `is_active` column on this table.** If a query against `thoughtleaders_topics` errors with "column 'is_active' does not exist", that's the regression marker — you guessed a schema instead of using the verbatim query above. A real run wasted three round-trips on this exact mistake: first `thoughtleaders_topic` (singular, doesn't exist), then `WHERE is_active = TRUE` (column doesn't exist), then finally `information_schema.columns` introspection. Use the verbatim query and skip the wasted trips.
+
 ---
 
 ## Output schema (strict)
