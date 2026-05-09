@@ -61,10 +61,25 @@ This repo is also a Claude Code plugin, and can directly be installed as one.
 Skills under `skills/` are split into a `SKILL.md` and one or more `references/*.md` files. To prevent drift, each fact has exactly one home:
 
 - **CLI-shaped facts live in `SKILL.md`** — command surface, flags, filter syntax, output shapes, workflow, credit-cost curve, status-label mapping the CLI emits.
-- **Schema-shaped facts live in `references/`** — table/column catalogues, accepted-query rules for raw DB engines (PG/ES/Firebolt), index constraints, field types, ID formats.
-- **Business-shaped facts live in `references/business-glossary.md`** (or the equivalent glossary file) — revenue/pipeline definitions, performance grades, ownership semantics, MSN/TPP meaning, team rosters.
+- **Schema-shaped facts live in `skills/tl/references/`** — table/column catalogues, accepted-query rules for raw DB engines (PG/ES/Firebolt), index constraints, field types, ID formats. This directory is the **single canonical home** for schema facts inside this plugin. It is a managed sync of the upstream `thoughtleaders-skills/tl-data/references/` (the source of truth across all TL agent surfaces); changes that originate here should be propagated upstream, and vice versa.
+- **Business-shaped facts live in `skills/tl/references/business-glossary.md`** (or the equivalent glossary file) — revenue/pipeline definitions, performance grades, ownership semantics, MSN/TPP meaning, team rosters.
 
 When adding or updating skill content, place the fact in its single home and link from the others. Do not duplicate or "quick-recap" content across files — recaps are the highest drift surface.
+
+#### Anti-pattern: skill-local schema references
+
+When a dependent skill (e.g. `tl-report-builder`) needs to reference a schema fact (table layout, columns, fetch SQL, hallucinated-column markers), **link to the canonical home in `skills/tl/references/`** — do not create a new `<skill>/references/*.md` file that mirrors or paraphrases that content.
+
+Concrete regression marker: an earlier branch added `skills/tl-report-builder/references/data_plane.md` to consolidate the `thoughtleaders_topics` fetch query out of inline tool text. That had the right *shape* (don't restate schema in tool prose) but the wrong *home* — it forked schema facts into a parallel reference file that would silently drift from `skills/tl/references/postgres-schema.md`. The fix was to land the columns + fetch SQL + regression markers in `postgres-schema.md` (and upstream in `tl-data/references/postgres-schema.md`), delete the local file, and rewire the references via Markdown links.
+
+Rule of thumb: if you are about to write *"here's the SQL to query this table"* or *"these columns don't exist on this table"* anywhere outside `skills/tl/references/`, stop. Add the fact to the canonical reference, then link to the anchor. Same for business facts and the glossary.
+
+Skill-local `references/*.md` ARE appropriate when the content is **skill-shaped**, not schema-shaped:
+- Column metadata for a specific report type (sortable columns, formula templates) — `tl-report-builder/references/columns_*.md`
+- JSON schemas for tool-specific request/response shapes — `tl-report-builder/references/*_schema.json`
+- Disambiguation tables, defaults, and pitfall catalogues that exist only in this skill's flow — `tl-report-builder/references/report_glossary.md`
+
+If you are unsure whether a fact is schema-shaped or skill-shaped, ask: "would another TL skill (analyst, finance, mbn-outreach) ever need this fact?" If yes, it's schema/business-shaped — promote it to the canonical home.
 
 ## API Response Envelope
 

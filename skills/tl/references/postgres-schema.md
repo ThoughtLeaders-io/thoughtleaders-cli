@@ -1,5 +1,7 @@
 # ThoughtLeaders PostgreSQL Schema Reference
 
+> **Canonical home (within this plugin).** This file is the single source of truth for TL Postgres schema facts inside `tl-cli` (tables, columns, fetch SQL, hallucinated-column markers, join paths). Dependent skills here — most notably `tl-report-builder` — must **link to entries in this file** rather than restate columns / fetch SQL / "do not exist" markers in their own `references/*.md`. Forking schema content into a parallel `<skill>/references/*.md` produces silent drift; that anti-pattern is what this preamble exists to prevent. Upstream source of truth is `thoughtleaders-skills/tl-data/references/postgres-schema.md`; this file is a managed sync.
+
 ## How to query
 
 ```bash
