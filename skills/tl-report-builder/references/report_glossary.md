@@ -115,13 +115,15 @@ When two fields look similar, use this table to pick.
 | "Channels created on TL since X" | `createdat_from` (+ `createdat_to`) | This is the TL-side AdLink/Channel record creation, not the YouTube publish date. |
 | Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses these for send_date) | Type 8's date semantics shift — the schema docstring explains. |
 
-### Reach / size signals
+### Channel-size signals
 
-| User intent | Fields to use | Why |
+> **Vocabulary**: SQL/internal term is `reach`, user-facing term is **subscribers**. See `thoughtleaders-skills/tl-data/references/business-glossary.md` for the canonical mapping (line 149: *"AMs say subscribers, SQL says reach"*). When emitting the FilterSet, use the field name `reach_from` / `reach_to`. When narrating to the user (chat replies, sample-table column headers, takeaways, filter summaries), say **"subscribers"** — never **"reach"**. *"By reach: 1M+ → 2 · 100K–1M → 57"* is a leak; write *"By subscribers: 1M+ → 2 · 100K–1M → 57"*.
+
+| User intent | Field to emit | Narrate as |
 |---|---|---|
-| "Big channels" / "mid-size or bigger" / size floor | `reach_from` (+ `reach_to`) | Reach is TL's preferred size metric — handles podcasts/newsletters too, not just subs. |
-| "Channels expecting >X projected views per video" | `projected_views_from` (+ `projected_views_to`) | PV is a forward-looking estimate; better than Reach when intent is sponsor-deal pricing. |
-| Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | Per-upload metric — only meaningful for type 1 (CONTENT). |
+| "Big channels" / "100K+ subscribers" / size floor | `reach_from` (+ `reach_to`) | "subscribers" / "channel size" |
+| "Channels expecting >X projected views per video" | `projected_views_from` (+ `projected_views_to`) | "projected views" — PV is a forward-looking estimate; better than subscribers when intent is sponsor-deal pricing |
+| Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | "views per video" — per-upload metric, only meaningful for type 1 (CONTENT) |
 
 ### Demographic shares
 
