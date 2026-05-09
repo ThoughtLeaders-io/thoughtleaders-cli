@@ -24,39 +24,9 @@ The orchestration injects two values:
    ```
    The topics list changes over time; never assume a fixed count or fixed IDs.
 
-### How to fetch the topics — exact SQL
+### How to fetch the topics
 
-**Always use this query verbatim** when invoking `topic_matcher`. Don't guess column names; don't add a `WHERE is_active = TRUE` filter (that column does not exist on this table); don't try `thoughtleaders_topic` (singular) first (that table does not exist).
-
-```bash
-tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
-```
-
-Schema reference (the only columns this table has):
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | integer | primary key |
-| `name` | varchar | topic display name |
-| `description` | varchar | one-paragraph description, used by `topic_matcher` for tie-breaks |
-| `keywords` | jsonb | array of curated keyword strings |
-| `created_at` | timestamptz | rarely needed |
-| `updated_at` | timestamptz | rarely needed |
-| `source` | varchar | provenance, rarely needed |
-
-**Columns that do NOT exist on this table** (don't guess — use the verbatim query above):
-
-- ❌ `is_active` — no such column. Don't add `WHERE is_active = TRUE`.
-- ❌ `type` — there is no per-topic type/category column. Topics aren't subtyped at the schema level.
-- ❌ `parent_id` — topics are flat, not hierarchical. There's no parent/child relationship.
-- ❌ `slug`, `topic_id` (the PK is `id`), `archived`, `is_published` — none of these exist.
-
-If a query against `thoughtleaders_topics` errors with "column '<X>' does not exist", that's the regression marker — you guessed a schema instead of using the verbatim query above. Two real runs wasted round-trips on this exact mistake:
-
-- Run A (AI/marketing channels): tried `thoughtleaders_topic` (singular — doesn't exist), then `WHERE is_active = TRUE` (column doesn't exist), then finally `information_schema.columns` introspection. Three round-trips before the right query.
-- Run B (travel/digital-nomad with competitor brands): tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(ARRAY['%travel%', ...])` — `type` and `parent_id` don't exist.
-
-Use the verbatim query above and skip the wasted trips. If you need to filter by name, do it in Python after fetching all topics — the table has fewer than 20 rows; client-side filtering is free.
+The fetch query, the column list, and the negative-column regression markers all live in **[`references/data_plane.md`](../references/data_plane.md#topics-table--fetch-query-canonical)** — schema-shaped facts belong in `references/`, not in tool text. Use the verbatim query documented there. **Do not restate or paraphrase the schema here.** If you find yourself about to type `SELECT … FROM thoughtleaders_topics …` from memory, stop and consult the reference file instead. This tool's job is to score topics against the user query; the data-plane reference's job is to say what the underlying table looks like.
 
 ---
 
