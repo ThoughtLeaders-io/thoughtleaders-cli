@@ -104,7 +104,7 @@ Compose 4–7 of these into a short bulleted summary directly in chat. Use the u
 | Phase 3 — column builder | "Picking which columns to show in the report…" |
 | Phase 4 — widget builder | "Choosing the charts and dashboards…" |
 | Phase 4 — final composition | "Putting the final report together…" |
-| Preview path (default) — show takeaways + sample table | "Here's what matches…" / "Found N channels — top by reach:" / "Top videos that match:" |
+| Preview path (default) — show takeaways + sample table | "Here's what matches…" / "Found N channels — top by subscribers:" / "Top videos that match:" |
 | Preview tail (ambiguous middle — close with this) | *"If you want this saved as a TL report you can come back to, say save."* |
 | Save step (resolve portable temp path → write JSON → verify file exists → `tl reports create --config-file <path> --yes`) | "Saving the report…" |
 | Save success (only after the CLI command returns success) | "**TL report saved.**" + link from the CLI response, optionally with "(report #N)" using the report id from the CLI response — never as "Campaign #N". Do NOT echo the JSON config back; do NOT say "saved as <path>.json" (temp file is transport, not the deliverable); do NOT say "Campaign #..." (internal jargon — say "report"). |
@@ -183,7 +183,7 @@ Same architecture, different intent. The prompt is exploratory; the policy says 
 >
 > *(...later...)* **1,838 unpitched investing channels.** Spot-checked the top 10; 9 of 10 are clearly on-target.
 >
-> **Top by reach (sample):**
+> **Top by subscribers (sample):**
 >
 > | Channel | Subscribers | Last published |
 > |---|---|---|
@@ -1302,7 +1302,7 @@ Returns `6,601`. Classification: `normal` (51–10000 bucket).
 
 **Step 2.V4 — `db_sample` + `sample_judge`**:
 
-`db_sample` returns the top 10 channels by reach. Top results include:
+`db_sample` returns the top 10 channels by subscribers (SQL `ORDER BY reach DESC`; narrate as "subscribers" per rule 6). Top results include:
 ```
 Cocomelon, Bad Bunny, Bruno Mars, BRIGHT SIDE, Selena Gomez,
 That Little Puff, Taarak Mehta Ka Ooltah Chashmah, ...
@@ -1328,7 +1328,7 @@ That Little Puff, Taarak Mehta Ka Ooltah Chashmah, ...
     "db_count": 6601,
     "count_classification": "normal",
     "sample_judgment": "looks_wrong",
-    "sample_judgment_reasoning": "Top 10 by reach: Cocomelon, Bad Bunny, Bruno Mars... — none about IRS tax debt; substring noise from short keyword 'IRS'",
+    "sample_judgment_reasoning": "Top 10 by subscribers: Cocomelon, Bad Bunny, Bruno Mars... — none about IRS tax debt; substring noise from short keyword 'IRS'",
     "validation_concerns": ["'IRS' substring noise confirmed in samples"]
   },
   "alternatives_for_user": {
@@ -1352,7 +1352,7 @@ This is the canonical regression test. Whenever Phase 2 validation changes, walk
 
 **Canonical user-facing rendering for the G11 example** (translate the JSON above into this — do NOT show the JSON):
 
-> Hmm — I ran the search but the top results don't look right for **"channels about IRS tax debt forgiveness programs"**. The first 10 by reach are channels like **Cocomelon**, **Bad Bunny**, **Bruno Mars**, and **Selena Gomez** — music and kids' content, not tax/finance. The short word "IRS" is matching inside unrelated words in channel descriptions, which is pulling in a lot of noise.
+> Hmm — I ran the search but the top results don't look right for **"channels about IRS tax debt forgiveness programs"**. The first 10 by subscribers are channels like **Cocomelon**, **Bad Bunny**, **Bruno Mars**, and **Selena Gomez** — music and kids' content, not tax/finance. The short word "IRS" is matching inside unrelated words in channel descriptions, which is pulling in a lot of noise.
 >
 > How do you want to proceed?
 > 1. **Save it anyway** — if you want to dig through the long tail manually.
@@ -1540,7 +1540,7 @@ Render as Markdown links in the table cell — *not* the bare ID, *not* the YouT
 If the slug is missing or empty for a row, fall back to the ID-based path the platform exposes (e.g. `https://app.thoughtleaders.io/youtube/id-<channel_id>`); never fall back to the YouTube URL — that takes the user *away* from TL. The Phase 2 sample query must include the slug column alongside the rendered fields, otherwise the table can't link properly.
 
 21. **No side-channel deliverables.** The skill produces exactly two output shapes: (a) a saved TL report + a report URL (save mode), or (b) an in-chat preview with the sample-rows table + takeaways + save tail (preview mode). It does NOT write CSVs, Markdown reports, or any other "data dump" file to disk as a deliverable. A real run for FRÉ Skincare wrote a CSV to `<temp>\fre-skincare-shortlist.csv` and pointed the user at it as the "full list" — that's a fabricated alternative deliverable that bypasses the TL report-creation flow. If the user wants more than the preview shows, the answer is *"save it as a TL report and run it"* — not "I'll dump CSV", and **never** *"save it as a campaign"* (rule 6). The only filesystem write the skill is allowed to make is the `<system-temp>/tl-report-builder-<slug>.json` transport file used in step 1 of the save mechanics, and even that is a transport (deleted whenever) — never a deliverable.
-22. **Phases 1–4 always run; the skill never short-circuits to a chat-only data answer.** When the skill is invoked, the output is **always** a Campaign (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a verification table, an analyst summary, a list cross-check, or any other "I'll just answer this directly in chat" deliverable is a regression bug. Real example to internalise: a prompt of *"Brands sponsoring Linus Tech Tips in the past 6 months: dbrand, Private Internet Access, Squarespace, Vessi, Secretlab, UGREEN, Odoo, Dell, Razer, Saily"* should route through Phase 1 → Type 2 brands report scoped to channel 1788 + last 180 days → Phases 2/3/4 → preview with the user's seed brands as a starting filter and the takeaways calling out *"your seed list is accurate but incomplete — TL data shows 60 distinct sponsors over 131 videos; top missing are War Thunder (7), Boot.dev (6), DeleteMe (6)…"*. Instead, a recent run produced exactly that analytical content **as a free-floating markdown table in chat** — no FilterSet emitted, no columns picked, no widgets, no save option. The analytical insight is welcome as a takeaway; it is **not** a substitute for the report. If you find yourself replying with a markdown table directly, ask: am I about to ship a Phase-4 preview, or am I bypassing the phases? The answer must always be the former.
+22. **Phases 1–4 always run; the skill never short-circuits to a chat-only data answer.** When the skill is invoked, the output is **always** a saved TL report (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a verification table, an analyst summary, a list cross-check, or any other "I'll just answer this directly in chat" deliverable is a regression bug. Real example to internalise: a prompt of *"Brands sponsoring Linus Tech Tips in the past 6 months: dbrand, Private Internet Access, Squarespace, Vessi, Secretlab, UGREEN, Odoo, Dell, Razer, Saily"* should route through Phase 1 → Type 2 brands report scoped to channel 1788 + last 180 days → Phases 2/3/4 → preview with the user's seed brands as a starting filter and the takeaways calling out *"your seed list is accurate but incomplete — TL data shows 60 distinct sponsors over 131 videos; top missing are War Thunder (7), Boot.dev (6), DeleteMe (6)…"*. Instead, a recent run produced exactly that analytical content **as a free-floating markdown table in chat** — no FilterSet emitted, no columns picked, no widgets, no save option. The analytical insight is welcome as a takeaway; it is **not** a substitute for the report. If you find yourself replying with a markdown table directly, ask: am I about to ship a Phase-4 preview, or am I bypassing the phases? The answer must always be the former.
 23. **No ad-hoc data-engineering pipelines.** The skill does NOT write Python consolidation scripts, multi-stage CSV merge tools, dedupe scripts, false-positive filters as standalone files, or any other custom data pipeline as part of producing the deliverable. The data plane is fixed: `tl db pg` (PG), `tl db es` (ES), `tl db fb` (Firebolt). Phase 2 issues queries against these directly to compose a FilterSet and validate it; that's the entire data-side surface. A real aviation/non-MSN run produced this anti-pattern: the agent issued five separate PG queries each writing a CSV (`/tmp/aviation_by_name.csv`, `/tmp/aviation_desc.csv`, `/tmp/aviation_desc2.csv`, `/tmp/aviation_desc3.csv`, `/tmp/aviation_pilot_desc.csv`), wrote a `consolidate_aviation.py` script to merge + dedupe + filter false positives, hit a Windows-vs-Linux `/tmp/` path mismatch, debugged it with `cygpath`, eventually rewrote the script to use `%LOCALAPPDATA%\Temp`, then produced `aviation_consolidated.csv` as the "full list". **None of this is the skill's job.** The right shape: one ES query with `terms` / `bool.should` filters covering the niche keywords + the `creator_countries` filter + `msn_channels_only: false` + `is_active: true` → get count + sample → emit the FilterSet → preview. If the skill's narration is starting to read like a data engineer's bash session ("Run consolidation script", "Try /tmp path resolution", "Resolve /tmp via cygpath", "Find where /tmp files actually are"), stop — the skill has gone off the rails. Restart from Phase 1 with a single composed query.
 
 ## Follow-Up Interactions
