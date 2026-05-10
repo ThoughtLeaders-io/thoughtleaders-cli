@@ -455,10 +455,17 @@ def update_report(
 
     The "-" positional is a sentinel meaning "use a flag instead." Use the
     flag forms when the patch contains apostrophes, dollar signs, or
-    backticks — file transport sidesteps shell quoting entirely. The
-    create command (`tl reports create`) accepts the same three input
-    shapes (with prompt as the positional sentinel), so the agent-side
-    flow can use one consistent invocation pattern across save and edit.
+    backticks — file transport sidesteps shell quoting entirely.
+
+    Update and `tl reports create` BOTH accept --config-file, so the agent-
+    side flow can use the file-transport pattern in both. The CLI shapes
+    are NOT identical: create has an optional positional `prompt` and three
+    mutually-exclusive sources (prompt, --config, --config-file); update
+    has a required positional that takes a JSON string OR a "-" sentinel
+    that opts into flag-based input. The "-" sentinel is update-only; do
+    NOT pass `tl reports create - --config-file ...` — create rejects
+    that as "exactly one of: prompt, --config, --config-file" because
+    `-` is interpreted as the prompt and --config-file is also set.
 
     Unknown fields are rejected with a 400 listing the offending key.
     """
