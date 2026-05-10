@@ -408,7 +408,7 @@ There is no fifth phase. Phase 4's output IS the deliverable. The skill itself n
 >
 > **The JSON config never appears in chat in either path.** In save mode it lives in the portable-temp transport file; in preview mode it stays in working memory. JSON in chat is implementation noise and a regression we already shipped a fix for once.
 >
-> **Edits** to a saved report use `tl reports update <id> '<json>'` — same shell-quoting caveat as save: when the patch contains apostrophes, write to a portable temp file (resolved at runtime per step 1) and use `tl reports update <id> "$(cat <that-path>)"`. Don't tell users to paste JSON into the platform UI; that's an obsolete pre-v0.6.12 fallback.
+> **Edits** to a saved report use `tl reports update <id> - --config-file <path>` — the `-` positional is the sentinel that opts into flag-based input; the patch lives in a portable temp file (same file-transport pattern as save). For tiny patches without apostrophes the shorter `tl reports update <id> '<json>'` positional form also works, but the file-transport shape is the safe default — see the **Editing a saved report** subsection for the full mechanics. Don't tell users to paste JSON into the platform UI; that's an obsolete pre-v0.6.12 fallback.
 >
 > **Reads via `tl db es` / `tl db pg` (engine routed by report type — see Step 2.V1), writes via the CLI** is the architectural split.
 
