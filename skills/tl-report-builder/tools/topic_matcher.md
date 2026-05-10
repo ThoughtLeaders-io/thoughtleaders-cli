@@ -24,6 +24,10 @@ The orchestration injects two values:
    ```
    The topics list changes over time; never assume a fixed count or fixed IDs.
 
+### How to fetch the topics
+
+The fetch query, the column list, and the negative-column regression markers all live in the canonical Postgres-schema reference in the `tl-cli:tl` skill: **[`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy)**. Schema-shaped facts belong in that reference, not in tool text. Use the verbatim fetch query documented there. **Do not restate or paraphrase the schema here.** If you find yourself about to type `SELECT … FROM thoughtleaders_topics …` from memory, stop and consult the reference file instead. This tool's job is to score topics against the user query; the schema reference's job is to say what the underlying table looks like.
+
 ---
 
 ## Output schema (strict)
