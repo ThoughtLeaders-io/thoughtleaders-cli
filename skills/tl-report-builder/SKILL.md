@@ -205,6 +205,14 @@ Same architecture, different intent. The prompt is exploratory; the policy says 
 
 If the user replies *"yes save it"* or *"save"* → run the save step (resolve a portable temp path → write → verify → invoke `tl reports create --config-file <that-exact-path> --yes`; see Save-or-preview policy step 1+2 for the full mechanics) using the **same config that's already in working memory**. Don't re-run Phases 1–4. The follow-up reply is just the takeaways + saved-report link.
 
+### Editing a saved report (post-save follow-up)
+
+If the user follows a save with *"add a filter for X"* / *"change the date range to Y"* / *"remove the language filter"* / *"also include Z"* — that's an **edit**, not a re-save. Run `tl reports update <report_id> '<json patch>'` against the report you just created (the id is in the save response). Use a portable temp file for the patch when it contains apostrophes (same shell-quoting mechanics as save). Patch shape is the FilterSet fields you're changing — e.g., `{"filterset": {"msn_channels_only": true}}`.
+
+**Hard rule — do NOT fabricate a CLI limitation to justify creating a new report.** The FilterSet IS editable via the CLI. The path is `tl reports update`. Verbatim regression marker (real run, fitness/wellness MSN-filter follow-up): the agent told the user *"The FilterSet on a saved report isn't editable via the CLI — only columns, widgets, title, etc. can be patched"* and then created a duplicate report. That's a fabrication — `tl reports update` accepts FilterSet patches. Never assert the negative. If the patch shape isn't obvious, ask the user *"can you confirm the change you want?"* — never invent a constraint.
+
+**MSN filtering — pinned to the FilterSet field.** When the user says *"msn only"* / *"our network"* / *"media selling network"*, the FilterSet patch is `{"filterset": {"msn_channels_only": true}}` — the boolean field documented in `references/intelligence_filterset_schema.json` (line 307) and listed as an intent override (line 379). Verbatim regression marker (same fitness/wellness run): the agent put `media_selling_network_join_date` filtering into the saved FilterSet, which is a PG column on `thoughtleaders_channel`, NOT a FilterSet field. The platform silently ignored it; the resulting report was unfiltered. **`media_selling_network_join_date` is for VALIDATION counts via `tl db pg` / `tl db es` (where presence-not-null = MSN member), not for FilterSet patches.** The FilterSet field is always `msn_channels_only: true`.
+
 What changes between save-mode and preview-mode:
 
 | | Save (explicit intent) | Preview (default) |
