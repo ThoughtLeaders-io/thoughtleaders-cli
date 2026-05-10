@@ -477,13 +477,28 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 **How to fetch the live topics**: see the `tl-cli:tl` skill's Postgres-schema reference — [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). That's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
-**Narrow-first keyword assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable keyword set first**, then validate. Expand only if the count is below the type's narrow threshold. Concretely:
+**Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on real LATAM-shape runs**:
 
-- **For topic-strong matches**: include only the FIRST 2–3 keywords from `topic.keywords[]` (head terms) in the initial FilterSet — NOT the entire array. The curated keyword array is sorted head-to-long-tail; the head 2–3 carry most of the recall while the long-tail terms are noise-prone in non-English markets (real LATAM cooking case: `topic.keywords` for Cooking includes head terms like `"cooking"` and `"recipes"` plus long-tail like `"food"`, `"comida"`, `"chef"`, `"gastronomia"`. Including all of them in the initial query hit ~5,700 channels with 60% noise; a head-only initial query would have hit ~1,300 with 80% signal in one cycle.)
-- **For `keyword_research` outputs**: include only the `core_head` tier (2–4 terms) in the initial FilterSet. `sub_segment` and `long_tail` tiers are validation candidates that *can* be added on expansion, NOT default inclusions.
-- **Expansion trigger**: if the initial FilterSet's `db_count` is below the narrow threshold for the report type (Type 3: < 50 channels; Type 1/2: < 100 results), expand the keyword set by appending the next tier (sub_segment for keyword_research; the next 3–5 entries from `topic.keywords[]` for topic-strong) and revalidate. **One expansion step max** — same calibration as the retry cap above.
+**Lever 1 (HIGHEST impact) — Field selection (Type 3 / channel discovery)**
 
-This ordering is opposite of the historical "broad → tighten" pattern. The historical pattern was the dominant time sink in LATAM-shape runs (multi-language niche, cooking/wellness territory) because the broad-first variant requires 2–3 narrowing cycles to get to a clean count, while narrow-first requires 0–1 expansion cycles. Net win: 1–3 minutes per noisy-niche run.
+The initial FilterSet's `content_fields` for Type 3 MUST be `["name", "channel_description"]` ONLY. Do NOT include `ai.description` or `ai.topic_descriptions` on the first cycle. AI-summarized fields list every topic a channel touches — including incidental mentions — so a music channel that ran one kid-cooking video will match `ai.topic_descriptions: "...cooking..."` and pollute the result. Channel's own `name` + `channel_description` answer "is this channel ABOUT cooking?" — AI fields answer "does this channel ever mention cooking?". For channel-discovery intent, the former is signal and the latter is noise.
+
+Calibration source — LATAM cooking real run, cycle 3 (the "good" cycle): same 7 keywords as the noisy cycle 2, but `content_fields` reduced from 4 fields (incl. AI) to 2 fields (`name` + `channel_description` only). Result went from 4,050 noisy → 1,350 signal-rich (80% on-target) in a single cycle. **The field-selection win was bigger than the keyword-count win.** Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 50 channels).
+
+**Lever 2 — Keyword selection**
+
+For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets). Drop generic-overlap terms (e.g. for cooking outside English-only context: drop `"food"`, `"chef"`, `"comida"` — they match too many lifestyle/family channels; keep cooking-specific terms `"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`).
+
+For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
+
+**Expansion trigger**: if the initial FilterSet's `db_count` is below the narrow threshold (Type 3: < 50 channels; Type 1/2: < 100 results), expand in this order:
+
+1. **First expansion**: add `ai.description` and `ai.topic_descriptions` to `content_fields`. (Cheaper expansion — just opens the search surface; usually enough.)
+2. **Second expansion** (only if still narrow): append more keywords (the `long_tail` tier from keyword_research, or the next 3–5 entries from `topic.keywords[]`).
+
+**One expansion cycle max** — same calibration as the retry cap above. After one expansion, surface to the user via `alternatives` if still narrow.
+
+**Why field-selection-first matters more than keyword-count-first**: in the historical broad-first pattern, the LATAM run took 3 narrowing cycles (~3+ min) because the first 2 cycles tightened keywords without addressing the AI-fields noise source. Cycle 3 finally tightened fields and converged. Doing fields first (lever 1) reaches the cycle-3 shape immediately; the keyword-count axis (lever 2) is a second-order adjustment.
 
 ### T2 — `tools/keyword_research.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
