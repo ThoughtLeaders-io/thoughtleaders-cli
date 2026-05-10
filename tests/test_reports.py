@@ -131,3 +131,49 @@ class TestUpdateArgValidation:
         result = runner.invoke(app, ["update", "12345", '"just a string"'])
         assert result.exit_code == 1
         assert "json object" in (result.stderr or result.output).lower()
+
+    def test_positional_with_config_flag_rejected(self) -> None:
+        # If positional fields is real JSON (not '-'), flag args are mutually
+        # exclusive — agent must pass '-' as the sentinel to opt into flags.
+        result = runner.invoke(
+            app,
+            ["update", "12345", '{"a": 1}', "--config", '{"b": 2}'],
+        )
+        assert result.exit_code == 1
+        assert "pass '-'" in (result.stderr or result.output).lower()
+
+    def test_dash_positional_without_any_flag_rejected(self) -> None:
+        # '-' opts into flag mode but neither --config nor --config-file given.
+        result = runner.invoke(app, ["update", "12345", "-"])
+        assert result.exit_code == 1
+        assert "exactly one" in (result.stderr or result.output).lower()
+
+    def test_dash_positional_with_both_flags_rejected(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "patch.json"
+        cfg.write_text('{"title": "x"}', encoding="utf-8")
+        result = runner.invoke(
+            app,
+            ["update", "12345", "-", "--config", '{"a": 1}', "--config-file", str(cfg)],
+        )
+        assert result.exit_code == 1
+        assert "exactly one" in (result.stderr or result.output).lower()
+
+    def test_dash_positional_with_missing_file_rejected(self, tmp_path: Path) -> None:
+        missing = tmp_path / "does-not-exist.json"
+        result = runner.invoke(app, ["update", "12345", "-", "--config-file", str(missing)])
+        assert result.exit_code == 1
+        assert "could not read" in (result.stderr or result.output).lower()
+
+    def test_dash_positional_with_file_invalid_json_rejected(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "broken.json"
+        cfg.write_text("{not json", encoding="utf-8")
+        result = runner.invoke(app, ["update", "12345", "-", "--config-file", str(cfg)])
+        assert result.exit_code == 1
+        assert "json object" in (result.stderr or result.output).lower()
+
+    def test_dash_positional_with_file_non_object_rejected(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "array.json"
+        cfg.write_text("[1, 2, 3]", encoding="utf-8")
+        result = runner.invoke(app, ["update", "12345", "-", "--config-file", str(cfg)])
+        assert result.exit_code == 1
+        assert "json object" in (result.stderr or result.output).lower()

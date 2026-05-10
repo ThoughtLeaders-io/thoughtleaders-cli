@@ -418,22 +418,85 @@ def create_report(
 @app.command("update")
 def update_report(
     report_id: int = typer.Argument(..., help="Report ID"),
-    fields: str = typer.Argument(..., help='JSON object of fields to update'),
+    fields: str = typer.Argument(
+        ...,
+        help='JSON patch as a string (e.g. \'{"title":"New"}\'). Pass "-" to use --config-file or --config instead.',
+    ),
+    config_json: str | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "Patch as JSON, passed as a flag instead of a positional arg. "
+            "Use when the positional shell-quoting is awkward. Requires the "
+            "positional argument to be '-' (the sentinel for 'use a flag instead')."
+        ),
+    ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config-file",
+        help=(
+            "Path to a file containing the patch as JSON. Use this when the "
+            "patch contains characters that are awkward to shell-escape "
+            "(apostrophes in titles or keywords, dollar signs, backticks). "
+            "File transport sidesteps shell quoting entirely. Requires the "
+            "positional argument to be '-' (the sentinel for 'use a flag instead')."
+        ),
+    ),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Update a saved report.
 
+    Three ways to pass the patch — pick the most convenient for your shell:
+
+        tl reports update 12345 '{"title": "New title"}'                    # positional (small patches)
+        tl reports update 12345 - --config '{"filterset": {...}}'           # --config flag
+        tl reports update 12345 - --config-file /tmp/patch.json             # file transport
+
+    The "-" positional is a sentinel meaning "use a flag instead." Use the
+    flag forms when the patch contains apostrophes, dollar signs, or
+    backticks — file transport sidesteps shell quoting entirely. The
+    create command (`tl reports create`) accepts the same three input
+    shapes (with prompt as the positional sentinel), so the agent-side
+    flow can use one consistent invocation pattern across save and edit.
+
     Unknown fields are rejected with a 400 listing the offending key.
     """
+    using_flag = fields == "-"
+    if using_flag:
+        # Flag-based input: exactly one of --config / --config-file.
+        sources_provided = sum(x is not None for x in (config_json, config_file))
+        if sources_provided != 1:
+            err.print(
+                "[red]With '-' positional, provide exactly one of: --config '<json>' or --config-file <path>.[/red]"
+            )
+            raise typer.Exit(1)
+        if config_file is not None:
+            try:
+                with open(config_file, encoding="utf-8") as fh:
+                    patch_text = fh.read()
+            except OSError as exc:
+                err.print(f"[red]Could not read --config-file: {exc}[/red]")
+                raise typer.Exit(1)
+        else:
+            patch_text = config_json  # type: ignore[assignment]  # validated above
+    else:
+        # Positional JSON: flags are mutually exclusive.
+        if config_json is not None or config_file is not None:
+            err.print(
+                "[red]Pass '-' as the positional argument when using --config or --config-file.[/red]"
+            )
+            raise typer.Exit(1)
+        patch_text = fields
+
     fmt = detect_format(json_output, False, False, toon_output)
     try:
-        body = json.loads(fields)
+        body = json.loads(patch_text)
     except json.JSONDecodeError as exc:
-        err.print(f"[red]Error:[/red] fields argument must be a JSON object: {exc}")
+        err.print(f"[red]Error:[/red] patch must be a JSON object: {exc}")
         raise typer.Exit(1)
     if not isinstance(body, dict):
-        err.print("[red]Error:[/red] fields argument must be a JSON object.")
+        err.print("[red]Error:[/red] patch must be a JSON object.")
         raise typer.Exit(1)
 
     client = get_client()
