@@ -251,7 +251,7 @@ USER_QUERY
 │         – db_count → threshold classify                                 │
 │         – db_sample (LIMIT 10) → sample_judge                           │
 │         – Decide: proceed | retry | alternatives | fail                 │
-│         – Retry with feedback to T1/T2 (cap 3) on empty/too_broad       │
+│         – Retry with feedback to T1/T2 (cap 1) on empty/too_broad       │
 │                                                                          │
 │   ┌─── Conditional Tool Invocation (within Phase 2 only) ─────────────┐ │
 │   │   T1  tools/topic_matcher.md           — fires per criteria       │ │
@@ -476,6 +476,14 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 **Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
 **How to fetch the live topics**: see the `tl-cli:tl` skill's Postgres-schema reference — [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). That's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
+
+**Narrow-first keyword assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable keyword set first**, then validate. Expand only if the count is below the type's narrow threshold. Concretely:
+
+- **For topic-strong matches**: include only the FIRST 2–3 keywords from `topic.keywords[]` (head terms) in the initial FilterSet — NOT the entire array. The curated keyword array is sorted head-to-long-tail; the head 2–3 carry most of the recall while the long-tail terms are noise-prone in non-English markets (real LATAM cooking case: `topic.keywords` for Cooking includes head terms like `"cooking"` and `"recipes"` plus long-tail like `"food"`, `"comida"`, `"chef"`, `"gastronomia"`. Including all of them in the initial query hit ~5,700 channels with 60% noise; a head-only initial query would have hit ~1,300 with 80% signal in one cycle.)
+- **For `keyword_research` outputs**: include only the `core_head` tier (2–4 terms) in the initial FilterSet. `sub_segment` and `long_tail` tiers are validation candidates that *can* be added on expansion, NOT default inclusions.
+- **Expansion trigger**: if the initial FilterSet's `db_count` is below the narrow threshold for the report type (Type 3: < 50 channels; Type 1/2: < 100 results), expand the keyword set by appending the next tier (sub_segment for keyword_research; the next 3–5 entries from `topic.keywords[]` for topic-strong) and revalidate. **One expansion step max** — same calibration as the retry cap above.
+
+This ordering is opposite of the historical "broad → tighten" pattern. The historical pattern was the dominant time sink in LATAM-shape runs (multi-language niche, cooking/wellness territory) because the broad-first variant requires 2–3 narrowing cycles to get to a clean count, while narrow-first requires 0–1 expansion cycles. Net win: 1–3 minutes per noisy-niche run.
 
 ### T2 — `tools/keyword_research.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
@@ -1209,7 +1217,7 @@ Decision based on judgment:
 - `looks_wrong` → `decision: "alternatives"` — Mode-B follow-up to user (save anyway / refine / cancel). Skip Phase 3 + Phase 4.
 - `uncertain` → `decision: "alternatives"` favoring "Refine" — surface ambiguity rather than ship silently.
 
-### Step 2.V5 — Retry orchestration (cap: 3)
+### Step 2.V5 — Retry orchestration (cap: 1)
 
 When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever upstream signal produced the failing FilterSet:
 
@@ -1218,10 +1226,16 @@ When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever
 | Matched topics → `keywords` field | re-compose FilterSet with broader keywords from `topic.keywords[]` (beyond head) or relax operator AND→OR | `{issue, suggestion, previous_filterset}` |
 | `keyword_research` output | re-invoke T2 with the failing keywords + retry hint | `{issue, suggestion}` |
 
-Cap at **3 retries total**. After 3, `decision: "fail"` with diagnostic — better to honestly fail than infinite-loop.
+Cap at **1 retry**. After 1 retry, if the second cycle still returns `empty` or `too_broad`, emit `decision: "alternatives"` and surface the count + the failing FilterSet to the user — let them pick refine / save anyway / cancel.
 
-**What does NOT trigger retry**:
-- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`.
+**Why 1, not 3** (calibration source — fitness/wellness and LATAM cooking real runs):
+- Each retry costs **30–90 seconds** of full Phase 2c → Phase 3 cycle (LLM compose + ES count + ES sample + sample_judge LLM).
+- After the first retry, if the count is *still* empty/too_broad, the underlying failure shape is almost always **data sparsity / inherent niche-language noise** — not a shape issue further iteration can fix. The 2nd and 3rd retries usually fail the same way as the first, costing 60–180s for the same signal.
+- One real LATAM cooking run did three keyword-refinement cycles (broad → tighter → AI-anchored → name+description-only); cycles 2 and 3 each saved ~10% noise but added 60s+ each. The user value of "10% less noise on the long tail" is small; the cost of 2+ extra minutes is large. Better to surface the noise and let the user decide.
+- The shape-mismatch case (which retry IS valuable for — wrong AND/OR, missing field) is almost always caught on the first retry. So 1 retry catches the only failure mode where iteration helps; capping at 1 just bails on the failure modes where iteration doesn't.
+
+**What does NOT trigger retry** (unchanged):
+- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`. **A noisy spot-check is NOT a license for the agent to self-initiate a keyword-refinement loop** — the LATAM cooking run produced `looks_wrong → tighten → re-validate → looks_wrong → tighten → re-validate` cycles outside the official retry path, costing ~3 minutes. If the first sample looks noisy, surface it via `alternatives`; do not silently iterate.
 - `db_count` in `narrow` (1–4) — proceed with warning; retry would lose the small but real signal.
 
 ### Step 2.V6 — Compose decision output
