@@ -270,6 +270,7 @@ Common hallucinations the agent has tried in real runs (each wasted a round-trip
 Cited regression markers from real runs:
 - AI/marketing channels run: tried `thoughtleaders_topic` (singular — table doesn't exist), then `WHERE is_active = TRUE`. Three round-trips before consulting `information_schema`.
 - Travel/digital-nomad run: tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(...)`.
+- **Name-pattern WHERE-clause loop (general pattern)**: when the user's niche has no obvious curated topic, agents have run progressively broader name-pattern `WHERE` queries against this table — typically two or three rounds of `WHERE name ILIKE '%<term1>%' OR name ILIKE '%<term2>%' OR ...`, sometimes interleaved with an `information_schema.columns` inspection between them — each returning zero rows. The correct path is one canonical fetch (above) + the matcher's `summary.no_match: true` verdict for the off-taxonomy case. **A zero-row canonical fetch (no WHERE clause) is a data-plane failure, NOT off-taxonomy** — surface the failure rather than silently falling through to keyword_research.
 
 If a query against this table errors with *"column '\<X\>' does not exist"*, that's the regression marker — go back to the verbatim fetch above.
 

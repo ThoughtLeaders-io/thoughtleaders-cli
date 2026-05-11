@@ -26,7 +26,23 @@ The orchestration injects two values:
 
 ### How to fetch the topics
 
-The fetch query, the column list, and the negative-column regression markers all live in the canonical Postgres-schema reference in the `tl-cli:tl` skill: **[`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy)**. Schema-shaped facts belong in that reference, not in tool text. Use the verbatim fetch query documented there. **Do not restate or paraphrase the schema here.** If you find yourself about to type `SELECT … FROM thoughtleaders_topics …` from memory, stop and consult the reference file instead. This tool's job is to score topics against the user query; the schema reference's job is to say what the underlying table looks like.
+Use the canonical fetch SQL from the schema reference: **[`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim)**. The table has fewer than 20 rows; client-side filtering after the full fetch is free — **filter the results in your head, not in SQL.** Column catalogue and "do not exist" markers live in the same reference; consult it when you need column-level facts.
+
+**Agent-behaviour rules** (these are agent-side, not schema-shaped — the failure modes pinned here are catalogued in the schema reference's "Cited regression markers" list):
+
+- ❌ Don't push a name-pattern `WHERE` clause into the query (e.g. `WHERE name ILIKE '%crypto%' OR name ILIKE '%web3%' OR ...`). Whatever the user said, the right path is fetch-all → match in your head.
+- ❌ Don't run `information_schema.columns` to inspect the table. If you need column names, read the schema reference linked above.
+- ❌ Don't retry the canonical fetch with broader patterns or different fields when the matcher reads the fetched rows and emits `summary.no_match: true` — that's off-taxonomy. Fall through to keyword_research (T2).
+
+**Interpreting the fetch result:**
+
+| Fetch result | Meaning | Next step |
+|---|---|---|
+| Non-empty, matcher emits ≥1 `strong` / `weak` verdict | Curated match found | Use the matched topic's `keywords[]` array in the FilterSet (topic-strong path) |
+| Non-empty, matcher emits all `none` verdicts (`summary.no_match: true`) | **Off-taxonomy** — niche has no curated topic | Fall through to keyword_research (T2) |
+| **Empty (zero rows returned)** | **Data-plane failure or empty taxonomy — NOT off-taxonomy.** The canonical fetch has no `WHERE` clause; an empty result means either the table is empty, the database returned an error, or the request was truncated. | Surface the failure rather than silently falling through to T2. If a re-fetch also returns empty, escalate to the user — silently bypassing curated topic matching on a real data-plane failure would mask the bug. |
+
+The "Cited regression markers" section in the schema reference catalogues the anti-pattern shapes that have occurred in practice. Read it when you recognise the failure-mode shape in your own output.
 
 ---
 
