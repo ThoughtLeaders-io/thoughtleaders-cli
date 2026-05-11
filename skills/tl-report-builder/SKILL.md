@@ -111,7 +111,7 @@ Compose 4–7 of these into a short bulleted summary directly in chat. Use the u
 | Save failure | "Couldn't save the report: <plain-English reason>" — surface the CLI's stderr verbatim if it's user-readable, otherwise summarise |
 | User says "save" / "yes save it" / "save it" after a preview | "Saving…" — re-use the config from working memory; do NOT re-run Phases 1–4 |
 | Mode B follow-up (looks_wrong) | "The top results don't look right — here are your options…" |
-| Mode C (3 retries exhausted) | "I couldn't build a sensible result for this — here's what I tried…" |
+| Mode C (1 retry exhausted on empty/too_broad; data shape genuinely doesn't fit) | "I couldn't build a sensible result for this — here's what I tried…" |
 
 **Report-type → user-facing label**:
 
@@ -274,7 +274,7 @@ USER_QUERY
 │        timed out — confirm narrowing with the user                     │
 │      • Validation: sample_judge returned looks_wrong → Mode B prompt   │
 │        (save anyway / refine / cancel)                                 │
-│      • Validation: 3 retries exhausted on empty/too_broad → fail mode  │
+│      • Validation: 1 retry exhausted on empty/too_broad → alternatives │
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  validated schema
                                    ▼
@@ -481,13 +481,13 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 
 **Lever 1 (HIGHEST impact) — Field selection (Type 3 / channel discovery)**
 
-The initial FilterSet's `content_fields` for Type 3 MUST be `["name", "channel_description"]` ONLY. Do NOT include `ai.description` or `ai.topic_descriptions` on the first cycle.
+The initial FilterSet's `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Use the schema enum values verbatim — these are the platform-recognised content-field names from `intelligence_filterset_schema.json`. The FilterSet rejects unknown values.)
 
-The mechanism: AI-summarized fields catalogue **every topic a channel has ever touched** — including incidental mentions, format crossovers, and adjacent-niche tags. A channel whose primary niche is X but that ran one video about Y will still match queries against `ai.topic_descriptions` for Y. For channel-discovery intent, that's pure noise: you wanted channels *about* Y, not channels that *once mentioned* Y. Channel's own `name` + `channel_description` answer the channel-discovery question (*"is this channel ABOUT the niche?"*); AI fields answer a strictly broader question (*"has this channel ever mentioned the niche?"*) that surfaces too many false positives at discovery time.
+The mechanism: the two AI-summarised content fields (`channel_description_ai`, `channel_topic_description`) catalogue **every topic a channel has ever touched** — including incidental mentions, format crossovers, and adjacent-niche tags. A channel whose primary niche is X but that ran one video about Y will still match queries against `channel_topic_description` for Y. For channel-discovery intent, that's pure noise: you wanted channels *about* Y, not channels that *once mentioned* Y. The channel's own `channel.channel_name` + `channel_description` answer the channel-discovery question (*"is this channel ABOUT the niche?"*); the AI-summarised fields answer a strictly broader question (*"has this channel ever mentioned the niche?"*) that surfaces too many false positives at discovery time.
 
-Mechanism implication — **once `content_fields` is right, even a broad keyword set converges; even a tight keyword set produces noisy results with AI fields included.** Field selection is the bigger dial; keyword pruning is the fine-tune. Restricting fields first reaches a clean count in one cycle; pruning keywords without addressing the AI-fields noise source typically takes 2–3 narrowing cycles.
+Mechanism implication — **once `content_fields` is right, even a broad keyword set converges; even a tight keyword set produces noisy results with the AI-summarised fields included.** Field selection is the bigger dial; keyword pruning is the fine-tune. Restricting fields first reaches a clean count in one cycle; pruning keywords without addressing the AI-fields noise source typically takes 2–3 narrowing cycles.
 
-*Regression-marker anchor — multilingual niche-language preview (LATAM cooking, several thousand candidates)*: the cycle that finally converged kept the same keyword set as the previous noisy cycle but reduced `content_fields` from 4 fields (incl. AI) to 2 (`name` + `channel_description` only). Result went from ~4,000 noisy → ~1,350 signal-rich (80% on-target) in a single pass — bigger gain than the prior keyword-pruning cycles delivered combined. The principle is general (applies to fitness/wellness, beauty, aviation, any niche-discovery preview where channels cross over into adjacent topics); LATAM cooking is the run that calibrated it.
+*Regression-marker anchor — multilingual niche-language preview (LATAM cooking, several thousand candidates)*: the cycle that finally converged kept the same keyword set as the previous noisy cycle but reduced `content_fields` from 4 fields (incl. the two AI-summarised ones) to 2 (`channel.channel_name` + `channel_description` only). Result went from ~4,000 noisy → ~1,350 signal-rich (80% on-target) in a single pass — bigger gain than the prior keyword-pruning cycles delivered combined. The principle is general (applies to fitness/wellness, beauty, aviation, any niche-discovery preview where channels cross over into adjacent topics); LATAM cooking is the run that calibrated it.
 
 Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 50 channels) — that's the expansion path that re-opens the broader recall, not the default starting shape.
 
@@ -501,12 +501,9 @@ Drop **generic-overlap terms** — head terms that match the niche literally but
 
 For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
 
-**Expansion trigger**: if the initial FilterSet's `db_count` is below the narrow threshold (Type 3: < 50 channels; Type 1/2: < 100 results), expand in this order:
+**Expansion trigger** (strictly one validation cycle, no second attempt): if the initial FilterSet's `db_count` is below the narrow threshold (Type 3: < 50 channels; Type 1/2: < 100 results), do **one** expansion step — add `channel_description_ai` and `channel_topic_description` to `content_fields` (the schema enum values). This opens recall to the AI-summarised surface. After this single expansion cycle, if the count is still narrow OR if it overshoots, do NOT compose another FilterSet — emit `decision: "alternatives"` and surface to the user with the count + the failing shape. Further widening (keyword changes, threshold relaxation) is the user's call via the alternatives prompt, not skill-side iteration.
 
-1. **First expansion**: add `ai.description` and `ai.topic_descriptions` to `content_fields`. (Cheaper expansion — just opens the search surface; usually enough.)
-2. **Second expansion** (only if still narrow): append more keywords (the `long_tail` tier from keyword_research, or the next 3–5 entries from `topic.keywords[]`).
-
-**One expansion cycle max** — same calibration as the retry cap above. After one expansion, surface to the user via `alternatives` if still narrow.
+Why one and not two: field-set expansion is the high-leverage lever (re-opens AI-summarised recall); a follow-up keyword-set expansion adds 30–90s of LLM + ES round-trip for marginal extra recall, contradicting the speed-up goal. If field-expansion alone doesn't reach the narrow threshold, the underlying issue is data sparsity in this niche — a second skill-side cycle won't fix that; user judgment will.
 
 **Why field-selection-first matters more than keyword-count-first**: the historical broad-first pattern fails specifically because cycles 1 and 2 typically tighten keywords without addressing the AI-fields noise source — only when fields finally get tightened (often cycle 3 or later) does the result converge. Doing fields first (lever 1) reaches the converged shape immediately; the keyword-count axis (lever 2) is a second-order adjustment that fine-tunes within an already-clean field set. The calibration run that proved this in production (LATAM cooking, ~3 minutes wasted in cycles 1–2) is documented above; the principle applies to any niche-discovery preview where AI-summarized fields cross over into adjacent topics.
 
@@ -618,6 +615,8 @@ Compose an ES search body. The index is fixed server-side; the client only sends
 ```
 
 The `must` array carries one `multi_match` entry per keyword, combined per `keyword_operator`: AND → list every `multi_match` inside `must` (each is required); OR → move them to a sibling `should` array and add `"minimum_should_match": 1`. The example above shows the single-keyword case; multi-keyword extensions follow that pattern.
+
+> ⚠️ **The `fields` array inside `multi_match` uses ES document field paths**, NOT the FilterSet `content_fields` enum values. ES uses `["name", "description", "ai.description", "ai.topic_descriptions"]`; the FilterSet enum (documented in [Lever 1 — Field selection](#lever-1-highest-impact--field-selection-type-3--channel-discovery) above and in [`intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json)) uses `["channel.channel_name", "channel_description", "channel_description_ai", "channel_topic_description"]`. They're two different APIs touching the same underlying data — keep them distinct when composing the validation query vs the FilterSet emission.
 
 For `db_count` on type 3: read `aggregations.distinct_channels.value`, NOT `total`. The `total` field counts documents (channel-doc duplicates included); `distinct_channels` counts unique channel IDs.
 
@@ -1589,7 +1588,7 @@ Every phase has explicit conditions where it must pause and ask the user, rather
 | **2** | T4 returned ambiguous name resolution (>1 active candidate per name) | "Which one of these did you mean?" + option list |
 | **2** | T3 cross-reference returned unexpectedly large or zero result set | "The preliminary query matched [N] entities — narrow the date range or status filter?" |
 | **2** | Validation: sample_judge returned `looks_wrong` (G11-class noise) | Mode B prompt: save anyway / refine / cancel — plain English only, citing 2–3 specific sample names; never expose internal terms (phase numbers, tool names, `validation_concerns`, `db_count`, `looks_wrong`). See "User-facing rendering (Mode B)" in the Phase 2 section. |
-| **2** | Validation: 3 retries exhausted on empty/too_broad | Surface diagnostic + suggest the user reformulate the request |
+| **2** | Validation: 1 retry exhausted on empty/too_broad | Emit `decision: "alternatives"` — surface the count + failing shape; let the user choose refine / save anyway / cancel. Skill does NOT chain further validation cycles. |
 | **3** | Column template + extra columns the user listed differ from each other | "Use the template's columns, the columns you listed, or both?" |
 | **3** | Selected columns incompatible (e.g., requested `Views` on a type 3 report) | "[column] isn't available for [report type]; closest is [alternative]" |
 | **3** | No columns provided AND no clear intent | "I'll use [type]'s default set unless you want a different focus (outreach / discovery / sponsorship-pitch)" |
