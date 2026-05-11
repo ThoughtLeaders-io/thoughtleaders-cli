@@ -1,0 +1,23 @@
+{
+  "_placeholder": true,
+  "_status": "Milestone 1 — placeholder. Awaiting initial sync.",
+  "_schema_version": "v1",
+  "_synced_from": "create-report skill's data/sortable_columns.json (platform repo)",
+  "_sync_instructions": [
+    "1. From the platform repo, copy .claude/skills/create-report/data/sortable_columns.json into this file.",
+    "2. The Column / Widget Builder (prompts/column_widget_builder.md, Milestone 5) reads this file to know which columns are sortable, default sort direction, and display labels.",
+    "3. Re-sync whenever the platform's column metadata changes. Until a tl-side schema endpoint exposes this, the sync is manual.",
+    "4. The skill should fall back to `tl describe show <resource> --json` for any column not present in this file — don't hard-fail."
+  ],
+  "_expected_shape": {
+    "<resource>": {
+      "<column_key>": {
+        "label": "<human-readable label>",
+        "sortable": true,
+        "default_sort": "asc | desc",
+        "type": "string | number | date | enum"
+      }
+    }
+  },
+  "columns": {}
+}
