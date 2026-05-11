@@ -98,10 +98,25 @@ Every data query costs credits (rates vary by resource). `tl describe` shows rat
 
 ## Version Bumps
 
-The version string is defined in three files and all three must be updated together:
+The version string is defined in three files and all three must be updated together when a bump happens:
 - `pyproject.toml` — `version = "x.y.z"`
 - `.claude-plugin/plugin.json` — `"version": "x.y.z"`
 - `src/tl_cli/__init__.py` — `__version__ = "x.y.z"`
+
+### Where the bump goes — main, NOT the PR branch
+
+**Do not bump the version in a PR branch.** Version bumps land on `main` as a separate dedicated commit, made by whoever is cutting the release, immediately before tagging.
+
+Rationale: when multiple PRs are open at the same time, each pre-claiming a version number, merging them in different orders produces stale-version conflicts (PR A bumps to 0.6.22 → merges → main is 0.6.22; PR B was also bumping to 0.6.22 → needs rebase to 0.6.23; if PR B sat for a while, by the time it lands main might be 0.6.24 already). The fix is to keep PR branches version-neutral: PRs contain only the substantive change; the version-bump commit is owned by the release flow on main.
+
+What this means in practice:
+
+- **Opening a PR**: leave `pyproject.toml`, `.claude-plugin/plugin.json`, and `src/tl_cli/__init__.py` unchanged. The PR's diff against main should not touch those three files.
+- **Naming a PR**: use a descriptive title (`hotfix: scrub Campaign jargon`, `speed-up: retry cap + narrow-first`) rather than a version-claiming title (`v0.6.22: …`). The actual version assigned at release time is the release-cutter's call.
+- **Cutting a release** (release-cutter only, on `main` after the substantive PRs have merged): make one commit titled `vX.Y.Z: bump version` that updates all three files, then tag `vX.Y.Z` against that commit. Push the tag.
+- **Stacking PRs**: stacked PRs don't need to coordinate version numbers — the entire stack lands version-neutral, and the release-cutter bumps once on main covering all the changes in the stack.
+
+If you find yourself about to edit any of the three version files in a PR branch, stop. That file goes to main with the release commit, not to the PR.
 
 ## Important Constraint
 
