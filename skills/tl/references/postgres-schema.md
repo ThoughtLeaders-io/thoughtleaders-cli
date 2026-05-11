@@ -270,6 +270,7 @@ Common hallucinations the agent has tried in real runs (each wasted a round-trip
 Cited regression markers from real runs:
 - AI/marketing channels run: tried `thoughtleaders_topic` (singular — table doesn't exist), then `WHERE is_active = TRUE`. Three round-trips before consulting `information_schema`.
 - Travel/digital-nomad run: tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(...)`.
+- Norwegian crypto/Web3 run (2026-05-11): three PG queries with name-pattern WHERE clauses — `WHERE name ILIKE '%crypto%' OR ... LIMIT 20`, then `information_schema.columns LIMIT 50`, then `WHERE name ILIKE '%crypto%' OR ... OR name ILIKE '%nft%' OR name ILIKE '%defi%' LIMIT 30`. All three returned 0; 4.82 credits burnt. The off-taxonomy verdict for the crypto niche is the matcher's job — it reads the fetched topics and emits `summary.no_match: true`. **A zero-row canonical fetch (no WHERE clause) is a data-plane failure, NOT off-taxonomy** — surface the failure rather than silently falling through to keyword_research.
 
 If a query against this table errors with *"column '\<X\>' does not exist"*, that's the regression marker — go back to the verbatim fetch above.
 

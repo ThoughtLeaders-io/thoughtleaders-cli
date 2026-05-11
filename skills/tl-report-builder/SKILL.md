@@ -479,13 +479,13 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 ### T1 — `tools/topic_matcher.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
 **Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
-**How to fetch the live topics — run this exact command, one query only:**
+**How to fetch the live topics**: use the canonical fetch SQL documented at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE` clause; table has <20 rows so client-side filtering after the full fetch is free.
 
-```bash
-tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
-```
+**Agent-behaviour rules** (encoded in [`tools/topic_matcher.md`](tools/topic_matcher.md); regression markers catalogued in the schema reference's "Cited regression markers" list):
 
-Table has fewer than 20 rows — filter client-side, not in SQL. **Do NOT push name-pattern `WHERE` clauses into the query** (e.g. `WHERE name ILIKE '%crypto%' OR name ILIKE '%web3%' OR ...`); the agent has done this in multiple real runs and burnt credits + round-trips on it. Empty result from the canonical fetch = niche is off-taxonomy → fall through to keyword_research (T2). Don't retry with broader name patterns. Don't run `information_schema.columns` to inspect the table. See [`tools/topic_matcher.md`](tools/topic_matcher.md) for the full anti-pattern list and verbatim regression markers (Norwegian crypto, fitness/wellness). Column catalogue lives at [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy).
+- Don't push name-pattern `WHERE` clauses into the fetch query — agents have burnt credits + round-trips on this in multiple real runs.
+- Don't run `information_schema.columns` to inspect the table.
+- **Empty fetch ≠ off-taxonomy.** A zero-row result from the canonical (no-`WHERE`) fetch is a data-plane failure — surface it rather than silently falling through to T2. Off-taxonomy is when the fetch returns rows but the matcher emits `summary.no_match: true`.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
 **Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on noisy-niche / multilingual runs**:
