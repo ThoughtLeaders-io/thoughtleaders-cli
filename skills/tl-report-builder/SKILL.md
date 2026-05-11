@@ -541,7 +541,7 @@ Why one and not two: field-set expansion is the high-leverage lever (re-opens AI
 - Type 8 — deal sample shape ≠ channel sample shape; sample_judge is not configured for sponsorship rows.
 - Initial `db_count` is `empty` / `too_broad` — V3 routes to the Step 2.V5 retry path, not to sampling.
 - Initial `db_count` is `very_narrow` / `narrow` AND `ReportType ∈ {1, 2}` — V3 routes directly to `decision: "alternatives"`; no sample inspection because there's no Lever-1 expansion path for Types 1/2.
-- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` (or `empty` / `too_broad`), it goes to alternatives / retry respectively — sample_judge still does NOT fire. sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
+- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` — or if it's `empty` / `too_broad` — it routes to `decision: "alternatives"` per the post-expansion table; sample_judge does NOT fire. (Post-expansion empty/too_broad does NOT re-enter V5 retry — the one-cycle cap is total, not per-direction.) sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
 **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
 
 ### Phase 3 sub-tool
@@ -1214,18 +1214,33 @@ For PG queries (type 8 or smoke-check fallback):
 
 ### Step 2.V3 — Apply threshold rules
 
+The routing has two tables: **initial** (first validation cycle, all types) and **post-expansion** (Type 3 only, fires once after a Lever 1 expansion). Each cell maps a classified `db_count` to exactly one downstream action; no cell loops back to a previous step.
+
+**Initial routing** (any type, first validation cycle):
+
 | `db_count` | classification | next (Type 3) | next (Type 1 / 2) |
 |---|---|---|---|
 | 0 | `empty` | Step 2.V5 (retry — broaden) | Step 2.V5 (retry — broaden) |
-| 1–4 | `very_narrow` | **Lever 1 expansion** (one cycle: add `channel_description_ai` + `channel_topic_description`); on post-expansion `db_count`, re-enter this table | **`decision: "alternatives"`** — no skill-side expansion path for Type 1/2 |
+| 1–4 | `very_narrow` | **Lever 1 expansion** (one cycle: add `channel_description_ai` + `channel_topic_description`); on the post-expansion `db_count`, use the **post-expansion routing table below** — NOT this table | **`decision: "alternatives"`** — no skill-side expansion path for Type 1/2 |
 | 5–50 | `narrow` | **Lever 1 expansion** (same as above) | **`decision: "alternatives"`** |
 | 51–10000 | `normal` | Step 2.V4 (sample) | Step 2.V4 (sample) |
 | 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest | Step 2.V4 (sample); proceed with narrow-suggest |
 | > 50000 | `too_broad` | Step 2.V5 (retry — narrow) | Step 2.V5 (retry — narrow) |
 
-**Loop guard for the Lever 1 expansion path**: after the one-cycle expansion runs, the resulting `db_count` is re-classified on this same table. If the post-expansion bucket is still `very_narrow` / `narrow`, do NOT loop — emit `decision: "alternatives"`. The expansion is one cycle by definition (see Lever 1 above); the re-classification entry is informational, telling the orchestration where the post-expansion count lands without re-triggering expansion.
+**Post-expansion routing** (Type 3 only, after the single Lever 1 expansion cycle):
 
-The pre-`d395ae2` table said `very_narrow` / `narrow` go to *"sample; proceed with warning/note."* That was the historical universal-flow behaviour (used pre-Lever-1). The new Lever 1 rule for Type 3 replaces "proceed with warning" with "expand once first"; the Type 1/2 rule replaces it with "alternatives." Old prose elsewhere in the file describing "proceed with warning" on narrow counts is stale relative to this table — follow the table.
+| post-expansion `db_count` | classification | next |
+|---|---|---|
+| 0 | `empty` | **`decision: "alternatives"`** (no second narrowing cycle; expansion is one cycle by Lever 1's definition) |
+| 1–4 | `very_narrow` | **`decision: "alternatives"`** |
+| 5–50 | `narrow` | **`decision: "alternatives"`** |
+| 51–10000 | `normal` | Step 2.V4 (sample) |
+| 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest |
+| > 50000 | `too_broad` | **`decision: "alternatives"`** (no second narrowing cycle; the expansion overshot — emit the count and let the user decide whether to add a stricter filter) |
+
+Only `normal` and `broad` route post-expansion to sample inspection. Everything else — `empty`, `very_narrow`, `narrow`, `too_broad` — routes to `alternatives` with no further skill-side cycles. This is the unambiguous "one cycle by definition" cap from Lever 1, enforced as a table.
+
+The pre-`d395ae2` initial table said `very_narrow` / `narrow` go to *"sample; proceed with warning/note."* That was the historical universal-flow behaviour (used pre-Lever-1). The new Lever 1 rule for Type 3 replaces "proceed with warning" with "expand once first"; the Type 1/2 rule replaces it with "alternatives." Old prose elsewhere in the file describing "proceed with warning" on narrow counts is stale relative to these tables — follow the tables.
 
 ### Step 2.V4 — Run sample query, then `sample_judge`
 
