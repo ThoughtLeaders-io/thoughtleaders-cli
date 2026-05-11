@@ -321,11 +321,16 @@ USER_QUERY
 │     • Type-8: count_sponsorships, sum_price (axis branches on          │
 │       publish_status — send_date for proposals, purchase_date for sold)│
 │     • histogram_bucket_size set per date range                         │
+│     • Generate report_title + report_description from final config     │
+│       (must happen BEFORE validation — both fields are mandatory       │
+│        on save and the validation step below checks for them)          │
 │     • PERFORM FINAL JSON-SHAPE VALIDATION of the campaign config:      │
 │         – All Phase 2 + Phase 3 + Phase 4 outputs compose validly      │
 │         – API-contract pre-check (type=2 DYNAMIC, valid report_type,   │
-│           non-empty columns, sort references an emitted column)        │
-│     • Generate report_title + report_description from final config     │
+│           non-empty columns, sort references an emitted column,        │
+│           report_title ≤60 chars non-empty, report_description         │
+│           1–3 sentences non-empty — both mandatory on save; CLI        │
+│           rejects with HTTP 400 if either is missing)                  │
 │     • Compose key takeaway insights                                    │
 │                                                                          │
 │   ↘ FOLLOW-UP TRIGGERS:                                                 │
