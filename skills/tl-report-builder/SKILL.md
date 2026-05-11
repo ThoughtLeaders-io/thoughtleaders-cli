@@ -535,9 +535,13 @@ Why one and not two: field-set expansion is the high-leverage lever (re-opens AI
 
 ### Phase 2 validation sub-tool
 
-**`tools/sample_judge.md`** — fires inside Phase 2's validation step.
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND `db_count` classification is `narrow` / `normal` / `broad` (i.e., not `empty` and not `too_broad` — those go straight to retry without sample inspection).
-**Skipped when**: type 8 (deal sample shape ≠ channel sample shape) OR `db_count` was `empty` / `too_broad` (retry path).
+**`tools/sample_judge.md`** — fires inside Phase 2's validation step (Step 2.V4).
+**Fires when**: `ReportType ∈ {1, 2, 3}` AND the **post-V3-routing** `db_count` classification is `normal` (51–10000) or `broad` (10001–50000). "Post-V3-routing" means: the count actually routed to Step 2.V4 per the Step 2.V3 threshold table above — that is, either the **initial** count landed in `normal` / `broad`, OR (Type 3 only) the **post-Lever-1-expansion** count landed in `normal` / `broad`.
+**Skipped when** any of:
+- Type 8 — deal sample shape ≠ channel sample shape; sample_judge is not configured for sponsorship rows.
+- Initial `db_count` is `empty` / `too_broad` — V3 routes to the Step 2.V5 retry path, not to sampling.
+- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType ∈ {1, 2}` — V3 routes directly to `decision: "alternatives"`; no sample inspection because there's no Lever-1 expansion path for Types 1/2.
+- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` (or `empty` / `too_broad`), it goes to alternatives / retry respectively — sample_judge still does NOT fire. sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
 **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
 
 ### Phase 3 sub-tool
