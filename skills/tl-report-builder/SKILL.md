@@ -1468,7 +1468,9 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
 ### Process
 
 1. **Pick widgets via `tools/widget_builder.md`.** Inject `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, and the matching widget schema (`references/intelligence_widget_schema.json` for types 1/2/3; `references/sponsorship_widget_schema.json` for type 8). The builder emits `{ widgets, histogram_bucket_size, _widget_metadata }`. **The selection rule is: emit only widgets that add value to the user's original prompt.** A widget earns its slot if it answers a question the user implicitly cares about (intent), surfaces a metric tied to a filter the user named (niche), or shows a trend over the date scope they specified. Don't pad to hit 6 — emit fewer (down to 4) if the extras don't answer something. The builder handles type-8 axis branching and intent-driven swaps per the schema's `_tl_intent_overrides`.
-2. **FINAL JSON-shape validation pass.** Verify the composed config:
+2. **Generate `report_title` and `report_description`** from the FilterSet + the user's original NL request. Title ≤ 60 chars; description 1–3 sentences summarizing intent + key filters. **Do this BEFORE step 3's validation pass** — both fields are mandatory on save, so the validation in step 3 needs to see them populated.
+3. **FINAL JSON-shape validation pass.** Verify the composed config:
+   - **`report_title` is a non-empty string ≤ 60 chars AND `report_description` is a non-empty 1–3 sentences.** Both fields are **MANDATORY** on `tl reports create` — the CLI rejects with HTTP 400 `Missing required field: report_title` (or `report_description`) if either is missing. If step 2 (title/description generation) hasn't run yet, run it FIRST, then come back to this check. Verbatim regression marker (real run, LATAM cooking 2026-05-11): saved config omitted `report_title`; first `tl reports create --config-file <path> --yes` returned `Error (400): Missing required field: report_title` and the agent had to edit the transport file and retry. **Fail closed at this validation step rather than discovering the missing field at save time** — a save-side 400 wastes a CLI round-trip and a credit charge.
    - Every field in `filterset` exists in the schema and matches its declared type.
    - Every column in `columns` is in the type's column file.
    - Every aggregator in `widgets` is in the matching catalog (intelligence for 1/2/3, sponsorship for 8).
@@ -1477,7 +1479,6 @@ Phase 4 is the terminal phase. It picks widgets, performs FINAL JSON-shape valid
    - When `cross_references` is present, `report_type ∈ {1, 3}`.
    - When `filters_json.similar_to_channels` is present, no overlapping `keywords` / `topics` fields.
    - `type = 2` (DYNAMIC) and `report_type ∈ {1, 2, 3, 8}` — Campaign-model contract for the API endpoint.
-3. **Generate `report_title` and `report_description`** from the FilterSet + the user's original NL request. Title ≤ 60 chars; description 1–3 sentences summarizing intent + key filters.
 4. **Compose key takeaway insights** — see "Takeaway-composition rules" below. These are the headline observations the user reads in the Phase 4 message. The `_validation` block from Phase 2 carries through here — narrow-result notes, sample_judge reasoning, and validation_concerns are all surfaced as takeaways.
 5. **Emit the final deliverable.**
 
