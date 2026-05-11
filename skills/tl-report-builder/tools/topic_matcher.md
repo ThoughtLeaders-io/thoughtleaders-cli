@@ -42,7 +42,7 @@ Use the canonical fetch SQL from the schema reference: **[`tl/references/postgre
 | Non-empty, matcher emits all `none` verdicts (`summary.no_match: true`) | **Off-taxonomy** — niche has no curated topic | Fall through to keyword_research (T2) |
 | **Empty (zero rows returned)** | **Data-plane failure or empty taxonomy — NOT off-taxonomy.** The canonical fetch has no `WHERE` clause; an empty result means either the table is empty, the database returned an error, or the request was truncated. | Surface the failure rather than silently falling through to T2. If a re-fetch also returns empty, escalate to the user — silently bypassing curated topic matching on a real data-plane failure would mask the bug. |
 
-The "Cited regression markers" list in the schema reference catalogues real runs where this went wrong (Norwegian crypto 2026-05-11, AI/marketing, travel/digital-nomad, fitness/wellness). Read that list when you recognise the failure-mode shape.
+The "Cited regression markers" section in the schema reference catalogues the anti-pattern shapes that have occurred in practice. Read it when you recognise the failure-mode shape in your own output.
 
 ---
 
