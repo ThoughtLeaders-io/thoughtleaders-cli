@@ -1210,14 +1210,18 @@ For PG queries (type 8 or smoke-check fallback):
 
 ### Step 2.V3 — Apply threshold rules
 
-| `db_count` | classification | next |
-|---|---|---|
-| 0 | `empty` | Step 2.V5 (retry — broaden) |
-| 1–4 | `very_narrow` | Step 2.V4 (sample); proceed with warning |
-| 5–50 | `narrow` | Step 2.V4 (sample); proceed with note |
-| 51–10000 | `normal` | Step 2.V4 (sample) |
-| 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest |
-| > 50000 | `too_broad` | Step 2.V5 (retry — narrow) |
+| `db_count` | classification | next (Type 3) | next (Type 1 / 2) |
+|---|---|---|---|
+| 0 | `empty` | Step 2.V5 (retry — broaden) | Step 2.V5 (retry — broaden) |
+| 1–4 | `very_narrow` | **Lever 1 expansion** (one cycle: add `channel_description_ai` + `channel_topic_description`); on post-expansion `db_count`, re-enter this table | **`decision: "alternatives"`** — no skill-side expansion path for Type 1/2 |
+| 5–50 | `narrow` | **Lever 1 expansion** (same as above) | **`decision: "alternatives"`** |
+| 51–10000 | `normal` | Step 2.V4 (sample) | Step 2.V4 (sample) |
+| 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest | Step 2.V4 (sample); proceed with narrow-suggest |
+| > 50000 | `too_broad` | Step 2.V5 (retry — narrow) | Step 2.V5 (retry — narrow) |
+
+**Loop guard for the Lever 1 expansion path**: after the one-cycle expansion runs, the resulting `db_count` is re-classified on this same table. If the post-expansion bucket is still `very_narrow` / `narrow`, do NOT loop — emit `decision: "alternatives"`. The expansion is one cycle by definition (see Lever 1 above); the re-classification entry is informational, telling the orchestration where the post-expansion count lands without re-triggering expansion.
+
+The pre-`d395ae2` table said `very_narrow` / `narrow` go to *"sample; proceed with warning/note."* That was the historical universal-flow behaviour (used pre-Lever-1). The new Lever 1 rule for Type 3 replaces "proceed with warning" with "expand once first"; the Type 1/2 rule replaces it with "alternatives." Old prose elsewhere in the file describing "proceed with warning" on narrow counts is stale relative to this table — follow the table.
 
 ### Step 2.V4 — Run sample query, then `sample_judge`
 
@@ -1264,7 +1268,7 @@ Cap at **1 retry**. After 1 retry, if the second cycle still returns `empty` or 
 
 **What does NOT trigger retry** (unchanged):
 - `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`. **A noisy spot-check is NOT a license for the agent to self-initiate a keyword-refinement loop.** The agent has been observed running `looks_wrong → tighten → re-validate → looks_wrong → tighten → re-validate` cycles outside the official retry path on multilingual niche-discovery prompts (LATAM cooking being one documented case), costing ~3 minutes for marginal noise reduction. If the first sample looks noisy, surface it via `alternatives`; do not silently iterate. The agent does not have license to chain validation cycles based on its own subjective noise judgment — that's the user's call after the alternatives prompt.
-- `db_count` in `narrow` (1–4) — proceed with warning; retry would lose the small but real signal.
+- `db_count` in `narrow` (5–50) or `very_narrow` (1–4) — does NOT trigger the V5 retry path (V5 is for `empty` and `too_broad` only). The narrow / very_narrow routing is owned by Step 2.V3's threshold table: **Type 3 → Lever 1 expansion (one cycle); Type 1 / Type 2 → `decision: "alternatives"`.** Neither path involves V5. The pre-`d395ae2` text here said "narrow (1–4) — proceed with warning" — that's stale on two counts (1–4 is `very_narrow`, not `narrow`, per V3's bucket labels; AND "proceed with warning" is the historical universal-flow behaviour that the new Lever 1 rule replaces).
 
 ### Step 2.V6 — Compose decision output
 
