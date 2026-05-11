@@ -26,7 +26,26 @@ The orchestration injects two values:
 
 ### How to fetch the topics
 
-The fetch query, the column list, and the negative-column regression markers all live in the canonical Postgres-schema reference in the `tl-cli:tl` skill: **[`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy)**. Schema-shaped facts belong in that reference, not in tool text. Use the verbatim fetch query documented there. **Do not restate or paraphrase the schema here.** If you find yourself about to type `SELECT … FROM thoughtleaders_topics …` from memory, stop and consult the reference file instead. This tool's job is to score topics against the user query; the schema reference's job is to say what the underlying table looks like.
+**Run this exact command — one query, no improvisations:**
+
+```bash
+tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
+```
+
+That's the canonical fetch. The table has fewer than 20 rows, so client-side filtering after a full fetch is free — **filter the results in your head, not in SQL.** Column catalogue and "do not exist" markers live in the schema reference: [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). Consult that file for the column list; do not restate it here.
+
+**Hard rules — do NOT improvise the SQL:**
+
+- ❌ Don't push a name-pattern WHERE clause into the query (`WHERE name ILIKE '%crypto%' OR name ILIKE '%web3%' OR ...`). Whatever the user said, the right path is fetch-all → match in your head.
+- ❌ Don't run `information_schema.columns` to inspect the table — that's the agent's tell when the previous query came back empty and it's about to guess columns. Empty result = "no curated topic matches your niche," not "the schema is different than I expected." Read the schema reference if you genuinely need column names.
+- ❌ Don't run a second / third / broader name-pattern query if the first returned zero. Zero rows from the canonical fetch means the niche is off-taxonomy — fall through to keyword_research, don't try more name patterns.
+
+**Verbatim regression markers** (real runs that burned credits + round-trips on this anti-pattern):
+
+- *Norwegian crypto / Web3 run, 2026-05-11* — agent ran three PG queries: `WHERE name ILIKE '%crypto%' OR ... LIMIT 20 OFFSET 0` (returned 0), then `information_schema.columns LIMIT 50 OFFSET 0` (schema inspection), then `WHERE name ILIKE '%crypto%' OR ... OR name ILIKE '%nft%' OR name ILIKE '%defi%' LIMIT 30 OFFSET 0` (returned 0). 4.82 credits wasted; correct path was the one-query canonical fetch above + recognising the niche is off-taxonomy.
+- *Fitness/wellness run, earlier* — "Background task failed" on the first topic query, agent retried with different name patterns instead of the canonical fetch.
+
+Both regressions trace to the same root cause: the agent reading this tool prompt without reading the schema reference, then improvising the SQL. Pinning the canonical command inline (above) closes the loop — there's no path where the agent reads this file and doesn't see the exact query to run.
 
 ---
 

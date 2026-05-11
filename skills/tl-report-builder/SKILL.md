@@ -479,7 +479,13 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 ### T1 — `tools/topic_matcher.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
 **Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
-**How to fetch the live topics**: see the `tl-cli:tl` skill's Postgres-schema reference — [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). That's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
+**How to fetch the live topics — run this exact command, one query only:**
+
+```bash
+tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
+```
+
+Table has fewer than 20 rows — filter client-side, not in SQL. **Do NOT push name-pattern `WHERE` clauses into the query** (e.g. `WHERE name ILIKE '%crypto%' OR name ILIKE '%web3%' OR ...`); the agent has done this in multiple real runs and burnt credits + round-trips on it. Empty result from the canonical fetch = niche is off-taxonomy → fall through to keyword_research (T2). Don't retry with broader name patterns. Don't run `information_schema.columns` to inspect the table. See [`tools/topic_matcher.md`](tools/topic_matcher.md) for the full anti-pattern list and verbatim regression markers (Norwegian crypto, fitness/wellness). Column catalogue lives at [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy).
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
 **Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on noisy-niche / multilingual runs**:
