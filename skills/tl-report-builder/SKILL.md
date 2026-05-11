@@ -493,7 +493,11 @@ Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 
 
 **Lever 2 — Keyword selection**
 
-For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets). Drop generic-overlap terms (e.g. for cooking outside English-only context: drop `"food"`, `"chef"`, `"comida"` — they match too many lifestyle/family channels; keep cooking-specific terms `"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`).
+For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, Asia-Pacific, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets).
+
+Drop **generic-overlap terms** — head terms that match the niche literally but also surface high volumes of adjacent-niche channels. Heuristic: any single-word generic that a lifestyle / family / entertainment channel might use about the niche in passing is a generic-overlap term. Keep the niche-specific terms — multi-word phrases or native-language vocabulary that lifestyle channels wouldn't casually use.
+
+*Concrete example from the LATAM cooking calibration run*: in `topic.keywords` for the Cooking topic, the head terms include both niche-specific Spanish/Portuguese phrases (`"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`) and generic-overlap terms (`"food"`, `"chef"`, `"comida"`). The generic-overlap terms each matched several hundred extra lifestyle/family channels that mention food in passing; dropping them tightened the result from ~5,700 channels at 60% signal to ~4,050 at higher signal-density without sacrificing genuine cooking creators. Same pattern applies in other niches — fitness ("body", "training" are generic; "pilates", "calisthenics" are niche-specific); finance ("money", "rich" generic; "ETF", "options", "yield farming" niche-specific); etc.
 
 For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
 
@@ -504,7 +508,7 @@ For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plu
 
 **One expansion cycle max** — same calibration as the retry cap above. After one expansion, surface to the user via `alternatives` if still narrow.
 
-**Why field-selection-first matters more than keyword-count-first**: in the historical broad-first pattern, the LATAM run took 3 narrowing cycles (~3+ min) because the first 2 cycles tightened keywords without addressing the AI-fields noise source. Cycle 3 finally tightened fields and converged. Doing fields first (lever 1) reaches the cycle-3 shape immediately; the keyword-count axis (lever 2) is a second-order adjustment.
+**Why field-selection-first matters more than keyword-count-first**: the historical broad-first pattern fails specifically because cycles 1 and 2 typically tighten keywords without addressing the AI-fields noise source — only when fields finally get tightened (often cycle 3 or later) does the result converge. Doing fields first (lever 1) reaches the converged shape immediately; the keyword-count axis (lever 2) is a second-order adjustment that fine-tunes within an already-clean field set. The calibration run that proved this in production (LATAM cooking, ~3 minutes wasted in cycles 1–2) is documented above; the principle applies to any niche-discovery preview where AI-summarized fields cross over into adjacent topics.
 
 ### T2 — `tools/keyword_research.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
@@ -1249,14 +1253,16 @@ When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever
 
 Cap at **1 retry**. After 1 retry, if the second cycle still returns `empty` or `too_broad`, emit `decision: "alternatives"` and surface the count + the failing FilterSet to the user — let them pick refine / save anyway / cancel.
 
-**Why 1, not 3** (calibration source — fitness/wellness and LATAM cooking real runs):
+**Why 1, not 3** (mechanism + calibration evidence):
+
 - Each retry costs **30–90 seconds** of full Phase 2c → Phase 3 cycle (LLM compose + ES count + ES sample + sample_judge LLM).
 - After the first retry, if the count is *still* empty/too_broad, the underlying failure shape is almost always **data sparsity / inherent niche-language noise** — not a shape issue further iteration can fix. The 2nd and 3rd retries usually fail the same way as the first, costing 60–180s for the same signal.
-- One real LATAM cooking run did three keyword-refinement cycles (broad → tighter → AI-anchored → name+description-only); cycles 2 and 3 each saved ~10% noise but added 60s+ each. The user value of "10% less noise on the long tail" is small; the cost of 2+ extra minutes is large. Better to surface the noise and let the user decide.
 - The shape-mismatch case (which retry IS valuable for — wrong AND/OR, missing field) is almost always caught on the first retry. So 1 retry catches the only failure mode where iteration helps; capping at 1 just bails on the failure modes where iteration doesn't.
 
+*Calibration evidence — multilingual niche-discovery runs (LATAM cooking, fitness/wellness)*: in the historical 3-cap regime, runs that hit the retry path consistently went broad → tighter → AI-anchored → name+description-only over three cycles. Cycles 2 and 3 each saved ~10% additional noise but added 60s+ each. The user value of "10% less noise on the long tail" is small relative to the 2+ extra minutes per run; better to surface the noise after one retry and let the user decide. The principle generalises to any noisy-niche shape (beauty, aviation, crypto-vs-finance edge, etc.).
+
 **What does NOT trigger retry** (unchanged):
-- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`. **A noisy spot-check is NOT a license for the agent to self-initiate a keyword-refinement loop** — the LATAM cooking run produced `looks_wrong → tighten → re-validate → looks_wrong → tighten → re-validate` cycles outside the official retry path, costing ~3 minutes. If the first sample looks noisy, surface it via `alternatives`; do not silently iterate.
+- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`. **A noisy spot-check is NOT a license for the agent to self-initiate a keyword-refinement loop.** The agent has been observed running `looks_wrong → tighten → re-validate → looks_wrong → tighten → re-validate` cycles outside the official retry path on multilingual niche-discovery prompts (LATAM cooking being one documented case), costing ~3 minutes for marginal noise reduction. If the first sample looks noisy, surface it via `alternatives`; do not silently iterate. The agent does not have license to chain validation cycles based on its own subjective noise judgment — that's the user's call after the alternatives prompt.
 - `db_count` in `narrow` (1–4) — proceed with warning; retry would lose the small but real signal.
 
 ### Step 2.V6 — Compose decision output
