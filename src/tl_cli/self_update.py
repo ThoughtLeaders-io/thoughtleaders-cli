@@ -34,9 +34,10 @@ def _detect_install_method() -> str | None:
 
     Both the new distribution name (`thoughtleaders-cli`) and the legacy one
     (`tl-cli`) are matched so users who installed before the rename keep
-    auto-updating.
+    auto-updating. `Path.as_posix()` normalises Windows backslashes so the
+    same substring checks work on every platform.
     """
-    exe = sys.executable
+    exe = Path(sys.executable).as_posix()
     for dist_name in ("thoughtleaders-cli", "tl-cli"):
         if f"/pipx/venvs/{dist_name}/" in exe:
             return "pipx"
