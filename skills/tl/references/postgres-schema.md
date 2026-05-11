@@ -207,16 +207,16 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `description` | text | LLM-generated description of the channel. Sometimes useful as a regex-target for thematic filtering when the integer category is too coarse (e.g. filtering "Technology" cat 15 down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
 | `evergreenness` | float | Cached evergreen score |
 
-#### Columns that DO NOT exist on `thoughtleaders_channel`
+#### Hallucination shapes to avoid
 
-Common hallucinations the agent has tried in real runs. All return *"column '\<name\>' does not exist"*:
+When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the column table above. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring shapes:
 
-- ❌ `publication_date_max` / `last_publication_date` / `latest_publish_date` — the correct column is `last_published` (date, no time component, no `_max` suffix).
-- ❌ `youtube_id` — the correct column is `external_channel_id` (varchar; YouTube channel ID like `UCxxxxxx`). Already listed in the section preamble; repeated here for proximity.
-- ❌ `name` (without prefix) — the correct column is `channel_name`. SQL keywords sometimes shadow the bare form; always use the full `channel_name`.
-- ❌ `subscribers` / `subs` / `subscriber_count` — the correct column is `reach` (bigint). User-facing language is "subscribers"; the SQL column is `reach`. See [business-glossary](business-glossary.md) for the canonical mapping.
+- ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns above use bare names.
+- ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
+- ❌ **Bare-noun forms without the table-prefix** (e.g. `name` instead of `channel_name`). This table prefixes its display fields with `channel_` to avoid SQL keyword collisions and ambiguity in joins.
+- ❌ **User-facing-term forms used as SQL column names** (the user-facing word is sometimes different from the SQL column name; consult [business-glossary](business-glossary.md) for the canonical mapping when the two diverge).
 
-When sample-row enrichment needs a column (`slug` + a "last published" date is the common pair, for hyperlink + freshness rendering), consult this table FIRST. Do not guess a column name and rely on the 400 round-trip to correct you; do not fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
+When the canonical column you need isn't obvious from the table above, consult the column table first. Do **not** rely on a 400 to correct you, and do **not** fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
 
 #### `content_category` Constants
 
