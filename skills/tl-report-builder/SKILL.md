@@ -111,7 +111,7 @@ Compose 4–7 of these into a short bulleted summary directly in chat. Use the u
 | Save failure | "Couldn't save the report: <plain-English reason>" — surface the CLI's stderr verbatim if it's user-readable, otherwise summarise |
 | User says "save" / "yes save it" / "save it" after a preview | "Saving…" — re-use the config from working memory; do NOT re-run Phases 1–4 |
 | Mode B follow-up (looks_wrong) | "The top results don't look right — here are your options…" |
-| Mode C (3 retries exhausted) | "I couldn't build a sensible result for this — here's what I tried…" |
+| Mode C (1 retry exhausted on empty/too_broad; data shape genuinely doesn't fit) | "I couldn't build a sensible result for this — here's what I tried…" |
 
 **Report-type → user-facing label**:
 
@@ -251,7 +251,7 @@ USER_QUERY
 │         – db_count → threshold classify                                 │
 │         – db_sample (LIMIT 10) → sample_judge                           │
 │         – Decide: proceed | retry | alternatives | fail                 │
-│         – Retry with feedback to T1/T2 (cap 3) on empty/too_broad       │
+│         – Retry with feedback to T1/T2 (cap 1) on empty/too_broad       │
 │                                                                          │
 │   ┌─── Conditional Tool Invocation (within Phase 2 only) ─────────────┐ │
 │   │   T1  tools/topic_matcher.md           — fires per criteria       │ │
@@ -274,7 +274,7 @@ USER_QUERY
 │        timed out — confirm narrowing with the user                     │
 │      • Validation: sample_judge returned looks_wrong → Mode B prompt   │
 │        (save anyway / refine / cancel)                                 │
-│      • Validation: 3 retries exhausted on empty/too_broad → fail mode  │
+│      • Validation: 1 retry exhausted on empty/too_broad → alternatives │
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  validated schema
                                    ▼
@@ -477,6 +477,38 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 **How to fetch the live topics**: see the `tl-cli:tl` skill's Postgres-schema reference — [`tl/references/postgres-schema.md` → `thoughtleaders_topics`](../tl/references/postgres-schema.md#thoughtleaders_topics-curated-topic-taxonomy). That's the canonical home for the fetch query, column list, and "do not guess" regression markers. Don't restate the SQL here.
 **Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
 
+**Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on noisy-niche / multilingual runs**:
+
+**Lever 1 (HIGHEST impact) — Field selection (Type 3 / channel discovery)**
+
+The initial FilterSet's `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Use the schema enum values verbatim — these are the platform-recognised content-field names from `intelligence_filterset_schema.json`. The FilterSet rejects unknown values.)
+
+The mechanism: the two AI-summarised content fields (`channel_description_ai`, `channel_topic_description`) catalogue **every topic a channel has ever touched** — including incidental mentions, format crossovers, and adjacent-niche tags. A channel whose primary niche is X but that ran one video about Y will still match queries against `channel_topic_description` for Y. For channel-discovery intent, that's pure noise: you wanted channels *about* Y, not channels that *once mentioned* Y. The channel's own `channel.channel_name` + `channel_description` answer the channel-discovery question (*"is this channel ABOUT the niche?"*); the AI-summarised fields answer a strictly broader question (*"has this channel ever mentioned the niche?"*) that surfaces too many false positives at discovery time.
+
+Mechanism implication — **once `content_fields` is right, even a broad keyword set converges; even a tight keyword set produces noisy results with the AI-summarised fields included.** Field selection is the bigger dial; keyword pruning is the fine-tune. Restricting fields first reaches a clean count in one cycle; pruning keywords without addressing the AI-fields noise source typically takes 2–3 narrowing cycles.
+
+*Regression-marker anchor — multilingual niche-language preview (LATAM cooking, several thousand candidates)*: the cycle that finally converged kept the same keyword set as the previous noisy cycle but reduced `content_fields` from 4 fields (incl. the two AI-summarised ones) to 2 (`channel.channel_name` + `channel_description` only). Result went from ~4,000 noisy → ~1,350 signal-rich (80% on-target) in a single pass — bigger gain than the prior keyword-pruning cycles delivered combined. The principle is general (applies to fitness/wellness, beauty, aviation, any niche-discovery preview where channels cross over into adjacent topics); LATAM cooking is the run that calibrated it.
+
+Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 50 channels) — that's the expansion path that re-opens the broader recall, not the default starting shape.
+
+**Lever 2 — Keyword selection**
+
+For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, Asia-Pacific, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets).
+
+Drop **generic-overlap terms** — head terms that match the niche literally but also surface high volumes of adjacent-niche channels. Heuristic: any single-word generic that a lifestyle / family / entertainment channel might use about the niche in passing is a generic-overlap term. Keep the niche-specific terms — multi-word phrases or native-language vocabulary that lifestyle channels wouldn't casually use.
+
+*Concrete example from the LATAM cooking calibration run*: in `topic.keywords` for the Cooking topic, the head terms include both niche-specific Spanish/Portuguese phrases (`"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`) and generic-overlap terms (`"food"`, `"chef"`, `"comida"`). The generic-overlap terms each matched several hundred extra lifestyle/family channels that mention food in passing; dropping them tightened the result from ~5,700 channels at 60% signal to ~4,050 at higher signal-density without sacrificing genuine cooking creators. Same pattern applies in other niches — fitness ("body", "training" are generic; "pilates", "calisthenics" are niche-specific); finance ("money", "rich" generic; "ETF", "options", "yield farming" niche-specific); etc.
+
+For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
+
+**Expansion trigger — Type 3 (CHANNELS) only** (strictly one validation cycle, no second attempt): if the initial Type 3 FilterSet's `db_count` is `narrow` or `very_narrow` per the Step 2.V3 threshold table (`db_count` ≤ 50 channels), do **one** expansion step — add `channel_description_ai` and `channel_topic_description` to `content_fields` (the schema enum values). This opens recall to the AI-summarised surface. After this single expansion cycle, if the count is still narrow OR if it overshoots, do NOT compose another FilterSet — emit `decision: "alternatives"` and surface to the user with the count + the failing shape. Further widening (keyword changes, threshold relaxation) is the user's call via the alternatives prompt, not skill-side iteration.
+
+Why one and not two: field-set expansion is the high-leverage lever (re-opens AI-summarised recall); a follow-up keyword-set expansion adds 30–90s of LLM + ES round-trip for marginal extra recall, contradicting the speed-up goal. If field-expansion alone doesn't reach the narrow threshold, the underlying issue is data sparsity in this niche — a second skill-side cycle won't fix that; user judgment will.
+
+**For Type 1 (CONTENT) and Type 2 (BRANDS), this expansion rule does NOT apply.** The mechanism above is Type 3-specific because the lever it pulls (the AI-summarised channel-level fields `channel_description_ai` / `channel_topic_description`) only exists in Type 3's default `content_fields`. Types 1 and 2 default to video-level fields (`content`, `title`, `transcript` per the schema's `_tl_default_by_report_type`) which have no AI-summary surface to expand into. When a Type 1 / Type 2 FilterSet hits `narrow` / `very_narrow` on the same Step 2.V3 thresholds, **route directly to `decision: "alternatives"`** — there is no skill-side expansion to try first. The user's refinement options (via the alternatives prompt) are the only widening path.
+
+**Why field-selection-first matters more than keyword-count-first**: the historical broad-first pattern fails specifically because cycles 1 and 2 typically tighten keywords without addressing the AI-fields noise source — only when fields finally get tightened (often cycle 3 or later) does the result converge. Doing fields first (lever 1) reaches the converged shape immediately; the keyword-count axis (lever 2) is a second-order adjustment that fine-tunes within an already-clean field set. The calibration run that proved this in production (LATAM cooking, ~3 minutes wasted in cycles 1–2) is documented above; the principle applies to any niche-discovery preview where AI-summarized fields cross over into adjacent topics.
+
 ### T2 — `tools/keyword_research.md`
 **Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
 **Skipped when**: any of the above conditions fail. **Crucially, skipped when the user enumerates specific channels or brands** — those provide the filter anchor; keyword research is wasted work.
@@ -503,9 +535,13 @@ Each tool fires only when its criteria are explicitly met (no automatic / specul
 
 ### Phase 2 validation sub-tool
 
-**`tools/sample_judge.md`** — fires inside Phase 2's validation step.
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND `db_count` classification is `narrow` / `normal` / `broad` (i.e., not `empty` and not `too_broad` — those go straight to retry without sample inspection).
-**Skipped when**: type 8 (deal sample shape ≠ channel sample shape) OR `db_count` was `empty` / `too_broad` (retry path).
+**`tools/sample_judge.md`** — fires inside Phase 2's validation step (Step 2.V4).
+**Fires when**: `ReportType ∈ {1, 2, 3}` AND the **post-V3-routing** `db_count` classification is `normal` (51–10000) or `broad` (10001–50000). "Post-V3-routing" means: the count actually routed to Step 2.V4 per the Step 2.V3 threshold table above — that is, either the **initial** count landed in `normal` / `broad`, OR (Type 3 only) the **post-Lever-1-expansion** count landed in `normal` / `broad`.
+**Skipped when** any of:
+- Type 8 — deal sample shape ≠ channel sample shape; sample_judge is not configured for sponsorship rows.
+- Initial `db_count` is `empty` / `too_broad` — V3 routes to the Step 2.V5 retry path, not to sampling.
+- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType ∈ {1, 2}` — V3 routes directly to `decision: "alternatives"`; no sample inspection because there's no Lever-1 expansion path for Types 1/2.
+- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` — or if it's `empty` / `too_broad` — it routes to `decision: "alternatives"` per the post-expansion table; sample_judge does NOT fire. (Post-expansion empty/too_broad does NOT re-enter V5 retry — the one-cycle cap is total, not per-direction.) sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
 **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
 
 ### Phase 3 sub-tool
@@ -585,6 +621,8 @@ Compose an ES search body. The index is fixed server-side; the client only sends
 ```
 
 The `must` array carries one `multi_match` entry per keyword, combined per `keyword_operator`: AND → list every `multi_match` inside `must` (each is required); OR → move them to a sibling `should` array and add `"minimum_should_match": 1`. The example above shows the single-keyword case; multi-keyword extensions follow that pattern.
+
+> ⚠️ **The `fields` array inside `multi_match` uses ES document field paths**, NOT the FilterSet `content_fields` enum values. ES uses `["name", "description", "ai.description", "ai.topic_descriptions"]`; the FilterSet enum (documented in [Lever 1 — Field selection](#lever-1-highest-impact--field-selection-type-3--channel-discovery) above and in [`intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json)) uses `["channel.channel_name", "channel_description", "channel_description_ai", "channel_topic_description"]`. They're two different APIs touching the same underlying data — keep them distinct when composing the validation query vs the FilterSet emission.
 
 For `db_count` on type 3: read `aggregations.distinct_channels.value`, NOT `total`. The `total` field counts documents (channel-doc duplicates included); `distinct_channels` counts unique channel IDs.
 
@@ -1176,14 +1214,33 @@ For PG queries (type 8 or smoke-check fallback):
 
 ### Step 2.V3 — Apply threshold rules
 
-| `db_count` | classification | next |
+The routing has two tables: **initial** (first validation cycle, all types) and **post-expansion** (Type 3 only, fires once after a Lever 1 expansion). Each cell maps a classified `db_count` to exactly one downstream action; no cell loops back to a previous step.
+
+**Initial routing** (any type, first validation cycle):
+
+| `db_count` | classification | next (Type 3) | next (Type 1 / 2) |
+|---|---|---|---|
+| 0 | `empty` | Step 2.V5 (retry — broaden) | Step 2.V5 (retry — broaden) |
+| 1–4 | `very_narrow` | **Lever 1 expansion** (one cycle: add `channel_description_ai` + `channel_topic_description`); on the post-expansion `db_count`, use the **post-expansion routing table below** — NOT this table | **`decision: "alternatives"`** — no skill-side expansion path for Type 1/2 |
+| 5–50 | `narrow` | **Lever 1 expansion** (same as above) | **`decision: "alternatives"`** |
+| 51–10000 | `normal` | Step 2.V4 (sample) | Step 2.V4 (sample) |
+| 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest | Step 2.V4 (sample); proceed with narrow-suggest |
+| > 50000 | `too_broad` | Step 2.V5 (retry — narrow) | Step 2.V5 (retry — narrow) |
+
+**Post-expansion routing** (Type 3 only, after the single Lever 1 expansion cycle):
+
+| post-expansion `db_count` | classification | next |
 |---|---|---|
-| 0 | `empty` | Step 2.V5 (retry — broaden) |
-| 1–4 | `very_narrow` | Step 2.V4 (sample); proceed with warning |
-| 5–50 | `narrow` | Step 2.V4 (sample); proceed with note |
+| 0 | `empty` | **`decision: "alternatives"`** (no second narrowing cycle; expansion is one cycle by Lever 1's definition) |
+| 1–4 | `very_narrow` | **`decision: "alternatives"`** |
+| 5–50 | `narrow` | **`decision: "alternatives"`** |
 | 51–10000 | `normal` | Step 2.V4 (sample) |
 | 10001–50000 | `broad` | Step 2.V4 (sample); proceed with narrow-suggest |
-| > 50000 | `too_broad` | Step 2.V5 (retry — narrow) |
+| > 50000 | `too_broad` | **`decision: "alternatives"`** (no second narrowing cycle; the expansion overshot — emit the count and let the user decide whether to add a stricter filter) |
+
+Only `normal` and `broad` route post-expansion to sample inspection. Everything else — `empty`, `very_narrow`, `narrow`, `too_broad` — routes to `alternatives` with no further skill-side cycles. This is the unambiguous "one cycle by definition" cap from Lever 1, enforced as a table.
+
+The pre-`d395ae2` initial table said `very_narrow` / `narrow` go to *"sample; proceed with warning/note."* That was the historical universal-flow behaviour (used pre-Lever-1). The new Lever 1 rule for Type 3 replaces "proceed with warning" with "expand once first"; the Type 1/2 rule replaces it with "alternatives." Old prose elsewhere in the file describing "proceed with warning" on narrow counts is stale relative to these tables — follow the tables.
 
 ### Step 2.V4 — Run sample query, then `sample_judge`
 
@@ -1209,7 +1266,7 @@ Decision based on judgment:
 - `looks_wrong` → `decision: "alternatives"` — Mode-B follow-up to user (save anyway / refine / cancel). Skip Phase 3 + Phase 4.
 - `uncertain` → `decision: "alternatives"` favoring "Refine" — surface ambiguity rather than ship silently.
 
-### Step 2.V5 — Retry orchestration (cap: 3)
+### Step 2.V5 — Retry orchestration (cap: 1)
 
 When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever upstream signal produced the failing FilterSet:
 
@@ -1218,11 +1275,19 @@ When `db_count` is `empty` or `too_broad`, emit structured feedback to whichever
 | Matched topics → `keywords` field | re-compose FilterSet with broader keywords from `topic.keywords[]` (beyond head) or relax operator AND→OR | `{issue, suggestion, previous_filterset}` |
 | `keyword_research` output | re-invoke T2 with the failing keywords + retry hint | `{issue, suggestion}` |
 
-Cap at **3 retries total**. After 3, `decision: "fail"` with diagnostic — better to honestly fail than infinite-loop.
+Cap at **1 retry**. After 1 retry, if the second cycle still returns `empty` or `too_broad`, emit `decision: "alternatives"` and surface the count + the failing FilterSet to the user — let them pick refine / save anyway / cancel.
 
-**What does NOT trigger retry**:
-- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`.
-- `db_count` in `narrow` (1–4) — proceed with warning; retry would lose the small but real signal.
+**Why 1, not 3** (mechanism + calibration evidence):
+
+- Each retry costs **30–90 seconds** of full Phase 2c → Phase 3 cycle (LLM compose + ES count + ES sample + sample_judge LLM).
+- After the first retry, if the count is *still* empty/too_broad, the underlying failure shape is almost always **data sparsity / inherent niche-language noise** — not a shape issue further iteration can fix. The 2nd and 3rd retries usually fail the same way as the first, costing 60–180s for the same signal.
+- The shape-mismatch case (which retry IS valuable for — wrong AND/OR, missing field) is almost always caught on the first retry. So 1 retry catches the only failure mode where iteration helps; capping at 1 just bails on the failure modes where iteration doesn't.
+
+*Calibration evidence — multilingual niche-discovery runs (LATAM cooking, fitness/wellness)*: in the historical 3-cap regime, runs that hit the retry path consistently went broad → tighter → AI-anchored → name+description-only over three cycles. Cycles 2 and 3 each saved ~10% additional noise but added 60s+ each. The user value of "10% less noise on the long tail" is small relative to the 2+ extra minutes per run; better to surface the noise after one retry and let the user decide. The principle generalises to any noisy-niche shape (beauty, aviation, crypto-vs-finance edge, etc.).
+
+**What does NOT trigger retry** (unchanged):
+- `sample_judge` returning `looks_wrong` — substantive failure (data sparsity or noise), not a shape failure. Retrying produces more noise. Go straight to `alternatives`. **A noisy spot-check is NOT a license for the agent to self-initiate a keyword-refinement loop.** The agent has been observed running `looks_wrong → tighten → re-validate → looks_wrong → tighten → re-validate` cycles outside the official retry path on multilingual niche-discovery prompts (LATAM cooking being one documented case), costing ~3 minutes for marginal noise reduction. If the first sample looks noisy, surface it via `alternatives`; do not silently iterate. The agent does not have license to chain validation cycles based on its own subjective noise judgment — that's the user's call after the alternatives prompt.
+- `db_count` in `narrow` (5–50) or `very_narrow` (1–4) — does NOT trigger the V5 retry path (V5 is for `empty` and `too_broad` only). The narrow / very_narrow routing is owned by Step 2.V3's threshold table: **Type 3 → Lever 1 expansion (one cycle); Type 1 / Type 2 → `decision: "alternatives"`.** Neither path involves V5. The pre-`d395ae2` text here said "narrow (1–4) — proceed with warning" — that's stale on two counts (1–4 is `very_narrow`, not `narrow`, per V3's bucket labels; AND "proceed with warning" is the historical universal-flow behaviour that the new Lever 1 rule replaces).
 
 ### Step 2.V6 — Compose decision output
 
@@ -1548,7 +1613,7 @@ Every phase has explicit conditions where it must pause and ask the user, rather
 | **2** | T4 returned ambiguous name resolution (>1 active candidate per name) | "Which one of these did you mean?" + option list |
 | **2** | T3 cross-reference returned unexpectedly large or zero result set | "The preliminary query matched [N] entities — narrow the date range or status filter?" |
 | **2** | Validation: sample_judge returned `looks_wrong` (G11-class noise) | Mode B prompt: save anyway / refine / cancel — plain English only, citing 2–3 specific sample names; never expose internal terms (phase numbers, tool names, `validation_concerns`, `db_count`, `looks_wrong`). See "User-facing rendering (Mode B)" in the Phase 2 section. |
-| **2** | Validation: 3 retries exhausted on empty/too_broad | Surface diagnostic + suggest the user reformulate the request |
+| **2** | Validation: 1 retry exhausted on empty/too_broad | Emit `decision: "alternatives"` — surface the count + failing shape; let the user choose refine / save anyway / cancel. Skill does NOT chain further validation cycles. |
 | **3** | Column template + extra columns the user listed differ from each other | "Use the template's columns, the columns you listed, or both?" |
 | **3** | Selected columns incompatible (e.g., requested `Views` on a type 3 report) | "[column] isn't available for [report type]; closest is [alternative]" |
 | **3** | No columns provided AND no clear intent | "I'll use [type]'s default set unless you want a different focus (outreach / discovery / sponsorship-pitch)" |
