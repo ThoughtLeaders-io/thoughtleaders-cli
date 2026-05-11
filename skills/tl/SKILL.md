@@ -92,7 +92,7 @@ Other key concepts:
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
   - **`send_date`** — the date the video is/was expected to be published (scheduled)
   - **`publish_date`** — the date the video was actually published; These make up live ads.
-- **Credits** — every data query costs credits; use `tl describe` to see rates
+- **Credits** — every data query costs credits; use `tl describe` to see rates. Top up with `tl credits buy --amount-usd N` (free; opens a browser checkout). New accounts get a starter balance on first `tl auth login`; the rate is shown by `tl credits pricing`.
 
 Users see data scoped by their organization and plan:
 - **Media buyers** see sponsorships where their org is the brand. They see `price` but never `cost`.
@@ -345,7 +345,10 @@ tl schema pg <table>                   # PostgreSQL schema for a SINGLE table (f
 tl schema fb                           # Live Firebolt tables and column types for `tl db fb` (free) — both tables
 tl schema fb <table>                   # Firebolt schema for a SINGLE table (free) — `article_metrics` or `channel_metrics`
 tl schema es                           # Elasticsearch document shape for `tl db es` (free)
-tl balance --json                      # Credit balance (free)
+tl balance --json                      # Credit balance + recent usage (free)
+tl credits pricing                     # Current usd-per-credit rate (free, no auth)
+tl credits buy --amount-usd 10         # Start a top-up; opens browser checkout (free)
+tl credits history                     # Recent top-ups for the caller's org (free)
 tl whoami                              # Current user, org, brands (free)
 tl auth status                         # Auth check (free)
 tl changelog                           # Release notes — current version, or current..latest if behind (free)

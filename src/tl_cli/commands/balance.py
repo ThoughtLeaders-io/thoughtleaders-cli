@@ -46,6 +46,19 @@ def balance(
         if allow_overage:
             console.print("[dim]Overage: enabled[/dim]")
 
+        # Top-up hint when running low. Threshold matches the hook warning
+        # that nudges the user before they hit 0.
+        try:
+            balance_decimal = float(balance_val)
+        except (TypeError, ValueError):
+            balance_decimal = None
+        if balance_decimal is not None and balance_decimal < 500:
+            console.print(
+                "[yellow]Running low.[/yellow] Top up with: "
+                "[bold]tl credits buy --amount-usd 10[/bold] "
+                "(or https://app.thoughtleaders.io/billing/cli)"
+            )
+
         recent = data.get("recent_usage", [])
         if recent:
             table = Table(title="Recent Usage")

@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 from rich.prompt import Prompt
 
+from tl_cli.auth.finalize import finalize_signup
 from tl_cli.auth.login import login_browser, login_device_code
 from tl_cli.auth.token_store import clear_tokens, load_tokens
 
@@ -13,7 +14,12 @@ console = Console(stderr=True)
 
 @app.command("login", help="Log in to ThoughtLeaders.")
 def login_cmd() -> None:
-    """Log in to ThoughtLeaders."""
+    """Log in to ThoughtLeaders.
+
+    After Auth0 returns, the CLI calls the server's finalize endpoint.
+    First-time users are prompted for a persona (Media Buyer or Creator)
+    and the account + starter credits are created on the server side.
+    """
     console.print("[bold]How would you like to authenticate?[/bold]")
     console.print("  [cyan]1[/cyan] — Browser on this machine (default)")
     console.print("  [cyan]2[/cyan] — Device code (use a browser on another device)")
@@ -24,6 +30,8 @@ def login_cmd() -> None:
         login_device_code()
     else:
         login_browser()
+
+    finalize_signup()
 
 
 @app.command("logout")

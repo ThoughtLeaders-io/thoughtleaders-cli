@@ -17,6 +17,7 @@ from tl_cli.commands.balance import app as balance_app
 from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
 from tl_cli.commands.bulk_import import bulk_import_command
+from tl_cli.commands.credits import app as credits_app
 from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
@@ -104,6 +105,7 @@ app.add_typer(db_app, name="db")
 app.add_typer(describe_app, name="describe")
 app.add_typer(schema_app, name="schema")
 app.add_typer(balance_app, name="balance")
+app.add_typer(credits_app, name="credits")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
 
