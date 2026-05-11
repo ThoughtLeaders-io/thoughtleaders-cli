@@ -207,6 +207,17 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `description` | text | LLM-generated description of the channel. Sometimes useful as a regex-target for thematic filtering when the integer category is too coarse (e.g. filtering "Technology" cat 15 down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
 | `evergreenness` | float | Cached evergreen score |
 
+#### Columns that DO NOT exist on `thoughtleaders_channel`
+
+Common hallucinations the agent has tried in real runs. All return *"column '\<name\>' does not exist"*:
+
+- ❌ `publication_date_max` / `last_publication_date` / `latest_publish_date` — the correct column is `last_published` (date, no time component, no `_max` suffix).
+- ❌ `youtube_id` — the correct column is `external_channel_id` (varchar; YouTube channel ID like `UCxxxxxx`). Already listed in the section preamble; repeated here for proximity.
+- ❌ `name` (without prefix) — the correct column is `channel_name`. SQL keywords sometimes shadow the bare form; always use the full `channel_name`.
+- ❌ `subscribers` / `subs` / `subscriber_count` — the correct column is `reach` (bigint). User-facing language is "subscribers"; the SQL column is `reach`. See [business-glossary](business-glossary.md) for the canonical mapping.
+
+When sample-row enrichment needs a column (`slug` + a "last published" date is the common pair, for hyperlink + freshness rendering), consult this table FIRST. Do not guess a column name and rely on the 400 round-trip to correct you; do not fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
+
 #### `content_category` Constants
 
 Source of truth: `thoughtleaders.taxonomies.ContentCategory` (Django `IntEnum` in the main `thoughtleaders` repo).
