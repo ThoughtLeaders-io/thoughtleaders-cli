@@ -61,6 +61,10 @@ def _render_whoami(data: dict) -> None:
     if org.get("is_managed_services"):
         org_lines.append("Managed services", style="magenta")
         org_lines.append("\n")
+    if "credits_balance" in org:
+        org_lines.append("Credits: ", style="dim")
+        org_lines.append(f"{org['credits_balance']:g}", style="cyan")
+        org_lines.append("\n")
     start = org.get("contract_start_date")
     end = org.get("contract_end_date")
     if start or end:
@@ -136,6 +140,8 @@ def _render_whoami_md(data: dict) -> None:
         print(f"- **Plan:** {plan}")
     if org.get("is_managed_services"):
         print("- **Managed services:** yes")
+    if "credits_balance" in org:
+        print(f"- **Credits:** {org['credits_balance']:g}")
     start = org.get("contract_start_date")
     end = org.get("contract_end_date")
     if start or end:
