@@ -92,7 +92,7 @@ Don't use `success_ids` / `failed_ids` for display — they lose input mapping a
 | `reason` | `newly_created` | `mode` | Icon | Label |
 |---|---|---|---|---|
 | `Success` | `true` | `include` | 🆕 | Created in TL |
-| `Success` | `true` | `exclude` | 🆕 | Created in TL (excluded) |
+| `Success` | `true` | `exclude` | ⚠️ | Created in TL — unexpected for exclude, verify report state |
 | `Success` | `false` | `include` | ✅ | Added |
 | `Success` | `false` | `exclude` | ✂️ | Excluded |
 | `Duplicate` | any | `include` | ↺ | Already in report |
@@ -105,6 +105,8 @@ Don't use `success_ids` / `failed_ids` for display — they lose input mapping a
 | anything else | any | any | ❌ | Failed (show reason verbatim) |
 
 For 🆕 rows: mention that enrichment (subscriber stats, AI description, demographics for channels; metadata for brands) is queued and will populate over the next few minutes — these entities just entered the database.
+
+For ⚠️ rows: the auto-create path currently adds the new channel to the report's include list regardless of `mode`. If the user submitted with `--exclude` and the row came back as `newly_created`, tell them the channel was created but the exclusion didn't take effect; ask them to verify the report and re-submit the exclude against the now-existing channel ID if needed.
 
 ## Display
 
@@ -134,9 +136,9 @@ Display rules:
 - **Use the user's raw `input` value** in the Input column (it's `inputs[i].input` — the raw submitted string, unchanged).
 - **Omit any column that's uniformly empty** — for sponsorships, the "Input" and "ID" columns are usually identical (both numeric); the Reason column carries the signal.
 - **Small imports (≤30 rows):** render the full table.
-- **Large imports (>30 rows):** lead with a summary table of bucket counts; render the per-row table only for non-✅ buckets (everything except plain "Added") — those are the rows the user cares about. Offer to dump the rest on request.
+- **Large imports (>30 rows):** lead with a summary table of bucket counts; render the per-row table only for **non-bulk-success rows** — i.e. omit the dominant happy-path bucket, which is ✅ Added in include mode and ✂️ Excluded in exclude mode. The rows the user cares about (already-present, newly-created, failed, unexpected) all stay. Offer to dump the omitted rows on request.
 
-  Summary table:
+  Summary table (include mode example):
 
   ```markdown
   | Bucket | Count |
@@ -146,6 +148,17 @@ Display rules:
   | 🆕 Created in TL | 3 |
   | ❌ Failed | 2 |
   | **Total submitted** | **154** |
+  ```
+
+  Summary table (exclude mode example):
+
+  ```markdown
+  | Bucket | Count |
+  |---|---|
+  | ✂️ Excluded | 142 |
+  | ↺ Already excluded | 7 |
+  | ❌ Failed | 2 |
+  | **Total submitted** | **151** |
   ```
 
 - **Never look up entity names** with extra `tl channels show <id>` / `tl brands show <id>` calls just to populate a "Name" column — those are metered. The user's input column is enough for them to identify each row. If the user explicitly asks "what are these channels called?", then look them up.
