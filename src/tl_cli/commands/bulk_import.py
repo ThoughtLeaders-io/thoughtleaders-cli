@@ -16,7 +16,6 @@ from rich.console import Console
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 
-app = typer.Typer(help="Bulk-import entities into a report (superuser-only)")
 err = Console(stderr=True)
 
 POLL_INTERVAL_SEC = 2
@@ -54,8 +53,7 @@ def _poll_until_done(client, task_id: str) -> dict:
     raise typer.Exit(3)
 
 
-@app.callback(invoke_without_command=True)
-def bulk_import(
+def bulk_import_command(
     entity: str = typer.Argument(..., help=f"Entity type: one of {', '.join(VALID_ENTITIES)}"),
     campaign: int = typer.Option(..., "--campaign", "-c", help="Target report ID"),
     ids_file: str | None = typer.Option(None, "--ids-file", "-f", help="Path to file with one identifier per line. Omit to read from stdin."),

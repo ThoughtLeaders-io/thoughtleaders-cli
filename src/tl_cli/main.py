@@ -16,7 +16,7 @@ from tl_cli.commands.ask import app as ask_app
 from tl_cli.commands.balance import app as balance_app
 from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
-from tl_cli.commands.bulk_import import app as bulk_import_app
+from tl_cli.commands.bulk_import import bulk_import_command
 from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
@@ -94,7 +94,10 @@ app.add_typer(brands_app, name="brands")
 app.add_typer(recommender_app, name="recommender")
 app.add_typer(snapshots_app, name="snapshots")
 app.add_typer(reports_app, name="reports")
-app.add_typer(bulk_import_app, name="bulk-import")
+# Direct command (not a sub-Typer) so `tl bulk-import <entity> --campaign <id>`
+# parses ENTITY as the positional and --campaign as a command option, instead
+# of Typer treating `--campaign` as a group-level flag that has to come first.
+app.command(name="bulk-import")(bulk_import_command)
 app.add_typer(db_app, name="db")
 
 # Discoverability
