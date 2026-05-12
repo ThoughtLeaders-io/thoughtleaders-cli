@@ -106,7 +106,7 @@ Don't use `success_ids` / `failed_ids` for display — they lose input mapping a
 
 For 🆕 rows: mention that enrichment (subscriber stats, AI description, demographics for channels; metadata for brands) is queued and will populate over the next few minutes — these entities just entered the database.
 
-For ⚠️ rows: the auto-create path currently adds the new channel to the report's include list regardless of `mode`. If the user submitted with `--exclude` and the row came back as `newly_created`, tell them the channel was created but the exclusion didn't take effect; ask them to verify the report and re-submit the exclude against the now-existing channel ID if needed.
+For ⚠️ rows: if an exclude import returns `newly_created: true`, treat it as unexpected. Tell the user the channel was created but does not appear to have been excluded — ask them to verify the report and re-submit the exclude against the returned `resolved_id` if needed.
 
 ## Display
 
