@@ -100,34 +100,91 @@ def check_plugin_version() -> list[str]:
     return warnings
 
 
-def _install_standalone_skills(plugin_root: Path) -> int:
+SKILLS_MANIFEST_FILENAME = ".tl-cli-skills-manifest"
+
+
+def _read_skills_manifest(target_dir: Path) -> set[str]:
+    """Return the set of skill directory names this plugin installed previously.
+
+    Empty set if no manifest exists yet (first install or pre-manifest install).
+    """
+    manifest = target_dir / SKILLS_MANIFEST_FILENAME
+    if not manifest.exists():
+        return set()
+    try:
+        return {line.strip() for line in manifest.read_text().splitlines() if line.strip()}
+    except OSError:
+        return set()
+
+
+def _write_skills_manifest(target_dir: Path, names: set[str]) -> None:
+    """Persist which skill directory names this plugin owns in target_dir."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    manifest = target_dir / SKILLS_MANIFEST_FILENAME
+    manifest.write_text("\n".join(sorted(names)) + "\n")
+
+
+def _sync_plugin_skills(plugin_root: Path, target_dir: Path) -> tuple[int, list[str]]:
+    """Install all source skills into target_dir; sweep orphans from prior installs.
+
+    The manifest at `target_dir/.tl-cli-skills-manifest` records the directory
+    names this plugin installed in the previous run. On the next run, any name
+    present in the previous manifest but missing from the current source is
+    removed — that's how a renamed or deleted skill stops triggering for users
+    who installed via `tl setup`. Skill directories not owned by this plugin
+    (other tools, hand-written user skills) are never touched.
+
+    Returns (installed_count, swept_skill_names).
+    """
+    skills_src = plugin_root / "skills"
+    if not skills_src.is_dir():
+        return 0, []
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    installed: set[str] = set()
+    for skill_dir in skills_src.iterdir():
+        if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
+            dst = target_dir / skill_dir.name
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(skill_dir, dst)
+            installed.add(skill_dir.name)
+
+    previous = _read_skills_manifest(target_dir)
+    swept: list[str] = []
+    for name in sorted(previous - installed):
+        orphan = target_dir / name
+        if orphan.is_dir():
+            shutil.rmtree(orphan)
+            swept.append(name)
+
+    if installed:
+        _write_skills_manifest(target_dir, installed)
+
+    return len(installed), swept
+
+
+def _install_standalone_skills(plugin_root: Path) -> tuple[int, list[str]]:
     """Copy skills and commands to ~/.claude/ for non-namespaced invocation.
 
-    Returns the number of items installed.
+    Returns (item_count, swept_skill_names) where item_count covers both skills
+    and commands and swept_skill_names lists skill dirs removed because they
+    were installed by a previous version of this plugin and have since been
+    renamed/deleted in the source.
     """
-    count = 0
-
-    # Skills: skills/<name>/SKILL.md → ~/.claude/skills/<name>/SKILL.md
-    skills_src = plugin_root / "skills"
-    if skills_src.is_dir():
-        for skill_dir in skills_src.iterdir():
-            if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
-                dst = CLAUDE_SKILLS_DIR / skill_dir.name
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.copytree(skill_dir, dst)
-                count += 1
+    skill_count, swept = _sync_plugin_skills(plugin_root, CLAUDE_SKILLS_DIR)
 
     # Commands: commands/<name>.md → ~/.claude/commands/<name>.md
+    command_count = 0
     commands_src = plugin_root / "commands"
     if commands_src.is_dir():
         CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
         for cmd_file in commands_src.glob("*.md"):
             dst = CLAUDE_COMMANDS_DIR / cmd_file.name
             shutil.copy2(cmd_file, dst)
-            count += 1
+            command_count += 1
 
-    return count
+    return skill_count + command_count, swept
 
 
 def _print_manual_instructions() -> None:
@@ -252,11 +309,13 @@ def setup_claude(
 def _install_standalone_skills_step(plugin_root: Path) -> None:
     """Install standalone skills and print status."""
     console.print("[bold]Installing skills for /tl shortcut...[/bold]")
-    count = _install_standalone_skills(plugin_root)
+    count, swept = _install_standalone_skills(plugin_root)
     if count > 0:
         console.print(f"  [green]✓[/green] Installed {count} skills/commands to ~/.claude/")
     else:
         console.print("  [yellow]![/yellow] No skills found to install")
+    if swept:
+        console.print(f"  [green]✓[/green] Removed {len(swept)} orphaned skill(s) from previous installs: {', '.join(swept)}")
 
 
 def _setup_noninteractive() -> None:
@@ -293,8 +352,9 @@ def _setup_noninteractive() -> None:
         result["plugin_installed"] = False
 
     # Always install standalone skills
-    count = _install_standalone_skills(plugin_root)
+    count, swept = _install_standalone_skills(plugin_root)
     result["standalone_skills_installed"] = count
+    result["orphaned_skills_swept"] = swept
 
     # Write version stamp
     version_dir = CLAUDE_PLUGINS_DIR / "tl-cli"
@@ -308,22 +368,14 @@ def _setup_noninteractive() -> None:
 # --- OpenCode setup ---
 
 
-def _install_opencode_skills(plugin_root: Path) -> int:
+def _install_opencode_skills(plugin_root: Path) -> tuple[int, list[str]]:
     """Copy skills to ~/.config/opencode/skills/ for OpenCode discovery.
 
-    Returns the number of skills installed.
+    Returns (installed_count, swept_skill_names) — same shape and sweep
+    semantics as `_install_standalone_skills`, targeting OpenCode's skills
+    directory.
     """
-    count = 0
-    skills_src = plugin_root / "skills"
-    if skills_src.is_dir():
-        for skill_dir in skills_src.iterdir():
-            if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
-                dst = OPENCODE_SKILLS_DIR / skill_dir.name
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.copytree(skill_dir, dst)
-                count += 1
-    return count
+    return _sync_plugin_skills(plugin_root, OPENCODE_SKILLS_DIR)
 
 
 @app.command("opencode")
@@ -347,10 +399,11 @@ def setup_opencode(
             result["error"] = "Plugin assets not found"
             print(json.dumps(result, indent=2))
             raise SystemExit(1)
-        count = _install_opencode_skills(plugin_root)
+        count, swept = _install_opencode_skills(plugin_root)
         OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
         (OPENCODE_SKILLS_DIR / ".tl-version").write_text(__version__)
         result["skills_installed"] = count
+        result["orphaned_skills_swept"] = swept
         result["status"] = "ok"
         print(json.dumps(result, indent=2))
         return
@@ -379,12 +432,14 @@ def setup_opencode(
 
     # Install skills
     console.print("[bold]Installing skills...[/bold]")
-    count = _install_opencode_skills(plugin_root)
+    count, swept = _install_opencode_skills(plugin_root)
     if count > 0:
         console.print(f"  [green]✓[/green] Installed {count} skill(s) to {OPENCODE_SKILLS_DIR}/")
     else:
         console.print("  [yellow]![/yellow] No skills found to install")
         raise SystemExit(1)
+    if swept:
+        console.print(f"  [green]✓[/green] Removed {len(swept)} orphaned skill(s) from previous installs: {', '.join(swept)}")
 
     # Write version stamp
     OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
