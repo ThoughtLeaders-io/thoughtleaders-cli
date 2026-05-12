@@ -92,25 +92,53 @@ The user wants to know **how much of the list actually changed the report**. `su
    | **Newly created in TL** | `newly_created_ids` — always a subset of "Newly added"; flag separately so the user knows enrichment is queued. |
    | **Failed** | `failed_ids` — couldn't be resolved or created. |
 
-4. **Display** with markdown headers + counts. Example:
+4. **Display** as a markdown table — one row per identifier from the user's input list, in input order so they can scan against their original list.
 
+   **Headline first**, then the table:
+
+   ```markdown
+   **Bulk-import to report 23859 — done.** Report gained **12** channels (3 already there, 1 failed).
+
+   | # | Status | Identifier | Channel | ID |
+   |---|---|---|---|---|
+   | 1 | ✅ Added | `@mkbhd` | Marques Brownlee | 4587 |
+   | 2 | ✅ Added | `@veritasium` | Veritasium | 1209 |
+   | 3 | ↺ Already in report | `@lemmino` | LEMMiNO | 8821 |
+   | 4 | 🆕 Created in TL | `@OfficialSaharTV` | SaharTV | 1328906 |
+   | 5 | ❌ Failed | `https://example.com/bad-url` | — | — |
    ```
-   ✅ **Bulk-import to report 23859 — done.**
 
-   - **Newly added (12):** @mkbhd, @veritasium, @lemmino, …
-   - **Already in the report (3):** #4587, #1209, #8821
-   - **Newly created in TL (2):** @newchannel-a, @newchannel-b — YouTube scrape + enrichment queued, lands in a few minutes
-   - **Failed (1):** `https://example.com/bad-url` — couldn't resolve
-   ```
+   **Status legend** (use these exact icons + labels):
 
-   Display rules:
+   | Icon | Label | Means |
+   |---|---|---|
+   | ✅ | Added | In `success_ids` and **not** in the pre-import snapshot — the report just gained this one. |
+   | ↺ | Already in report | In `success_ids` AND in the pre-import snapshot — no-op for this identifier. |
+   | 🆕 | Created in TL | Also in `newly_created_ids` — the entity didn't exist in our database before this import; YouTube scrape + AI enrichment is queued for channels, website scrape for brands. Always renders this label over plain "Added" when both apply. |
+   | ❌ | Failed | In `failed_ids` — couldn't be resolved or created. |
 
-   - **Omit any bucket that's empty** — don't show "Failed (0)".
-   - **Already in the report:** collapse to count if >10. Offer to list on request.
-   - **Newly created in TL:** always list — these are the entities with side effects (Celery enrichment) the user should know about.
-   - **Names vs IDs:** display channel handles / brand domains where you have them from the input list. Don't burn credits with `tl channels show <id>` unless the user asks for names.
+   **Channel/Brand name column:** populate from the input handle/URL where obvious (`@mkbhd` → "MKBHD" is the handle itself, fine to leave as the identifier). For numeric IDs in the input, leave the name blank rather than burning a credit on `tl channels show <id>` per row. If the user asks "what are these?", THEN look up names.
 
-**Headline number:** the value the user really cares about is `len(newly_added)` — what the report actually gained. `success_ids_count` is misleading on its own when the list had overlap with the existing report.
+   **Display rules:**
+
+   - **Small imports (≤30 rows):** render the full table as shown.
+   - **Large imports (>30 rows):** lead with a summary table of bucket counts, then render the **per-row table only for the non-Added buckets** ("Already in report", "Created in TL", "Failed") since those are the rows the user cares about. Offer to dump the full "Added" rows on request.
+
+     Summary table for large imports:
+
+     ```markdown
+     | Bucket | Count |
+     |---|---|
+     | ✅ Added | 142 |
+     | ↺ Already in report | 7 |
+     | 🆕 Created in TL | 3 |
+     | ❌ Failed | 2 |
+     | **Total submitted** | **154** |
+     ```
+
+   - **Omit the legend** in the actual response — it's documented here for you (the skill), not for the user. They should be able to read the icons in context.
+
+**Headline number:** the value the user really cares about is `len(newly_added)` — what the report actually gained. `success_ids_count` alone is misleading when the input overlaps with the existing report.
 
 ## Errors
 
