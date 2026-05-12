@@ -26,10 +26,13 @@ def _render_whoami(data: dict) -> None:
 
     # --- User ---
     name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    email = user.get("email", "")
     title = Text()
-    title.append(name or user.get("email", ""), style="bold cyan")
-    if name:
-        title.append(f"  {user.get('email', '')}", style="dim")
+    if name and email:
+        title.append(f'"{name}"', style="bold cyan")
+        title.append(f" <{email}>", style="dim")
+    else:
+        title.append(f"<{email}>" if email else name, style="bold cyan")
 
     flags = profile.get("flags", [])
     persona = profile.get("persona")
@@ -60,6 +63,10 @@ def _render_whoami(data: dict) -> None:
     org_lines.append("\n")
     if org.get("is_managed_services"):
         org_lines.append("Managed services", style="magenta")
+        org_lines.append("\n")
+    if "credits_balance" in org:
+        org_lines.append("Credits: ", style="dim")
+        org_lines.append(f"{org['credits_balance']:g}", style="cyan")
         org_lines.append("\n")
     start = org.get("contract_start_date")
     end = org.get("contract_end_date")
@@ -118,9 +125,12 @@ def _render_whoami_md(data: dict) -> None:
     brands = data.get("brands", [])
 
     name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
-    print(f"# {name or user.get('email', '')}\n")
-    if name:
-        print(f"- **Email:** {user.get('email', '')}")
+    email = user.get("email", "")
+    if name and email:
+        header = f'"{name}" <{email}>'
+    else:
+        header = f"<{email}>" if email else name
+    print(f"# {header}\n")
     persona = profile.get("persona")
     if persona:
         print(f"- **Persona:** {persona}")
@@ -136,6 +146,8 @@ def _render_whoami_md(data: dict) -> None:
         print(f"- **Plan:** {plan}")
     if org.get("is_managed_services"):
         print("- **Managed services:** yes")
+    if "credits_balance" in org:
+        print(f"- **Credits:** {org['credits_balance']:g}")
     start = org.get("contract_start_date")
     end = org.get("contract_end_date")
     if start or end:

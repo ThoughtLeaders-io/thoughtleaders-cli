@@ -46,7 +46,8 @@ def handle_api_error(error: ApiError) -> None:
         sys.exit(2)
     elif error.status_code == 402:
         err.print("[red]Insufficient credits.[/red]")
-        err.print("Deposit more at: https://app.thoughtleaders.io/settings/billing")
+        err.print("Top up with: [bold]tl credits buy --amount-usd 10[/bold]")
+        err.print("Or visit: https://app.thoughtleaders.io/billing/cli")
         _print_debug(error)
         sys.exit(4)
     elif error.status_code == 403:
