@@ -115,12 +115,52 @@ def _run_upgrade(method: str, latest: str) -> None:
         f"[tl-cli] upgrading {__version__} → {latest} via {method}…",
         file=sys.stderr,
     )
+    # Capture output so a noisy traceback from a broken upgrader (seen on
+    # Windows pipx shims that lose track of their own module) doesn't get
+    # dumped into the user's shell — we surface it deliberately on failure
+    # alongside an actionable next-step message.
     try:
-        result = subprocess.run(cmd, check=False, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
+        result = subprocess.run(cmd, check=False, timeout=60, capture_output=True, text=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(
+            f"[tl-cli] could not run {method}: {exc}\n"
+            f"[tl-cli] upgrade manually with:\n  {' '.join(cmd)}",
+            file=sys.stderr,
+        )
         return
     if result.returncode == 0:
         _resync_integrations()
+        return
+    _report_upgrade_failure(method, cmd, result)
+
+
+def _report_upgrade_failure(method: str, cmd: list[str], result: subprocess.CompletedProcess) -> None:
+    """Print a user-friendly failure message after a non-zero upgrader exit.
+
+    On Windows in particular, `pipx.exe` can be a broken shim that errors
+    with `ModuleNotFoundError: No module named 'pipx'`. We detect that and
+    give a targeted hint instead of just echoing the traceback.
+    """
+    combined_err = (result.stderr or '') + (result.stdout or '')
+    print(
+        f"[tl-cli] automatic upgrade failed (exit {result.returncode}).",
+        file=sys.stderr,
+    )
+    if "No module named 'pipx'" in combined_err:
+        print(
+            "[tl-cli] Your pipx install appears broken (its launcher can't find the pipx module).\n"
+            "[tl-cli] Reinstall pipx from your system Python, then rerun the upgrade.\n"
+            "[tl-cli] Or switch to uv:  uv tool install --force " + cmd[-1],
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[tl-cli] To upgrade manually, run:\n  {' '.join(cmd)}",
+            file=sys.stderr,
+        )
+    if combined_err.strip():
+        print("[tl-cli] Upgrader output:", file=sys.stderr)
+        sys.stderr.write(combined_err if combined_err.endswith('\n') else combined_err + '\n')
 
 
 def _resync_integrations() -> None:
