@@ -1,4 +1,4 @@
-"""tl bulk-import — bulk-add or exclude entities from a report.
+"""tl bulk-import - bulk-add or exclude entities from a report.
 
 Superuser-only on the server side. Submits a list of identifiers
 (channels / brands / articles / sponsorships) against a target report
@@ -63,10 +63,10 @@ def bulk_import_command(
     """Bulk-import entities into a report.
 
     Accepts a list of identifiers per entity:
-      channels      → numeric IDs, YouTube channel IDs (UC...), @handles, full URLs
-      brands        → numeric IDs, slugs, websites/domains
-      articles      → video IDs or URLs
-      sponsorships  → AdLink IDs (numeric)
+      channels      -> numeric IDs, YouTube channel IDs (UC...), @handles, full URLs
+      brands        -> numeric IDs, slugs, websites/domains
+      articles      -> video IDs or URLs
+      sponsorships  -> AdLink IDs (numeric)
 
     Submits the list and polls until the import completes. Channels/brands
     that aren't already on file get auto-created from YouTube / their
@@ -78,7 +78,7 @@ def bulk_import_command(
         echo "@mkbhd" | tl bulk-import channels -c 23859
         tl bulk-import brands -c 23859 -f ./brands.txt --exclude
 
-    Requires superuser permission — non-superusers get a 403.
+    Requires superuser permission - non-superusers get a 403.
     """
     if entity not in VALID_ENTITIES:
         err.print(f"[red]entity must be one of: {', '.join(VALID_ENTITIES)}[/red]")
