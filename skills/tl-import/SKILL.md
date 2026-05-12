@@ -1,11 +1,11 @@
 ---
-name: bulk-import
+name: tl-import
 description: Bulk-add or exclude a list of channels, brands, articles, or sponsorships from a ThoughtLeaders report (campaign). Superuser-only. Use when a request asks to import / add / exclude a batch of identifiers against a specific report ID — phrasings like "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z".
 ---
 
-# Bulk Import
+# tl-import
 
-Wraps `tl bulk-import` — submits a list of identifiers against a report and polls until the import finishes. Reports which entities landed and which were skipped or newly created.
+Wraps the `tl bulk-import` command — submits a list of identifiers against a report and polls until the import finishes. Reports which entities landed and which were skipped or newly created.
 
 ## When to use
 
