@@ -1,11 +1,11 @@
 ---
 name: bulk-import
-description: Bulk-add or exclude a list of channels, brands, articles, or sponsorships from a ThoughtLeaders report (campaign). Superuser-only. Use when a request asks to import / add / exclude a batch of identifiers against a specific report ID — phrasings like "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z".
+description: Bulk-add or exclude a list of channels, brands, uploads (videos), or sponsorships against a ThoughtLeaders report (campaign). Superuser-only. Use when a request asks to import / add / exclude a batch of identifiers against a specific report ID — phrasings like "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X".
 ---
 
 # Bulk Import
 
-Wraps `tl bulk-import` — submits a list of identifiers against a report and polls until the import finishes. Reports which entities landed and which were skipped or newly created.
+Wraps `tl bulk-import` — submits a list of identifiers against a report, polls until done, and renders a per-row result table.
 
 ## When to use
 
@@ -15,29 +15,30 @@ Trigger on requests like:
 - "Add these brands to campaign 5678"
 - "Bulk-add this list of channels to report 999"
 - "Exclude these channels from report Z"
+- "Add these videos to report X"
 
-If a single identifier is asked for, `tl bulk-import` still works (it accepts one). The reason to keep this skill separate from other report-edit flows: it's the only path that auto-creates channels from YouTube URLs / handles and brands from website domains.
+Single-identifier requests still work (the command accepts one). The reason to keep this skill separate from other report-edit flows: it's the only path that auto-creates channels from YouTube URLs / handles, and brands from website domains.
 
 ## Inputs to gather
 
-Before running the command, confirm:
+Before running, confirm:
 
-1. **Report ID** (`--campaign`) — required. If the user pastes a TL URL (e.g. `https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859&...`), the integer after `campaign=` is the ID.
-2. **Entity type** — one of `channels`, `brands`, `articles`, `sponsorships`. Infer from context:
+1. **Report ID** (`--campaign` / `-c`) — required. If the user pastes a TL URL (e.g. `https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859&...`), the integer after `campaign=` is the ID.
+2. **Entity type** — one of `channels` / `brands` / `articles` / `sponsorships`. Infer from context, but translate user-facing vocabulary:
    - YouTube URLs / handles / `UC…` IDs → `channels`
    - Domains / brand slugs → `brands`
-   - Video URLs / IDs → `articles`
-   - AdLink integer IDs → `sponsorships`
-3. **Identifiers** — the actual list. Accepted shapes per entity:
+   - "videos" / "uploads" / video URLs / video IDs → `articles` *(the CLI calls them uploads in `tl uploads list`, but `bulk-import` expects `articles` — same concept, legacy naming)*
+   - "adlinks" / "deals" / "sponsorships" / numeric AdLink IDs → `sponsorships`
+3. **Identifiers** — the list. Accepted shapes per entity:
    - **channels**: numeric DB IDs, YouTube channel IDs (`UC…`), `@handles`, full YouTube URLs (`/@…`, `/channel/UC…`, `/user/…`)
-   - **brands**: numeric IDs, slugs, websites/domains (`example.com`)
-   - **articles**: video IDs or video URLs
-   - **sponsorships**: AdLink IDs (numeric only)
+   - **brands**: numeric IDs, slugs, websites / domains (`example.com`)
+   - **articles** (uploads): video IDs or video URLs
+   - **sponsorships** (adlinks): numeric AdLink IDs only
 4. **Include vs exclude** — default is include (add to the report). Pass `--exclude` only if the user explicitly wants to remove from the report.
 
 ## How to invoke
 
-The command reads identifiers from a file (`--ids-file`) or stdin. For lists of more than a handful, write to a temp file:
+The command reads identifiers from a file (`--ids-file`) or stdin:
 
 ```bash
 # small list — stdin
@@ -54,37 +55,113 @@ tl bulk-import brands --campaign 5678 -f ./brands.txt --exclude
 
 Short flags: `-c` for `--campaign`, `-f` for `--ids-file`.
 
-## Output
+## Output: the `inputs` envelope
 
-JSON envelope on stdout:
+`tl bulk-import` returns a JSON envelope. Use the **`inputs`** array as the source of truth for what to render — it has one row per submitted identifier, in input order, with everything you need to classify and display.
 
 ```json
 {
   "task_id": "...",
-  "success_ids": [<int>, ...],
-  "success_ids_count": <int>,
+  "mode": "include",
+  "inputs": [
+    {"input": "@mkbhd",            "resolved_id": 4587,    "reason": "Success",    "newly_created": false},
+    {"input": "@veritasium",       "resolved_id": 1209,    "reason": "Duplicate",  "newly_created": false},
+    {"input": "@OfficialSaharTV",  "resolved_id": 1328906, "reason": "Success",    "newly_created": true},
+    {"input": "https://bad-url",   "resolved_id": null,    "reason": "Not found",  "newly_created": false}
+  ],
+  "success_ids": [4587, 1328906],
+  "newly_created_ids": [1328906],
   "failed_ids": [...],
-  "failed_ids_count": <int>,
-  "newly_created_ids": [<int>, ...],
-  "not_created_channels_count": <int>
+  ...
 }
 ```
 
-Surface to the user:
+Each `inputs` row's `input` field echoes the raw identifier the user submitted (unchanged). `resolved_id` is the entity ID it matched/created, or `null` for failures. `reason` and `newly_created` drive the row's display label below.
 
-- **`success_ids_count`** — how many identifiers landed in the report.
-- **`newly_created_ids`** — channels/brands that didn't exist before and were created by this import. Mention that enrichment (subscriber stats, AI description, demographics for channels; logo/website metadata for brands) is queued and will populate over the next few minutes.
-- **`failed_ids` / `not_created_channels_count`** — anything that couldn't be resolved or created. Show them so the user can fix and retry.
+**`mode` echoes back the operation mode** (`"include"` or `"exclude"`). You need this for labelling because the semantics flip:
 
-## Errors
+- include + Success = identifier was just added to the report
+- exclude + Success = identifier was just removed from the report
+- include + Duplicate = identifier was already in the report (no-op)
+- exclude + Duplicate = identifier was already excluded (no-op)
 
-- **403** → caller isn't a superuser. Stop and tell the user; this skill is gated.
-- **400** → bad input. Show the `detail` verbatim (usually missing field, unknown entity, or all-empty identifiers).
+Don't use `success_ids` / `failed_ids` for display — they lose input mapping and miss the include/exclude direction. `inputs` is the canonical surface.
+
+## Classify each row
+
+| `reason` | `newly_created` | `mode` | Icon | Label |
+|---|---|---|---|---|
+| `Success` | `true` | `include` | 🆕 | Created in TL |
+| `Success` | `true` | `exclude` | 🆕 | Created in TL (excluded) |
+| `Success` | `false` | `include` | ✅ | Added |
+| `Success` | `false` | `exclude` | ✂️ | Excluded |
+| `Duplicate` | any | `include` | ↺ | Already in report |
+| `Duplicate` | any | `exclude` | ↺ | Already excluded |
+| `Not found` | any | any | ❌ | Not found |
+| `Cannot parse` | any | any | ❌ | Bad format |
+| `Multiple matches found` | any | any | ❌ | Ambiguous (multiple matches) |
+| `Limit exceeded` | any | any | ❌ | Auto-create cap hit |
+| starts with `Error:` | any | any | ❌ | Error (show reason verbatim) |
+| anything else | any | any | ❌ | Failed (show reason verbatim) |
+
+For 🆕 rows: mention that enrichment (subscriber stats, AI description, demographics for channels; metadata for brands) is queued and will populate over the next few minutes — these entities just entered the database.
+
+## Display
+
+Per-row markdown table. **Headline first** with the gain count, then the table.
+
+For include mode:
+
+```markdown
+**Bulk-import to report 23859 — done.** Report gained **2** rows; **1** was already there; **1** failed.
+
+| # | Status | Input | ID | Reason |
+|---|---|---|---|---|
+| 1 | ✅ Added | `@mkbhd` | 4587 | Success |
+| 2 | ↺ Already in report | `@veritasium` | 1209 | Duplicate |
+| 3 | 🆕 Created in TL | `@OfficialSaharTV` | 1328906 | Success — enrichment queued |
+| 4 | ❌ Not found | `https://bad-url` | — | Not found |
+```
+
+For exclude mode, headline uses "lost" wording:
+
+```markdown
+**Bulk-import (exclude) to report 23859 — done.** Report lost **N** rows; **M** were already excluded.
+```
+
+Display rules:
+
+- **Use the user's raw `input` value** in the Input column (it's `inputs[i].input` — the raw submitted string, unchanged).
+- **Omit any column that's uniformly empty** — for sponsorships, the "Input" and "ID" columns are usually identical (both numeric); the Reason column carries the signal.
+- **Small imports (≤30 rows):** render the full table.
+- **Large imports (>30 rows):** lead with a summary table of bucket counts; render the per-row table only for non-✅ buckets (everything except plain "Added") — those are the rows the user cares about. Offer to dump the rest on request.
+
+  Summary table:
+
+  ```markdown
+  | Bucket | Count |
+  |---|---|
+  | ✅ Added | 142 |
+  | ↺ Already in report | 7 |
+  | 🆕 Created in TL | 3 |
+  | ❌ Failed | 2 |
+  | **Total submitted** | **154** |
+  ```
+
+- **Never look up entity names** with extra `tl channels show <id>` / `tl brands show <id>` calls just to populate a "Name" column — those are metered. The user's input column is enough for them to identify each row. If the user explicitly asks "what are these channels called?", then look them up.
+
+## Errors at the command level (before the per-row results)
+
+These are envelope-level failures, distinct from per-row `reason` values:
+
+- **403** → caller isn't a superuser. Stop and tell the user; this command is gated.
+- **400** → bad input shape (missing field, unknown entity, all-empty identifiers). Show the `detail` verbatim.
 - **402** → out of credits. Tell the user to top up.
-- **Connection failed** → transient network issue. Retry once; if it persists, ask the user.
+- **Connection failed** → transient network issue. Retry once; if it persists, surface to the user.
 
 ## What this skill does NOT do
 
-- Doesn't create reports — that's a separate skill (`tl-report-builder`).
+- Doesn't create reports — that's `tl-report-builder`.
 - Doesn't change report metadata (title, description, columns, filters).
-- Doesn't validate identifiers ahead of time — let `tl bulk-import` do the lookup and report back which ones failed. Pre-checking via `tl channels show` is wasteful.
+- Doesn't validate identifiers ahead of time — submit and let the per-row `reason` tell the user which ones failed. Pre-checking with `tl channels show` / etc. is wasteful (metered) and adds latency.
+- Doesn't sweep duplicates from the user's input list — submit them as-is. The response will mark the second occurrence as `Duplicate`, which is more informative than silently deduping.
