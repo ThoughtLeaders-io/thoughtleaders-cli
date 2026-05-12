@@ -37,6 +37,10 @@ def finalize_signup() -> None:
         except ApiError as exc:
             if exc.status_code == 400 and isinstance(exc.raw, dict) and exc.raw.get("code") == "persona_required":
                 result = _prompt_and_finalize(client, exc.raw.get("allowed_personas") or [])
+            elif exc.status_code == 404:
+                # Server predates this endpoint — silently skip; legacy
+                # accounts already exist and don't need provisioning.
+                return
             else:
                 console.print(f"[yellow]Could not finalize signup: {exc.detail}[/yellow]")
                 return
