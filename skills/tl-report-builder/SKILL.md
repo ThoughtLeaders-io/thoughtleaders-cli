@@ -13,7 +13,9 @@ description: |
 
   Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
 
-  **Skip this skill** only for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
+  **Bare-container mode** — when the user pastes a list of hand-picked identifiers (YouTube URLs / `@handles` / `UC…` IDs / brand domains / video URLs / AdLink IDs) and asks for a NEW report (phrasings: "import these links into a new report", "build a report from these channels", "create a campaign with these brands", "make a new report containing these videos", "save these channels to a new report"). The list will be attached by `tl-cli:tl-import` in the **next** step of the chain — but this skill runs FIRST to create the empty container. Skip Phase 2 (no filters to design — `filterset` is intentionally empty; the list, not a filter, defines the report's scope). Run Phase 1 (report type — derive from the entity shape of the pasted identifiers: YouTube → channels = 3, domains → brands = 2, video URLs → content = 1, AdLink IDs → sponsorships = 8), Phase 3 (columns appropriate for the report type), and Phase 4 (widgets, polished title using any niche hint from the prompt, description, takeaways framed around "this is a hand-picked report — N entities will be attached next"). Save via `tl reports create --config-file <path> --yes` with the full bare-container config and return the new `report_id` so `tl-import` can proceed. Identify both skills at planning time when a list-paste-into-new-report prompt arrives; **this skill runs first**, then `tl-cli:tl-import`.
+
+  **Skip this skill entirely** for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
 ---
 
 # TL Report Builder Skill
@@ -1613,6 +1615,55 @@ If the slug is missing or empty for a row, fall back to the ID-based path the pl
 21. **No side-channel deliverables.** The skill produces exactly two output shapes: (a) a saved TL Campaign + a campaign URL (save mode), or (b) an in-chat preview with the sample-rows table + takeaways + save tail (preview mode). It does NOT write CSVs, Markdown reports, or any other "data dump" file to disk as a deliverable. A real run for FRÉ Skincare wrote a CSV to `<temp>\fre-skincare-shortlist.csv` and pointed the user at it as the "full list" — that's a fabricated alternative deliverable that bypasses the TL report-creation flow. If the user wants more than the preview shows, the answer is "save it as a campaign and run it" — not "I'll dump CSV". The only filesystem write the skill is allowed to make is the `<system-temp>/tl-report-builder-<slug>.json` transport file used in step 1 of the save mechanics, and even that is a transport (deleted whenever) — never a deliverable.
 22. **Phases 1–4 always run; the skill never short-circuits to a chat-only data answer.** When the skill is invoked, the output is **always** a Campaign (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a verification table, an analyst summary, a list cross-check, or any other "I'll just answer this directly in chat" deliverable is a regression bug. Real example to internalise: a prompt of *"Brands sponsoring Linus Tech Tips in the past 6 months: dbrand, Private Internet Access, Squarespace, Vessi, Secretlab, UGREEN, Odoo, Dell, Razer, Saily"* should route through Phase 1 → Type 2 brands report scoped to channel 1788 + last 180 days → Phases 2/3/4 → preview with the user's seed brands as a starting filter and the takeaways calling out *"your seed list is accurate but incomplete — TL data shows 60 distinct sponsors over 131 videos; top missing are War Thunder (7), Boot.dev (6), DeleteMe (6)…"*. Instead, a recent run produced exactly that analytical content **as a free-floating markdown table in chat** — no FilterSet emitted, no columns picked, no widgets, no save option. The analytical insight is welcome as a takeaway; it is **not** a substitute for the report. If you find yourself replying with a markdown table directly, ask: am I about to ship a Phase-4 preview, or am I bypassing the phases? The answer must always be the former.
 23. **No ad-hoc data-engineering pipelines.** The skill does NOT write Python consolidation scripts, multi-stage CSV merge tools, dedupe scripts, false-positive filters as standalone files, or any other custom data pipeline as part of producing the deliverable. The data plane is fixed: `tl db pg` (PG), `tl db es` (ES), `tl db fb` (Firebolt). Phase 2 issues queries against these directly to compose a FilterSet and validate it; that's the entire data-side surface. A real aviation/non-MSN run produced this anti-pattern: the agent issued five separate PG queries each writing a CSV (`/tmp/aviation_by_name.csv`, `/tmp/aviation_desc.csv`, `/tmp/aviation_desc2.csv`, `/tmp/aviation_desc3.csv`, `/tmp/aviation_pilot_desc.csv`), wrote a `consolidate_aviation.py` script to merge + dedupe + filter false positives, hit a Windows-vs-Linux `/tmp/` path mismatch, debugged it with `cygpath`, eventually rewrote the script to use `%LOCALAPPDATA%\Temp`, then produced `aviation_consolidated.csv` as the "full list". **None of this is the skill's job.** The right shape: one ES query with `terms` / `bool.should` filters covering the niche keywords + the `creator_countries` filter + `msn_channels_only: false` + `is_active: true` → get count + sample → emit the FilterSet → preview. If the skill's narration is starting to read like a data engineer's bash session ("Run consolidation script", "Try /tmp path resolution", "Resolve /tmp via cygpath", "Find where /tmp files actually are"), stop — the skill has gone off the rails. Restart from Phase 1 with a single composed query.
+
+## Bare-container mode (first half of the tl-import pipeline)
+
+A second entry point alongside the standard "build from natural language" path. Triggered when the user pastes a list of hand-picked identifiers (YouTube URLs / `@handles` / `UC…` IDs / brand domains / video URLs / AdLink IDs) and asks for a NEW report — phrasings like *"import these links into a new report"*, *"build a report from these channels"*, *"create a campaign with these brands"*, *"make a new report containing these videos"*, *"save these channels to a new report"*.
+
+In this mode, the report's content is defined by the pasted list — NOT by filters. The list itself will be attached to the report by `tl-cli:tl-import` in the **next** step of the chain. This skill's job is to create the empty container that `tl-import` can then bulk-import into: correct `report_type`, a sensible default column set, default widgets, polished title, description, and a takeaway that frames the report as ready for list attachment.
+
+Identification cue: the prompt contains concrete identifiers AND new-report intent. The agent identifies both `tl-cli:tl-import` (because of the list) and this skill (because of "new report") at planning time. Execution order: **this skill runs first**, then `tl-cli:tl-import` attaches the list against the returned `report_id`.
+
+### Inputs
+- `entity_context` — the entity type derived from the pasted identifiers' shape:
+  - YouTube URLs / `@handles` / `UC…` IDs → `channels` → `report_type` 3
+  - Brand domains / brand slugs → `brands` → `report_type` 2
+  - Video URLs / video IDs → `articles` (content) → `report_type` 1
+  - AdLink IDs (numeric) → `sponsorships` → `report_type` 8
+- `niche_hint` (optional) — any topical hint from the user's wording (*"these fitness creators"*, *"crypto channels"*, *"my Q2 prospects"*) that should colour the title/description. Do NOT translate this into filter fields — the hint is a label for human discoverability, not a query.
+- `identifier_count` — how many entities the user pasted. Used in the title/description so the report is recognisable in the saved-reports list.
+
+### Process
+1. **Phase 1 (Report type)** — derive from `entity_context` per the table above. No follow-up needed; the entity shape is unambiguous from the pasted identifiers.
+2. **Skip Phase 2 entirely.** No filters to design — `filterset` is intentionally empty. The pasted list, not a filter, defines the report's scope. Don't run `topic_matcher`, `keyword_research`, `cross_references`, `db_count`, `db_sample`, or `sample_judge`. Don't add `keywords` / `topics` / `creator_countries` / `reach_from` / any other filter field — even if `niche_hint` would tempt one. The downstream `tl bulk-import` defines the report's content.
+3. **Run Phase 3 (Columns).** Pick per `references/columns_<type>.md`'s "Defaults — always include" plus 4–7 outreach/evaluation columns appropriate for the report type. Use `niche_hint` only to nudge between outreach-flavored vs discovery-flavored column sets — never to add filtering columns.
+4. **Run Phase 4 (Widgets + composition).** Pick widgets per the matching widget schema's default set for the report type.
+   - **Title** ≤ 60 chars. If `niche_hint` is present, use it: *"Fitness Creators — 50 hand-picked channels"*. Otherwise: *"Imported <entity-label> — <N> <entity>"* (e.g. *"Imported channels — 50 channels"*).
+   - **Description** 1–3 sentences. Default template: *"Hand-picked <entity-label> imported from a user-supplied list on <YYYY-MM-DD>. <N> identifiers to be attached. No filters applied — the list itself defines the report's scope."*
+   - **Takeaways** 1–2 short lines framed around the import-prep outcome: *"Container ready — <N> <entity> will be attached next via bulk-import."* The full takeaway story (newly-created, top-by-reach, US-share distribution) belongs after `tl-import` runs, narrated by the agent in the consolidated user-facing message.
+5. **Run the FINAL JSON-shape validation pass** as in standard mode. Required fields: `report_title` non-empty ≤60, `report_description` non-empty 1–3 sentences, `type: 2`, `report_type` ∈ {1, 2, 3, 8}, every column in the type's column file, every widget aggregator in the matching catalog, `filterset: {}`.
+6. **Save via `tl reports create --config-file <path> --yes`** as in standard mode. Capture the `Campaign ID` from the response — this is the `-c` value `tl-cli:tl-import` will use against `tl bulk-import` in the next step.
+
+### Differences from standard mode (cheat sheet)
+
+| Aspect | Standard mode | Bare-container mode |
+|---|---|---|
+| Trigger | Natural-language filter-driven request | Hand-picked-list paste + new-report intent |
+| Phase 1 | Routes report type from the prompt | Derives report type from pasted-identifier shape |
+| Phase 2 | Designs + validates FilterSet | Skipped — `filterset: {}` intentionally |
+| Phase 3 | Picks columns | Picks columns (same logic) |
+| Phase 4 takeaways | Filter-result framing (count, sample, narrow notes) | "Container ready — N to be attached" |
+| Persistence | `tl reports create --config-file <full-config> --yes` | Same — full config with empty `filterset` |
+| What runs next | Nothing (skill is the deliverable) | `tl-cli:tl-import` against the returned `report_id` |
+
+### Hand-off contract with `tl-import`
+
+After save, surface the captured `report_id` so `tl-cli:tl-import` can run against it. The conversation already has `entity_context` and the pasted identifier list; the agent threads them into the next-step invocation. The single end-to-end user-facing message at the end of the chain is composed by the agent weaving:
+
+- This skill's output: *"TL report created — <title> (report #N) — <link>"*
+- `tl-import`'s output: *"<N> entities attached, <K> already in TL, <M> newly created, <X> failed"*
+
+Don't duplicate `tl-import`'s rendering into this skill's output. Each skill renders its own slice; the agent stitches them for the user.
 
 ## Follow-Up Interactions
 
