@@ -3,14 +3,14 @@ name: tl-import
 description: |
   Bulk-add or exclude a list of channels, brands, uploads (videos), or sponsorships against a ThoughtLeaders report (campaign). Superuser-only.
 
-  Triggers on **two shapes** of request — both go through this skill, NOT through `tl-cli:tl-report-builder`:
+  Triggers on **two shapes** of request:
 
-  1. **Existing report** — the user names a target report ID or pastes a TL report URL. Examples: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X".
-  2. **New report from a hand-picked list** — the user pastes a list of identifiers (YouTube URLs, `@handles`, `UC…` IDs, brand domains, video URLs, AdLink IDs) and asks to import them into a NEW report, with no filters / keywords / topic criteria. Examples: "import these links into a new report: <URLs>", "build a report from these channels: <list>", "create a campaign with these brands: <domains>", "make a new report containing these videos", "save these channels to a new report".
+  1. **Existing report** — the user names a target report ID or pastes a TL report URL. Examples: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X". This skill handles the request end-to-end.
+  2. **New report from a hand-picked list** — the user pastes a list of identifiers (YouTube URLs, `@handles`, `UC…` IDs, brand domains, video URLs, AdLink IDs) and asks to import them into a NEW report, with no filters / keywords / topic criteria. Examples: "import these links into a new report: <URLs>", "build a report from these channels: <list>", "create a campaign with these brands: <domains>", "make a new report containing these videos", "save these channels to a new report". **This is a two-skill pipeline**: `tl-import` runs FIRST to create the bare container and attach the list, then `tl-cli:tl-report-builder` runs SECOND to populate columns/widgets/title-polish/takeaways on the just-created report (via its enrich-existing mode). Identify both at planning time; run them in order; surface a single end-to-end result to the user.
 
-  Both paths are this skill's job because `tl bulk-import` already auto-creates channels from YouTube URLs/handles and brands from website domains — no SQL resolution needed. For path 2, this skill first creates an empty container report via `tl reports create --config-file <minimal-config> --yes`, then runs `tl bulk-import` against the new report ID.
+  Both paths are this skill's entry point because `tl bulk-import` already auto-creates channels from YouTube URLs/handles and brands from website domains — no SQL resolution needed.
 
-  **Skip this skill** when the user wants a filter-driven report (keywords, topics, demographic floors, exclusions, look-alikes, date scopes, MSN/TPP scoping). Those go to `tl-cli:tl-report-builder`. Rule of thumb: if the request boils down to "these specific entities and nothing else", this skill. If it boils down to "entities matching <criteria>", the report-builder skill.
+  **Skip this skill entirely** when the user wants a filter-driven report (keywords, topics, demographic floors, exclusions, look-alikes, date scopes, MSN/TPP scoping) and does NOT paste a hand-picked list. Those go straight to `tl-cli:tl-report-builder`. Rule of thumb: if the request pastes a concrete list of entities, this skill is in the pipeline. If it describes entities by criteria only, this skill is not.
 ---
 
 # tl-import
@@ -87,7 +87,7 @@ Both fields are **mandatory** — `tl reports create` returns `Error (400): Miss
 - **Title** ≤ 60 chars. If the user supplied one ("call it 'Fitness Creators Q2'"), use it verbatim. Otherwise default to `"Imported <entity-label> — <N> <entity>"` (e.g. `"Imported channels — 50 channels"`). Keep it descriptive enough that the user recognises it in their saved-reports list.
 - **Description** 1–3 sentences summarising what the report contains and how it was assembled. Default template: `"Hand-picked <entity-label> imported from a user-supplied list on <YYYY-MM-DD>. <N> identifiers submitted. No filters applied — the list itself defines the report's scope."`
 
-### Step 3 — Build the minimal config
+### Step 3 — Build the minimal container config
 
 ```json
 {
@@ -95,30 +95,16 @@ Both fields are **mandatory** — `tl reports create` returns `Error (400): Miss
   "report_type": <int from Step 1>,
   "report_title": "<from Step 2>",
   "report_description": "<from Step 2>",
-  "filterset": {},
-  "columns": { /* defaults — see Step 4 */ },
-  "widgets": [ /* defaults — see Step 4 */ ]
+  "filterset": {}
 }
 ```
 
 - `type: 2` is the `DYNAMIC` Campaign-model contract — always emit this value for skill-created reports.
 - `filterset: {}` is intentional. The pasted list is attached by `tl bulk-import` in the next phase; no filter fields are needed.
 - Do NOT add `filterset.channels: [...]` / `filterset.brands: [...]` here even if you happen to have IDs. Let `tl bulk-import` own the attachment — it's the single source of truth for what's in the report, and it handles auto-create.
+- **Don't pick columns or widgets here.** The container is intentionally bare. `tl-cli:tl-report-builder` picks columns/widgets/title-polish/takeaways in the enrichment step (Step 5 below). Picking them here would mean both skills doing the same job from different reference points.
 
-### Step 4 — Pick default columns + widgets
-
-Source the defaults from `tl-cli:tl-report-builder`'s reference files (same plugin, sibling skill) — `references/columns_<type>.md` for the "Defaults — always include" set, plus 4–6 outreach/evaluation columns from the standard list. For widgets, use the matching schema's `_tl_default_set` for the report type.
-
-Sensible minimums (use these if `tl-report-builder` references aren't readable):
-
-- **channels (type 3)** — columns: `Channel`, `TL Channel Summary`, `Subscribers`, `Avg. Views`, `Country`, `USA Share`, `Posts Per 90 Days`, `Sponsorship Score`, `Latest AdSpot Price`. Widgets: `channel_count` metric, `views_avg_metric`, `channel_reach_at_scrape_metric`, `views_sum_histogram`, `uploads_histogram`.
-- **brands (type 2)** — columns: `Brand`, `Mentions`, `Channels Sponsored`, `Latest Sponsorship`. Widgets: brand-count metric, mentions histogram.
-- **articles (type 1)** — columns: `Title`, `Channel`, `Published`, `Views`, `Likes`. Widgets: upload-count, views-sum-histogram.
-- **sponsorships (type 8)** — columns: `Channel`, `Brand`, `Send Date`, `Status`, `Price`. Widgets: deal-count, send-date histogram.
-
-`columns` is emitted as `{"<Display Name>": {"index": <int>, "display": true}, ...}` (positional `index` matters; assign 0..N in display order). `widgets` is an array of `{type, index, width, height, aggregator}` objects per `tl-report-builder/references/intelligence_widget_schema.json` (or `sponsorship_widget_schema.json` for type 8).
-
-### Step 5 — Save the container
+### Step 4 — Save the container
 
 Write the config to a portable temp path:
 
@@ -137,9 +123,21 @@ Capture the `Campaign ID` from the response — this is the `-c` value for the b
 If `tl reports create` fails:
 - **`Error (400): Missing required field: report_title`** — Step 2 didn't generate a title. Generate one, rewrite the file, retry.
 - **`Error (400): Missing required field: report_description`** — same as above for the description.
+- **`Error (400): Missing required field: columns`** (or `widgets`) — the server requires at least a baseline set. Add the always-include channels columns (`Channel`, `TL Channel Summary`, `Subscribers`) — emitted as `{"Channel": {"index": 0, "display": true}, "TL Channel Summary": {"index": 1, "display": true}, "Subscribers": {"index": 2, "display": true}}` — and retry. `tl-report-builder` will rewrite them in Step 5 anyway.
 - **Any other 400** — surface the error verbatim and stop. Don't proceed to bulk-import against a non-existent report.
 
 Now proceed to "How to invoke" below with the captured `Campaign ID` as the `-c` value.
+
+### Step 5 — After bulk-import succeeds, hand off to tl-report-builder
+
+The pipeline for new-report mode is **import + configure**, executed in order:
+
+1. **`tl-import` (this skill)** creates the bare container (Step 4) and runs `tl bulk-import` (the "How to invoke" section below) — the list is now attached to a real report.
+2. **`tl-cli:tl-report-builder`** is then invoked in **enrich-existing mode** with the captured `Campaign ID`. It picks the right columns and widgets for `report_type`, polishes the title/description, generates takeaway insights, and persists the updates via `tl reports update <id>`.
+
+After the bulk-import result table has been rendered to the user, invoke `tl-cli:tl-report-builder` with the report ID and let it own the metadata-configuration phase. The user sees: container created → list attached → report fully configured, all in one flow.
+
+Don't try to pick columns/widgets/takeaways from inside `tl-import`. That's `tl-report-builder`'s job and duplicating it here drifts the two skills apart over time.
 
 ## How to invoke
 
@@ -279,8 +277,8 @@ These are envelope-level failures, distinct from per-row `reason` values:
 
 ## What this skill does NOT do
 
-- **Doesn't build filter-driven reports** — keyword search, topic filters, demographic floors, brand exclusions, look-alikes, MSN/TPP scoping, date scopes. Those go to `tl-cli:tl-report-builder`. This skill only handles hand-picked lists (Shape B's "naked container" pattern) and existing-report bulk-attach (Shape A).
-- **Doesn't change report metadata after creation** — once the container is saved (or an existing report is targeted), this skill only adds/excludes entities. Renaming a report, changing its columns, or swapping its filters is out of scope.
+- **Doesn't pick columns, widgets, or takeaways.** That's `tl-cli:tl-report-builder`'s job — both for new-report-mode (where this skill hands off after bulk-import) and for filter-driven reports (where this skill isn't involved at all). The container this skill creates is intentionally bare.
+- **Doesn't build filter-driven reports** — keyword search, topic filters, demographic floors, brand exclusions, look-alikes, MSN/TPP scoping, date scopes. Those go to `tl-cli:tl-report-builder` directly. This skill only handles hand-picked lists.
 - **Doesn't resolve identifiers ahead of time** — no `tl db pg` / raw SQL to look up channel IDs from URLs / handles. `tl bulk-import` does that server-side and auto-creates anything missing. Pre-resolution wastes credits, misses the auto-create path, and is the kind of detour the skill is designed to avoid.
 - **Doesn't validate identifiers ahead of time** either — submit and let the per-row `reason` tell the user which ones failed. Pre-checking with `tl channels show` / etc. is wasteful (metered) and adds latency.
 - **Doesn't sweep duplicates** from the user's input list — submit them as-is. The response will mark the second occurrence as `Duplicate`, which is more informative than silently deduping.
