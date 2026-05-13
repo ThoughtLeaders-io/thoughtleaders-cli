@@ -115,6 +115,33 @@ class TestCreateArgValidation:
         assert result.exit_code == 0
         assert "McDonald's" in (result.stdout or result.output)
 
+    def test_yes_json_skips_preview_emit_on_stdout(self, tmp_path: Path) -> None:
+        # With --yes --json, the command should NOT emit the config preview
+        # JSON to stdout — only the save response JSON should land there, so
+        # programmatic consumers can parse stdout with a single json.loads().
+        # We can't reach the save step in a unit test (no live API), but we
+        # can confirm the preview JSON never hits stdout: the only way the
+        # preview would show is via the print(...) call in the json_output
+        # branch, and that's now gated on `not yes`. We assert stdout is
+        # empty up to the point where the network call would occur.
+        cfg = tmp_path / "yes.json"
+        cfg.write_text(
+            json.dumps({"report_title": "Preview-skip test", "report_type": 3}),
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app, ["create", "--config-file", str(cfg), "--yes", "--json"]
+        )
+        # The save POST fails in unit tests (no live API), so exit_code is
+        # non-zero. The thing we're locking down is that the preview config
+        # JSON is NOT in stdout — i.e. the unique title string only appears
+        # on stdout if the preview path fired, which it shouldn't with --yes.
+        stdout = result.stdout or ""
+        assert "Preview-skip test" not in stdout, (
+            "--yes --json should skip the preview JSON emit so stdout is "
+            "single-document parseable; preview leaked into stdout"
+        )
+
 
 # ---------------------------------------------------------------------------
 # tl reports update — argument validation

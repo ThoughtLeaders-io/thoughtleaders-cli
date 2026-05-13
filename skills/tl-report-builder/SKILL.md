@@ -13,7 +13,15 @@ description: |
 
   Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
 
-  **Skip this skill** only for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
+  **Skip this skill** for:
+  - counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list" → route to `tl-cli:tl`.
+  - **explicit intent to import a list of identifiers into a report — existing or new.** The routing test is the **user's import intent**, NOT the mere presence of a list. A user can paste 50 channel URLs and want analysis, comparison, similar-channel discovery, or filtered lookup — those still belong here (or in `tl-cli:tl`), not in tl-import. They can also paste 50 URLs and want exactly those channels to land in a report as-given — that is import, route to `tl-cli:tl-import`. The deciding question: *"Would the user be satisfied if the listed entities simply ended up as the report's contents exactly as-given, no transformation?"* If yes → import intent → `tl-cli:tl-import`. If they expect filtering, analysis, similarity expansion, or any other transformation on top of the list → it's not import, keep it here.
+
+    Concrete phrasings that route to `tl-cli:tl-import` (intent: import + list = report contents): *"import these channels into report 1234"*, *"add these brands to campaign 5678"*, *"create a new report with these channels: <list>"*, *"build me a campaign from these adlinks: <list>"*, *"make a report containing these uploads: <list>"*.
+
+    Phrasings that **stay here** even with a list attached (intent: discovery / analysis using the list as input, not as the answer): *"find me channels similar to these: <list>"*, *"build a report of TPP channels in the same niche as these: <list>"*, *"show me which of these have sponsored fintech brands"*, *"compare engagement across these channels"*.
+
+    If you find yourself about to resolve a URL/handle to a channel ID *as the deliverable* (no analysis, no filtering, no discovery on top), stop and hand off — that's the import shape.
 ---
 
 # TL Report Builder Skill
