@@ -47,6 +47,8 @@ Retry after 5 seconds if the server returns a "connection denied" or a "server e
 
 Where possible reference sponsorships, brands, channel by numeric IDs.
 
+Always load the [references/business-glossary.md](references/business-glossary.md) file before running any query. It describes how business terms are mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
+
 ## Data Model & Terminology
 
 ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers / media buyers) with **Channels** (YouTube creators, podcasters / media sellers).
@@ -313,12 +315,6 @@ Load these on demand — don't read all upfront. Pick the one(s) relevant to the
 - [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Required reading for `tl db pg` queries, and useful for understanding what the structured `tl` commands return.
 - [references/elasticsearch-schema.md](references/elasticsearch-schema.md) — index aliases, video/channel fields, common query bodies for `tl db es`.
 - [references/firebolt-schema.md](references/firebolt-schema.md) — the two metric tables and their indexes; how to write valid `tl db fb` queries.
-
-Always load the [references/business-glossary.md](references/business-glossary.md) file. It describes how business terms are mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
-
-### Key business concepts
-
-See [references/business-glossary.md](references/business-glossary.md) for revenue/pipeline definitions, performance grades, ownership fields, channel quality and availability, MSN/TPP, and team rosters.
 
 ### Limitations of the `tl`-only data path
 
