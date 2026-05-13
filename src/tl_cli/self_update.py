@@ -23,10 +23,12 @@ from pathlib import Path
 
 from tl_cli import __version__
 
-CACHE_PATH = Path.home() / ".cache" / "tl-cli" / "version-check.json"
+CACHE_DIR = Path.home() / ".cache" / "tl-cli"
+CACHE_PATH = CACHE_DIR / "version-check.json"
 CACHE_TTL_SECONDS = 3600  # 1 hour
 LATEST_URL = "https://api.github.com/repos/ThoughtLeaders-io/thoughtleaders-cli/releases/latest"
 REQUEST_TIMEOUT = 2  # tight — the user is already waiting to see their shell prompt back
+WIN_UPGRADE_RESCHEDULE_WINDOW = 600  # 10 minutes: don't re-schedule a background upgrade we already queued
 
 
 def _detect_install_method() -> str | None:
@@ -92,17 +94,24 @@ REPO_URL = "https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git"
 
 
 def _run_upgrade(method: str, latest: str) -> None:
-    """Block briefly to run the upgrade. Progress goes to stderr so piped
-    stdout stays clean.
+    """Run the upgrade. Progress goes to stderr so piped stdout stays clean.
 
     Uses `install --force` with the new tag URL. pipx/uv pin the original
     install spec including the git tag, so a plain `upgrade` re-installs
     the same version — `--force` is the only way to advance the pinned tag.
 
-    On a successful upgrade, re-syncs Claude Code and OpenCode skills if
-    their respective binaries are on PATH, so the new version's skills
-    land in ~/.claude/ and ~/.config/opencode/ without the user having
-    to remember to run `tl setup ...`.
+    On Windows the running tl.exe holds an exclusive lock on its own file,
+    so pipx/uv can never replace it in-process — every attempt fails with
+    WinError 32 and leaves ``~``-prefixed orphan dirs in site-packages
+    that wedge the next launch with ``ModuleNotFoundError: No module
+    named 'tl_cli'``. The Windows path spawns a detached helper instead
+    that waits for our PID to exit and then runs the upgrade.
+
+    On a successful upgrade (POSIX inline path, or the detached helper),
+    Claude Code and OpenCode skills are re-synced if their binaries are
+    on PATH, so the new version's skills land in ~/.claude/ and
+    ~/.config/opencode/ without the user having to remember to run
+    `tl setup ...`.
     """
     tagged_url = f"git+{REPO_URL}@v{latest}"
     cmd = {
@@ -111,14 +120,25 @@ def _run_upgrade(method: str, latest: str) -> None:
     }.get(method)
     if not cmd:
         return
+
+    if sys.platform == "win32":
+        if _spawn_detached_windows_upgrade(cmd, latest):
+            print(
+                f"[tl-cli] upgrade {__version__} → {latest} scheduled "
+                f"(runs after this command exits; log: "
+                f"{CACHE_DIR / f'upgrade-{latest}.log'})",
+                file=sys.stderr,
+            )
+            _mark_upgrade_scheduled(latest)
+        return
+
     print(
         f"[tl-cli] upgrading {__version__} → {latest} via {method}…",
         file=sys.stderr,
     )
-    # Capture output so a noisy traceback from a broken upgrader (seen on
-    # Windows pipx shims that lose track of their own module) doesn't get
-    # dumped into the user's shell — we surface it deliberately on failure
-    # alongside an actionable next-step message.
+    # Capture output so a noisy traceback from a broken upgrader doesn't
+    # get dumped into the user's shell — we surface it deliberately on
+    # failure alongside an actionable next-step message.
     try:
         result = subprocess.run(cmd, check=False, timeout=60, capture_output=True, text=True)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -132,6 +152,146 @@ def _run_upgrade(method: str, latest: str) -> None:
         _resync_integrations()
         return
     _report_upgrade_failure(method, cmd, result)
+
+
+def _spawn_detached_windows_upgrade(cmd: list[str], latest: str) -> bool:
+    """Schedule the upgrade to run after this process exits.
+
+    Writes a small .cmd helper that polls until our PID disappears and
+    then runs the upgrader. Spawned with CREATE_NO_WINDOW |
+    CREATE_BREAKAWAY_FROM_JOB so it survives this process and any
+    job-object-owned shell that launched us. Output is appended to a
+    log file under ~/.cache/tl-cli/ so the user can diagnose failures
+    after their shell prompt returns.
+
+    Returns True on successful schedule. Idempotent against repeated
+    invocations: see `_already_scheduled`.
+    """
+    import os
+
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"[tl-cli] could not create cache dir for upgrade helper: {exc}",
+            file=sys.stderr,
+        )
+        return False
+
+    log_path = CACHE_DIR / f"upgrade-{latest}.log"
+    script_path = CACHE_DIR / f"upgrade-{latest}.cmd"
+    # Per-helper temp file for tasklist output (a pipe would die; see below).
+    tmp_path = CACHE_DIR / f"upgrade-{latest}.tasklist.tmp"
+
+    parent_pid = os.getpid()
+    quoted_cmd = " ".join(f'"{a}"' for a in cmd)
+
+    # CRLF line endings + cmd.exe-safe quoting.
+    #
+    # We deliberately avoid the pipe-based idiom `tasklist | findstr`: a
+    # detached cmd.exe (CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB) has
+    # no console for the pipe sub-shells to attach to, and they exit
+    # silently the moment the helper hits a `|`. Routing through a temp
+    # file keeps every command as a plain redirected child.
+    script = (
+        "@echo off\r\n"
+        f'echo [tl-cli upgrader] waiting for parent PID {parent_pid} to exit > "{log_path}"\r\n'
+        ":wait\r\n"
+        f'tasklist /FI "PID eq {parent_pid}" /NH 2>NUL > "{tmp_path}"\r\n'
+        f'findstr /C:"{parent_pid}" "{tmp_path}" >NUL\r\n'
+        "if not errorlevel 1 (\r\n"
+        "    ping -n 2 127.0.0.1 >NUL\r\n"
+        "    goto wait\r\n"
+        ")\r\n"
+        f'del "{tmp_path}" 2>NUL\r\n'
+        f'echo [tl-cli upgrader] running: {quoted_cmd} >> "{log_path}"\r\n'
+        f'{quoted_cmd} >> "{log_path}" 2>&1\r\n'
+        "set RC=%ERRORLEVEL%\r\n"
+        f'echo [tl-cli upgrader] exit code %RC% >> "{log_path}"\r\n'
+        "if not %RC%==0 goto end\r\n"
+        "where claude >NUL 2>&1\r\n"
+        "if not errorlevel 1 (\r\n"
+        f'    echo [tl-cli upgrader] re-syncing claude skills >> "{log_path}"\r\n'
+        f'    tl setup claude --json >> "{log_path}" 2>&1\r\n'
+        ")\r\n"
+        "where opencode >NUL 2>&1\r\n"
+        "if not errorlevel 1 (\r\n"
+        f'    echo [tl-cli upgrader] re-syncing opencode skills >> "{log_path}"\r\n'
+        f'    tl setup opencode --json >> "{log_path}" 2>&1\r\n'
+        ")\r\n"
+        ":end\r\n"
+    )
+
+    try:
+        script_path.write_text(script)
+    except OSError as exc:
+        print(f"[tl-cli] could not write upgrade helper: {exc}", file=sys.stderr)
+        return False
+
+    # creationflags constants — repeated here rather than referenced from
+    # subprocess.* so this works on Python builds where the symbols are
+    # guarded behind sys.platform checks.
+    #
+    # CREATE_NO_WINDOW (not DETACHED_PROCESS): a fully-detached cmd.exe
+    # has no console for spawned child commands to inherit, which breaks
+    # piped sub-shells and a few utilities that try to query the console.
+    # CREATE_NO_WINDOW gives us "no visible window" while keeping the
+    # console subsystem available for children.
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+    CREATE_NO_WINDOW = 0x08000000
+
+    try:
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(script_path)],
+            creationflags=(
+                CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+            ),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            cwd=str(CACHE_DIR),
+        )
+    except OSError as exc:
+        print(
+            f"[tl-cli] could not schedule background upgrade: {exc}\n"
+            f"[tl-cli] upgrade manually with:\n  {quoted_cmd}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def _mark_upgrade_scheduled(latest: str) -> None:
+    """Record in the version-check cache that we've queued a background
+    upgrade for ``latest`` so subsequent invocations don't re-schedule
+    while the first helper is still pending."""
+    try:
+        cache = json.loads(CACHE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+    cache["scheduled_at"] = time.time()
+    cache["scheduled_for"] = latest
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(json.dumps(cache))
+    except OSError:
+        pass
+
+
+def _already_scheduled(latest: str) -> bool:
+    """True if we recently queued the same upgrade — caller should skip."""
+    try:
+        cache = json.loads(CACHE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    if cache.get("scheduled_for") != latest:
+        return False
+    scheduled_at = cache.get("scheduled_at")
+    if not isinstance(scheduled_at, (int, float)):
+        return False
+    return time.time() - scheduled_at < WIN_UPGRADE_RESCHEDULE_WINDOW
 
 
 def _report_upgrade_failure(method: str, cmd: list[str], result: subprocess.CompletedProcess) -> None:
@@ -213,6 +373,11 @@ def check_and_upgrade() -> None:
             if _version_tuple(latest) <= _version_tuple(__version__):
                 return
         except ValueError:
+            return
+
+        # On Windows the upgrade is detached: don't re-queue it on every
+        # subsequent tl invocation while the first helper is still pending.
+        if sys.platform == "win32" and _already_scheduled(latest):
             return
 
         _run_upgrade(method, latest)
