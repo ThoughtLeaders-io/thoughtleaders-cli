@@ -367,8 +367,13 @@ def create_report(
 
         # --- Show preview ---
         if json_output:
-            print(json.dumps(config, indent=2, default=str))
+            # Preview-only mode (--json without --yes): print the config and exit.
+            # With --yes, skip the preview emit entirely so the only thing on
+            # stdout is the single save-response JSON below — programmatic
+            # consumers can parse stdout with one json.loads() instead of having
+            # to split two documents.
             if not yes:
+                print(json.dumps(config, indent=2, default=str))
                 raise typer.Exit(0)
         else:
             err.print()

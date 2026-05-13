@@ -34,14 +34,15 @@ Single-identifier requests still work for the import intent (the command accepts
 
 ## Decide which flow
 
-Look at the user's request and the data they provided. Pick exactly one:
+Look at the user's request and pick exactly one of three responses:
 
-| Signal | Flow |
+| Signal | Response |
 |---|---|
 | User references an existing report (campaign ID number, `?campaign=<id>` in a pasted URL, "report X", "this campaign") | **Existing-report flow** — skip to "Inputs to gather" |
-| User says "new report", "a new campaign", "create a report with…", "make a campaign of…", OR gives a list with no report destination at all | **New-report flow** — read "Create a fresh container first" below, then continue |
+| User explicitly asks for a new report ("new report", "a new campaign", "create a report with…", "make a campaign of…") | **New-report flow** — read "Create a fresh container first" below, then continue |
+| User provides a list with no destination cue at all (no campaign reference AND no "new" wording) | **Ambiguous — ask once** before proceeding: *"Should I add these to an existing report (give me the report ID or URL), or create a new one?"* Wait for the answer. Then dispatch to the matching flow above. |
 
-Do not blindly run the new-report flow when the user has an existing report in mind, and do not run the existing-report flow when there is no destination. If the signal is ambiguous (user gave a list but didn't say "new" or reference an existing report), ask once: *"Should I add these to an existing report, or create a new one?"* before continuing.
+Never silently create a new report when the destination is ambiguous; never silently use an existing report when none was referenced. The skill's only acceptable action without a clear destination is to ask.
 
 ## Create a fresh container first (new-report flow only)
 
@@ -77,15 +78,15 @@ Steps:
    ```
 
    `type: 2` is DYNAMIC (the only valid campaign type for save). `filterset: {}` is intentional — no keyword/topic/demographic filters; the report's contents will come entirely from the include list bulk-import populates next.
-6. **Persist via the same primitive `tl-report-builder` uses:**
+6. **Persist via the same primitive `tl-report-builder` uses.** Write the config dict to a temp file using your file-writing tool — **do not use shell `echo` or heredocs**, those break on titles containing apostrophes, dollar signs, backticks, etc. The whole point of `--config-file` is to bypass shell quoting entirely. Pick any temp path the agent's filesystem tool can write to (e.g. `/tmp/tl-import-container.json` on Unix, the OS temp dir on Windows).
+
+   Then run:
 
    ```bash
-   # write the config to a temp file (safest re: shell quoting)
-   echo '<config json>' > /tmp/tl-import-container.json
-   tl reports create --config-file /tmp/tl-import-container.json --yes --json
+   tl reports create --config-file <path-you-just-wrote> --yes --json
    ```
 
-   Parse `campaign_id` (and `report_url` for the summary) from the JSON output. If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
+   With `--yes --json` the CLI emits a single JSON document on stdout containing the save response — parse it with one `json.loads()` and pull out `campaign_id` (and `report_url` for the summary). If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
 
 7. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below.
 
