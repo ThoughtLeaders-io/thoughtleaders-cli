@@ -318,7 +318,7 @@ Always load the [references/business-glossary.md](references/business-glossary.m
 
 ### Key business concepts
 
-See [references/business-glossary.md](references/business-glossary.md) for revenue/pipeline definitions, performance grades, ownership fields, MSN/TPP, and team rosters.
+See [references/business-glossary.md](references/business-glossary.md) for revenue/pipeline definitions, performance grades, ownership fields, channel quality and availability, MSN/TPP, and team rosters.
 
 ### Limitations of the `tl`-only data path
 
@@ -522,4 +522,3 @@ tl recommender inspect-brand Nike                              # Per-tag breakdo
 tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal profile
 ```
 Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches.
-

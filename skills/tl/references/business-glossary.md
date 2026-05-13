@@ -18,6 +18,7 @@ Maps business terms to database concepts.
 | **Weighted pipeline** | `SUM(weighted_price)` for open opps | Pre-calculated on save |
 | **Ad is live** | `publish_date IS NOT NULL` | Until publish_date is set, ad is not on YouTube |
 | **Cancellation risk** | Sold but `publish_date IS NULL` | Sold deals without publish_date can still be canceled |
+| **Immediately bookable** | `is_tl_channel = true` | TPP channels are immediately bookable |
 
 ## Performance Grade (`adlink.performance_grade`)
 
@@ -240,4 +241,3 @@ WHERE al.owner_publisher_id IN (218, 5710, 873, 9011, 11361)
 SELECT ... FROM thoughtleaders_profile p
 WHERE p.owner_publisher_id IN (71, 9274, 18159, 5799, 5804, 10743, 11592)
 ```
-
