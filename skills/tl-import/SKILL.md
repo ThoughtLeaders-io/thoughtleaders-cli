@@ -1,29 +1,90 @@
 ---
 name: tl-import
-description: Bulk-add or exclude a list of channels, brands, uploads (videos), or sponsorships against a ThoughtLeaders report (campaign). Superuser-only. Use when a request asks to import / add / exclude a batch of identifiers against a specific report ID — phrasings like "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X".
+description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. Handles both "add to existing" and "create + populate" intents from the same user-facing skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
 ---
 
 # tl-import
 
-Wraps the `tl bulk-import` command — submits a list of identifiers against a report, polls until done, and renders a per-row result table.
+Imports a list of identifiers (channels / brands / articles / sponsorships) into a report. Two flows depending on whether the user references an existing report or wants a new one — see "Decide which flow" below. Both end in the same step: `tl bulk-import` submits the identifiers, polls until done, and the skill renders a per-row result table.
 
 ## When to use
 
 Trigger on requests like:
 
-- "Import @mkbhd, @veritasium into report 1234"
-- "Add these brands to campaign 5678"
-- "Bulk-add this list of channels to report 999"
-- "Exclude these channels from report Z"
-- "Add these videos to report X"
+- "Import @mkbhd, @veritasium into report 1234" → **existing-report flow**
+- "Add these brands to campaign 5678" → **existing-report flow**
+- "Bulk-add this list of channels to report 999" → **existing-report flow**
+- "Exclude these channels from report Z" → **existing-report flow**
+- "Create a new report with these channels: \<list\>" → **new-report flow**
+- "Make a campaign containing these brands: \<list\>" → **new-report flow**
+- "Build me a report from these adlinks: \<list\>" → **new-report flow** *(even though "build" sounds like `tl-report-builder` — the defining signal is the attached fixed list. If the user gave you the identifiers, the report is a container, not a discovery query.)*
 
 Single-identifier requests still work (the command accepts one). The reason to keep this skill separate from other report-edit flows: it's the only path that auto-creates channels from YouTube URLs / handles, and brands from website domains.
+
+## Decide which flow
+
+Look at the user's request and the data they provided. Pick exactly one:
+
+| Signal | Flow |
+|---|---|
+| User references an existing report (campaign ID number, `?campaign=<id>` in a pasted URL, "report X", "this campaign") | **Existing-report flow** — skip to "Inputs to gather" |
+| User says "new report", "a new campaign", "create a report with…", "make a campaign of…", OR gives a list with no report destination at all | **New-report flow** — read "Create a fresh container first" below, then continue |
+
+Do not blindly run the new-report flow when the user has an existing report in mind, and do not run the existing-report flow when there is no destination. If the signal is ambiguous (user gave a list but didn't say "new" or reference an existing report), ask once: *"Should I add these to an existing report, or create a new one?"* before continuing.
+
+## Create a fresh container first (new-report flow only)
+
+The user wants the report to contain exactly the identifiers they're about to import — nothing else. No keyword research, no discovery query, no review pipeline. Just a minimal container that holds the list. **The persistence step uses the same primitive `tl-cli:tl-report-builder` calls at the end of its workflow** (`tl reports create --config-file`), but with a tiny config and none of the upstream phases.
+
+Steps:
+
+1. **Title.** If the user gave one (e.g. *"create a Q1 cohort report with…"* → title *"Q1 cohort"*), use it. Otherwise ask once: *"What should I name the new report?"* Title must be ≤ 60 chars, non-empty.
+2. **Description.** Auto-generate a 1-sentence description; don't ask the user. Format: `"Bulk-imported list of <N> <entity> (<YYYY-MM-DD>)."`. Required by the platform on save (not optional).
+3. **Map entity → `report_type`:**
+   - `channels` → **3** (THOUGHTLEADERS)
+   - `brands` → **2** (BRANDS)
+   - `articles` (uploads/videos) → **1** (CONTENT)
+   - `sponsorships` (adlinks/deals) → **8** (CAMPAIGN_MANAGEMENT)
+4. **Pick default columns.** Read the matching columns reference file in the sibling `tl-report-builder` skill and use its **"always include"** defaults — do NOT duplicate the list inline here, that's where the canonical default lives:
+   - channels → `../tl-report-builder/references/columns_channels.md` (look for the "Defaults — always include" section)
+   - brands → `../tl-report-builder/references/columns_brands.md`
+   - articles → `../tl-report-builder/references/columns_content.md`
+   - sponsorships → `../tl-report-builder/references/columns_sponsorships.md`
+
+   Convert the column display names into the dict shape: `{"Channel": {"display": true}, "TL Channel Summary": {"display": true}, …}`.
+5. **Compose the minimal config:**
+
+   ```json
+   {
+     "report_title": "<from step 1>",
+     "report_description": "<from step 2>",
+     "report_type": <from step 3>,
+     "type": 2,
+     "filterset": {},
+     "columns": <from step 4>
+   }
+   ```
+
+   `type: 2` is DYNAMIC (the only valid campaign type for save). `filterset: {}` is intentional — no keyword/topic/demographic filters; the report's contents will come entirely from the include list bulk-import populates next.
+6. **Persist via the same primitive `tl-report-builder` uses:**
+
+   ```bash
+   # write the config to a temp file (safest re: shell quoting)
+   echo '<config json>' > /tmp/tl-import-container.json
+   tl reports create --config-file /tmp/tl-import-container.json --yes --json
+   ```
+
+   Parse `campaign_id` (and `report_url` for the summary) from the JSON output. If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
+
+7. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below.
+
+Surface the new report URL alongside the bulk-import results in the final summary, e.g. *"Created [Q1 cohort](https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859) and imported 50 channels:"* followed by the per-row table.
 
 ## Inputs to gather
 
 Before running, confirm:
 
-1. **Report ID** (`--campaign` / `-c`) — required. If the user pastes a TL URL (e.g. `https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859&...`), the integer after `campaign=` is the ID.
+1. **Report ID** (`--campaign` / `-c`) — required. If the user pastes a TL URL (e.g. `https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859&...`), the integer after `campaign=` is the ID. In the new-report flow, use the `campaign_id` returned by `tl reports create` above.
 2. **Entity type** — one of `channels` / `brands` / `articles` / `sponsorships`. Infer from context, but translate user-facing vocabulary:
    - YouTube URLs / handles / `UC…` IDs → `channels`
    - Domains / brand slugs → `brands`
@@ -174,7 +235,7 @@ These are envelope-level failures, distinct from per-row `reason` values:
 
 ## What this skill does NOT do
 
-- Doesn't create reports — that's `tl-report-builder`.
-- Doesn't change report metadata (title, description, columns, filters).
+- Doesn't run `tl-report-builder`'s discovery pipeline (keyword research, topic matching, validation cycles, review). When a user gives a fixed list of identifiers, they've already done the discovery themselves — the report is a container for their list, not a query result. Use `tl-report-builder` only when the user wants you to *find* channels/brands/etc. by criteria.
+- Doesn't change existing report metadata (title, description, columns, filters) after creation. For that, use the platform UI or a dedicated edit flow. The new-report flow in this skill sets minimum-required metadata once at creation and never revisits it.
 - Doesn't validate identifiers ahead of time — submit and let the per-row `reason` tell the user which ones failed. Pre-checking with `tl channels show` / etc. is wasteful (metered) and adds latency.
 - Doesn't sweep duplicates from the user's input list — submit them as-is. The response will mark the second occurrence as `Duplicate`, which is more informative than silently deduping.

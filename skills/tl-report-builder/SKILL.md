@@ -13,7 +13,9 @@ description: |
 
   Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
 
-  **Skip this skill** only for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
+  **Skip this skill** for:
+  - counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list" → route to `tl-cli:tl`.
+  - **requests that already include the exhaustive list of identifiers** the user wants in the report (channel URLs / handles / `UC…` IDs, brand domains / slugs, video URLs, AdLink IDs). The user is asking to *import* those identifiers, not to *discover* matches — even if the wording says "build a report" or "create a campaign". The list IS the report. Route those to `tl-cli:tl-import` (which handles both "add to existing report" and "create new report + populate" via a single tool). Examples of phrasings that belong to `tl-cli:tl-import`, NOT here: *"create a new report with these channels: <list>"*, *"build me a campaign from these brands: <list>"*, *"make a report containing these adlinks: <list>"*. The defining signal is an attached fixed list; if you find yourself about to resolve a URL or handle to a channel ID, stop and hand off.
 ---
 
 # TL Report Builder Skill
