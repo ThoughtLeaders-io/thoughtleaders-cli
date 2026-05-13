@@ -18,7 +18,7 @@ Maps business terms to database concepts.
 | **Weighted pipeline** | `SUM(weighted_price)` for open opps | Pre-calculated on save |
 | **Ad is live** | `publish_date IS NOT NULL` | Until publish_date is set, ad is not on YouTube |
 | **Cancellation risk** | Sold but `publish_date IS NULL` | Sold deals without publish_date can still be canceled |
-| **Immediately bookable** | `is_tl_channel = true` | TPP channels are immediately bookable |
+| **Immediately bookable** | `is_tl_channel = true` | TPP channels — TL's closest partners. Fastest to respond, easiest to close, prefer when booking. |
 
 ## Performance Grade (`adlink.performance_grade`)
 
@@ -76,7 +76,7 @@ Maps business terms to database concepts.
 - Channels where TL has **≥80% confidence** they can buy an ad tomorrow
 - Key data: **who is the contact** to buy the ad from
 - `thoughtleaders_channel.media_selling_network_join_date` = when channel joined MSN
-- `thoughtleaders_channel.is_tl_channel` = TPP/VIP channel (subset of MSN)
+- `thoughtleaders_channel.is_tl_channel` = TPP channel — TL's closest partners, a strict subset of MSN. **Prefer when booking**: fastest response, easiest to close. Not a gating flag; not a process barrier.
 - **Rule:** Only one active adspot with `integration=mention` per channel at any time
 - MSN quality depends on having current, accurate contact info
 
@@ -88,7 +88,7 @@ Vocabulary that AMs use about channels, mapped to the actual DB encoding. Most o
 |---------------|------------|-------|
 | **Subscribers** | `thoughtleaders_channel.reach` (bigint) | ⚠️ There is no `subscribers` column. The DB column is `reach`. |
 | **MSN member** | `media_selling_network_join_date IS NOT NULL` | Whole MSN pool. NOT `is_tl_channel = true` — that's the VIP subset only. |
-| **TPP / VIP channel** | `is_tl_channel = true` | The small VIP subset of MSN (~144 channels at 100k+ reach). Don't use as a general "MSN" proxy — silently drops ~98% of MSN. |
+| **TPP / TL channel** | `is_tl_channel = true` | TL's closest-partner channels (~144 at 100k+ reach). Prefer when booking — fastest to respond, easiest to close. A strict subset of MSN; *don't* use as a general "MSN" proxy — silently drops ~98% of MSN. |
 | **Active channel** | `is_active = true AND last_published >= CURRENT_DATE - INTERVAL '120 days'` | Standard filter for "channel is live and posting." Always include `is_active = true` in channel queries. |
 | **Country / Geo of a deal** | `thoughtleaders_channel.country` (ISO 3166-1 alpha-2) | `thoughtleaders_adlink` has NO geo column. Geo for sponsorships almost always means the channel's country. |
 | **Language of a channel** | `thoughtleaders_channel.language` (short ISO 639 code) | ⚠️ Short ISO 639 codes — NOT BCP-47. Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with BCP-47 (`en-US`/`pt-BR`) returns zero. Don't assume `LENGTH(language) = 2`. |
