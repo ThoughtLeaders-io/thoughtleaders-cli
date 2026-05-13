@@ -13,7 +13,7 @@ description: |
 
   Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
 
-  **Skip this skill** only for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list". Those go to `tl-cli:tl`.
+  **Skip this skill** for: counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list" (those go to `tl-cli:tl`); AND for **hand-picked-list imports** — when the user pastes a list of YouTube URLs / `@handles` / `UC…` IDs / brand domains / video URLs / AdLink IDs and asks to put them into a new or existing report with NO filtering criteria. That's `tl-cli:tl-import`'s job — it auto-creates the container report (if asked) and runs `tl bulk-import`, which resolves URLs server-side and auto-creates missing entities. Don't try to resolve the URLs yourself via `tl db pg` — it's the wrong tool and wastes credits.
 ---
 
 # TL Report Builder Skill
