@@ -57,14 +57,36 @@ Steps:
    - `brands` → **2** (BRANDS)
    - `articles` (uploads/videos) → **1** (CONTENT)
    - `sponsorships` (adlinks/deals) → **8** (CAMPAIGN_MANAGEMENT)
-4. **Pick default columns.** Read the matching columns reference file in the sibling `tl-report-builder` skill and use its **"always include"** defaults — do NOT duplicate the list inline here, that's where the canonical default lives:
-   - channels → `../tl-report-builder/references/columns_channels.md` (look for the "Defaults — always include" section)
+4. **Pick default columns.** Read the matching columns reference file in the sibling `tl-report-builder` skill and use its **"Defaults — always include"** section — that's where the canonical column list lives per type; do NOT restate it here. The four files:
+   - channels → `../tl-report-builder/references/columns_channels.md`
    - brands → `../tl-report-builder/references/columns_brands.md`
    - articles → `../tl-report-builder/references/columns_content.md`
    - sponsorships → `../tl-report-builder/references/columns_sponsorships.md`
 
-   Convert the column display names into the dict shape: `{"Channel": {"display": true}, "TL Channel Summary": {"display": true}, …}`.
-5. **Compose the minimal config:**
+   Convert each display name from the "Defaults — always include" list into a column entry shape **`{"display": true, "width": "default"}`** — the `width` field is required by the dashboard's column renderer; without it, columns sometimes resolve but cells render empty. Use `"wide"` for narrative columns (e.g. `TL Channel Summary`, `Channel Description`, `Topic Descriptions`); use `"narrow"` for short numeric columns (e.g. `Status`, `Country`); `"default"` everywhere else is safe.
+
+5. **Pick `dataset_structure`.** This block tells the dashboard's data plane how to query each row's cell values. **Without it the report saves but rows render empty** — see the bottom-of-section sanity check. Shape:
+
+   ```json
+   "dataset_structure": {
+     "report_type": <same as the top-level report_type>,
+     "page_size": 50,
+     "sort": "<backend_code field, optionally -prefixed for descending>"
+   }
+   ```
+
+   Per-type sensible default sort (sourced from `../tl-report-builder/references/sortable_columns.json` — pick the first sortable entry that fits the use case, prefer descending where relevant):
+
+   | report_type | entity | default `sort` | what it orders by |
+   |---|---|---|---|
+   | 3 | channels | `-doc_count` | content count, most-prolific first |
+   | 2 | brands | `-channel_count` | unique channels mentioning, most first |
+   | 1 | articles | `-publication_date` | most recent uploads first |
+   | 8 | sponsorships | `-send_date` | nearest scheduled date first |
+
+   If the user explicitly asked for a different sort, honor that instead — but it must reference a `backend_code` valid for the type per `sortable_columns.json`.
+
+6. **Compose the minimal config:**
 
    ```json
    {
@@ -73,12 +95,13 @@ Steps:
      "report_type": <from step 3>,
      "type": 2,
      "filterset": {},
-     "columns": <from step 4>
+     "columns": <from step 4>,
+     "dataset_structure": <from step 5>
    }
    ```
 
-   `type: 2` is DYNAMIC (the only valid campaign type for save). `filterset: {}` is intentional — no keyword/topic/demographic filters; the report's contents will come entirely from the include list bulk-import populates next.
-6. **Persist via the same primitive `tl-report-builder` uses.** Write the config dict to a temp file using your file-writing tool — **do not use shell `echo` or heredocs**, those break on titles containing apostrophes, dollar signs, backticks, etc. The whole point of `--config-file` is to bypass shell quoting entirely. Pick any temp path the agent's filesystem tool can write to (e.g. `/tmp/tl-import-container.json` on Unix, the OS temp dir on Windows).
+   `type: 2` is DYNAMIC (the only valid campaign type for save). `filterset: {}` is intentional — no keyword/topic/demographic filters; the report's contents will come entirely from the include list bulk-import populates next. **`dataset_structure` is what makes the rows render with actual values** — leave it out and the dashboard shows row numbers but blank cells.
+7. **Persist via the same primitive `tl-report-builder` uses.** Write the config dict to a temp file using your file-writing tool — **do not use shell `echo` or heredocs**, those break on titles containing apostrophes, dollar signs, backticks, etc. The whole point of `--config-file` is to bypass shell quoting entirely. Pick any temp path the agent's filesystem tool can write to (e.g. `/tmp/tl-import-container.json` on Unix, the OS temp dir on Windows).
 
    Then run:
 
@@ -88,7 +111,17 @@ Steps:
 
    With `--yes --json` the CLI emits a single JSON document on stdout containing the save response — parse it with one `json.loads()` and pull out `campaign_id` (and `report_url` for the summary). If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
 
-7. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below.
+8. **Sanity-check the rendered report before handing off.** Save success is not the same as render success — a config that the API accepts can still produce a report where rows render with blank cells (typically because `dataset_structure` is missing or its `sort` references a non-existent `backend_code`). Run a quick read against the new report:
+
+   ```bash
+   tl reports run <campaign_id> --limit 3 --json
+   ```
+
+   Inspect the response. If `results` is non-empty AND each row has populated fields beyond just an ID, you're good — proceed to step 9. If `results` is empty (expected — bulk-import hasn't run yet) OR each row is mostly null/empty fields, the config is missing required render-time fields. Surface that to the user as *"the report was created but renders empty cells — likely missing required config fields"* and stop. Don't proceed to bulk-import against a broken container; that just adds 50 channels to a report the user can't read.
+
+   *Note: this check costs a small report-run credit charge. It's worth it — silently handing the user a blank report is worse.*
+
+9. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below.
 
 Surface the new report URL alongside the bulk-import results in the final summary, e.g. *"Created [Q1 cohort](https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859) and imported 50 channels:"* followed by the per-row table.
 
