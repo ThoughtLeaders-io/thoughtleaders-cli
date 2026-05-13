@@ -1,6 +1,6 @@
 ---
 name: tl-import
-description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. Handles both "add to existing" and "create + populate" intents from the same user-facing skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
+description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. **Trigger on explicit intent to import the listed entities into a report**, NOT on the mere presence of a list (a user can paste a list and want analysis, comparison, or similar-channel discovery — those go to `tl-cli:tl-report-builder` or `tl-cli:tl`). The deciding question is: *would the user be satisfied if those exact entities ended up as the report's contents, no transformation?* If yes, this is the skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
 ---
 
 # tl-import
@@ -9,7 +9,9 @@ Imports a list of identifiers (channels / brands / articles / sponsorships) into
 
 ## When to use
 
-Trigger on requests like:
+The deciding test is the **user's intent**, not just what they pasted. The user must want the listed entities to land in a report as-given — no filtering, no analysis, no similarity expansion on top.
+
+Trigger on:
 
 - "Import @mkbhd, @veritasium into report 1234" → **existing-report flow**
 - "Add these brands to campaign 5678" → **existing-report flow**
@@ -17,9 +19,18 @@ Trigger on requests like:
 - "Exclude these channels from report Z" → **existing-report flow**
 - "Create a new report with these channels: \<list\>" → **new-report flow**
 - "Make a campaign containing these brands: \<list\>" → **new-report flow**
-- "Build me a report from these adlinks: \<list\>" → **new-report flow** *(even though "build" sounds like `tl-report-builder` — the defining signal is the attached fixed list. If the user gave you the identifiers, the report is a container, not a discovery query.)*
+- "Build me a report from these adlinks: \<list\>" → **new-report flow** *(the verb "build" doesn't matter — what matters is that the user wants exactly those adlinks in the report.)*
 
-Single-identifier requests still work (the command accepts one). The reason to keep this skill separate from other report-edit flows: it's the only path that auto-creates channels from YouTube URLs / handles, and brands from website domains.
+**Do NOT trigger** when the user pastes a list but wants something other than direct import — those belong to `tl-cli:tl-report-builder` or `tl-cli:tl`:
+
+- *"Find me channels similar to these: \<list\>"* — discovery using the list as a seed, not as the answer.
+- *"Build a report of TPP channels in the same niche as these: \<list\>"* — discovery with filters and similarity expansion.
+- *"Compare engagement across these channels"* — analysis on top of the list.
+- *"Show me which of these have sponsored fintech brands"* — filtered lookup.
+
+If you're about to do anything beyond "put these exact entities into a report", the wrong skill is running.
+
+Single-identifier requests still work for the import intent (the command accepts one). The reason to keep this skill separate from other report-edit flows: it's the only path that auto-creates channels from YouTube URLs / handles, and brands from website domains.
 
 ## Decide which flow
 
