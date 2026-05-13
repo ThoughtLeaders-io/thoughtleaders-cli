@@ -111,21 +111,21 @@ Steps:
 
    With `--yes --json` the CLI emits a single JSON document on stdout containing the save response — parse it with one `json.loads()` and pull out `campaign_id` (and `report_url` for the summary). If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
 
-8. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below — that flow will populate the FilterSet with the user's identifiers, render the per-row classification table, and return.
+8. **Run bulk-import, capture the result — but DO NOT render the success summary yet.** Hand off to the bulk-import path with the new `campaign_id` and execute "Inputs to gather" + the bulk-import call + the JSON-envelope parse. **Stop before** rendering the per-row classification table or any "import done" message. Step 9 below must run first; only then do you render the summary. If you find yourself about to emit the success markdown straight out of the bulk-import flow, stop — you skipped step 9.
 
-9. **Post-import render check (after bulk-import finishes).** Once bulk-import has populated the FilterSet, verify the rows actually render with values before you surface the success summary. The save accepts the config; the renderer can still drop columns silently (e.g. `sort` points at a column you didn't emit, or `width` is missing on entries that needed it). Run:
+9. **Post-import render check (must execute before any success summary is emitted).** The save accepts the config; the renderer can still drop columns silently (e.g. `sort` points at a column you didn't emit, or `width` is missing on entries that needed it). Run:
 
    ```bash
    tl reports run <campaign_id> --limit 3 --json
    ```
 
-   - If `results` is non-empty AND each row has fields beyond just an ID → render works, surface the normal success message and per-row table.
-   - If `results` is non-empty but each row is mostly null/empty fields → the config has a render bug. Surface to the user: *"The bulk-import succeeded but the report is rendering with empty cells. Add columns via the dashboard UI, or delete and re-run the import."* Don't hide this — the import already happened; the user needs to know they have a partially-broken report.
-   - If `results` is unexpectedly empty (shouldn't happen post-bulk-import unless every row failed) → surface the bulk-import's `inputs` table to explain which rows failed.
+   - If `results` is non-empty AND each row has fields beyond just an ID → render works. Now surface the bulk-import success summary (headline + per-row classification table) plus the new report URL.
+   - If `results` is non-empty but each row is mostly null/empty fields → the config has a render bug. Surface to the user **instead of** the normal success message: *"The bulk-import succeeded but the report is rendering with empty cells. Add columns via the dashboard UI, or delete and re-run the import."* Don't hide this — the import already happened; the user needs to know they have a partially-broken report. Still include the bulk-import's `inputs` classification table so they see what landed.
+   - If `results` is unexpectedly empty (shouldn't happen post-bulk-import unless every row failed) → surface the bulk-import's `inputs` table to explain which rows failed; skip the "Created [report] and imported N" headline since N=0.
 
    *Cost: a small report-run credit. Worth it — silently handing the user a report whose cells are blank is worse than telling them upfront.*
 
-Surface the new report URL alongside the bulk-import results in the final summary, e.g. *"Created [Q1 cohort](https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859) and imported 50 channels:"* followed by the per-row table.
+Once step 9 passes, surface the new report URL alongside the bulk-import results in the final summary, e.g. *"Created [Q1 cohort](https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859) and imported 50 channels:"* followed by the per-row table.
 
 ## Inputs to gather
 
