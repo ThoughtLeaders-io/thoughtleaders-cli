@@ -75,16 +75,16 @@ Steps:
    }
    ```
 
-   Per-type sensible default sort (sourced from `../tl-report-builder/references/sortable_columns.json` — pick the first sortable entry that fits the use case, prefer descending where relevant):
+   Per-type default sort. **Critical invariant:** the `sort` field must reference a `backend_code` whose display-name column is in the column set you emitted in step 4. The dashboard's renderer rejects sorts pointing at columns that aren't present in the report. So pick the intersection of (a) the type's "Defaults — always include" columns from `columns_<type>.md` and (b) sortable columns from `../tl-report-builder/references/sortable_columns.json`:
 
-   | report_type | entity | default `sort` | what it orders by |
+   | report_type | entity | default `sort` | maps to (must be in column set) |
    |---|---|---|---|
-   | 3 | channels | `-doc_count` | content count, most-prolific first |
-   | 2 | brands | `-channel_count` | unique channels mentioning, most first |
-   | 1 | articles | `-publication_date` | most recent uploads first |
-   | 8 | sponsorships | `-send_date` | nearest scheduled date first |
+   | 3 | channels | `-reach` | `Subscribers` (in defaults) |
+   | 2 | brands | `-doc_count` | `Mentions` (in defaults) |
+   | 1 | articles | `-publication_date` | `Date` (in defaults) |
+   | 8 | sponsorships | `-send_date` | `Scheduled Date` (in defaults) |
 
-   If the user explicitly asked for a different sort, honor that instead — but it must reference a `backend_code` valid for the type per `sortable_columns.json`.
+   If the user explicitly asked for a different sort, honor that — but if their preferred sort column isn't in the type's defaults, **add that column to the column set in step 4** before emitting the config. Sort pointing at an absent column re-creates the original render-failure bug.
 
 6. **Compose the minimal config:**
 
@@ -111,17 +111,19 @@ Steps:
 
    With `--yes --json` the CLI emits a single JSON document on stdout containing the save response — parse it with one `json.loads()` and pull out `campaign_id` (and `report_url` for the summary). If `tl reports create` returns HTTP 400 with `Missing required field: report_title` or `…report_description`, the config is malformed — re-check step 1/2.
 
-8. **Sanity-check the rendered report before handing off.** Save success is not the same as render success — a config that the API accepts can still produce a report where rows render with blank cells (typically because `dataset_structure` is missing or its `sort` references a non-existent `backend_code`). Run a quick read against the new report:
+8. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below — that flow will populate the FilterSet with the user's identifiers, render the per-row classification table, and return.
+
+9. **Post-import render check (after bulk-import finishes).** Once bulk-import has populated the FilterSet, verify the rows actually render with values before you surface the success summary. The save accepts the config; the renderer can still drop columns silently (e.g. `sort` points at a column you didn't emit, or `width` is missing on entries that needed it). Run:
 
    ```bash
    tl reports run <campaign_id> --limit 3 --json
    ```
 
-   Inspect the response. If `results` is non-empty AND each row has populated fields beyond just an ID, you're good — proceed to step 9. If `results` is empty (expected — bulk-import hasn't run yet) OR each row is mostly null/empty fields, the config is missing required render-time fields. Surface that to the user as *"the report was created but renders empty cells — likely missing required config fields"* and stop. Don't proceed to bulk-import against a broken container; that just adds 50 channels to a report the user can't read.
+   - If `results` is non-empty AND each row has fields beyond just an ID → render works, surface the normal success message and per-row table.
+   - If `results` is non-empty but each row is mostly null/empty fields → the config has a render bug. Surface to the user: *"The bulk-import succeeded but the report is rendering with empty cells. Add columns via the dashboard UI, or delete and re-run the import."* Don't hide this — the import already happened; the user needs to know they have a partially-broken report.
+   - If `results` is unexpectedly empty (shouldn't happen post-bulk-import unless every row failed) → surface the bulk-import's `inputs` table to explain which rows failed.
 
-   *Note: this check costs a small report-run credit charge. It's worth it — silently handing the user a blank report is worse.*
-
-9. **Hand off to bulk-import** using the new `campaign_id` as if the user had supplied it. Continue with "Inputs to gather" and the rest of this skill below.
+   *Cost: a small report-run credit. Worth it — silently handing the user a report whose cells are blank is worse than telling them upfront.*
 
 Surface the new report URL alongside the bulk-import results in the final summary, e.g. *"Created [Q1 cohort](https://app.thoughtleaders.io/#/thoughtleaders?campaign=23859) and imported 50 channels:"* followed by the per-row table.
 
