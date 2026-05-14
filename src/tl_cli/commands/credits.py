@@ -119,7 +119,7 @@ def _poll_for_credit(initial_balance: Decimal, expected_increment: Decimal) -> N
     """Poll the balance endpoint until it goes up. Bounded so the CLI
     eventually returns to the prompt instead of hanging forever.
     """
-    console.print("[dim]Waiting for payment confirmation (up to 10 minutes; Ctrl-C to stop)…[/dim]")
+    console.print("[dim]Polling balance every 5s for up to 10 minutes (Ctrl-C to stop)…[/dim]")
     deadline = time.time() + 600
     last_balance = initial_balance
     try:
