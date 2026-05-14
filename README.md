@@ -16,12 +16,19 @@ pip install -e .
 ### As a user
 
 ```bash
+# Recommended:
 pipx install thoughtleaders-cli
 # or
 uv tool install thoughtleaders-cli
-# or (but try to avoid it because just "pip" will not create a new venv for the product - only "uv" and "pipx" will do that)
+# or (avoid this — plain `pip` will install into your current environment instead of a fresh venv)
 pip install thoughtleaders-cli
 ```
+
+> **Don't use `uv pip install thoughtleaders-cli`.** A transitive dependency
+> (`toon-format`) only publishes pre-releases, and `uv pip` hides those by
+> default — the resolver reports the package as missing. The other commands
+> above accept the exact pin without extra flags. If you really must use
+> `uv pip`, pass `--prerelease=allow`.
 
 Then set up:
 ```bash
