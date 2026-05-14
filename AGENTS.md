@@ -121,4 +121,6 @@ When a feature is purely server-side but changes the data the CLI receives (e.g.
 
 # Be aware of tests
 
+For every feature or change, explicitly consider whether tests need to be added or updated — new endpoint, new model field, new CLI command, new validation rule, new error path, anything that changes user-visible behaviour. Don't ship a feature without asking "what test covers this?" If no test does and the surface is non-trivial, write one. This applies across all repos involved in the change (server-side changes that ripple into the CLI need both server tests and CLI tests updated).
+
 Be sure to check if tests need to be updated when changing any data structures or function names, in all repos involved in the change.
