@@ -2,15 +2,30 @@
 
 import platform
 import shutil
+import statistics
+import time
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from tl_cli import __version__
 from tl_cli.auth.token_store import load_tokens
 from tl_cli.client.errors import ApiError
 from tl_cli.client.http import get_client
 from tl_cli.config import get_config
+
+# Free, side-effect-free GET endpoints we time. Picked to cover the auth
+# path (whoami, balance), public-no-auth path (pricing), and the bigger
+# payloads (describe, changelog). All cost zero credits.
+_LATENCY_ENDPOINTS: tuple[str, ...] = (
+    "/balance",
+    "/whoami",
+    "/pricing",
+    "/describe",
+    "/changelog",
+)
+_LATENCY_ITERATIONS = 3
 
 # Helper tools that AI agents using `tl --json` output frequently reach for.
 # Not required, but life is much better with them.
@@ -57,6 +72,66 @@ app = typer.Typer(help="Health check (auth, connectivity, version)")
 console = Console()
 
 
+def _collect_latency_samples(client, samples_by_endpoint: dict[str, list[float]]) -> None:
+    """Hit each free endpoint up to _LATENCY_ITERATIONS times and record
+    wall-clock latencies. Endpoints that 404 (older server) are dropped
+    silently — they just don't appear in the table.
+    """
+    for path in _LATENCY_ENDPOINTS:
+        # The initial /balance call already produced one sample; top it up
+        # so every endpoint has the same call count.
+        already = len(samples_by_endpoint.get(path, []))
+        for _ in range(max(0, _LATENCY_ITERATIONS - already)):
+            t0 = time.perf_counter()
+            try:
+                client.get(path)
+            except ApiError as exc:
+                if exc.status_code == 404:
+                    # Endpoint missing on this server — stop probing it.
+                    break
+                # Other errors (5xx, 401 after refresh) still produced a
+                # round-trip, so the latency is meaningful — record it.
+            except Exception:
+                # Network failure mid-probe — bail on this endpoint.
+                break
+            samples_by_endpoint.setdefault(path, []).append((time.perf_counter() - t0) * 1000)
+
+
+def _print_latency_table(samples_by_endpoint: dict[str, list[float]]) -> None:
+    """Render per-endpoint and overall latency stats."""
+    rows = [(path, samples) for path, samples in samples_by_endpoint.items() if samples]
+    if not rows:
+        return
+
+    table = Table(title="API latency (ms)", show_lines=False)
+    table.add_column("Endpoint")
+    table.add_column("Calls", justify="right")
+    table.add_column("Min", justify="right")
+    table.add_column("Median", justify="right")
+    table.add_column("Max", justify="right")
+    for path, samples in rows:
+        table.add_row(
+            path,
+            str(len(samples)),
+            f"{min(samples):.0f}",
+            f"{statistics.median(samples):.0f}",
+            f"{max(samples):.0f}",
+        )
+    console.print()
+    console.print(table)
+
+    all_samples = [s for _, samples in rows for s in samples]
+    if len(all_samples) >= 2:
+        # Nearest-rank p95 — good enough for a health-check sample of ~15.
+        ranked = sorted(all_samples)
+        p95 = ranked[min(len(ranked) - 1, int(round(0.95 * len(ranked))) - 1)]
+        console.print(
+            f"  Overall: median={statistics.median(all_samples):.0f}ms  "
+            f"p95={p95:.0f}ms  max={max(all_samples):.0f}ms  "
+            f"n={len(all_samples)}"
+        )
+
+
 @app.callback(invoke_without_command=True)
 def doctor(ctx: typer.Context) -> None:
     """Check CLI health: version, auth status, API connectivity, credits."""
@@ -78,20 +153,32 @@ def doctor(ctx: typer.Context) -> None:
     else:
         console.print(f"  Auth:   [green]ok[/green] ({tokens.email})")
 
-    # Connectivity + balance
+    # Connectivity + balance + latency timing. The first /balance call
+    # doubles as the connectivity probe; subsequent calls feed the
+    # latency stats table.
     if tokens and not tokens.is_expired:
         client = get_client()
+        samples_by_endpoint: dict[str, list[float]] = {}
         try:
-            data = client.get("/balance")
-            balance_val = data.get("balance", "?")
-            console.print(f"  API:    [green]connected[/green]")
-            console.print(f"  Credits: {balance_val}")
-        except ApiError as e:
-            console.print(f"  API:    [red]error ({e.status_code})[/red]")
-            all_ok = False
-        except Exception as e:
-            console.print(f"  API:    [red]unreachable[/red]")
-            all_ok = False
+            try:
+                t0 = time.perf_counter()
+                data = client.get("/balance")
+                samples_by_endpoint.setdefault("/balance", []).append((time.perf_counter() - t0) * 1000)
+                balance_val = data.get("balance", "?")
+                console.print(f"  API:    [green]connected[/green]")
+                console.print(f"  Credits: {balance_val}")
+            except ApiError as e:
+                console.print(f"  API:    [red]error ({e.status_code})[/red]")
+                all_ok = False
+            except Exception:
+                console.print(f"  API:    [red]unreachable[/red]")
+                all_ok = False
+
+            # Time the remaining endpoints (and pad /balance to N calls so
+            # every row in the latency table has the same iteration count).
+            if samples_by_endpoint.get("/balance"):
+                _collect_latency_samples(client, samples_by_endpoint)
+                _print_latency_table(samples_by_endpoint)
         finally:
             client.close()
     else:
