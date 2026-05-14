@@ -155,10 +155,10 @@ def doctor(ctx: typer.Context) -> None:
 
     # Connectivity + balance + latency timing. The first /balance call
     # doubles as the connectivity probe; subsequent calls feed the
-    # latency stats table.
+    # latency stats table that's printed at the end of the report.
+    samples_by_endpoint: dict[str, list[float]] = {}
     if tokens and not tokens.is_expired:
         client = get_client()
-        samples_by_endpoint: dict[str, list[float]] = {}
         try:
             try:
                 t0 = time.perf_counter()
@@ -174,11 +174,10 @@ def doctor(ctx: typer.Context) -> None:
                 console.print(f"  API:    [red]unreachable[/red]")
                 all_ok = False
 
-            # Time the remaining endpoints (and pad /balance to N calls so
-            # every row in the latency table has the same iteration count).
+            # Pad /balance to N calls and time the remaining free endpoints.
+            # The table itself is printed at the bottom, just above the verdict.
             if samples_by_endpoint.get("/balance"):
                 _collect_latency_samples(client, samples_by_endpoint)
-                _print_latency_table(samples_by_endpoint)
         finally:
             client.close()
     else:
@@ -213,6 +212,8 @@ def doctor(ctx: typer.Context) -> None:
             console.print(f"  [cyan]{name}[/cyan] — {purpose}")
             if hint:
                 console.print(f"    Install: {hint}")
+
+    _print_latency_table(samples_by_endpoint)
 
     console.print()
     if all_ok:
