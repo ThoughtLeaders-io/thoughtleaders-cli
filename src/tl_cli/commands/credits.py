@@ -19,6 +19,7 @@ from decimal import Decimal, InvalidOperation
 
 import typer
 from rich.console import Console
+from rich.prompt import Prompt
 from rich.table import Table
 
 from tl_cli.client.errors import ApiError, handle_api_error
@@ -59,14 +60,13 @@ def pricing_cmd(
 @app.command("buy")
 def buy_cmd(
     amount_usd: str = typer.Option(..., "--amount-usd", help="Amount to top up, in USD."),
-    no_browser: bool = typer.Option(False, "--no-browser", help="Don't open a browser, just print the checkout URL."),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll balance after opening the checkout page."),
 ) -> None:
     """Start a credit top-up.
 
-    Calls the server to create a pending purchase, opens the web checkout
-    URL, and (by default) polls `tl balance` until the credits land or you
-    Ctrl-C out.
+    Calls the server to create a pending purchase, prints the checkout URL,
+    then asks whether to open it in a browser. Polls `tl balance` (unless
+    `--no-poll`) until the credits land or you Ctrl-C out.
     """
     try:
         Decimal(amount_usd)
@@ -96,13 +96,17 @@ def buy_cmd(
     console.print(
         f"\n[bold]Started top-up:[/bold] ${result['usd_amount']} → {credits} credits"
     )
-    console.print(f"Checkout: {checkout_url}")
-
-    if checkout_url and not no_browser:
-        try:
-            webbrowser.open(checkout_url)
-        except Exception:
-            pass
+    if checkout_url:
+        console.print(f"[bold]Checkout URL:[/bold] {checkout_url}\n")
+        console.print("How would you like to continue?")
+        console.print("  [cyan]1[/cyan] — Open the URL in a browser on this machine (default)")
+        console.print("  [cyan]2[/cyan] — I'll open it manually")
+        choice = Prompt.ask("Choose", choices=["1", "2"], default="1", console=console)
+        if choice == "1":
+            try:
+                webbrowser.open(checkout_url)
+            except Exception:
+                console.print("[yellow]Could not launch a browser. Open the URL above manually.[/yellow]")
 
     if not poll or initial_balance is None:
         console.print("[dim]Run `tl balance` to confirm once payment completes.[/dim]")
