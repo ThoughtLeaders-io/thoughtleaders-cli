@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thoughtleaders-cli"
-version = "0.6.37"
+version = "0.6.38"
 description = "ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence"
 readme = "README.md"
 license = "MIT"
@@ -31,11 +31,10 @@ dependencies = [
     "httpx>=0.27",
     "keyring>=25.0",
     "authlib>=1.3",
-    # `toon-format` only publishes pre-releases (0.9.0b1 is the only modern
-    # release; 0.1.0 is the lone stable). pip/pipx accept `>=0.9.0b1` and pull
-    # the beta, but uv refuses pre-releases under `>=` when a stable exists.
-    # An exact pin is the one form uv will resolve without `--prerelease=allow`.
-    "toon-format==0.9.0b1",
+    # toon-codec (imports as `pytoon`) is the stable-released TOON encoder.
+    # Replaces toon-format which only publishes pre-releases and made
+    # `uv tool install` / `uv pip install` fail without --prerelease=allow.
+    "toon-codec>=1.0.1",
     "pyyaml>=6.0",
 ]
 

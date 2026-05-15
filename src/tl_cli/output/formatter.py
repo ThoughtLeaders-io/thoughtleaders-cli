@@ -332,7 +332,7 @@ def _output_markdown(results: list[dict], columns: list[str], column_types: dict
 
 def _output_toon(results: list[dict], columns: list[str]) -> None:
     """TOON (Token-Oriented Object Notation) output for LLM consumption."""
-    from toon_format import encode
+    from pytoon import encode
     # Build column-filtered rows for uniform tabular encoding
     rows = [{col: row.get(col) for col in columns} for row in results]
     print(encode(rows))
@@ -340,7 +340,7 @@ def _output_toon(results: list[dict], columns: list[str]) -> None:
 
 def _output_toon_single(record: dict) -> None:
     """TOON output for a single detail record."""
-    from toon_format import encode
+    from pytoon import encode
     print(encode(record))
 
 

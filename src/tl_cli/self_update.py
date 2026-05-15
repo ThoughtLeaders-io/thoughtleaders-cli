@@ -148,10 +148,11 @@ def _run_upgrade(method: str, latest: str) -> None:
             file=sys.stderr,
         )
         return
-    if result.returncode == 0:
+    binary_intact = _verify_tl_binary_intact()
+    if result.returncode == 0 and binary_intact:
         _resync_integrations()
         return
-    _report_upgrade_failure(method, cmd, result)
+    _report_upgrade_failure(method, cmd, result, binary_intact=binary_intact, latest=latest)
 
 
 def _spawn_detached_windows_upgrade(cmd: list[str], latest: str) -> bool:
@@ -294,19 +295,85 @@ def _already_scheduled(latest: str) -> bool:
     return time.time() - scheduled_at < WIN_UPGRADE_RESCHEDULE_WINDOW
 
 
-def _report_upgrade_failure(method: str, cmd: list[str], result: subprocess.CompletedProcess) -> None:
+def _verify_tl_binary_intact() -> bool:
+    """Sanity-check the upgraded install: is there still a working `tl`?
+
+    `uv tool install --force` removes the previous install BEFORE it
+    builds the new one. A failing build leaves the user with no `tl`
+    binary at all — even though the exit-code branch will already have
+    flagged the failure, we use this check to emphasize the now-missing
+    state in the recovery message. Also catches the rarer case where
+    the upgrader returns 0 but the resulting binary is unusable.
+
+    Cheapest signal that won't trip on harmless slowness: does
+    `tl --version` exit 0 within a couple of seconds?
+    """
+    tl_bin = shutil.which("tl")
+    if not tl_bin:
+        return False
+    try:
+        result = subprocess.run(
+            [tl_bin, "--version"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _report_upgrade_failure(
+    method: str,
+    cmd: list[str],
+    result: subprocess.CompletedProcess,
+    *,
+    binary_intact: bool,
+    latest: str,
+) -> None:
     """Print a user-friendly failure message after a non-zero upgrader exit.
 
     On Windows in particular, `pipx.exe` can be a broken shim that errors
     with `ModuleNotFoundError: No module named 'pipx'`. We detect that and
     give a targeted hint instead of just echoing the traceback.
+
+    If the install is now corrupted (no working `tl` on PATH), we
+    emphasize that in the message and surface the version-pinned
+    recovery command for the *previous* good version too.
     """
     combined_err = (result.stderr or '') + (result.stdout or '')
-    print(
-        f"[tl-cli] automatic upgrade failed (exit {result.returncode}).",
-        file=sys.stderr,
-    )
-    if "No module named 'pipx'" in combined_err:
+    if result.returncode == 0 and not binary_intact:
+        # Upgrader claimed success but the binary is gone or broken — rare
+        # but a worse failure mode than a non-zero exit because there's no
+        # error text to anchor on.
+        print(
+            "[tl-cli] Upgrade reported success but the `tl` command is missing or broken.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[tl-cli] automatic upgrade failed (exit {result.returncode}).",
+            file=sys.stderr,
+        )
+
+    if not binary_intact:
+        print(
+            f"[tl-cli] Your install was removed by `{method}` before the new build "
+            f"could finish, so the `tl` command is gone right now.",
+            file=sys.stderr,
+        )
+        print(
+            f"[tl-cli] Recover with the previous known-good release:\n"
+            f"  {cmd[0]} {'tool ' if method == 'uv' else ''}install --force "
+            f"git+{REPO_URL}@v{__version__}",
+            file=sys.stderr,
+        )
+        print(
+            f"[tl-cli] Or retry the new version once the issue is fixed:\n"
+            f"  {' '.join(cmd)}",
+            file=sys.stderr,
+        )
+    elif "No module named 'pipx'" in combined_err:
         print(
             "[tl-cli] Your pipx install appears broken (its launcher can't find the pipx module).\n"
             "[tl-cli] Reinstall pipx from your system Python, then rerun the upgrade.\n"

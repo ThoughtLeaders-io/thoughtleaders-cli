@@ -147,6 +147,8 @@ Prefer writing Python code, shell code, or `jq` commands that fetche or analysis
 
 ## Available Commands
 
+Note that if you're working on Windows, you need to set up UTF-8 in the console, because all of these commands return UTF-8 data.
+
 ### Data queries
 ```bash
 tl sponsorships list [filters...]      # Sponsorships — list curve, mult 1.0

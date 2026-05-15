@@ -206,7 +206,7 @@ def whoami(
         if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
         elif fmt == "toon":
-            from toon_format import encode
+            from pytoon import encode
             print(encode(data))
         elif fmt == "md":
             _render_whoami_md(data)

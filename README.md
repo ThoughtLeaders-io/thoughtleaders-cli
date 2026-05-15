@@ -24,12 +24,6 @@ uv tool install thoughtleaders-cli
 pip install thoughtleaders-cli
 ```
 
-> **Don't use `uv pip install thoughtleaders-cli`.** A transitive dependency
-> (`toon-format`) only publishes pre-releases, and `uv pip` hides those by
-> default — the resolver reports the package as missing. The other commands
-> above accept the exact pin without extra flags. If you really must use
-> `uv pip`, pass `--prerelease=allow`.
-
 Then set up:
 ```bash
 tl auth login          # authenticate with ThoughtLeaders
