@@ -213,6 +213,41 @@ Same architecture, different intent. The prompt is exploratory; the policy says 
 
 If the user replies *"yes save it"* or *"save"* → run the save step (resolve a portable temp path → write → verify → invoke `tl reports create --config-file <that-exact-path> --yes`; see Save-or-preview policy step 1+2 for the full mechanics) using the **same config that's already in working memory**. Don't re-run Phases 1–4. The follow-up reply is just the takeaways + saved-report link.
 
+### Editing a saved report (post-save refinement flow)
+
+When the user's follow-up after a successful save is a **refinement** of the report we just created — *"change X to Y"*, *"use Z instead"*, *"now with W"*, *"but tighter on Q"*, *"drop the W filter"*, *"add an A column"* — that's an **edit**, not a new save. The skill must NOT default to running Phase 1–4 again and creating a duplicate report.
+
+**Recognition** — treat the follow-up as an edit candidate when ALL of these hold:
+
+1. The most recent terminal action in this session was a successful `tl reports create` invocation. The resulting `report_id` and the full config it wrote are in working memory.
+2. The new prompt's intent shape overlaps with the prior save — same report type, same primary brand / niche / channel set, same competitive frame. (If the new prompt opens a fundamentally different topic, it's a new save, not an edit.)
+3. The new prompt contains refinement vocabulary — words like *instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*, *use … instead of …*.
+
+If 1 + 2 hold AND 3 fires → the post-save follow-up trigger fires (see the Follow-Up Interactions table). Ask the user whether to update the existing report or save a separate variant. Default the framing toward update — the failure mode the skill is preventing is the one where four refinements produce four duplicate reports instead of one updated report.
+
+If 1 + 2 hold AND 3 is absent (different intent shape entirely) → treat as a new save; not an edit.
+
+**Mechanics — when the user confirms "update the existing one":**
+
+1. **Fetch the report's current config** to merge against (don't compose from scratch — that loses fields the user didn't ask to change):
+   ```
+   tl reports show <report_id> --json
+   ```
+2. **Compose the patch** — modify only the fields the user explicitly changed. The new config is `<current> merged with <user-requested deltas>`. Do NOT re-run topic_matcher / keyword_research / validation unless the user's change forces it (e.g., the niche itself changed, not just a filter on top).
+3. **Resolve a portable temp path** for the patch JSON (same mechanics as save — `python -c "import tempfile, os; print(...)"`). Hard-coding `/tmp/` fails on Windows.
+4. **Write the patch and verify** — write the JSON to the resolved path, then `test -f <path>` before invoking the CLI.
+5. **Invoke the update** — `tl reports update <report_id> --config-file <that-exact-path>`. Same shell-quoting protection as save (apostrophes in brand names break inline `--config '<json>'`).
+6. **Reply** with the updated report's URL + a one-line summary of what changed (*"changed: filterset.X from A to B; added column Y"*). Same shape as the save-success message — say "TL report" not "Campaign", say "report #N" not "Campaign #N".
+
+**Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates):
+
+- ❌ Running Phase 1–4 from scratch on a refinement follow-up. The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
+- ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a refinement. The CLI accepts both; the skill must pick by intent shape, not by reflex.
+- ❌ Asserting that *"FilterSet on a saved report isn't editable via the CLI"* or any equivalent fabrication. `tl reports update` accepts FilterSet patches — verify the CLI command's `--help` before claiming a constraint.
+- ❌ Treating the absence of `tl reports show` in the user's prompt as license to skip step 1 (fetch current config). Without the current config, the patch composition is guessing; the update may silently drop fields the user didn't ask to change.
+
+When in doubt about whether a follow-up is an edit or a new save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report.
+
 What changes between save-mode and preview-mode:
 
 | | Save (explicit intent) | Preview (default) |
