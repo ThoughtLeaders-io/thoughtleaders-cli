@@ -13,7 +13,7 @@ description: |
 
   Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
 
-  **Post-save refinements default to ASKING update vs. create-new** — when the user's follow-up after a successful save uses refinement vocabulary (*instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*) AND the topic overlaps with the prior save, the skill MUST ask whether to update the existing report in place (`tl reports update`) or save a separate variant. Do NOT auto-create a new report on every refinement prompt in a session. See "Editing a saved report" in the body for the full mechanics.
+  **Post-save refinements default to ASKING** — when the user's follow-up arrives after a successful save AND the topic overlaps with the prior save (same brand / niche / report type), the skill MUST surface the choice between updating the existing report, saving a separate variant, or treating as a fresh save. Refinement vocabulary (*instead*, *change*, *add*, *limit*, *only*, *filter*, *make it X*, etc.) strengthens the trigger but its absence does NOT bypass it — topic overlap alone is enough to ask. Do NOT auto-create a new report on every refinement-shaped prompt in a session. **Note**: the CLI edit endpoint can only patch campaign-level fields (title, description, columns, widgets, etc.); FilterSet changes (keywords, filters, demographics, cross-references) cannot be updated in place — those route to "save as a new variant" instead. See "Editing a saved report" in the body for the routing decision table + mechanics.
 
   **Skip this skill** for:
   - counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list" → route to `tl-cli:tl`.
@@ -217,7 +217,33 @@ If the user replies *"yes save it"* or *"save"* → run the save step (resolve a
 
 ### Editing a saved report (post-save refinement flow)
 
-When the user's follow-up after a successful save is a **refinement** of the report we just created — *"change X to Y"*, *"use Z instead"*, *"now with W"*, *"but tighter on Q"*, *"drop the W filter"*, *"add an A column"*, *"make it US-only"*, *"limit to AdSpot price"*, *"remove channels under 50K subs"*, *"include only MSN"*, *"sort by last published"* — that's an **edit**, not a new save. The skill must NOT default to running Phase 1–4 again and creating a duplicate report.
+When the user's follow-up after a successful save is a **refinement** of the report we just created — *"change X to Y"*, *"use Z instead"*, *"add an A column"*, *"sort by last published"*, *"rename the report"* — the right response depends on **what** the user wants to change. The CLI edit endpoint accepts only a narrow set of fields; FilterSet changes need a different path.
+
+**What `tl reports update` CAN edit today** (campaign-level fields only):
+
+- `title`, `description`, `report_type`, `type`
+- `columns`, `widgets`, `histogram_bucket_size`
+- `emoji`, `display_mode`
+- `owner`, `subscribers`, `link`
+- `webhook_url`, `notifications_on`, `message_template`
+
+**What `tl reports update` does NOT edit** (the backend explicitly rejects these — `CliReportEditView` docstring: *"Filterset edits are not supported here"*):
+
+- `filterset` and any of its fields (`keywords`, `keyword_groups`, `channels`, `brands`, `start_date`, `end_date`, `days_ago`, `msn_channels_only`, `creator_countries`, etc.)
+- `filters_json` (the catch-all containing `publish_status`, `ad_publish_status`, etc.)
+- `cross_references`
+
+The backend's `_reject_unknown_fields` validation is **atomic** — if the update payload contains any unsupported key (e.g. `filterset`), the WHOLE request returns HTTP 400, including any legitimate field edits in the same payload. The skill must therefore send ONLY editable fields in the patch, never the full working-memory config.
+
+**Routing decision** — what kind of refinement the user is asking for:
+
+| User wants to change | Editable via `tl reports update`? | Skill's action |
+|---|---|---|
+| Title, description, emoji, display mode | ✅ Yes | Update in place via the mechanics below |
+| Columns (add/remove/reorder) | ✅ Yes | Update in place |
+| Widgets, histogram bucket size | ✅ Yes | Update in place |
+| Subscribers, webhook, notifications | ✅ Yes | Update in place |
+| **Any filter field** — keywords, brands, channels, language, date range, MSN flag, demographics, cross_references, filters_json | ❌ **No** | **Cannot update in place.** Tell the user: *"The CLI edit endpoint can't patch FilterSet fields today (server-side limitation — `CliReportEditView`'s filterset path isn't wired up). I can save this as a new variant of the report instead — same shape with the filter change applied — and link it back to the original. OK to proceed?"* On confirmation: run Phase 1–4 with the prior config as the starting point + the user's filter delta, save as a NEW report. NOT an edit.
 
 **Recognition** — treat the follow-up as an edit candidate based on these signals:
 
@@ -240,24 +266,41 @@ When the user's follow-up after a successful save is a **refinement** of the rep
 
 The failure mode the skill is preventing: silent auto-create on every refinement prompt, producing N duplicate reports instead of one updated report. A clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is the duplicate.
 
-**Mechanics — when the user confirms "update the existing one":**
+**Mechanics — when the user confirms "update the existing one" AND the change is in the editable-field whitelist above:**
 
-1. **Source the current config from working memory.** Recognition criterion 1 requires the prior save happened in this session, so the full config the skill emitted is still in working memory. Merge against THAT. **The CLI does NOT today expose a `tl reports show` / refetch command** — if for any reason the prior config is NOT in working memory (e.g., session was cleared, or the user is editing a report from a different session by ID), STOP and ask the user to (a) confirm the `report_id` and (b) describe the specific change. Do NOT guess at the current config.
-2. **Compose the patch** — modify only the fields the user explicitly changed. The new payload is `<working-memory config> merged with <user-requested deltas>`. Do NOT re-run topic_matcher / keyword_research / validation unless the user's change forces it (e.g., the niche itself changed, not just a filter on top).
+1. **Source the current config from working memory.** Recognition criterion 1 requires the prior save happened in this session, so the full config the skill emitted is still in working memory. **The CLI does NOT today expose a `tl reports show` / refetch command** — if for any reason the prior config is NOT in working memory (session was cleared, or the user is editing a report from a different session by ID), STOP and ask the user to (a) confirm the `report_id` and (b) describe the specific change. Do NOT guess at the current config.
+2. **Compose the patch — ONLY editable fields.** Build a JSON object containing **only the fields the user explicitly asked to change**, drawn exclusively from the editable-field whitelist (title, description, columns, widgets, histogram_bucket_size, emoji, display_mode, subscribers, webhook_url, notifications_on, message_template, report_type, type, owner, link). **Do NOT send the full working-memory config** — it contains `filterset`, `cross_references`, `filters_json`, and other create-only fields that the backend's `_reject_unknown_fields` validation will atomically 400 even if the user's actual edit is to a legitimate field like `columns`.
 3. **Resolve a portable temp path** for the patch JSON (same mechanics as save — `python -c "import tempfile, os; print(...)"`). Hard-coding `/tmp/` fails on Windows.
 4. **Write the patch and verify** — write the JSON to the resolved path, then `test -f <path>` before invoking the CLI.
 5. **Invoke the update** — `tl reports update <report_id> "$(cat <that-exact-path>)"`. The `update` command's second positional argument is a JSON object of fields to update (not a `--config-file` flag — that flag is only on `tl reports create`, not `update`). Passing inline as `'<json>'` breaks on apostrophes in brand names; the safe shape is `"$(cat <path>)"` against the verified temp file.
-6. **Reply** with the updated report's URL + a one-line summary of what changed (*"changed: filterset.X from A to B; added column Y"*). Same wording rules as the save-success message — say "TL report" not "Campaign", say "report #N" not "Campaign #N".
+6. **Reply** with the updated report's URL + a one-line summary of what changed (*"changed: columns added Y; description rewritten"*). Same wording rules as the save-success message — say "TL report" not "Campaign", say "report #N" not "Campaign #N".
 
-**Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates):
+**Patch shape — what the JSON should and shouldn't contain:**
 
-- ❌ Running Phase 1–4 from scratch on a refinement follow-up. The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
-- ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a refinement. The CLI accepts both; the skill must pick by intent shape, not by reflex.
-- ❌ Asserting that *"FilterSet on a saved report isn't editable via the CLI"* or any equivalent fabrication. `tl reports update` accepts FilterSet patches — verify the CLI command's `--help` before claiming a constraint.
+```json
+// ✅ Correct: only editable fields the user changed
+{
+  "columns": { "channel_name": true, "subscribers": true, "last_published": true, "outreach_email": true },
+  "description": "Updated description text"
+}
+
+// ❌ Wrong: merged full config — `filterset` and `cross_references` will atomically 400 the request
+{
+  "title": "...", "description": "...", "filterset": {...}, "cross_references": [...], "columns": {...}
+}
+```
+
+**Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates; subsequent verification of the CLI edit endpoint surfaced additional constraints):
+
+- ❌ Running Phase 1–4 from scratch on a *non-filter* refinement (column/title/widget change). The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
+- ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a column/widget/title refinement. Pick by intent shape, not by reflex.
+- ❌ Sending the full working-memory config as the `tl reports update` payload. The endpoint's `_reject_unknown_fields` validation is atomic — including `filterset`, `cross_references`, or `filters_json` in the payload 400s the WHOLE request, even if the user's actual edit was to a legitimate field like `columns`. Send ONLY editable fields.
+- ❌ Attempting to patch any FilterSet field (keywords, brands, channels, filters_json, msn_channels_only, demographics, date ranges, cross_references, etc.) via `tl reports update`. The backend explicitly rejects these — `CliReportEditView` docstring: *"Filterset edits are not supported here."* For FilterSet changes, route the user to "save as a new variant" (run Phase 1–4 with the prior config as starting point + the user's delta, save as a NEW report). Do NOT fabricate a working `tl reports update` call with a filterset payload.
+- ❌ Asserting that ALL editing is impossible (the opposite over-correction). Campaign-level fields — title, description, columns, widgets, histogram_bucket_size, emoji, display_mode, subscribers, webhook, notifications — ARE editable. Don't tell the user *"the CLI can't edit anything on a saved report"*; the truth is *"the CLI can edit these fields, not these others."*
 - ❌ Inventing a `tl reports show` command to refetch config. That command does not exist today; if config isn't in working memory, ask the user, don't fabricate a fetch step.
 - ❌ Passing the patch via a `--config-file` flag on `tl reports update`. That flag exists only on `tl reports create`. For `update`, the JSON goes as the second positional argument.
 
-When in doubt about whether a follow-up is an edit or a new save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report.
+When in doubt about whether a follow-up is an edit, a new variant, or a fresh save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report or a 400 the user has to debug.
 
 What changes between save-mode and preview-mode:
 
