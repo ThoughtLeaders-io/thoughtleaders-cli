@@ -217,36 +217,45 @@ If the user replies *"yes save it"* or *"save"* → run the save step (resolve a
 
 ### Editing a saved report (post-save refinement flow)
 
-When the user's follow-up after a successful save is a **refinement** of the report we just created — *"change X to Y"*, *"use Z instead"*, *"now with W"*, *"but tighter on Q"*, *"drop the W filter"*, *"add an A column"* — that's an **edit**, not a new save. The skill must NOT default to running Phase 1–4 again and creating a duplicate report.
+When the user's follow-up after a successful save is a **refinement** of the report we just created — *"change X to Y"*, *"use Z instead"*, *"now with W"*, *"but tighter on Q"*, *"drop the W filter"*, *"add an A column"*, *"make it US-only"*, *"limit to AdSpot price"*, *"remove channels under 50K subs"*, *"include only MSN"*, *"sort by last published"* — that's an **edit**, not a new save. The skill must NOT default to running Phase 1–4 again and creating a duplicate report.
 
-**Recognition** — treat the follow-up as an edit candidate when ALL of these hold:
+**Recognition** — treat the follow-up as an edit candidate based on these signals:
 
 1. The most recent terminal action in this session was a successful `tl reports create` invocation. The resulting `report_id` and the full config it wrote are in working memory.
-2. The new prompt's intent shape overlaps with the prior save — same report type, same primary brand / niche / channel set, same competitive frame. (If the new prompt opens a fundamentally different topic, it's a new save, not an edit.)
-3. The new prompt contains refinement vocabulary — words like *instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*, *use … instead of …*.
+2. The new prompt's topic overlaps with the prior save — same report type, same primary brand / niche / channel set, same competitive frame. (If the new prompt opens a fundamentally different topic, it's a new save.)
+3. The new prompt contains a **refinement signal** — broadly defined. Refinement signals include:
+   - **Refinement vocabulary**: *instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*, *use … instead of …*
+   - **Filter / sort modifiers**: *filter*, *limit*, *only*, *remove*, *replace*, *include*, *exclude*, *sort by [field]*
+   - **"Make it X" framings**: *make it [country]-only*, *make it [category]-only*, *make it [demographic-shape]*
+   - **Partial-filter prompts** that name a single filter axis without naming a new topic: *"with AdSpot price < $2K"* after a save on the same niche
 
-If 1 + 2 hold AND 3 fires → the post-save follow-up trigger fires (see the Follow-Up Interactions table). Ask the user whether to update the existing report or save a separate variant. Default the framing toward update — the failure mode the skill is preventing is the one where four refinements produce four duplicate reports instead of one updated report.
+**Decision rule** (not binary — ask when in doubt):
 
-If 1 + 2 hold AND 3 is absent (different intent shape entirely) → treat as a new save; not an edit.
+| 1 (prior save) | 2 (topic overlap) | 3 (refinement signal) | Action |
+|---|---|---|---|
+| ✓ | ✓ | strongly fires | Post-save trigger fires (Follow-Up Interactions). Ask update vs. variant; default-highlight **update**. |
+| ✓ | ✓ | ambiguous OR absent | **Still ask** — topic overlap alone is reason enough to surface the choice. Default-highlight update; user can override to "save a separate variant" or "it's a new report." |
+| ✓ | ✗ | n/a | Different topic → treat as new save; no clarifier needed. |
+| ✗ | n/a | n/a | No prior save in working memory → standard preview/save flow; nothing to edit. |
+
+The failure mode the skill is preventing: silent auto-create on every refinement prompt, producing N duplicate reports instead of one updated report. A clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is the duplicate.
 
 **Mechanics — when the user confirms "update the existing one":**
 
-1. **Fetch the report's current config** to merge against (don't compose from scratch — that loses fields the user didn't ask to change):
-   ```
-   tl reports show <report_id> --json
-   ```
-2. **Compose the patch** — modify only the fields the user explicitly changed. The new config is `<current> merged with <user-requested deltas>`. Do NOT re-run topic_matcher / keyword_research / validation unless the user's change forces it (e.g., the niche itself changed, not just a filter on top).
+1. **Source the current config from working memory.** Recognition criterion 1 requires the prior save happened in this session, so the full config the skill emitted is still in working memory. Merge against THAT. **The CLI does NOT today expose a `tl reports show` / refetch command** — if for any reason the prior config is NOT in working memory (e.g., session was cleared, or the user is editing a report from a different session by ID), STOP and ask the user to (a) confirm the `report_id` and (b) describe the specific change. Do NOT guess at the current config.
+2. **Compose the patch** — modify only the fields the user explicitly changed. The new payload is `<working-memory config> merged with <user-requested deltas>`. Do NOT re-run topic_matcher / keyword_research / validation unless the user's change forces it (e.g., the niche itself changed, not just a filter on top).
 3. **Resolve a portable temp path** for the patch JSON (same mechanics as save — `python -c "import tempfile, os; print(...)"`). Hard-coding `/tmp/` fails on Windows.
 4. **Write the patch and verify** — write the JSON to the resolved path, then `test -f <path>` before invoking the CLI.
-5. **Invoke the update** — `tl reports update <report_id> --config-file <that-exact-path>`. Same shell-quoting protection as save (apostrophes in brand names break inline `--config '<json>'`).
-6. **Reply** with the updated report's URL + a one-line summary of what changed (*"changed: filterset.X from A to B; added column Y"*). Same shape as the save-success message — say "TL report" not "Campaign", say "report #N" not "Campaign #N".
+5. **Invoke the update** — `tl reports update <report_id> "$(cat <that-exact-path>)"`. The `update` command's second positional argument is a JSON object of fields to update (not a `--config-file` flag — that flag is only on `tl reports create`, not `update`). Passing inline as `'<json>'` breaks on apostrophes in brand names; the safe shape is `"$(cat <path>)"` against the verified temp file.
+6. **Reply** with the updated report's URL + a one-line summary of what changed (*"changed: filterset.X from A to B; added column Y"*). Same wording rules as the save-success message — say "TL report" not "Campaign", say "report #N" not "Campaign #N".
 
 **Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates):
 
 - ❌ Running Phase 1–4 from scratch on a refinement follow-up. The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
 - ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a refinement. The CLI accepts both; the skill must pick by intent shape, not by reflex.
 - ❌ Asserting that *"FilterSet on a saved report isn't editable via the CLI"* or any equivalent fabrication. `tl reports update` accepts FilterSet patches — verify the CLI command's `--help` before claiming a constraint.
-- ❌ Treating the absence of `tl reports show` in the user's prompt as license to skip step 1 (fetch current config). Without the current config, the patch composition is guessing; the update may silently drop fields the user didn't ask to change.
+- ❌ Inventing a `tl reports show` command to refetch config. That command does not exist today; if config isn't in working memory, ask the user, don't fabricate a fetch step.
+- ❌ Passing the patch via a `--config-file` flag on `tl reports update`. That flag exists only on `tl reports create`. For `update`, the JSON goes as the second positional argument.
 
 When in doubt about whether a follow-up is an edit or a new save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report.
 
@@ -1678,7 +1687,7 @@ Every phase has explicit conditions where it must pause and ask the user, rather
 | **3** | No columns provided AND no clear intent | "I'll use [type]'s default set unless you want a different focus (outreach / discovery / sponsorship-pitch)" |
 | **4** | Aggregation/widget preferences need confirmation | "Default widgets for this report type are [list]; want to add/remove anything?" |
 | **4** | Final JSON-shape validation surfaced unresolved issues | "Can't ship config because [reason]. Fix [thing]?" |
-| **Post-save** | New prompt arrives after a successful save AND uses refinement vocabulary (*instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*) AND topic overlaps with the prior save (same brand / niche / report type) | *"Looks like a refinement of the report you just created (#N — `<title>`). Update it in place, or save a separate variant?"* — default-highlight the update option; user can override. See "Editing a saved report" subsection above for the full mechanics. |
+| **Post-save** | New prompt arrives after a successful save AND the topic overlaps with the prior save (same brand / niche / report type). Refinement signals strengthen the trigger but their absence does NOT bypass it when topic overlap is strong — refinement signals include vocabulary (*instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*), filter/sort modifiers (*filter*, *limit*, *only*, *remove*, *replace*, *include*, *exclude*, *sort by …*), "make it X" framings, or partial-filter prompts that name a single filter axis without naming a new topic. | *"Looks like a refinement of the report you just created (#N — `<title>`). Update it in place, or save a separate variant?"* — default-highlight the update option; user can override. See "Editing a saved report" subsection above for the full mechanics. |
 
 Skills that follow up are skills users trust. Silent assumptions are silent regressions.
 
