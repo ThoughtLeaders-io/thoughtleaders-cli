@@ -1676,6 +1676,7 @@ Every phase has explicit conditions where it must pause and ask the user, rather
 | **3** | No columns provided AND no clear intent | "I'll use [type]'s default set unless you want a different focus (outreach / discovery / sponsorship-pitch)" |
 | **4** | Aggregation/widget preferences need confirmation | "Default widgets for this report type are [list]; want to add/remove anything?" |
 | **4** | Final JSON-shape validation surfaced unresolved issues | "Can't ship config because [reason]. Fix [thing]?" |
+| **Post-save** | New prompt arrives after a successful save AND uses refinement vocabulary (*instead*, *change*, *swap*, *drop*, *add*, *tighter*, *broader*, *narrower*, *without*, *except*, *now with*, *but with*) AND topic overlaps with the prior save (same brand / niche / report type) | *"Looks like a refinement of the report you just created (#N — `<title>`). Update it in place, or save a separate variant?"* — default-highlight the update option; user can override. See "Editing a saved report" subsection above for the full mechanics. |
 
 Skills that follow up are skills users trust. Silent assumptions are silent regressions.
 
