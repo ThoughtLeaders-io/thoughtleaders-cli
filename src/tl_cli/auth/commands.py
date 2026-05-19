@@ -1,5 +1,6 @@
 """Auth CLI commands: tl auth login/logout/status."""
 
+import sys
 import time
 
 import typer
@@ -12,6 +13,69 @@ from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, lo
 
 app = typer.Typer(help="Authentication commands")
 console = Console(stderr=True)
+
+
+def _read_masked(prompt: str) -> str:
+    """Read a line of input echoing `*` for each character.
+
+    Falls back to plain `input()` when stdin is not a TTY (piped input,
+    test harness). Uses stdlib `termios` on Unix and `msvcrt` on Windows
+    so no extra dependency is needed.
+    """
+    if not sys.stdin.isatty():
+        return input(prompt)
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    buf: list[str] = []
+    if sys.platform == 'win32':
+        import msvcrt
+        while True:
+            ch = msvcrt.getwch()
+            if ch in ('\r', '\n'):
+                sys.stdout.write('\n')
+                sys.stdout.flush()
+                break
+            if ch == '\x03':  # Ctrl-C
+                raise KeyboardInterrupt
+            if ch in ('\b', '\x7f'):
+                if buf:
+                    buf.pop()
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+                continue
+            buf.append(ch)
+            sys.stdout.write('*')
+            sys.stdout.flush()
+    else:
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch in ('\r', '\n'):
+                    sys.stdout.write('\n')
+                    sys.stdout.flush()
+                    break
+                if ch == '\x03':
+                    raise KeyboardInterrupt
+                if ch in ('\b', '\x7f'):
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write('\b \b')
+                        sys.stdout.flush()
+                    continue
+                buf.append(ch)
+                sys.stdout.write('*')
+                sys.stdout.flush()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    return ''.join(buf)
 
 
 @app.command("login", help="Log in to ThoughtLeaders.")
@@ -58,7 +122,7 @@ def _login_api_key() -> None:
     from tl_cli.client.errors import ApiError
     from tl_cli.client.http import get_client
 
-    key = Prompt.ask("Paste your API key", console=console, password=True).strip()
+    key = _read_masked("Paste your API key: ").strip()
     if not key:
         console.print("[red]No key provided.[/red]")
         raise typer.Exit(1)
