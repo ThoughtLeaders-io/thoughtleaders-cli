@@ -1,10 +1,6 @@
 # Columns — Content report (report_type = 1)
 
-Reference for Phase 3 (Columns Phase). Each row in a Content report is one upload (video / article / podcast episode). Phase 3 reads this file to pick which columns appear in the saved report.
-
-The output Phase 3 emits is a `columns` dict mapping display names → `{"display": true}` (plus optional `custom`/`formula`/`cellType` for custom columns). Names below are the **exact display names** the platform expects — case-sensitive, including spaces.
-
----
+Phase 3 reference. Each row = one upload (video / article / podcast episode). Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
 
 ## Defaults — always include
 
@@ -13,13 +9,11 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 - `Title`
 - `Views`
 
----
-
-## Standard columns (pick 5–10 total, including the defaults above)
+## Standard columns (pick 5–10 total, including defaults)
 
 ### Identity / context
 - `Date`, `Channel`, `Title`, `Content`, `URL`, `Hashtags`, `Category`, `Country`, `Language`
-- `TL Channel Summary` — useful when the user wants channel context per row
+- `TL Channel Summary` — useful when user wants channel context per row
 
 ### View counts (current)
 - `Views`, `Subscribers`
@@ -47,8 +41,6 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 - `Age` — days since upload
 - `Deleted At`
 
----
-
 ## Intent-driven additions
 
 | Intent signal | Add columns |
@@ -60,19 +52,9 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 | Recent vs back-catalog comparison | `Date`, `Age`, `Views`, `Views at 30 days`, `Views at 365 days` |
 | Hashtag / topic discovery | `Title`, `Hashtags`, `Content`, `Category` |
 
----
+## Custom-formula variables
 
-## Custom-formula variables (`{Variable Name}`)
-
-Identity / time: `{Date}`, `{Channel}`, `{Title}`, `{Content}`, `{Age}`, `{URL}`, `{Hashtags}`
-
-Views: `{Views}`, `{Subscribers}`, `{Likes}`, `{Comments}`, `{Duration}`, `{Evergreen Score}`
-
-View snapshots: `{Views at 2 days}`, `{Views at 7 days}`, `{Views at 14 days}`, `{Views at 30 days}`, `{Views at 45 days}`, `{Views at 60 days}`, `{Views at 90 days}`, `{Views at 180 days}`, `{Views at 365 days}`
-
-Projections: `{Video Projected Views}`, `{Channel Projected Views}`
-
-Sponsorship: `{Revenue}`, `{Price}`, `{Cost}`, `{CPV}`, `{Brand CPV}`, `{Publisher CPV}`, `{Views Guarantee}`, `{Conversions}`
+Wrap any standard column name above in `{}` (case-sensitive, spaces preserved). Platform parses `{Variable Name}` into JS at runtime.
 
 ### Suggested formulas
 
@@ -82,17 +64,15 @@ Sponsorship: `{Revenue}`, `{Price}`, `{Cost}`, `{CPV}`, `{Brand CPV}`, `{Publish
 | Beat-the-projection | `{Views} > {Video Projected Views} ? 'beat' : 'miss'` | `regular` |
 | Per-subscriber reach | `{Views} / {Subscribers}` | `percent` |
 | Comment intensity | `{Comments} / {Views}` | `percent` |
-| Days since upload (alt) | `{Age}` is already days; combine with `{Views}` for `{Views} / {Age}` views-per-day | `regular` |
+| Views per day (since upload) | `{Views} / {Age}` | `regular` |
 | Sponsorship efficiency | `{Cost} / {Views}` (current CPV) | `usd` |
 
-Surface custom formulas in `refinement_suggestions`; the user opts in.
-
----
+Surface custom formulas as refinement suggestions; user opts in.
 
 ## Hard rules
 
-1. **Date and Channel are anchors** — almost every Content report needs both.
-2. **Don't dump every view-snapshot column.** Pick the 1–2 that match the date scope: short windows → `Views at 7 days` / `Views at 30 days`; longer → `Views at 90 days` / `Views at 365 days`.
-3. **Sponsorship columns only if intent involves deals.** Discovery reports don't need `Price`/`CPV` — they're sparse and confuse the table.
-4. **Display names match exactly.**
-5. **Pick 5–10 standard columns** unless intent justifies more (flag in `_phase3_metadata.column_count`).
+1. `Date` and `Channel` are anchors — almost every Content report needs both.
+2. Don't dump every view-snapshot column. Pick the 1–2 that match the date scope: short windows → `Views at 7 days` / `Views at 30 days`; longer → `Views at 90 days` / `Views at 365 days`.
+3. Sponsorship columns only if intent involves deals (sparse + noisy on discovery).
+4. Display names match exactly.
+5. Pick 5–10 standard columns unless intent justifies more (flag in `_phase3_metadata.column_count`).

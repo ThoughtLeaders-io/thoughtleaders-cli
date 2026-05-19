@@ -1,77 +1,65 @@
 # Report Glossary
 
-Reference for Phases 1 + 2. Disambiguation layer for the vocabulary the skill encounters: report-type synonyms, TL terminology, field-pair choices, deal-stage jargon, and common pitfalls. The schemas (`intelligence_filterset_schema.json` / `sponsorship_filterset_schema.json`) define what's *available*; this file defines what to *prefer* when terms overlap or aliases collide.
-
-If a term or concept isn't here, default to the schema's `_tl_intent_hints` for the field, or surface as a clarifying question.
-
----
+Phase 1 + 2 disambiguation: report-type synonyms, TL terminology, field-pair choices, deal-stage jargon, common pitfalls. Schemas (`*_filterset_schema.json`) define what's available; this file defines what to prefer when terms overlap. If a term isn't here, default to the schema's `_tl_intent_hints` or ask.
 
 ## Report-type synonyms
 
-Users name reports inconsistently. This table is the canonical mapping the skill uses in Phase 1.
-
-| Report type | Canonical name | Common synonyms / aliases | Notes |
+| Type | Canonical | Common synonyms / aliases | Notes |
 |---|---|---|---|
-| **1** | CONTENT | "uploads report", "videos report", "content report", "uploads", "video search", "individual videos", "per-video report" | Each row is one upload (video / podcast episode / article). |
-| **2** | BRANDS | "brands report", "advertisers report", "sponsors report" *(when used loosely)*, "competitor research" | Each row is one brand, aggregated across mentions. |
-| **3** | THOUGHTLEADERS / CHANNELS | "channels report", "creators report", "youtubers report", "publishers report", "channel discovery", "creator search", "TL report" *(loose)* | Each row is one channel. **Default when the user says "report" without qualification + the request is about creators.** |
-| **8** | CAMPAIGN_MANAGEMENT / SPONSORSHIPS | "sponsorships report", "deals report", "adlinks report", "deal pipeline", "sales pipeline", "sponsorship management" | Each row is one sponsorship deal (AdLink). Internal users only. |
+| **1** | CONTENT | "uploads", "videos", "content", "video search", "individual videos", "per-video" | Each row is one upload (video / podcast / article). |
+| **2** | BRANDS | "brands", "advertisers", "sponsors" *(loose)*, "competitor research" | Each row is one brand, aggregated across mentions. |
+| **3** | THOUGHTLEADERS / CHANNELS | "channels", "creators", "youtubers", "publishers", "channel discovery", "TL report" *(loose)* | Each row is one channel. **Default when "report" + creators context.** |
+| **8** | CAMPAIGN_MANAGEMENT / SPONSORSHIPS | "sponsorships", "deals", "adlinks", "deal pipeline", "sales pipeline" | Each row is one sponsorship deal. Internal users only. |
 
-### Ambiguous / dangerous terms
-
-These can mean different report types depending on context. Phase 1 must surface a clarifying question rather than guess.
+### Ambiguous terms — ask, don't guess
 
 | Term | Could mean | Clarifying question |
 |---|---|---|
-| **"campaign"** / **"campaign report"** | Type 8 (CAMPAIGN_MANAGEMENT — most common when context is deal-tracking) **OR** the generic Django sense (any report — `Campaign` is the umbrella model name) | "Do you want a sponsorship-deal report (each row = one deal), or a different report type?" |
-| **"sponsors report"** | Type 2 (brands that sponsor) **OR** type 8 (the sponsorship deals themselves) | "Should the report list the brands (one row per brand) or the individual deals (one row per deal)?" |
-| **"creator report"** *(singular)* | Type 3 about a single creator, **OR** the user wants type 1 uploads from a single creator | "Filter to one channel and show their videos (uploads report), or surface them inside a channels list?" |
-| **"performance report"** | Type 8 with performance-grade focus, **OR** type 3 with engagement focus | "Are we looking at deal-level performance (won/lost) or channel-level performance (engagement, growth)?" |
-| **"pipeline"** *(when no other context)* | Type 8 with active-stage filter | Default to type 8; confirm with the user. |
-| **"book of business"** | Type 8 with `tl_sponsorships_only: true` (TL-managed deals only) | Default to type 8 + that filter; confirm scope. |
+| **"campaign"** / **"campaign report"** | Type 8 (most common in deal-tracking) **OR** generic Django sense (any report) | "Do you want a sponsorship-deal report (one row per deal), or a different report type?" |
+| **"sponsors report"** | Type 2 (brands) **OR** type 8 (deals) | "List the brands (one row per brand) or the deals (one row per deal)?" |
+| **"creator report"** *(singular)* | Type 3 of one creator **OR** type 1 uploads from one creator | "Filter to one channel and show their videos, or surface them inside a channels list?" |
+| **"performance report"** | Type 8 (deal performance) **OR** type 3 (channel engagement) | "Deal-level performance (won/lost) or channel-level (engagement, growth)?" |
+| **"pipeline"** *(no other context)* | Type 8 with active-stage filter | Default to type 8; confirm. |
+| **"book of business"** | Type 8 with `tl_sponsorships_only: true` | Default to type 8 + filter; confirm scope. |
 
-### TL-specific role / pool synonyms
+### TL role / pool synonyms
 
 | Term | Meaning | Where it shows up |
 |---|---|---|
 | **MSN** | Media Selling Network — broad ~11K opted-in channel pool | `msn_channels_only` |
-| **TPP** | ThoughtLeaders Premier Partners — smaller ~169 high-touch managed pool | Filter via `is_tl_channel = TRUE` on the channel table. There is no top-level boolean flag in the FilterSet that maps to TPP; the canonical pattern is to **resolve the TPP roster** with `tl db pg "SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id"` and **pin the resulting IDs in `filterset.channels`** (the M2M include list). The roster is small and stable enough that pinning is cheap; just rerun the resolution if the TPP set changes. **Do not** narrate this as "TPP isn't a typed filter" — TPP IS a recognised filter; the implementation detail is the resolve-and-pin pattern. |
-| **MBN** | Media Buying Network — managed-services advertisers (brand side) | `cross_references` type `include_sponsored_by_mbn` |
-| **AM** / **Account Manager** | The advertiser-side owner of a deal | `owner_advertiser_name` (in `filters_json` for type 8) |
-| **TM** / **Talent Manager** / **Publisher Manager** | The publisher-side owner of a deal | `owner_publisher_name` (in `filters_json` for type 8) |
-
----
+| **TPP** | ThoughtLeaders Premier Partners — smaller ~169 high-touch managed pool. **Resolve-and-pin pattern**: `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels`. TPP IS a recognized filter; the implementation detail is resolve-and-pin. | `is_tl_channel = TRUE` resolved → `filterset.channels` |
+| **MBN** | Media Buying Network — managed-services advertisers | `cross_references` type `include_sponsored_by_mbn` |
+| **AM** / **Account Manager** | Advertiser-side deal owner | `owner_advertiser_name` (in `filters_json` for type 8) |
+| **TM** / **Talent Manager** / **Publisher Manager** | Publisher-side deal owner | `owner_publisher_name` (in `filters_json` for type 8) |
 
 ## TL terminology — use these
 
 | Term | Meaning | Where it shows up |
 |---|---|---|
-| **Reach** | TL's rolling audience-size metric for a channel. Not raw YouTube subs. | `reach_from` / `reach_to` |
-| **Projected Views (PV)** | Pricing estimate for a channel's next video. Drives sponsorship pricing. | `projected_views_from` / `projected_views_to`; column `Projected Views` |
-| **View Guarantee (VG)** | Contractual floor on views for a sponsored deal. Always type-8 territory. | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
-| **Net revenue** | TL's earned revenue on a deal. NOT "margin." | Type 8 columns: `Revenue` |
-| **TL profit** | Profit signal `Price - Cost`. NOT "margin." | Custom formula `{Price} - {Cost}` |
-| **Sold sponsorship** | Contractually agreed deal. Type 8 status filter via `filters_json.publish_status`. | — |
-| **Match / Proposal / Deal** | Funnel stages — Match (possible) → Proposal (offered to both sides) → Deal (sold). | Encoded in `filters_json.publish_status` for type 8 |
+| **Reach** | TL's rolling audience-size metric (not raw YouTube subs) | `reach_from` / `reach_to` |
+| **Projected Views (PV)** | Pricing estimate for next video; drives sponsorship pricing | `projected_views_from` / `projected_views_to`; column `Projected Views` |
+| **View Guarantee (VG)** | Contractual floor on views for a deal. Type-8 only. | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
+| **Net revenue** | TL's earned revenue. NOT "margin." | Type 8 column: `Revenue` |
+| **TL profit** | `Price - Cost`. NOT "margin." | Custom formula `{Price} - {Cost}` |
+| **Sold sponsorship** | Contractually agreed deal | Type 8 `filters_json.publish_status` |
+| **Match / Proposal / Deal** | Funnel: Match (possible) → Proposal (offered) → Deal (sold) | `filters_json.publish_status` for type 8 |
 
 ## TL terminology — DON'T use
 
-These are industry-default terms that **don't translate** to TL — never put them in field names, formulas, columns, or user-facing copy:
+Industry-default terms that don't translate; never put in field names, formulas, columns, or user-facing copy:
 
-- ❌ **"flight"** (MarTech term for a campaign window) → say "campaign" or "date range"
-- ❌ **"hero / hero-tier / hero channel"** → say "high-priority channel" or "TPP channel" if appropriate
-- ❌ **"margin"** (accounting term) → say `Net revenue` or `TL profit` (`{Price} - {Cost}`)
+- ❌ **"flight"** (MarTech) → say "campaign" or "date range"
+- ❌ **"hero / hero-tier / hero channel"** → say "high-priority" or "TPP" if appropriate
+- ❌ **"margin"** (accounting) → say `Net revenue` or `TL profit`
 - ❌ **"impressions"** in YouTube context → say `Views` or `Projected Views`
 
-When the user uses one of these, mirror their language in the *clarifying question* but use TL terms in the emitted config.
-
----
+Mirror the user's language in the *clarifying question*; emit TL terms in the config.
 
 ## Deal-stage jargon (type 8)
 
-When users describe deals informally, map to `filters_json.publish_status` IDs. The status enum values are integer IDs the platform recognizes.
+Map informal descriptions → `filters_json.publish_status` IDs (integer; platform doesn't accept string labels):
 
-| User says | `publish_status` ID(s) | Other `filters_json` | Status name / meaning |
+| User says | `publish_status` ID(s) | Other `filters_json` | Status name |
 |---|---|---|---|
 | "booked" / "sold" / "closed" / "won" | `3` | — | Sold |
 | "proposed" / "approved by creator" | `0` | — | Creator Approved |
@@ -79,106 +67,81 @@ When users describe deals informally, map to `filters_json.publish_status` IDs. 
 | "rejected" *(any side)* | `4, 5, 9` | — | Rejected by Brand / Creator / Agency |
 | "matched" | `7` | — | Matched |
 | "reached out" / "outreach" | `8` | — | Reached Out |
-| **"pipeline"** *(default scope)* | `0, 2, 6, 7, 8` | — | All active non-sold statuses |
-| **"in progress"** / **"active"** | `0, 2, 3, 6` | — | Active deal statuses (incl. sold) |
-| **"live"** / **"currently running"** | `3` | `ad_publish_status: "0"` | Sold AND published — the video is live on the channel |
+| **"pipeline"** *(default)* | `0, 2, 6, 7, 8` | — | All active non-sold |
+| **"in progress"** / **"active"** | `0, 2, 3, 6` | — | Active incl. sold |
+| **"live"** / **"currently running"** | `3` | `ad_publish_status: "0"` | Sold AND published |
 
-Note: `publish_status` values are integer IDs. The platform does NOT recognize string labels like `"live"` or `"sold"` directly — always emit numeric IDs. The string labels above are user-facing language only.
-
-Status reference (for completeness):
-
-| ID | Name |
-|---|---|
-| 0 | Creator Approved (Proposed) |
-| 1 | Unavailable |
-| 2 | Pending |
-| 3 | Sold |
-| 4 | Rejected by Brand |
-| 5 | Rejected by Creator |
-| 6 | Proposal Approved |
-| 7 | Matched |
-| 8 | Reached Out |
-| 9 | Rejected by Agency |
-
----
+Status reference: `0` Creator Approved, `1` Unavailable, `2` Pending, `3` Sold, `4` Rejected by Brand, `5` Rejected by Creator, `6` Proposal Approved, `7` Matched, `8` Reached Out, `9` Rejected by Agency.
 
 ## Field-pair disambiguation
 
-When two fields look similar, use this table to pick.
-
 ### Date scopes
 
-| User intent | Fields to use | Why |
+| User intent | Fields | Why |
 |---|---|---|
-| "Last 90 days" / "this year" / rolling | `days_ago` (and optionally `days_ago_to`) | Rolling = relative to now; survives report re-runs sensibly. |
-| "Between Jan 1 and Mar 31" / specific window | `start_date` + `end_date` | Absolute = fixed window; what the user explicitly anchored on. |
-| "Channels created on TL since X" | `createdat_from` (+ `createdat_to`) | This is the TL-side AdLink/Channel record creation, not the YouTube publish date. |
-| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses these for send_date) | Type 8's date semantics shift — the schema docstring explains. |
+| "Last 90 days" / rolling | `days_ago` (+ optionally `days_ago_to`) | Rolling = relative to now |
+| "Between Jan 1 and Mar 31" | `start_date` + `end_date` | Absolute window |
+| "Channels created on TL since X" | `createdat_from` (+ `createdat_to`) | TL-side record creation, not YouTube publish |
+| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses for send_date) | Type 8 semantics shift — see schema |
 
 ### Channel-size signals
 
-> **Vocabulary**: SQL/internal term is `reach`, user-facing term is **subscribers**. See `thoughtleaders-skills/tl-data/references/business-glossary.md` for the canonical mapping (line 149: *"AMs say subscribers, SQL says reach"*). When emitting the FilterSet, use the field name `reach_from` / `reach_to`. When narrating to the user (chat replies, sample-table column headers, takeaways, filter summaries), say **"subscribers"** — never **"reach"**. *"By reach: 1M+ → 2 · 100K–1M → 57"* is a leak; write *"By subscribers: 1M+ → 2 · 100K–1M → 57"*.
+> SQL/internal term = `reach`; user-facing term = **subscribers** (see business-glossary canonical mapping). Emit `reach_from` / `reach_to` in FilterSet; narrate as "subscribers" everywhere user-facing (sample headers, takeaways, summaries).
 
-| User intent | Field to emit | Narrate as |
+| User intent | Field | Narrate as |
 |---|---|---|
-| "Big channels" / "100K+ subscribers" / size floor | `reach_from` (+ `reach_to`) | "subscribers" / "channel size" |
-| "Channels expecting >X projected views per video" | `projected_views_from` (+ `projected_views_to`) | "projected views" — PV is a forward-looking estimate; better than subscribers when intent is sponsor-deal pricing |
-| Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | "views per video" — per-upload metric, only meaningful for type 1 (CONTENT) |
+| "100K+ subscribers" / size floor | `reach_from` (+ `reach_to`) | "subscribers" / "channel size" |
+| "Channels expecting >X projected views" | `projected_views_from` (+ `projected_views_to`) | "projected views" — forward-looking pricing estimate |
+| Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | "views per video" — per-upload, type 1 only |
 
 ### Demographic shares
 
-| User intent | Fields to use | Why |
+| User intent | Fields | Why |
 |---|---|---|
-| "Mostly US audience" (single threshold) | `demographic_usa_share` | Single-value field — interpreted as "≥ this share." |
-| "USA share between 40 and 80" (range) | `min_demographic_usa_share` + `max_demographic_usa_share` | Range variant — same field family with explicit bounds. |
-| Same pattern for male / mobile / computer / TV / tablet / game-console | `min_*_share` + `max_*_share` | Always prefer the min/max pair when the user gives a range. |
+| "Mostly US audience" (single threshold) | `demographic_usa_share` | Interpreted as ≥ this share |
+| "USA share between 40 and 80" (range) | `min_demographic_usa_share` + `max_demographic_usa_share` | Range variant |
+| Same pattern for male / mobile / computer / TV / tablet / game-console | `min_*_share` + `max_*_share` | Prefer min/max pair on ranges |
 
 ### Keyword surfaces
 
-| User intent | Fields to use | Why |
+| User intent | Fields | Why |
 |---|---|---|
-| Match keywords against video transcripts/titles | `content_fields` includes `content`, `title`, `transcript` | Standard for type 1 (CONTENT) discovery. |
-| Match keywords against channel descriptions only | `content_fields = ["channel_description", "channel_description_ai", "channel_topic_description"]` | Standard for type 3 (CHANNELS) discovery — channel-level signal, not video-level. |
-| Different keywords need different fields | `keyword_content_fields_map` (per-position override) | Use when one keyword is a brand name (match `channel.channel_name`) and another is a topic (match descriptions). |
-| User says "but not X" | `keywords` includes `X` + `keyword_exclude_map["<index>"] = true` | Substring negation per-position. |
-| User wants ALL keywords to match | `keyword_operator = "AND"` | Default is OR; set explicitly when intent calls for it. |
+| Match keywords in video transcripts/titles | `content_fields` includes `content`, `title`, `transcript` | Standard type 1 |
+| Match channel descriptions only | `content_fields = ["channel_description", "channel_description_ai", "channel_topic_description"]` | Standard type 3 |
+| Different keywords need different fields | `keyword_content_fields_map` (per-position) | E.g., brand name → `channel_name`; topic → descriptions |
+| "But not X" | `keywords` includes `X` + `keyword_exclude_map["<index>"] = true` | Substring negation per-position |
+| User wants ALL keywords to match | `keyword_operator = "AND"` | Default is OR |
 
 ### Sponsorship status (type 8)
 
-The platform filters deal stage through `filters_json.publish_status` — there is **no first-class status field** on FilterSet. Encode in `filters_json` only. See "Deal-stage jargon" above for the canonical NL → status-ID mapping.
+No first-class status field — encode in `filters_json.publish_status` only. See "Deal-stage jargon" for the NL → ID mapping.
 
----
-
-## Defaults that must always be set (unless contradicted)
+## Defaults (unless contradicted)
 
 | Field | Default | Why |
 |---|---|---|
-| `languages` | `["en"]` | TL's working market is English-language YouTube. |
-| `channel_formats` | `[4]` (Video) | TL's working format is YouTube Video. Other formats (Podcast=3, etc.) are marginal. |
-| `days_ago` for type 8 | `365` | Type 8 without a date scope is unbounded and meaningless — will time out. |
-| `sort` | Per-type default — see schema `_tl_default_by_report_type` | Reports MUST be sortable. |
+| `languages` | `["en"]` | TL's working market |
+| `channel_formats` | `[4]` (Video) | TL's working format |
+| `days_ago` for type 8 | `365` | Type 8 without date scope is unbounded |
+| `sort` | Per-type default — see `_tl_default_by_report_type` | Reports must be sortable |
 
-If the user contradicts a default ("include Spanish channels too", "look at TikTok"), drop the default. Otherwise keep it.
-
----
+Drop a default only if the user contradicts it ("include Spanish too", "look at TikTok").
 
 ## Filter-source decisions: typed field vs `filters_json`
 
-Always prefer a typed field. `filters_json` is the catch-all and the platform interprets it directly — no validation, no type checks. Use `filters_json` ONLY when:
+Always prefer typed fields. `filters_json` is the catch-all (no validation, no type checks). Use ONLY when:
 
-1. **No first-class field exists** for the user's intent (e.g., type-8 `publish_status`).
-2. **A field exists but its semantics don't match** the user's specific request.
+1. No first-class field exists (e.g., type-8 `publish_status`)
+2. A field exists but its semantics don't match the request
 
-Don't put something in `filters_json` that already has a typed field — it confuses precedence and may silently override the typed value.
-
----
+Never put something in `filters_json` that has a typed field — confuses precedence, may silently override.
 
 ## Common pitfalls
 
-- **Date upper bounds.** `start_date` / `end_date` in the model are `DateField`. The platform's underlying `DateTimeField` filtering uses `__lt next_day`, not `__lte` — so a user saying "through Feb 28" maps cleanly to `end_date = "2026-02-28"`. Don't try to be clever.
-- **`is_offline`** is a 5-char string, not a boolean. Preserve the platform's encoding rather than converting.
-- **`topics` is a real field.** Phase 2's topic_matcher can emit `topics: [<id>]` directly. Phase 2 may *also* expand the topic's curated `keywords[]` into the keyword fields — both are valid; pick one based on whether the user wants topic-bounded vs keyword-bounded precision.
-- **Brand and channel names are NOT IDs.** Always run the `name_resolver` tool to convert `"PewDiePie"` → `<channel_id>` before emitting `channels: [...]` / `brands: [...]`. Type 8 with unresolved names is a hard failure.
-- **`tl_sponsorships_only`** restricts to channels TL has sponsorship history with — not "channels currently in MSN." Different from `msn_channels_only`. Pick based on intent.
-- **"Campaign" is a colliding term.** In Django, `Campaign` is the umbrella model for ALL reports. In TL business language, "campaign" often means a sponsorship campaign (type 8). Phase 1 must clarify when "campaign report" appears in the user's wording.
-- **Free-text niches → keywords ONLY, never `content_categories` as a pre-filter.** When the user describes their target niches in free text — *"motorcycle, cycling, travel vlog, adventure sports, drone, tech review, photography, sailing, running"*, *"investing/finance"*, *"action sports"*, etc. — match those niches with `keyword_groups` (or `keywords`) against `content_fields` (description / ai_description / topic descriptions / channel name). **Do not** map them onto `content_categories`. The TL `ContentCategory` enum is a coarse 22-bucket taxonomy (LIFESTYLE / TRAVEL / SPORTS / HOWTO / ENTERTAINMENT / PHOTOGRAPHY / TECHNOLOGY / …); a single niche like "motorcycle vlogging" can scatter across LIFESTYLE, SPORTS, HOWTO, and ENTERTAINMENT depending on how each channel was tagged. Using `content_categories` as a pre-filter actively excludes channels that fit the niche but happen to be tagged in a sibling bucket. Only use `content_categories` when the user explicitly names one of TL's category labels (e.g. *"Lifestyle channels"*, *"channels in the Sports category"*) — that's a precise category request, not a niche description.
+- **Date upper bounds** — `start_date`/`end_date` are `DateField`; platform uses `__lt next_day`, not `__lte`. "Through Feb 28" → `end_date = "2026-02-28"`. Don't be clever.
+- **`is_offline`** — 5-char string, not boolean. Preserve platform encoding.
+- **`topics` is a real field** — `topic_matcher` can emit `topics: [<id>]` directly, OR expand to `keywords[]`. Both valid; pick by intent (topic-bounded vs keyword-bounded precision).
+- **Brand/channel names ≠ IDs** — always run `name_resolver` before emitting `channels: [...]` / `brands: [...]`. Type 8 with unresolved names is a hard failure.
+- **`tl_sponsorships_only`** ≠ `msn_channels_only`. First restricts to channels with TL sponsorship history; second to MSN-network channels. Pick by intent.
+- **"Campaign" is colliding** — Django umbrella model vs TL business sense (type 8). Phase 1 must clarify on "campaign report".
+- **Free-text niches → keywords only, NEVER `content_categories` as pre-filter.** Niches like "motorcycle vlogging" scatter across LIFESTYLE / SPORTS / HOWTO / ENTERTAINMENT. Using `content_categories` as a pre-filter excludes channels that fit the niche but are tagged in a sibling bucket. Only use `content_categories` when the user explicitly names a TL category label (e.g., "Lifestyle channels"). Otherwise match via `keyword_groups` against `content_fields`.

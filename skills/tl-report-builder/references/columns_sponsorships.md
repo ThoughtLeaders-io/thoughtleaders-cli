@@ -1,12 +1,8 @@
 # Columns — Sponsorships report (report_type = 8)
 
-Reference for Phase 3 (Columns Phase). Each row in a Sponsorships report is one sponsorship deal (an AdLink). Phase 3 reads this file to pick which columns appear in the saved report.
+Phase 3 reference. Each row = one sponsorship deal (AdLink). Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
 
-The output Phase 3 emits is a `columns` dict mapping display names → `{"display": true}`. Names below are the **exact display names** the platform expects — case-sensitive, including spaces.
-
-> Type 8 is **completely different** from types 1/2/3 — different rows, different column catalog, different default set. Don't reuse type-3 defaults like `TL Channel Summary` or `Subscribers` as primary columns; they're available but secondary here.
-
----
+> Type 8 is **completely different** from types 1/2/3 — different rows, different catalog, different defaults. Don't reuse type-3 defaults like `TL Channel Summary` as primary columns; they're available but secondary.
 
 ## Defaults — always include
 
@@ -16,9 +12,7 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 - `Price`
 - `Scheduled Date`
 
----
-
-## Standard columns (pick 5–10 total, including the defaults above)
+## Standard columns (pick 5–10 total, including defaults)
 
 ### Identity / context
 - `Channel`, `Advertiser`, `Sponsorship`, `Integration Type`
@@ -61,8 +55,6 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 - `Owner Advertiser`, `Owner Publisher`, `Owner Sales`
 - `Publisher Email`, `Confirmed Email`
 
----
-
 ## Intent-driven additions
 
 | Intent signal | Add columns |
@@ -75,19 +67,9 @@ The output Phase 3 emits is a `columns` dict mapping display names → `{"displa
 | Quality / channel-fit review | `TL Channel Summary`, `Sponsorship Score`, `Brand Safety`, `Match Grade`, `Subscribers` |
 | Outreach pipeline | `Outreach Date`, `Proposal Presented Date`, `Status`, `Confirmed Email`, `Publisher Email` |
 
----
+## Custom-formula variables
 
-## Custom-formula variables (`{Variable Name}`)
-
-Identity: `{Channel}`, `{Advertiser}`
-
-Financial: `{Price}`, `{Cost}`, `{Weighted price}`, `{Revenue}`, `{Conversions}`, `{Conversion Rate}`, `{CPA}`, `{ROAS}`, `{Expected CPV}`, `{Expected CPM}`, `{Current CPV}`
-
-Views: `{Current Views}`, `{Projected Views}`, `{Projected Views at Publish Date}`, `{Views Guaranteed}`, `{Views Guarantee Days}`, `{Publish Count}`
-
-Dates: `{Scheduled Date}`, `{Publish Date}`, `{Purchase Date}`, `{Created}`, `{Last Updated}`
-
-Channel info: `{Subscribers}`, `{Sponsorship Score}`, `{Engagement}`, `{Volatility}`, `{Total Views}`, `{Match Grade}`
+Wrap any standard column name above in `{}` (case-sensitive, spaces preserved). Platform parses `{Variable Name}` into JS at runtime.
 
 ### Suggested formulas
 
@@ -100,17 +82,15 @@ Channel info: `{Subscribers}`, `{Sponsorship Score}`, `{Engagement}`, `{Volatili
 | Time-to-publish lag | `{Publish Date} && {Purchase Date} ? ({Publish Date} - {Purchase Date}) : 'N/A'` | `regular` |
 | Per-channel deal weight | `{Weighted price} / {Publish Count}` | `usd` |
 
-Surface custom formulas in `refinement_suggestions`; the user opts in.
-
----
+Surface custom formulas as refinement suggestions; user opts in.
 
 ## Hard rules
 
-1. **`Channel`, `Advertiser`, `Status` are anchors.** Every Sponsorships report needs all three — they're how the user identifies a row.
-2. **Type 8 has its own column catalog.** Don't borrow type-3 defaults wholesale. `TL Channel Summary` and `Subscribers` are available but secondary; lead with deal-stage + financials.
-3. **Financial columns belong here.** Unlike types 1/2/3 where pricing is intent-gated, type 8 *is* about pricing — `Price` and `Status` are baseline.
-4. **Date columns: pick the one that matches intent.** Pipeline view → `Scheduled Date`; won-deals review → `Purchase Date`; activity feed → `Last Updated`. Including all of them at once clutters the table.
-5. **`Match Grade`** is the matching-engine score for the deal — useful when the user asks about deal-quality fit, otherwise omit.
-6. **Use TL-glossary terms in formulas.** TL says **Net revenue** / **TL profit**, not "margin." For a profit signal, prefer `{Price} - {Cost}` rather than calling it "margin" in the column name.
-7. **Display names match exactly** — note `Weighted price` (lowercase `p`), `Gender (male %)` (parens included), `Demographics - Age Median` (spaces around `-`).
-8. **Pick 5–10 standard columns** unless intent justifies more (flag in `_phase3_metadata.column_count`).
+1. `Channel`, `Advertiser`, `Status` are anchors. Every Sponsorships report needs all three.
+2. Type 8 has its own catalog. Don't borrow type-3 defaults wholesale. `TL Channel Summary` / `Subscribers` are available but secondary; lead with deal-stage + financials.
+3. Financial columns belong here. Unlike types 1/2/3 (intent-gated), type 8 IS about pricing — `Price` and `Status` are baseline.
+4. Date columns: pick the one matching intent. Pipeline → `Scheduled Date`; won-deals → `Purchase Date`; activity feed → `Last Updated`. Don't include all.
+5. `Match Grade` is the matching-engine score — useful for deal-quality fit questions, otherwise omit.
+6. Use TL-glossary terms in formulas. TL says **Net revenue** / **TL profit**, not "margin." For profit signal, prefer `{Price} - {Cost}` rather than naming it "margin."
+7. Display names match exactly — note `Weighted price` (lowercase `p`), `Gender (male %)` (parens included), `Demographics - Age Median` (spaces around `-`).
+8. Pick 5–10 standard columns unless intent justifies more (flag in `_phase3_metadata.column_count`).
