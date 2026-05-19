@@ -405,7 +405,12 @@ def _resync_integrations() -> None:
     tl_bin = shutil.which("tl")
     if not tl_bin:
         return
-    for tool, binary in (("claude", "claude"), ("opencode", "opencode")):
+    for tool, binary in (
+        ("claude", "claude"),
+        ("opencode", "opencode"),
+        ("gemini", "gemini"),
+        ("codex", "codex"),
+    ):
         if not shutil.which(binary):
             continue
         print(f"[tl-cli] re-syncing {tool} skills…", file=sys.stderr)

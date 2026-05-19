@@ -1,4 +1,11 @@
-"""tl setup — Install Claude Code plugin and other integrations."""
+"""tl setup — Install Claude Code plugin and other integrations.
+
+Agents-style installs (Gemini / Codex): both CLIs read skills from
+`~/.agents/skills/`, so they share a single install target. Any `tl
+setup …` command that installs skill files also mirrors them there
+whenever either `gemini` or `codex` is on PATH. Behaviour follows the
+OpenCode pattern (full per-skill tree copy, .tl-version stamp).
+"""
 
 import json
 import shutil
@@ -10,7 +17,7 @@ from rich.console import Console
 
 from tl_cli import __version__
 
-app = typer.Typer(help="Set up integrations (Claude Code, OpenCode)")
+app = typer.Typer(help="Set up integrations (Claude Code, OpenCode, Gemini, Codex)")
 console = Console(stderr=True)
 
 MARKETPLACE_SOURCE = "ThoughtLeaders-io/thoughtleaders-cli"
@@ -24,6 +31,13 @@ CLAUDE_SKILLS_DIR = CLAUDE_HOME / "skills"
 CLAUDE_COMMANDS_DIR = CLAUDE_HOME / "commands"
 
 OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
+
+# Shared install target for the "agents-style" CLIs that read skills from
+# `~/.agents/skills/`. Whenever any of these binaries is on PATH we mirror
+# the skill tree there once — the directory is the same regardless of
+# which CLI triggered the install.
+AGENTS_SKILLS_DIR = Path.home() / ".agents" / "skills"
+AGENTS_SKILLS_BINARIES = ("gemini", "codex")
 
 
 def _find_plugin_root() -> Path | None:
@@ -96,6 +110,16 @@ def check_plugin_version() -> list[str]:
         installed = opencode_version_file.read_text().strip()
         if installed != __version__:
             warnings.append(f"OpenCode skill is outdated (v{installed} vs CLI v{__version__}). Run 'tl setup opencode' to update.")
+
+    # Gemini / Codex (shared ~/.agents/skills/ target)
+    agents_version_file = AGENTS_SKILLS_DIR / ".tl-version"
+    if agents_version_file.exists():
+        installed = agents_version_file.read_text().strip()
+        if installed != __version__:
+            warnings.append(
+                f"Gemini/Codex skills are outdated (v{installed} vs CLI v{__version__}). "
+                f"Run 'tl setup gemini' or 'tl setup codex' to update."
+            )
 
     return warnings
 
@@ -308,22 +332,118 @@ def _setup_noninteractive() -> None:
 # --- OpenCode setup ---
 
 
-def _install_opencode_skills(plugin_root: Path) -> int:
-    """Copy skills to ~/.config/opencode/skills/ for OpenCode discovery.
+def _install_skill_trees(plugin_root: Path, target_dir: Path) -> int:
+    """Copy every `skills/<name>/` tree under `plugin_root` into `target_dir`.
 
-    Returns the number of skills installed.
+    Shared primitive used by every "external agent" install path
+    (OpenCode, Gemini, Codex) — each agent reads skills from a different
+    base directory, so we just parameterise on that. A `.tl-version`
+    stamp is written into the target so `check_plugin_version()` can
+    detect drift later. Returns the number of skills installed.
     """
     count = 0
     skills_src = plugin_root / "skills"
     if skills_src.is_dir():
         for skill_dir in skills_src.iterdir():
             if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
-                dst = OPENCODE_SKILLS_DIR / skill_dir.name
+                dst = target_dir / skill_dir.name
                 if dst.exists():
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
                 count += 1
+    if count > 0 or target_dir.exists():
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / ".tl-version").write_text(__version__)
     return count
+
+
+# Back-compat names — both delegate to the shared primitive. Kept so other
+# modules that import them continue to work without changes.
+def _install_opencode_skills(plugin_root: Path) -> int:
+    return _install_skill_trees(plugin_root, OPENCODE_SKILLS_DIR)
+
+
+def _install_agents_skills(plugin_root: Path) -> int:
+    return _install_skill_trees(plugin_root, AGENTS_SKILLS_DIR)
+
+
+def _setup_external_agent(
+    *,
+    agent_label: str,
+    agent_binary: str,
+    command_name: str,
+    target_dir: Path,
+    post_install_lines: list[str] | None,
+    json_output: bool,
+) -> None:
+    """Shared body for the OpenCode / Gemini / Codex setup commands.
+
+    All three follow the same shape: copy skill trees into a target
+    directory, stamp a `.tl-version` file, print a status report.
+    Arguments customise the diagnostic text and the install target.
+    Auto-discovery between agents has been intentionally removed —
+    `tl update` is responsible for re-syncing every detected agent
+    after a self-upgrade; the per-agent setup commands stay scoped to
+    their one agent.
+    """
+    plugin_root = _find_plugin_root()
+
+    if json_output:
+        result: dict = {"cli_version": __version__}
+        if plugin_root is None:
+            result["status"] = "error"
+            result["error"] = "Plugin assets not found"
+            print(json.dumps(result, indent=2))
+            raise SystemExit(1)
+        result[f"{agent_binary}_detected"] = shutil.which(agent_binary) is not None
+        count = _install_skill_trees(plugin_root, target_dir)
+        result["skills_installed"] = count
+        result["install_dir"] = str(target_dir)
+        result["status"] = "ok"
+        print(json.dumps(result, indent=2))
+        return
+
+    console.print()
+    console.print(f"[bold]tl-cli[/bold] v{__version__} — {agent_label} Setup")
+    console.print()
+
+    tl_bin = shutil.which("tl")
+    if tl_bin:
+        console.print(f"  [green]✓[/green] tl CLI found: {tl_bin}")
+    else:
+        console.print("  [red]✗[/red] tl CLI not found on PATH")
+        console.print(f"    {agent_label}'s shell tool won't be able to run tl commands.")
+        console.print("    Install with: [cyan]pipx install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
+
+    agent_bin = shutil.which(agent_binary)
+    if agent_bin:
+        console.print(f"  [green]✓[/green] {agent_binary} binary found: {agent_bin}")
+    else:
+        console.print(f"  [yellow]![/yellow] {agent_binary} binary not found on PATH (installing skills anyway)")
+
+    if plugin_root is None:
+        console.print("  [red]✗[/red] Plugin assets not found")
+        console.print("    Try reinstalling: [cyan]pipx install --force git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
+        raise SystemExit(1)
+    console.print(f"  [green]✓[/green] Plugin assets found: {plugin_root}")
+    console.print()
+
+    console.print("[bold]Installing skills...[/bold]")
+    count = _install_skill_trees(plugin_root, target_dir)
+    if count > 0:
+        console.print(f"  [green]✓[/green] Installed {count} skill(s) to {target_dir}/")
+    else:
+        console.print("  [yellow]![/yellow] No skills found to install")
+        raise SystemExit(1)
+
+    console.print()
+    console.print("[green]Setup complete![/green]")
+    console.print()
+    for line in post_install_lines or []:
+        console.print(line)
+    if post_install_lines:
+        console.print()
+    console.print(f"[dim]To update, run: tl setup {command_name}[/dim]")
 
 
 @app.command("opencode")
@@ -339,61 +459,65 @@ def setup_opencode(
         tl setup opencode
         tl setup opencode --json
     """
-    if json_output:
-        result = {"cli_version": __version__}
-        plugin_root = _find_plugin_root()
-        if plugin_root is None:
-            result["status"] = "error"
-            result["error"] = "Plugin assets not found"
-            print(json.dumps(result, indent=2))
-            raise SystemExit(1)
-        count = _install_opencode_skills(plugin_root)
-        OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-        (OPENCODE_SKILLS_DIR / ".tl-version").write_text(__version__)
-        result["skills_installed"] = count
-        result["status"] = "ok"
-        print(json.dumps(result, indent=2))
-        return
+    _setup_external_agent(
+        agent_label="OpenCode",
+        agent_binary="opencode",
+        command_name="opencode",
+        target_dir=OPENCODE_SKILLS_DIR,
+        post_install_lines=[
+            "OpenCode will automatically discover the tl skill.",
+            "The agent can use it when you ask about sponsorships, deals, channels, or brands.",
+        ],
+        json_output=json_output,
+    )
 
-    console.print()
-    console.print(f"[bold]tl-cli[/bold] v{__version__} — OpenCode Setup")
-    console.print()
 
-    # Check tl is on PATH
-    tl_bin = shutil.which("tl")
-    if tl_bin:
-        console.print(f"  [green]✓[/green] tl CLI found: {tl_bin}")
-    else:
-        console.print("  [red]✗[/red] tl CLI not found on PATH")
-        console.print("    OpenCode's Bash tool won't be able to run tl commands.")
-        console.print("    Install with: [cyan]pipx install git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
+# --- Gemini / Codex setup (shared ~/.agents/skills/ target) ---
 
-    # Find plugin assets
-    plugin_root = _find_plugin_root()
-    if plugin_root is None:
-        console.print("  [red]✗[/red] Plugin assets not found")
-        console.print("    Try reinstalling: [cyan]pipx install --force git+https://github.com/ThoughtLeaders-io/thoughtleaders-cli.git[/cyan]")
-        raise SystemExit(1)
-    console.print(f"  [green]✓[/green] Plugin assets found: {plugin_root}")
-    console.print()
 
-    # Install skills
-    console.print("[bold]Installing skills...[/bold]")
-    count = _install_opencode_skills(plugin_root)
-    if count > 0:
-        console.print(f"  [green]✓[/green] Installed {count} skill(s) to {OPENCODE_SKILLS_DIR}/")
-    else:
-        console.print("  [yellow]![/yellow] No skills found to install")
-        raise SystemExit(1)
+@app.command("gemini")
+def setup_gemini(
+    json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+) -> None:
+    """Install the TL CLI skills for the Gemini CLI.
 
-    # Write version stamp
-    OPENCODE_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    (OPENCODE_SKILLS_DIR / ".tl-version").write_text(__version__)
+    Copies skill files to ~/.agents/skills/ so the Gemini CLI can
+    discover and use them automatically. Shares its install target with
+    `tl setup codex` — running either installs the same files.
 
-    console.print()
-    console.print("[green]Setup complete![/green]")
-    console.print()
-    console.print("OpenCode will automatically discover the tl skill.")
-    console.print("The agent can use it when you ask about sponsorships, deals, channels, or brands.")
-    console.print()
-    console.print("[dim]To update, run: tl setup opencode[/dim]")
+    Examples:
+        tl setup gemini
+        tl setup gemini --json
+    """
+    _setup_external_agent(
+        agent_label="Gemini",
+        agent_binary="gemini",
+        command_name="gemini",
+        target_dir=AGENTS_SKILLS_DIR,
+        post_install_lines=None,
+        json_output=json_output,
+    )
+
+
+@app.command("codex")
+def setup_codex(
+    json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+) -> None:
+    """Install the TL CLI skills for the Codex CLI.
+
+    Copies skill files to ~/.agents/skills/ so the Codex CLI can
+    discover and use them automatically. Shares its install target with
+    `tl setup gemini` — running either installs the same files.
+
+    Examples:
+        tl setup codex
+        tl setup codex --json
+    """
+    _setup_external_agent(
+        agent_label="Codex",
+        agent_binary="codex",
+        command_name="codex",
+        target_dir=AGENTS_SKILLS_DIR,
+        post_install_lines=None,
+        json_output=json_output,
+    )
