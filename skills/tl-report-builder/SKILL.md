@@ -136,84 +136,19 @@ Narrate like a colleague describing what they're doing — not like a logger ann
 
 **Talk TO the user, not ABOUT them.** Second person, not third person. ❌ "The user wants channels for outreach." ✅ "You want channels for outreach — got it." Or just describe what you're doing without referring to the user at all.
 
-### Worked example — running a full request
+### Narration shape — leaky vs clean
 
-Here's a real request and the gap between leaky narration (the failure mode) and clean narration (the target). Both sides describe the SAME execution; only the surface text differs. **The intent here is "save" (not preview)** — the prompt says "Create a campaign", which is one of the explicit save-intent phrases listed in the Save-or-preview policy.
+A save-mode run for *"Create a campaign of investing channels we haven't pitched to investing.com"* shows the gap between leaky and clean narration. Both describe the SAME execution; only the surface differs.
 
-❌ **Leaky** (the failure mode: phase numbers, type numbers, identifier-shaped names, third-person framing). The `[bracketed]` placeholders mark where the agent leaked specific internal identifier names — the lesson is that any identifier-shaped name appeared at all:
+❌ **Leaky** (phase numbers, type numbers, identifier-shaped names, third-person framing):
+> "I'll work through this as a TL outreach campaign... **Phase 1 — Report Type: Type 3 (CHANNELS)**. The user wants channels for outreach... **Phase 2 setup**: I need to resolve "investing.com" to a `[platform-id-name]`... Now composing the final campaign config. **Phase 3 (columns)** — outreach intent. **Phase 4 (widgets)** — Type 3 standard set."
 
-> I'll work through this as a TL outreach campaign. Let me start by resolving the brand and exploring the request structure.
->
-> **Phase 1 — Report Type: Type 3 (CHANNELS)**. The user wants channels for outreach to a brand — clear channels-side request with a cross-reference exclusion.
->
-> **Phase 2 setup**: I need to resolve "investing.com" to a `[platform-id-name]` first, then build the `[platform-filter-object]`. Let me check the brand.
->
-> *(...later...)* Now let me check what `[platform-deal-statuses]` count as "pitched" and how many channels match.
->
-> *(...later...)* Sample for `[validation-step-name]`. […] V2 is worse — "portfolio" pulls in music labels and entertainment via AI-generated topic descriptions.
->
-> Now composing the final campaign config. **Phase 3 (columns)** — outreach intent. **Phase 4 (widgets)** — Type 3 standard set with outreach overlay.
+✅ **Clean** (plain English, no leaks, second person):
+> "I'll set this up as a channels report — creators for outreach, with anyone already pitched to investing.com filtered out. Looking up investing.com... **Found it.** Pulling channels pitched in the last year so I can exclude them. **668 already pitched** — out. **1,838 unpitched investing channels**, 9 of 10 in the spot-check are on-target — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra. Putting it together now (outreach-focused columns + standard charts). *(saving…)* **TL report saved.** [Investing channels](https://app.thoughtleaders.io/...) (report #12345)."
 
-✅ **Clean** (same execution, plain English, no leaks, second person):
+What's preserved (brand resolution outcome, real exclusion count, noise example with specific names, reasoning, sample names, saved-report link, takeaways) vs stripped (every phase number, type number, identifier-shaped name, "The user wants…", raw IDs, the campaign-config JSON itself — that lives in the portable-temp transport file, never the chat). Clean is also *more informative* — describes what's happening to the data, not which step in the spec is firing.
 
-> I'll set this up as a channels report — creators for outreach, with anyone we've already pitched to investing.com in the last year filtered out.
->
-> First — let me look up investing.com in our brand list… **Found it.** Now I'll pull the list of channels we've pitched to them in the last 12 months so I can exclude them.
->
-> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
->
-> *(...later...)* **2,842 unpitched investing-aligned channels** — that's a healthy pool. Spot-checking the top matches to make sure they actually look like investing creators…
->
-> *(...later...)* 7 of 10 are strong matches, but 2 are Pokémon channels — they're hitting on "Trading Card Game" because of a loose "trading" keyword. Let me tighten that up. *(tightening the search…)* Tried adding "portfolio" but that pulls in music labels via AI-generated topic descriptions, so I dropped it. *(trying a tighter set…)* **1,838 unpitched investing channels, 9 of 10 in the spot-check are clean** — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra, all on-target.
->
-> Putting the final report together now — outreach-focused columns (deal history, contact info, demographic fit) and the standard channels-report charts. *(saving…)*
->
-> **TL report saved.** [Investing — unpitched investing channels](https://app.thoughtleaders.io/...) (report #12345)
->
-> **Worth knowing**:
-> - 668 channels already pitched to investing.com are excluded.
-> - Topic anchored on the curated investing keyword set; spot-check looked clean.
-> - Sort is most-recently-active first so dormant channels don't crowd the top.
-
-Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names, the saved-report link, the takeaways) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see, **and the campaign-config JSON itself** — the JSON is written to a temp file and handed to `tl reports create --config-file <path> --yes`, not echoed back into the chat where it's just noise once the report is saved). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
-
-### Worked example — preview-by-default (no save)
-
-Same architecture, different intent. The prompt is exploratory; the policy says default to preview.
-
-**Request**: *"Find me investing/finance channels we haven't pitched to investing.com in the last year"*
-
-✅ **Clean preview output** (same Phase 1–4 execution, but no temp file, no `tl reports create`, no Campaign row):
-
-> Pulling investing/finance channels we haven't pitched to investing.com lately.
->
-> First — let me look up investing.com in our brand list… **Found it.** Pulling the list of channels we've pitched to them in the last 12 months so I can exclude them.
->
-> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
->
-> *(...later...)* **1,838 unpitched investing channels.** Spot-checked the top 10; 9 of 10 are clearly on-target.
->
-> **Top by reach (sample):**
->
-> | Channel | Subscribers | Last published |
-> |---|---|---|
-> | Pushkar Raj Thakur | 11.4M | 2 days ago |
-> | Mark Tilbury | 4.2M | yesterday |
-> | warikoo | 3.8M | today |
-> | Pranjal Kamra | 6.1M | 4 days ago |
-> | Meet Kevin | 1.9M | 6 days ago |
-> | New Money | 870K | yesterday |
-> | Hamish Hodder | 250K | 3 days ago |
-> | … | … | … |
->
-> **Worth knowing**:
-> - 668 channels already pitched to investing.com are excluded.
-> - Topic anchored on the curated investing keyword set; the spot-check looked clean (1 Pokémon channel slipped in via a "trading" keyword match — easy to filter further if needed).
-> - Sort is most-recently-active first so dormant channels don't crowd the top.
->
-> *If you want this saved as a TL report you can come back to, just say save.*
-
-If the user replies *"yes save it"* or *"save"* → run the save step (resolve a portable temp path → write → verify → invoke `tl reports create --config-file <that-exact-path> --yes`; see Save-or-preview policy step 1+2 for the full mechanics) using the **same config that's already in working memory**. Don't re-run Phases 1–4. The follow-up reply is just the takeaways + saved-report link.
+The same shape applies to **preview mode** (no save intent): same Phase 1-4 execution, but the reply ends with the sample-rows table + takeaways + save tail instead of the saved-report URL. If the user replies *"yes save it"* / *"save"* → run the save step using the **same config that's already in working memory**; don't re-run Phases 1-4.
 
 ### Editing a saved report (post-save refinement flow)
 
@@ -789,109 +724,22 @@ Then enriches each sample row: `{ id: <article id>, title: <title>, channel_name
 
 ##### Type 2 (BRANDS) — aggregate over articles, group by brand
 
-Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search.
+Brand-aggregated, so the ES query is an aggregation. **`tl db es` accepts at most one aggregation per request (top-level + sub-agg counts as 2 and is rejected per `skills/tl/references/elasticsearch-schema.md` line 28)** — type-2 validation therefore needs multiple separate ES calls, merged client-side.
 
-**`tl db es` accepts at most one aggregation per request, recursively.** Top-level + sub-agg counts as 2 and is rejected (per `skills/tl/references/elasticsearch-schema.md` line 28). Type-2 validation therefore needs **multiple separate ES calls**, not one nested aggregation. The orchestration runs them in sequence and merges client-side.
+**Call 1 (db_count)** — `cardinality` over `sponsored_brand_mentions` (or `organic_brand_mentions` / `all_brand_mentions` per intent): returns the distinct-brand count in `aggregations.distinct_brands.value`. Filter clause: `doc_type=article` + language + date range + `multi_match` keyword (`type: "phrase"`, fields `[title, summary, content]`).
 
-##### Call 1 — distinct-brand count (`db_count`)
+**Call 2 (db_sample)** — `terms` agg over the same field with `size: 10` and the same filter clause. Each bucket has `key` (brand ID) and `doc_count` (per-brand mentions count). Use `doc_count` directly; do NOT add a `value_count` sub-agg (violates the one-agg limit).
 
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "distinct_brands": { "cardinality": { "field": "sponsored_brand_mentions" } }
-  }
-}
-```
-
-The cardinality aggregation returns the count of distinct sponsored-brand IDs matching the query in `aggregations.distinct_brands.value`. **This is the canonical type-2 `db_count` path**; do NOT use `sum_other_doc_count` from a `terms` agg as a count proxy — it counts documents (mentions) outside the returned buckets, not distinct omitted brands.
-
-##### Call 2 — top brands and per-brand mention counts (`db_sample`)
-
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "by_brand": {
-      "terms": { "field": "sponsored_brand_mentions", "size": 10 }
-    }
-  }
-}
-```
-
-Each `by_brand` bucket has `key` (brand ID) and `doc_count` (mentions count for that brand within the filter set). **The bucket's `doc_count` IS the per-brand mentions count — use it directly; don't add a `value_count` sub-agg (would violate the one-agg limit).**
-
-##### Optional Call 3 — channels-count per brand (one extra call per brand if needed)
-
-If `sample_judge` needs the distinct-channels count per brand for richer judgment, the orchestration can run one additional ES call per top brand (small N, ≤ 10). **Reuse the full Call 2 query body and add the brand-ID filter** — otherwise the count covers all channels mentioning that brand in the date/language scope, ignoring the report's content predicate.
-
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } },
-        { "term":  { "sponsored_brand_mentions": "<brand_id>" } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "channels_count": { "cardinality": { "field": "channel.id" } }
-  }
-}
-```
-
-The query body is identical to Call 2 except (1) the `terms` agg over `sponsored_brand_mentions` is replaced by a `term` filter on a single brand ID, and (2) the aggregation is now `cardinality` over `channel.id`. The result lives in `aggregations.channels_count.value`.
-
-**Most type-2 validations skip Call 3** — the bucket `doc_count` from Call 2 is sufficient signal for `sample_judge` to judge whether the brands look on-target for `USER_QUERY`. Run Call 3 only when a per-brand drill-down is part of the user's intent (e.g., the user explicitly asked "which brands are mentioned across the most channels").
-
----
+**Optional Call 3** (per-brand channels count) — only when `sample_judge` needs the distinct-channels drill-down. Reuse Call 2's query body, add a `term` filter on the single brand ID, replace the agg with `cardinality` over `channel.id`. Most type-2 validations skip Call 3.
 
 **Field-source notes** (per `skills/tl/references/elasticsearch-schema.md`):
-- The "sponsored vs organic" distinction is **which keyword array you aggregate over**, not a `brand_mention_type` filter. Use `sponsored_brand_mentions` (sponsored only), `organic_brand_mentions` (organic only), or `all_brand_mentions` (both). There is no `brand_mention_type` field in ES.
-- The aggregation field is the keyword array name (e.g. `sponsored_brand_mentions`), NOT `brands.id`. The bucket keys are the brand IDs.
-- **Brand names are not in ES** — neither `brands.name` nor a top_hits inside the agg will return them. After Call 2 returns the buckets, the orchestration does a PG batch lookup against `thoughtleaders_brand` to resolve names: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
+- "Sponsored vs organic" distinction = which keyword array you aggregate over (`sponsored_brand_mentions` / `organic_brand_mentions` / `all_brand_mentions`). There is NO `brand_mention_type` filter field.
+- Aggregation field is the keyword array name, NOT `brands.id`. Bucket keys ARE the brand IDs.
+- Brand names are not in ES — after Call 2, PG batch lookup: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
 
-**Sample-row shaping for `sample_judge`** — orchestration merges Call 2's buckets + PG name lookup into the type-2 contract:
-```
-{ id: bucket.key, brand_name: <from PG lookup>, mentions_count: bucket.doc_count,
-  channels_count: <from Call 3 if run, else null>, last_mention_date: null }
-```
-`last_mention_date` is omitted in the standard path (would require yet another ES call per brand and isn't critical for `sample_judge`'s judgment).
+**Sample-row shape for `sample_judge`**: `{ id: bucket.key, brand_name: <PG lookup>, mentions_count: bucket.doc_count, channels_count: <Call 3 or null>, last_mention_date: null }`. The standard path omits `last_mention_date` (would need another ES call per brand; not critical for judgment).
 
----
-
-The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous phrase in any of the listed fields (no substring noise — phrase matching respects word boundaries). This is the architectural fix for the G03-class noise (`AI` matching `Tamil`/`captain`).
+**Why `multi_match type: "phrase"`**: contiguous phrase matching respects word boundaries — no substring noise (`AI` matching `Tamil`/`captain`).
 
 #### Sponsorship reports (8) — Postgres query
 
