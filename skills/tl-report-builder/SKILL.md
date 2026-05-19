@@ -1177,128 +1177,22 @@ In practice Path A only fires for the narrow case "created_at-only AND sort is a
 
 If `sponsorships`, `exclude_sponsorships`, `brands`, `exclude_brands`, `channels`, or `exclude_channels` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`, and in BOTH Path A and Path B when that path is eligible. Earlier drafts dropped channel filters from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set. Exclude filters are even riskier because the view is multi-row per adlink; apply them at adlink level with `NOT EXISTS`, not as row-local `<>` checks.
 
-##### Worked example A — `days_ago: 365` (the schema's default scope, no publish_status)
+##### Worked-example summary
 
-Input: `filterset = { days_ago: 365, brands: [29332] }`, no other date inputs, no publish_status.
+Three canonical shapes (templates documented above):
+- `days_ago` only — `send_lo` materialized as date literal, `send_hi_next` unbounded
+- `end_date` only — half-open `< next_day` (so `end_date: "2026-02-28"` → `< '2026-03-01'`), never `<= '2026-02-28'` which drops 23h59m
+- Sold-only with `sort: "-purchase_date"` — Path B with `al.purchase_date` projected into inner SELECT; outer ORDER BY references the bare column name with `NULLS LAST`
 
-Materialization: `send_lo` = `'2025-05-05'` (today minus 365 days, computed at query-build time); `send_hi_next` unbounded.
+**Why the inner/outer split**: `DISTINCT ON (adlink_id)` forces `ORDER BY adlink_id, ...` in the same SELECT — a syntactic Postgres requirement. Adding `LIMIT 10` to that returns the 10 smallest adlink IDs, not the 10 most recent. Wrap dedupe in a subquery; apply canonical sort + LIMIT in the outer SELECT.
 
-Resulting `db_count` (only `send_lo` and `brands` predicates emit; publish_status, send_hi_next, channels all omitted):
-```sql
-SELECT COUNT(DISTINCT v.adlink_id)
-FROM v_adspot_brand_profiles v
-JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE 1=1
-  AND al.send_date >= '2025-05-05'
-  AND v.brand_id = ANY(ARRAY[29332])
-LIMIT 1 OFFSET 0
-```
+#### Postgres CTE fallback (smoke-check only — niche path)
 
-##### Worked example B — `end_date: "2026-02-28"` (half-open upper bound)
-
-Input: `filterset = { end_date: "2026-02-28", brands: [29332] }`.
-
-Materialization: `send_lo` unbounded; `send_hi_next` = `'2026-03-01'` (the calendar day AFTER `end_date`).
-
-Resulting `db_count` (note `<` not `<=`):
-```sql
-SELECT COUNT(DISTINCT v.adlink_id)
-FROM v_adspot_brand_profiles v
-JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE 1=1
-  AND al.send_date < '2026-03-01'
-  AND v.brand_id = ANY(ARRAY[29332])
-LIMIT 1 OFFSET 0
-```
-This includes the entirety of Feb 28 — every timestamp from `'2026-02-28 00:00:00'` through `'2026-02-28 23:59:59.999'` — matching what a user means by "through Feb 28". A `<= '2026-02-28'` predicate would only match timestamps at exactly midnight at the start of Feb 28 (~0% of expected matches).
-
-##### Worked example C — sold-only intent with `sort: "-purchase_date"`
-
-Input: `filterset = { days_ago: 365, brands: [29332], sort: "-purchase_date", filters_json: { publish_status: [3] } }` (intent: won-deals; sort defaults to `-purchase_date`).
-
-Materialization: `send_lo` = `'2025-05-05'`; `send_hi_next` unbounded.
-
-Sort resolution (sort key `purchase_date`, descending direction from the leading `-`):
-- `<inner_sort_expr>` = `al.purchase_date DESC NULLS LAST` (table-qualified; inner ORDER BY)
-- `<outer_sort_expr>` = `purchase_date DESC NULLS LAST` (unqualified; outer ORDER BY references the projected column name, since `al` is out of scope outside the subquery)
-
-Resulting `db_sample` (Path B, sort column added to inner SELECT, NULLS LAST so unsold deals don't crowd out sold ones):
-```sql
-SELECT * FROM (
-  SELECT DISTINCT ON (v.adlink_id)
-         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status,
-         al.purchase_date
-  FROM v_adspot_brand_profiles v
-  JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-  WHERE 1=1
-    AND v.adlink_publish_status = ANY(ARRAY[3])
-    AND al.send_date >= '2025-05-05'
-    AND v.brand_id = ANY(ARRAY[29332])
-  ORDER BY v.adlink_id, al.purchase_date DESC NULLS LAST
-) deduped
-ORDER BY purchase_date DESC NULLS LAST
-LIMIT 10 OFFSET 0
-```
-The samples surface the brand's most-recently-sold deals, matching what the saved sold-only report will show — `sample_judge` evaluates whether the recent-sold mix looks right for the user's prompt, not whether the most-recently-pitched mix does.
-
-##### Why the inner/outer split
-
-`DISTINCT ON (adlink_id)` in PostgreSQL forces `ORDER BY adlink_id, ...` in the same SELECT — that's a syntactic requirement, not a stylistic choice. Putting `LIMIT 10` on that same query returns the 10 smallest adlink IDs (oldest pipeline entries by surrogate key), not the 10 most recent rows by date. Wrapping the dedupe in a subquery and applying the canonical sort + LIMIT in the outer SELECT is the only way to honor both the dedupe contract AND Phase 2's contract (line ~281: "10 rows, ordered by the canonical sort").
-
-Date filter required (per Phase 2 edge-case rule — type-8 without dates is rejected upfront). No keyword ILIKE pattern; sponsorships filter by relations, not content text.
-
-#### Postgres CTE fallback (smoke-check only)
-
-If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern with **`AS MATERIALIZED`** (this is mandatory — Postgres 12+ inlines CTEs by default, which collapses the pattern back into a flat WHERE that the sandbox planner rejects):
-
-```sql
-WITH filtered AS MATERIALIZED (
-  SELECT id, channel_name, description, reach
-  FROM thoughtleaders_channel
-  WHERE is_active = TRUE
-    AND <indexed-column predicates>
-)
-SELECT COUNT(*) FROM filtered
-WHERE <keyword ILIKE predicate>
-LIMIT 1 OFFSET 0
-```
-
-`MATERIALIZED` forces the CTE to evaluate first as an optimization fence; the outer ILIKE then runs on the small pre-filtered set instead of a flattened plan over the full table.
-
-**Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT.** Postgres can't index-optimize array-element ILIKE — it expands to a sequential scan with N ILIKE comparisons per row. Use explicit `OR`-chains, or better yet skip PG entirely for keyword work (next section).
-
-This pattern works only with substantial pre-filter pruning (≤ a few thousand rows after the indexed predicates). **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE, planner rejection on wide keyword sets) are real and surfaced in the e2e findings. ES is the right tool.
+If ES is unavailable AND the FilterSet has tight indexed predicates, fall back to a PG CTE with **`AS MATERIALIZED`** (Postgres 12+ inlines CTEs without it, collapsing the pattern into a flat WHERE the sandbox planner rejects). Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT — sequential scan with N comparisons per row. Use explicit OR chains. **Don't use this as the production path** — ES is the right tool.
 
 #### "Known ID set + keyword filter" pattern
 
-A common case: the FilterSet pins a small ID set in `channels: [...]` (TPP, similar-to-channels, cross-references) AND has keyword filters. When this happens, **don't try to do everything in PG** — the combination of `id IN (long list)` + multi-keyword ILIKE blows past the sandbox cost cap (this regression has been observed in the wild for TPP + niche-keyword queries).
-
-The correct shape is two queries on two engines:
-
-1. **PG** (already done if the IDs came from a previous resolution step): just have the ID list.
-2. **ES** (validation count + sample): use a `terms` filter on `id` to scope to the pinned set, combined with the standard intelligence-report `match_phrase` queries for keywords. ES handles keyword matching with proper indexes; passing the IDs as a filter sidesteps the missing `is_tl_channel` (or whatever scoping field) on the ES side.
-
-```json
-{
-  "query": {
-    "bool": {
-      "filter": [
-        { "terms":  { "id": [549, 1629, 2314, ...] } },
-        { "term":   { "is_active": true } },
-        { "range":  { "reach": { "gte": 100000 } } }
-      ],
-      "should": [
-        { "match_phrase": { "description":            "motorcycle" } },
-        { "match_phrase": { "channel_topic_description": "drone footage" } },
-        ...
-      ],
-      "minimum_should_match": 1
-    }
-  }
-}
-```
-
-This works whether or not ES has a `is_tl_channel`-like field — the resolved IDs are the scoping mechanism. **If you find yourself building a PG query with `id IN (long-list)` AND ILIKE keyword predicates, stop and switch to this pattern instead.**
+When the FilterSet pins a small ID set in `channels: [...]` AND has keyword filters, don't query PG with `id IN (long list)` + multi-keyword ILIKE — sandbox cost cap. Use ES with a `terms` filter on `id` (scoping) + `match_phrase` for keywords (indexed). The resolved IDs are the scoping mechanism; ES doesn't need an `is_tl_channel`-like field.
 
 ### Step 2.V2 — Run the count query (with timeout / fallback handling)
 
