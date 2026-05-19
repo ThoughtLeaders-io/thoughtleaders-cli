@@ -225,17 +225,17 @@ The failure mode the skill is preventing: silent auto-create on every refinement
 }
 ```
 
-**Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates; subsequent verification of the CLI edit endpoint surfaced additional constraints):
+**Anti-patterns to avoid** (failure modes observed in real runs):
 
-- ❌ Running Phase 1–4 from scratch on a *non-filter* refinement (column/title/widget change). The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
-- ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a column/widget/title refinement. Pick by intent shape, not by reflex.
-- ❌ Sending the full working-memory config as the `tl reports update` payload. The endpoint's `_reject_unknown_fields` validation is atomic — including `filterset`, `cross_references`, or `filters_json` in the payload 400s the WHOLE request, even if the user's actual edit was to a legitimate field like `columns`. Send ONLY editable fields.
-- ❌ Attempting to patch any FilterSet field (keywords, brands, channels, filters_json, msn_channels_only, demographics, date ranges, cross_references, etc.) via `tl reports update`. The backend explicitly rejects these — `CliReportEditView` docstring: *"Filterset edits are not supported here."* For FilterSet changes, route the user to "save as a new variant" (run Phase 1–4 with the prior config as starting point + the user's delta, save as a NEW report). Do NOT fabricate a working `tl reports update` call with a filterset payload.
-- ❌ Asserting that ALL editing is impossible (the opposite over-correction). Campaign-level fields — title, description, columns, widgets, histogram_bucket_size, emoji, display_mode, subscribers, webhook, notifications — ARE editable. Don't tell the user *"the CLI can't edit anything on a saved report"*; the truth is *"the CLI can edit these fields, not these others."*
-- ❌ Inventing a `tl reports show` command to refetch config. That command does not exist today; if config isn't in working memory, ask the user, don't fabricate a fetch step.
-- ❌ Passing the patch via a `--config-file` flag on `tl reports update`. That flag exists only on `tl reports create`. For `update`, the JSON goes as the second positional argument.
+- ❌ Re-running Phase 1–4 on a non-filter refinement (column/title/widget) — composes a parallel config instead of patching
+- ❌ `tl reports create` instead of `tl reports update` for column/widget/title refinements
+- ❌ Sending the full working-memory config as the update payload — `_reject_unknown_fields` is atomic and 400s the whole request if `filterset`/`cross_references`/`filters_json` are included. Send ONLY editable fields.
+- ❌ Patching any FilterSet field via `tl reports update` — backend explicitly rejects ("Filterset edits are not supported here"). Route to "save as a new variant" instead.
+- ❌ Over-correcting to "CLI can't edit anything" — title/description/columns/widgets/histogram_bucket_size/emoji/display_mode/subscribers/webhook/notifications ARE editable
+- ❌ Inventing `tl reports show` to refetch config — doesn't exist. If config isn't in working memory, ask the user.
+- ❌ Passing the patch via `--config-file` — that flag exists only on `create`, not `update`. For `update`, JSON goes as the second positional argument.
 
-When in doubt about whether a follow-up is an edit, a new variant, or a fresh save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report or a 400 the user has to debug.
+When in doubt: ask. Cost of asking when the user wanted a new variant = one ignorable line; cost of guessing wrong = duplicate report or unrecoverable 400.
 
 What changes between save-mode and preview-mode:
 
@@ -418,104 +418,78 @@ Phase 1 emits `{ report_type: <int>, clarifying_questions: [...] | [] }`. Phase 
 
 ## Conditional Tool Invocation
 
-Tools are invoked **from inside Phase 2 to figure out what the filter should be** — not as reactions to an existing filter. The user's natural-language request rarely names every filter field directly; tools resolve the gaps:
-- The user said "gaming channels" — `topic_matcher` figures out which topic ID(s) and curated keywords expand from that.
-- The user said "channels we've already proposed to Logitech" — `database_query` figures out which channel IDs the cross-reference condition resolves to.
-- The user said "MrBeast and PewDiePie" — `name_resolver` figures out the corresponding `channels` IDs.
-- The user said "no strong topic match" — `keyword_research` figures out a keyword candidate set from scratch.
+Tools fire from inside Phase 2 to resolve filter gaps the user's NL didn't name directly:
+- *"gaming channels"* → `topic_matcher` resolves topic IDs + curated keywords
+- *"channels we've proposed to Logitech"* → `database_query` resolves cross-reference IDs
+- *"MrBeast and PewDiePie"* → `name_resolver` resolves channel IDs
+- *"no strong topic match"* → `keyword_research` builds a keyword candidate set from scratch
 
-Each tool fires only when its criteria are explicitly met (no automatic / speculative invocation). Each may emit `warnings: [...]` that propagate through `_routing_metadata` to Phase 4's takeaways. Tools never reshape filters that have already been composed; they inform composition before validation.
+Each tool fires only on explicit criteria. May emit `warnings: [...]` propagating to Phase 4 takeaways. Tools inform composition; they don't reshape filters already composed.
 
 ### T1 — `tools/topic_matcher.md`
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
-**Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
-**How to fetch the live topics**: use the canonical fetch SQL documented at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE` clause; table has <20 rows so client-side filtering after the full fetch is free.
+- **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic that could map to `thoughtleaders_topics`.
+- **Skipped when**: `ReportType == 8` OR USER_QUERY is purely entity-name lookup.
+- **Fetch**: canonical SQL at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE`. Behavior rules: no name-pattern WHERE clauses, no `information_schema` inspection, **empty fetch ≠ off-taxonomy** (data-plane failure — surface, don't fall through). Off-taxonomy = matcher emits `summary.no_match: true`.
+- **Output**: per-topic verdicts (strong/weak/none) + summary. Strong match → topic's `keywords[]` drives FilterSet `keywords`; can also emit `topics: [<id>]` directly.
 
-**Agent-behaviour rules** (encoded in [`tools/topic_matcher.md`](tools/topic_matcher.md); regression markers catalogued in the schema reference's "Cited regression markers" list):
+**Narrow-first FilterSet assembly** (mandatory — applies to both topic-strong and keyword_research paths). Assemble with narrowest viable shape, validate, expand only if below narrow threshold. Two levers, ranked by impact:
 
-- Don't push name-pattern `WHERE` clauses into the fetch query — agents have burnt credits + round-trips on this in multiple real runs.
-- Don't run `information_schema.columns` to inspect the table.
-- **Empty fetch ≠ off-taxonomy.** A zero-row result from the canonical (no-`WHERE`) fetch is a data-plane failure — surface it rather than silently falling through to T2. Off-taxonomy is when the fetch returns rows but the matcher emits `summary.no_match: true`.
-**Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
+**Lever 1 (HIGHEST impact) — Field selection (Type 3 only)**
 
-**Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on noisy-niche / multilingual runs**:
+Initial `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Schema enum values from `intelligence_filterset_schema.json` — FilterSet rejects unknown values.)
 
-**Lever 1 (HIGHEST impact) — Field selection (Type 3 / channel discovery)**
-
-The initial FilterSet's `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Use the schema enum values verbatim — these are the platform-recognised content-field names from `intelligence_filterset_schema.json`. The FilterSet rejects unknown values.)
-
-The mechanism: the two AI-summarised content fields (`channel_description_ai`, `channel_topic_description`) catalogue **every topic a channel has ever touched** — including incidental mentions, format crossovers, and adjacent-niche tags. A channel whose primary niche is X but that ran one video about Y will still match queries against `channel_topic_description` for Y. For channel-discovery intent, that's pure noise: you wanted channels *about* Y, not channels that *once mentioned* Y. The channel's own `channel.channel_name` + `channel_description` answer the channel-discovery question (*"is this channel ABOUT the niche?"*); the AI-summarised fields answer a strictly broader question (*"has this channel ever mentioned the niche?"*) that surfaces too many false positives at discovery time.
-
-Mechanism implication — **once `content_fields` is right, even a broad keyword set converges; even a tight keyword set produces noisy results with the AI-summarised fields included.** Field selection is the bigger dial; keyword pruning is the fine-tune. Restricting fields first reaches a clean count in one cycle; pruning keywords without addressing the AI-fields noise source typically takes 2–3 narrowing cycles.
-
-*Regression-marker anchor — multilingual niche-language preview (LATAM cooking, several thousand candidates)*: the cycle that finally converged kept the same keyword set as the previous noisy cycle but reduced `content_fields` from 4 fields (incl. the two AI-summarised ones) to 2 (`channel.channel_name` + `channel_description` only). Result went from ~4,000 noisy → ~1,350 signal-rich (80% on-target) in a single pass — bigger gain than the prior keyword-pruning cycles delivered combined. The principle is general (applies to fitness/wellness, beauty, aviation, any niche-discovery preview where channels cross over into adjacent topics); LATAM cooking is the run that calibrated it.
-
-Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 50 channels) — that's the expansion path that re-opens the broader recall, not the default starting shape.
+The AI-summarised fields catalogue every topic a channel has ever touched — they answer *"has this channel ever mentioned the niche"* (too broad for discovery) rather than *"is this channel ABOUT the niche"* (what `channel_name` + `channel_description` answer). Once `content_fields` is right, even broad keywords converge; with AI fields included, even tight keywords stay noisy. Field selection is the bigger dial; keyword pruning is the fine-tune.
 
 **Lever 2 — Keyword selection**
 
-For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, Asia-Pacific, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets).
+Topic-strong: include `topic.keywords[]` entries fitting user's language scope. Multilingual prompts (LATAM/EU/APAC) need 5–8 native-language head terms — not just 2–3 English. Drop generic-overlap terms (single-word generics a lifestyle/family/entertainment channel might use in passing). Keep niche-specific (multi-word phrases or native-language vocab lifestyle channels wouldn't casually use).
 
-Drop **generic-overlap terms** — head terms that match the niche literally but also surface high volumes of adjacent-niche channels. Heuristic: any single-word generic that a lifestyle / family / entertainment channel might use about the niche in passing is a generic-overlap term. Keep the niche-specific terms — multi-word phrases or native-language vocabulary that lifestyle channels wouldn't casually use.
+Keyword_research outputs: include `core_head` (2–4 terms) + `sub_segment` (3–6 terms) = upper two tiers, ~5–10 total. `long_tail` held back as expansion fuel.
 
-*Concrete example from the LATAM cooking calibration run*: in `topic.keywords` for the Cooking topic, the head terms include both niche-specific Spanish/Portuguese phrases (`"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`) and generic-overlap terms (`"food"`, `"chef"`, `"comida"`). The generic-overlap terms each matched several hundred extra lifestyle/family channels that mention food in passing; dropping them tightened the result from ~5,700 channels at 60% signal to ~4,050 at higher signal-density without sacrificing genuine cooking creators. Same pattern applies in other niches — fitness ("body", "training" are generic; "pilates", "calisthenics" are niche-specific); finance ("money", "rich" generic; "ETF", "options", "yield farming" niche-specific); etc.
+**Expansion trigger — Type 3 only, ONE cycle max**
 
-For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
+If initial Type 3 `db_count` is `narrow` / `very_narrow` (≤ 50 channels per Step 2.V3): one expansion step — add `channel_description_ai` + `channel_topic_description` to `content_fields`. Then:
+- Post-expansion `normal` / `broad` → proceed to sample
+- Post-expansion still `narrow` / `very_narrow` OR `empty` / `too_broad` → `decision: "alternatives"`, surface to user. No second skill-side cycle.
 
-**Expansion trigger — Type 3 (CHANNELS) only** (strictly one validation cycle, no second attempt): if the initial Type 3 FilterSet's `db_count` is `narrow` or `very_narrow` per the Step 2.V3 threshold table (`db_count` ≤ 50 channels), do **one** expansion step — add `channel_description_ai` and `channel_topic_description` to `content_fields` (the schema enum values). This opens recall to the AI-summarised surface. After this single expansion cycle, if the count is still narrow OR if it overshoots, do NOT compose another FilterSet — emit `decision: "alternatives"` and surface to the user with the count + the failing shape. Further widening (keyword changes, threshold relaxation) is the user's call via the alternatives prompt, not skill-side iteration.
-
-Why one and not two: field-set expansion is the high-leverage lever (re-opens AI-summarised recall); a follow-up keyword-set expansion adds 30–90s of LLM + ES round-trip for marginal extra recall, contradicting the speed-up goal. If field-expansion alone doesn't reach the narrow threshold, the underlying issue is data sparsity in this niche — a second skill-side cycle won't fix that; user judgment will.
-
-**For Type 1 (CONTENT) and Type 2 (BRANDS), this expansion rule does NOT apply.** The mechanism above is Type 3-specific because the lever it pulls (the AI-summarised channel-level fields `channel_description_ai` / `channel_topic_description`) only exists in Type 3's default `content_fields`. Types 1 and 2 default to video-level fields (`content`, `title`, `transcript` per the schema's `_tl_default_by_report_type`) which have no AI-summary surface to expand into. When a Type 1 / Type 2 FilterSet hits `narrow` / `very_narrow` on the same Step 2.V3 thresholds, **route directly to `decision: "alternatives"`** — there is no skill-side expansion to try first. The user's refinement options (via the alternatives prompt) are the only widening path.
-
-**Why field-selection-first matters more than keyword-count-first**: the historical broad-first pattern fails specifically because cycles 1 and 2 typically tighten keywords without addressing the AI-fields noise source — only when fields finally get tightened (often cycle 3 or later) does the result converge. Doing fields first (lever 1) reaches the converged shape immediately; the keyword-count axis (lever 2) is a second-order adjustment that fine-tunes within an already-clean field set. The calibration run that proved this in production (LATAM cooking, ~3 minutes wasted in cycles 1–2) is documented above; the principle applies to any niche-discovery preview where AI-summarized fields cross over into adjacent topics.
+**Type 1 / Type 2**: expansion rule does NOT apply (no AI-summary content fields to expand into — types 1/2 default to video-level `content`/`title`/`transcript`). Narrow / very_narrow → directly `decision: "alternatives"`.
 
 ### T2 — `tools/keyword_research.md`
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
-**Skipped when**: any of the above conditions fail. **Crucially, skipped when the user enumerates specific channels or brands** — those provide the filter anchor; keyword research is wasted work.
-**Output**: validated `KeywordSet` (head/sub_segment/long_tail + content_fields + recommended_operator + per-keyword `db_count`).
+- **Fires**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor in USER_QUERY.
+- **Skipped**: any condition above fails. Especially when user enumerates specific channels/brands (those are the anchor; keyword research is wasted).
+- **Output**: validated `KeywordSet` (head/sub_segment/long_tail + content_fields + recommended_operator + per-keyword `db_count`).
 
-### T3 — `tools/database_query.md` (cross-reference query)
-**Fires when**: the user's request includes a **cross-reference** condition — a sponsorship/proposal/pipeline history filter that gates the main report's channel set. Examples: "NOT proposed to Brand X" → `cross_references` entry; "channels from our 2025 gaming pipeline with >$5K price" → `multi_step_query`.
-**Skipped when**: the main report is type 2 (BRANDS) or type 8 (SPONSORSHIPS) — `cross_references` only applies to types 1 and 3. Also skipped when the condition is expressible as a typed FilterSet field (`msn_channels_only`, `tl_sponsorships_only`) or is a name lookup (T4).
-**Behavior**: mirrors v1's existing cross_references catalog (`exclude_proposed_to_brand`, `include_proposed_to_brand`, `include_sponsored_by_mbn`) and `multi_step_query` mechanism. The only thing v2 changed is **extracting this logic to a dedicated tool file**; the catalog, defaults, and status IDs are unchanged.
-**Output**: a `cross_references_entry` to append at the top level of the create_report config, OR a full `multi_step_query` payload that wraps the create_report. Caller composes into the final response.
-**Hard rule**: sponsorship-side `multi_step_query` source queries default to the last 12 months when the user's framing is "currently / active" without explicit dates (v1 line 112).
+### T3 — `tools/database_query.md` (cross-reference)
+- **Fires**: USER_QUERY has a cross-reference condition (sponsorship/proposal/pipeline history gating the main channel set). E.g. *"NOT proposed to Brand X"* → `cross_references`; *"channels from 2025 gaming pipeline with >$5K price"* → `multi_step_query`.
+- **Skipped**: report type 2 / 8 (cross_references applies to 1 + 3 only); condition expressible as typed FilterSet field (`msn_channels_only`, `tl_sponsorships_only`); name lookup (use T4).
+- **Catalog**: `exclude_proposed_to_brand`, `include_proposed_to_brand`, `include_sponsored_by_mbn` + `multi_step_query` (defaults, status IDs unchanged from v1).
+- **Output**: `cross_references_entry` (appends to create_report config) OR full `multi_step_query` payload.
+- **Hard rule**: sponsorship-side `multi_step_query` source queries default to last 12 months for "currently / active" framing without explicit dates.
 
 ### T4 — `tools/name_resolver.md`
-**Fires when**: USER_QUERY enumerates specific channel or brand names that need to be resolved to IDs.
-**Skipped when**: no entity names mentioned.
-**Behavior**: progressive matching — exact → ILIKE substring → emoji-stripped → fuzzy. Surfaces match-quality and ambiguity (>1 active candidate) explicitly.
-**Output**: `{ name → entity_id }` mapping per entity type, plus an `ambiguities: [...]` list when user disambiguation is required (FOLLOW-UP trigger).
+- **Fires**: USER_QUERY enumerates specific channel or brand names.
+- **Skipped**: no entity names.
+- **Behavior**: progressive matching (exact → ILIKE substring → emoji-stripped → fuzzy). Surfaces match-quality + ambiguity (>1 active candidate).
+- **Output**: `{ name → entity_id }` + `ambiguities: [...]` for follow-up.
 
 ### T5 — `tools/similar_channels.md`
-**Fires when**: USER_QUERY contains "like X" / "similar to X" / "creators inspired by X" / "channels in the style of X" patterns AND the seed channel(s) resolve via T4.
-**Skipped when**: no similarity phrasing, or the report type is 8.
-**Behavior**: simple wrapper. Resolves seed names via T4, then emits `filters_json: { similar_to_channels: [<canonical names>] }` for the platform's vector-similarity engine to expand at execution time.
-**Output**: `{ filterset_patch: { filters_json: { similar_to_channels: [...] } }, anti_overlap: { drop_if_present: [...] } }`. Caller merges the patch and drops any overlapping keyword/topic fields.
+- **Fires**: USER_QUERY contains "like X" / "similar to X" / "creators inspired by X" AND seeds resolve via T4.
+- **Skipped**: no similarity phrasing, or report type 8.
+- **Output**: `{ filterset_patch: { filters_json: { similar_to_channels: [...] } }, anti_overlap: { drop_if_present: [...] } }`. Caller merges + drops overlapping keyword/topic fields.
 
-### Phase 2 validation sub-tool
+### Phase 2 validation sub-tool — `tools/sample_judge.md`
 
-**`tools/sample_judge.md`** — fires inside Phase 2's validation step (Step 2.V4).
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND the **post-V3-routing** `db_count` classification is `normal` (51–10000) or `broad` (10001–50000). "Post-V3-routing" means: the count actually routed to Step 2.V4 per the Step 2.V3 threshold table above — that is, either the **initial** count landed in `normal` / `broad`, OR (Type 3 only) the **post-Lever-1-expansion** count landed in `normal` / `broad`.
-**Skipped when** any of:
-- Type 8 — deal sample shape ≠ channel sample shape; sample_judge is not configured for sponsorship rows.
-- Initial `db_count` is `empty` / `too_broad` — V3 routes to the Step 2.V5 retry path, not to sampling.
-- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType ∈ {1, 2}` — V3 routes directly to `decision: "alternatives"`; no sample inspection because there's no Lever-1 expansion path for Types 1/2.
-- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` — or if it's `empty` / `too_broad` — it routes to `decision: "alternatives"` per the post-expansion table; sample_judge does NOT fire. (Post-expansion empty/too_broad does NOT re-enter V5 retry — the one-cycle cap is total, not per-direction.) sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
-**Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
+- **Fires**: `ReportType ∈ {1, 2, 3}` AND **post-V3-routing** `db_count` is `normal` (51–10000) or `broad` (10001–50000). Type 3 narrow-initial cases ONLY when post-expansion reclassifies to normal/broad.
+- **Skipped**: Type 8 (deal sample shape ≠ channel sample shape); initial `empty`/`too_broad` (V3 routes to V5 retry); Types 1/2 narrow/very_narrow (no Lever-1 expansion path → direct alternatives); Type 3 narrow that stays narrow post-expansion (alternatives, not re-sample). One-cycle cap is total, not per-direction.
+- **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` → Phase 2 follow-up (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires after Phase 2 emits a validated FilterSet.
 
-### Phase 3 sub-tool
+### Phase 3 sub-tool — `tools/column_builder.md`
+Always fires in Phase 3. Reads `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA` + `references/columns_<type>.md` + `references/sortable_columns.json`. Picks 5–10 columns (up to 13 with intent), validates sort, queues custom-formula refinement suggestions.
+**Output**: `{ columns, dataset_structure, pending_refinement_suggestions, _column_metadata }`.
 
-**`tools/column_builder.md`** — always fires in Phase 3.
-**Behavior**: same builder-prompt pattern as `widget_builder`. Reads `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, plus `references/columns_<type>.md` and `references/sortable_columns.json`. Picks 5–10 standard columns (up to 13 with intent), validates sort, queues custom-formula refinement suggestions.
-**Output**: `{ columns: {...}, dataset_structure: {...}, pending_refinement_suggestions: [...], _column_metadata: {...} }`.
-
-### Phase 4 sub-tool
-
-**`tools/widget_builder.md`** — always fires in Phase 4. Phase 2's validation already cleared the FilterSet, so widget_builder runs unconditionally.
-**Behavior**: mirrors v1's widget-builder approach. Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, plus the matching widget schema (`intelligence_widget_schema.json` for types 1/2/3, `sponsorship_widget_schema.json` for type 8). Picks 4–6 widgets that add value to the user's prompt; applies intent-driven swaps per the schema's `_tl_intent_overrides`; handles type-8 axis branching per `_tl_axis_branching`; sets `histogram_bucket_size`.
-**Output**: `{ widgets: [...], histogram_bucket_size: "week"|"month"|"year", _widget_metadata: {...} }`.
+### Phase 4 sub-tool — `tools/widget_builder.md`
+Always fires in Phase 4 (Phase 2 validation already cleared the FilterSet). Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA` + matching widget schema (intel for 1/2/3, sponsorship for 8). Picks 4–6 widgets; applies `_tl_intent_overrides`; handles type-8 axis branching per `_tl_axis_branching`; sets `histogram_bucket_size`.
+**Output**: `{ widgets, histogram_bucket_size, _widget_metadata }`.
 
 ## Sort field — which phase owns it
 
