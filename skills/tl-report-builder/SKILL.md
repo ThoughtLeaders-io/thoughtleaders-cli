@@ -250,130 +250,48 @@ What changes between save-mode and preview-mode:
 
 ## Process Flow (Strictly Sequential)
 
-Each phase consumes the previous phase's output. No phase runs out of order. No phase runs in parallel. Every phase may pause for a follow-up question with the user before proceeding.
+Each phase consumes the previous phase's output. No phase runs out of order or in parallel. Every phase may pause for a follow-up question before proceeding.
 
 ```
-USER_QUERY
-   │
-   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 1 — Report Selection                                              │
-│   Input:    USER_QUERY                                                  │
-│   Output:   ReportType ∈ {1 CONTENT | 2 BRANDS | 3 CHANNELS | 8 SPONS}  │
-│   Tools:    none (heuristic over USER_QUERY only)                       │
-│   Routing:  see "Phase 1 — Report Type Selection (detail)" below for   │
-│             the routing rules + authoritative G07 / G06 examples       │
-│   ↘ FOLLOW-UP TRIGGER: report type ambiguous / input invalid → ask user │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  ReportType
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 2 — Schema Phase + Validation                                     │
-│   Input:    USER_QUERY, ReportType                                      │
-│   Output:   { filterset, filters_json, cross_references,                │
-│               _routing_metadata, _validation }                          │
-│   Loads:    references/<intel|sponsorship>_filterset_schema.json        │
-│             references/report_glossary.md (on-demand)                   │
-│             tools/sample_judge.md (validation sub-step)                 │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Compose the FilterSet (filterset + filters_json + cross_refs)     │
-│     • Apply defaults per ReportType (days_ago, channel_formats, sort)   │
-│     • VALIDATE the FilterSet against live data:                         │
-│         – db_count → threshold classify                                 │
-│         – db_sample (LIMIT 10) → sample_judge                           │
-│         – Decide: proceed | retry | alternatives | fail                 │
-│         – Retry with feedback to T1/T2 (cap 1) on empty/too_broad       │
-│                                                                          │
-│   ┌─── Conditional Tool Invocation (within Phase 2 only) ─────────────┐ │
-│   │   T1  tools/topic_matcher.md           — fires per criteria       │ │
-│   │   T2  tools/keyword_research.md        — fires per criteria       │ │
-│   │   T3  tools/database_query.md          — cross-reference query    │ │
-│   │   T4  tools/name_resolver.md           — fires per criteria       │ │
-│   │   T5  tools/similar_channels.md        — fires per criteria       │ │
-│   │   sample_judge  tools/sample_judge.md  — validation sub-step      │ │
-│   │                                                                    │ │
-│   │   Tools are NOT phases. See "Conditional Tool Invocation" below   │ │
-│   │   for explicit criteria. Tool warnings propagate to Phase 4.      │ │
-│   └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Filters missing or incomplete (e.g., no topic + no entity-name) │
-│      • Filter inputs ambiguous (vague keywords, unclear targeting)     │
-│      • Tool-output requires confirming an assumption before proceeding │
-│      • Multi-candidate name resolution surfaced an ambiguity (T4)      │
-│      • Cross-reference query (T3) returned an unexpected size or       │
-│        timed out — confirm narrowing with the user                     │
-│      • Validation: sample_judge returned looks_wrong → Mode B prompt   │
-│        (save anyway / refine / cancel)                                 │
-│      • Validation: 1 retry exhausted on empty/too_broad → alternatives │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  validated schema
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3 — Columns Phase                                                 │
-│   Input:    validated schema, ReportType                                │
-│   Output:   { columns, dataset_structure, pending_refinement_sugg. }    │
-│   Loads:    tools/column_builder.md (always — picks the columns)        │
-│             references/columns_<type>.md (catalog)                      │
-│             references/sortable_columns.json                            │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Select relevant columns based on ReportType + filters + intent   │
-│     • Ensure selected columns are valid for the chosen ReportType      │
-│     • Ensure compatibility between selected columns                    │
-│     • Prepare dataset structure aligned with the selected columns      │
-│     • Run validation:                                                  │
-│         – Schema compliance (all columns exist for ReportType)         │
-│         – Data consistency (column types align with sort + filters)    │
-│         – Pagination defaults applied per ReportType                   │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Column selection requires user confirmation (e.g., template     │
-│        reference + extra columns user enumerated explicitly)           │
-│      • Selected columns incompatible with each other or with filters   │
-│      • No columns provided AND no clear intent → suggest defaults      │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  + columns
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 4 — Widget Phase (FINAL)                                          │
-│   Input:    validated schema, columns, ReportType                       │
-│   Output:   FINAL { campaign_config_json, takeaways }                   │
-│   Loads:    tools/widget_builder.md (always — picks the widgets)       │
-│             references/<intel|spons>_widget_schema.json (catalog +     │
-│                  axis branching + intent overrides; for widget_builder) │
-│             references/<intel|spons>_filterset_schema.json (final      │
-│                  JSON-shape validation source of truth)                 │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Define aggregations (sums, averages, counts, breakdowns)          │
-│     • Configure widgets aligned to ReportType + filters + columns      │
-│     • Type-3: subscriber/views aggregators                             │
-│     • Type-8: count_sponsorships, sum_price (axis branches on          │
-│       publish_status — send_date for proposals, purchase_date for sold)│
-│     • histogram_bucket_size set per date range                         │
-│     • Generate report_title + report_description from final config     │
-│       (must happen BEFORE validation — both fields are mandatory       │
-│        on save and the validation step below checks for them)          │
-│     • PERFORM FINAL JSON-SHAPE VALIDATION of the campaign config:      │
-│         – All Phase 2 + Phase 3 + Phase 4 outputs compose validly      │
-│         – API-contract pre-check (type=2 DYNAMIC, valid report_type,   │
-│           non-empty columns, sort references an emitted column,        │
-│           report_title ≤60 chars non-empty, report_description         │
-│           1–3 sentences non-empty — both mandatory on save; CLI        │
-│           rejects with HTTP 400 if either is missing)                  │
-│     • Compose key takeaway insights                                    │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Widget or aggregation preferences need user confirmation        │
-│      • Desired breakdowns/groupings ambiguous                          │
-│      • No aggregation requested → suggest defaults per ReportType      │
-│      • Final validation surfaced issues that need user resolution      │
-└─────────────────────────────────────────────────────────────────────────┘
+USER_QUERY → Phase 1 → Phase 2 → Phase 3 → Phase 4 → deliverable
+              (type)   (schema   (columns)  (widgets + final
+                       + valid.)             JSON validation)
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through `tl reports create --config-file <path> --yes`, which posts to the report-creation API.
+### Phase 1 — Report Selection
+- **In/Out**: `USER_QUERY` → `ReportType ∈ {1 CONTENT | 2 BRANDS | 3 CHANNELS | 8 SPONSORSHIPS}`
+- **Tools**: none (heuristic over USER_QUERY)
+- **Routing**: see "Phase 1 — Report Type Selection (detail)" + golden examples (G07, G06)
+- **Follow-up**: ambiguous / invalid input → ask user
+
+### Phase 2 — Schema Phase + Validation
+- **In/Out**: `(USER_QUERY, ReportType)` → `{filterset, filters_json, cross_references, _routing_metadata, _validation}`
+- **Loads**: `references/<intel|sponsorship>_filterset_schema.json`; `references/report_glossary.md` on-demand; `tools/sample_judge.md` for validation
+- **Responsibilities**: compose FilterSet (filterset + filters_json + cross_refs), apply ReportType defaults (`days_ago`, `channel_formats`, `sort`), then VALIDATE against live data: `db_count` → threshold classify → `db_sample` (LIMIT 10) → `sample_judge` → decide `proceed | retry | alternatives | fail`. **Retry cap: 1** (feedback to T1/T2 on empty/too_broad).
+- **Conditional Tool Invocation** (Phase 2 only — tools are NOT phases):
+  - **T1** `tools/topic_matcher.md` — taxonomy match
+  - **T2** `tools/keyword_research.md` — off-taxonomy keyword set
+  - **T3** `tools/database_query.md` — cross-reference query
+  - **T4** `tools/name_resolver.md` — brand/channel name → ID
+  - **T5** `tools/similar_channels.md` — look-alike channels
+  - `sample_judge` `tools/sample_judge.md` — validation sub-step
+- **Follow-up triggers**: filters missing/incomplete, filter inputs ambiguous, tool-output needs confirming, T4 multi-candidate ambiguity, T3 unexpected size / timeout, `sample_judge` `looks_wrong` → Mode B (save anyway / refine / cancel), 1 retry exhausted on empty/too_broad → alternatives
+
+### Phase 3 — Columns Phase
+- **In/Out**: `(validated schema, ReportType)` → `{columns, dataset_structure, pending_refinement_suggestions}`
+- **Loads**: `tools/column_builder.md` (always); `references/columns_<type>.md`; `references/sortable_columns.json`
+- **Responsibilities**: pick columns by `ReportType + filters + intent`; validate (schema compliance, type alignment with sort+filters, pagination defaults applied)
+- **Follow-up triggers**: column selection needs confirmation (template + user-enumerated extras); incompatible columns; no columns + no clear intent → suggest defaults
+
+### Phase 4 — Widget Phase (FINAL)
+- **In/Out**: `(validated schema, columns, ReportType)` → FINAL `{campaign_config_json, takeaways}`
+- **Loads**: `tools/widget_builder.md` (always); `references/<intel|spons>_widget_schema.json`; `references/<intel|spons>_filterset_schema.json` for final JSON validation
+- **Responsibilities**: define aggregations (sums/averages/counts/breakdowns); pick widgets per `ReportType + filters + columns`; set `histogram_bucket_size` per date range; **generate `report_title` + `report_description` BEFORE final validation** (both mandatory on save; CLI 400s if missing); then run **FINAL JSON-shape validation** (all phase outputs compose; API-contract: `type=2` DYNAMIC, valid report_type, non-empty columns, sort references an emitted column, title ≤60 chars non-empty, description 1–3 sentences non-empty); compose takeaways.
+- **Type-3** aggregators: subscriber/views.
+- **Type-8** aggregators: `count_sponsorships`, `sum_price` with axis branching on `publish_status` (`send_date` for proposals, `purchase_date` for sold).
+- **Follow-up triggers**: widget/aggregation preferences need confirmation; breakdowns ambiguous; no aggregation requested → suggest defaults; final validation surfaced issues.
+
+**There is no fifth phase.** Phase 4's output IS the deliverable. The skill never writes to the database directly — reads via `tl db es` (types 1/2/3) or `tl db pg` (type 8); writes via `tl reports create --config-file <path> --yes`.
 
 **The deliverable can land in the chat in two shapes — pick the right one based on the user's intent:**
 
