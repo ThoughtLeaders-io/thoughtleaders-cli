@@ -1,29 +1,16 @@
 ---
 name: tl-report-builder
 description: |
-  Build TL reports from natural-language requests. Produces an in-chat preview (sample-rows table + filter summary + takeaways) by default, or auto-saves a TL report when the user's wording is explicit about it ("save", "create the report", "make a campaign for me to come back to"). Covers the four report types: content/videos (1), brands (2), channels (3), sponsorships/deals (8).
+  Create the JSON config the TL web app expects as a saved report
+  (content/videos, brands, channels, or sponsorships) — and save it
+  via `tl reports create`, or preview it in chat for exploratory
+  requests. Use for any list-of-entities-with-filters prompt, even
+  when the user doesn't say "report" or "campaign".
 
-  **Use this skill — NOT `tl-cli:tl` — for ANY request that returns a list of channels, videos, brands, or sponsorships with filters applied**, even when the user doesn't say "report" or "campaign". This is the canonical path for list-shaped requests.
-
-  Triggers on every variant of "list me / find me / show me / give me / pull me / build me / make me X with filters Y", including:
-  - **Channels**: "Find me gaming channels with 100K+ subs", "show me TPP fintech creators in MSN", "channels we haven't pitched to <brand>", "look-alike channels to X", "non-MSN travel channels", "build me a list of <niche> creators", "channels matching <criteria>".
-  - **Brands**: "all brands flagged as Managed Services", "brand activity report for these specific brands: ...", "brands sponsoring <channel> in the past 6 months", "competitor brands of X".
-  - **Sponsorships / deals**: "**show me partnerships from last quarter** for <niche> creators", "Q1 2026 sold sponsorships for personal investing", "all proposal_approved deals owned by <user>", "list sponsorships with status sold and send_date 2026-05-07", "sponsorships for channel <name>".
-  - **Videos / uploads**: "videos sponsored by <brand>", "wellness videos but exclude anything sponsored by Nike or Adidas".
-
-  Save-intent variants ("save a campaign of …", "create the report …", "make a TL report for …") trigger auto-save; everything else previews. Off-taxonomy keywords ("crypto / Web3"), brand-exclusion logic ("not pitched to X"), demographic floors ("US audience ≥30%"), TPP/MSN scoping, and competitive-pitch shapes are all this skill's job — not the general `tl-cli:tl` data-analyst skill.
-
-  **Post-save refinements default to ASKING** — when the user's follow-up arrives after a successful save AND the topic overlaps with the prior save (same brand / niche / report type), the skill MUST surface the choice between updating the existing report, saving a separate variant, or treating as a fresh save. Refinement vocabulary (*instead*, *change*, *add*, *limit*, *only*, *filter*, *make it X*, etc.) strengthens the trigger but its absence does NOT bypass it — topic overlap alone is enough to ask. Do NOT auto-create a new report on every refinement-shaped prompt in a session. **Note**: the CLI edit endpoint can only patch campaign-level fields (title, description, columns, widgets, etc.); FilterSet changes (keywords, filters, demographics, cross-references) cannot be updated in place — those route to "save as a new variant" instead. See "Editing a saved report" in the body for the routing decision table + mechanics.
-
-  **Skip this skill** for:
-  - counts, metrics, trends, single-record show-by-ID lookups, raw exploratory queries, or analytical questions that aren't shaped as "give me a list" → route to `tl-cli:tl`.
-  - **explicit intent to import a list of identifiers into a report — existing or new.** The routing test is the **user's import intent**, NOT the mere presence of a list. A user can paste 50 channel URLs and want analysis, comparison, similar-channel discovery, or filtered lookup — those still belong here (or in `tl-cli:tl`), not in tl-import. They can also paste 50 URLs and want exactly those channels to land in a report as-given — that is import, route to `tl-cli:tl-import`. The deciding question: *"Would the user be satisfied if the listed entities simply ended up as the report's contents exactly as-given, no transformation?"* If yes → import intent → `tl-cli:tl-import`. If they expect filtering, analysis, similarity expansion, or any other transformation on top of the list → it's not import, keep it here.
-
-    Concrete phrasings that route to `tl-cli:tl-import` (intent: import + list = report contents): *"import these channels into report 1234"*, *"add these brands to campaign 5678"*, *"create a new report with these channels: <list>"*, *"build me a campaign from these adlinks: <list>"*, *"make a report containing these uploads: <list>"*.
-
-    Phrasings that **stay here** even with a list attached (intent: discovery / analysis using the list as input, not as the answer): *"find me channels similar to these: <list>"*, *"build a report of TPP channels in the same niche as these: <list>"*, *"show me which of these have sponsored fintech brands"*, *"compare engagement across these channels"*.
-
-    If you find yourself about to resolve a URL/handle to a channel ID *as the deliverable* (no analysis, no filtering, no discovery on top), stop and hand off — that's the import shape.
+  **Always confirm user intent before heavy actions** — saving,
+  editing in place, or changing FilterSet shape are all persistent
+  mutations. Ask before each one rather than guessing the user's
+  default.
 ---
 
 # TL Report Builder Skill
@@ -36,6 +23,32 @@ Produce two artifacts on every successful run:
 
 1. **A valid campaign config JSON** matching the platform's `dashboard.models.Campaign` + `dashboard.models.FilterSet` schemas. Ready to be POSTed to the report-creation API endpoint (and PUT for subsequent edits); the skill itself never writes to the database directly.
 2. **A short list of key takeaway insights** about the resulting dataset — db_count, count_classification, top sample channels/deals, noise warnings, narrow-result notes, tool-output flags worth surfacing, and any unresolved follow-ups the user should know about.
+
+## When to route elsewhere
+
+This skill owns list-with-filters requests for the four report types (content / brands / channels / sponsorships). Two adjacent skills carry related but distinct intents — route to them instead when the user's request matches their shape:
+
+### Route to `tl-cli:tl` (analytical / lookup intent)
+
+Use `tl-cli:tl` for any prompt where the answer is a **scalar, chart, single record, or open-ended analysis** rather than a list-shaped deliverable. Concretely:
+
+- Counts, metrics, trends, time-series, distributions (*"how many deals did we close last quarter"*, *"weighted pipeline by sales owner"*)
+- Single-record show-by-ID (*"show me adlink 12345"*, *"investigate this video"*)
+- Cross-source analysis spanning PG + ES + Firebolt (*"find Surfshark mentions in transcripts"*)
+- Anything where the user would NOT be satisfied with "a list of entities I'd want to come back to" as the answer
+
+### Route to `tl-cli:tl-import` (explicit import intent)
+
+Use `tl-cli:tl-import` when the user's intent is to **import a list of identifiers into a report as the report's contents, exactly as-given, no transformation**. The deciding question: *"Would the user be satisfied if the listed entities simply ended up as the report's contents exactly as-given?"*
+
+- Import-intent (route there): *"import these channels into report 1234"*, *"add these brands to campaign 5678"*, *"create a new report with these channels: \<list\>"*, *"build me a campaign from these adlinks: \<list\>"*
+- Discovery-intent with a list as INPUT (stay here): *"find me channels similar to these: \<list\>"*, *"build a report of TPP channels in the same niche as these: \<list\>"*, *"show me which of these have sponsored fintech brands"*, *"compare engagement across these channels"*
+
+If you find yourself about to resolve a URL/handle to a channel ID *as the deliverable* (no analysis, no filtering, no discovery on top), stop and hand off — that's the import shape.
+
+### Quick routing test
+
+*"Would the answer to this prompt be a TL report — a list of entities the user would want to come back to?"* If yes, this skill. If no (scalar, chart, single record, analysis), `tl-cli:tl`. If yes AND the entities are pre-supplied as the answer rather than discovered, `tl-cli:tl-import`.
 
 ## Architecture & Separation of Concerns
 
