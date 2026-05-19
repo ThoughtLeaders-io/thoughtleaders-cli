@@ -148,10 +148,14 @@ def doctor(ctx: typer.Context) -> None:
         console.print("  Auth:   [red]not logged in[/red]")
         all_ok = False
     elif tokens.is_expired:
-        console.print(f"  Auth:   [yellow]token expired[/yellow] ({tokens.email})")
+        console.print(
+            f"  Auth:   [yellow]token expired[/yellow] (OAuth2, {tokens.email})"
+        )
         all_ok = False
     else:
-        console.print(f"  Auth:   [green]ok[/green] ({tokens.email})")
+        method = "API key" if tokens.is_api_key else "OAuth2"
+        identity = tokens.email or ("via API key" if tokens.is_api_key else "unknown")
+        console.print(f"  Auth:   [green]ok[/green] ({method}, {identity})")
 
     # Connectivity + balance + latency timing. The first /balance call
     # doubles as the connectivity probe; subsequent calls feed the
