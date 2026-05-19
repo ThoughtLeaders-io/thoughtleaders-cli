@@ -211,6 +211,82 @@ tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share"
 
 Each call costs 2 credits. If a request is rejected with a 400, the response body names the offending key — read it and retry with a smaller body. If the user wants to edit something the API rejects, the change has to be made in the app or by a human with DB access.
 
+### Creating and vetting sponsorships
+
+This is the end-to-end workflow for proposing a sponsorship, then moving it through the funnel as the two sides respond. Three create commands plus `tl sponsorships update` cover every state transition the CLI exposes.
+
+#### Creating a sponsorship
+
+`tl sponsorships create` always creates the adlink in **proposed** status. Use the `tl matches create` or `tl proposals create` shortcuts when you specifically want a `matched` adlink or want a clearer log of intent — they share the same backend and accept the same flags.
+
+```bash
+# Minimum: channel ID + brand ID. Creates a proposal (publish_status=PREVIEW=0).
+tl sponsorships create --channel 5607 --brand 11459
+
+# Optional price (USD):
+tl sponsorships create --channel 5607 --brand 11459 --price 2500
+
+# Short flags:
+tl sponsorships create -c 5607 -b 11459 -p 2500
+
+# Capture the new adlink id for follow-up update calls:
+tl sponsorships create -c 5607 -b 11459 --json | jq -r '.results[0].sponsorship_id'
+
+# Shortcuts (delegated to the same server endpoint with a preset status):
+tl matches create -c 5607 -b 11459      # creates with publish_status=matched (7)
+tl proposals create -c 5607 -b 11459    # creates with publish_status=proposed (0)
+```
+
+Required: `--channel/-c <int>`, `--brand/-b <int>`. Optional: `--price/-p <float>`, `--json`, `--toon`. Returns the created adlink with a `tl sponsorships show <id>` hint.
+
+The adlink is owned by the **brand's** advertiser profile (not the calling user's profile) and its `list` FK is set to the requested brand — so the new sponsorship appears under the brand's pipeline, not the AM's.
+
+#### Vetting (state transitions via `tl sponsorships update`)
+
+After a sponsorship exists, `tl sponsorships update <id> '<json>'` is the single CLI lever for moving it through the funnel. The interesting transitions for vetting are below — pass `publish_status` as a string label (the integer code also works but the label is clearer for both humans and the audit log).
+
+| Action | Command | What it means |
+|---|---|---|
+| **Accept** (either side, in negotiation) | `tl sponsorships update <id> '{"publish_status": "pending"}'` | Moves the adlink to `PENDING` — both sides are working it but it's not yet sold. |
+| **Mark sold** (deal finalised) | `tl sponsorships update <id> '{"publish_status": "sold"}'` | Final commercial step. Sets purchase semantics server-side. |
+| **Reject — Advertiser side** | `tl sponsorships update <id> '{"publish_status": "advertiser_reject"}'` | Maps to `DENY` ("Rejected by Advertiser"). Use when the *brand* turns the offer down. |
+| **Reject — Publisher side** | `tl sponsorships update <id> '{"publish_status": "publisher_reject"}'` | Maps to `REJECT` ("Rejected by Publisher"). Use when the *channel* turns the offer down. |
+| **Reject — Agency** | `tl sponsorships update <id> '{"publish_status": "agency_reject"}'` | When an agency intermediary kills the deal. |
+
+**Choosing the right rejection label** — match the label to the side actually rejecting:
+
+- The CLI caller is acting for / on behalf of an **Advertiser** (Brand) → use `advertiser_reject`.
+- The CLI caller is acting for / on behalf of a **Publisher** (Channel) → use `publisher_reject`.
+- If you don't know which side, ask before running the update — the two labels are not interchangeable downstream (they drive different reporting and different KPIs).
+
+Optionally include a rejection reason in the same update:
+
+```bash
+tl sponsorships update 98765 '{
+  "publish_status": "advertiser_reject",
+  "rejection_reason": "off-brand audience",
+  "rejection_reason_details": "Brand wants 18-34 male; channel skews 35-54 female"
+}'
+```
+
+Full set of `publish_status` labels the CLI accepts: `proposed`, `unavailable`, `pending`, `sold`, `advertiser_reject`, `publisher_reject`, `proposal_approved`, `matched`, `outreach`, `agency_reject`. Numeric codes (0–9) are also accepted but labels are preferred.
+
+#### Worked example: propose → reject
+
+```bash
+# 1. Create the proposal and capture its id.
+sid=$(tl sponsorships create -c 5607 -b 11459 -p 2500 --json | jq -r '.results[0].sponsorship_id')
+
+# 2. Later, the brand declines.
+tl sponsorships update "$sid" '{
+  "publish_status": "advertiser_reject",
+  "rejection_reason": "budget cut for Q3"
+}'
+
+# 3. Verify final state.
+tl sponsorships show "$sid" --json | jq '{id, status, rejection_reason}'
+```
+
 ### Raw queries (`tl db`)
 
 `tl db pg|fb|es` is the default tool. Reach for it whenever the question is anything beyond a trivially simple lookup — and use the structured commands only for those trivial cases (single-record `show`, plain filtered `list`). Don't paginate-and-reduce in your head when one SQL or ES body would do it server-side.
