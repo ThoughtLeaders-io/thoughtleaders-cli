@@ -114,13 +114,17 @@ def do_create(
     fmt: str,
     status: str | None = None,
 ) -> None:
-    """Shared create logic."""
+    """Shared create logic (flag-style args)."""
     body: dict = {"channel_id": channel, "brand_id": brand}
     if price is not None:
         body["price"] = price
     if status is not None:
         body["status"] = status
+    do_create_body(body, fmt)
 
+
+def do_create_body(body: dict, fmt: str) -> None:
+    """Post a pre-built body to the sponsorships create endpoint."""
     client = get_client()
     try:
         data = client.post("/sponsorships", json_body=body)
@@ -180,18 +184,60 @@ def show_cmd(
 
 @app.command("create")
 def create_cmd(
-    channel: int = typer.Option(..., "--channel", "-c", help="Channel ID"),
-    brand: int = typer.Option(..., "--brand", "-b", help="Brand ID"),
+    fields: Optional[str] = typer.Argument(
+        None,
+        help='Optional JSON body — alternative to --channel/--brand/--price flags. '
+             'Shape: {"channel_id": int, "brand_id": int, "price"?: float, "status"?: str}. '
+             'Mutually exclusive with the flag form.',
+    ),
+    channel: Optional[int] = typer.Option(None, "--channel", "-c", help="Channel ID"),
+    brand: Optional[int] = typer.Option(None, "--brand", "-b", help="Brand ID"),
     price: Optional[float] = typer.Option(None, "--price", "-p", help="Deal price"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Create a new sponsorship proposal (free, no credits charged).
 
+    Either pass --channel and --brand (with optional --price) as flags, or
+    pass a JSON body as the positional argument — never both.
+
     Examples:
         tl sponsorships create --channel 1 --brand 2
+        tl sponsorships create --channel 1 --brand 2 --price 2500
+        tl sponsorships create '{"channel_id": 1, "brand_id": 2, "price": 2500}'
     """
     fmt = detect_format(json_output, False, False, toon_output)
+
+    used_flags = channel is not None or brand is not None or price is not None
+    if fields is not None and used_flags:
+        Console(stderr=True).print(
+            "[red]Error:[/red] Pass either a JSON body OR --channel/--brand/--price flags, not both."
+        )
+        raise typer.Exit(1)
+
+    if fields is not None:
+        try:
+            body = _json.loads(fields)
+        except _json.JSONDecodeError as e:
+            Console(stderr=True).print(f"[red]Error:[/red] Invalid JSON body: {e}")
+            raise typer.Exit(1)
+        if not isinstance(body, dict):
+            Console(stderr=True).print("[red]Error:[/red] JSON body must be an object.")
+            raise typer.Exit(1)
+        if "channel_id" not in body or "brand_id" not in body:
+            Console(stderr=True).print(
+                "[red]Error:[/red] JSON body must include channel_id and brand_id."
+            )
+            raise typer.Exit(1)
+        body.setdefault("status", "proposed")
+        do_create_body(body, fmt)
+        return
+
+    if channel is None or brand is None:
+        Console(stderr=True).print(
+            "[red]Error:[/red] --channel and --brand are required (or pass a JSON body)."
+        )
+        raise typer.Exit(1)
     do_create(channel, brand, price, fmt, status="proposed")
 
 
