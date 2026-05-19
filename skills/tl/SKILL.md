@@ -1,18 +1,44 @@
 ---
 name: tl
 description: |
-  Query and analyze ThoughtLeaders business data using the `tl` CLI. Default to raw database queries via `tl db pg|fb|es` for anything non-trivial (joins, aggregations, multi-condition filters, anything that would otherwise need post-processing); use the structured resource commands (sponsorships, deals, channels, brands, uploads, snapshots, reports) only for trivially simple lookups (single-record show by ID, plain filtered lists). You ARE the AI layer — do not use `tl ask`.
+  Query and analyze ThoughtLeaders business data using the `tl` CLI.
+  Default to raw database queries via `tl db pg|fb|es` for any
+  non-trivial work (joins, aggregations, multi-condition filters,
+  anything that would otherwise need post-processing); the structured
+  resource commands (sponsorships, deals, channels, brands, uploads,
+  snapshots, reports) are for trivial single-record or plain-filtered
+  lookups only. You ARE the AI layer — do not use `tl ask`.
 
-  **Use this skill for ANALYTICAL questions**: counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. *"How many deals did we close last quarter?"*, *"What's the weighted pipeline by sales owner?"*, *"Show me the view curve for video X"*, *"Find mentions of Surfshark in transcripts"*, *"Investigate this video"*.
-
-  **DEFER to `tl-cli:tl-report-builder`** when the user wants a **LIST of entities with filters** — channels, videos, brands, or sponsorships shaped as a report deliverable, regardless of whether they say "report" or "campaign". *"Show me partnerships from last quarter for beauty creators"*, *"Find me gaming channels with 100K+ subs"*, *"List the brands flagged as Managed Services"*, *"All sponsorships for channel X"*, *"Build me a TPP fintech list"* — every one of these goes to `tl-cli:tl-report-builder`, not here. The report-builder owns the four report types (content / brands / channels / sponsorships) and the preview/save flow; using this skill instead produces ad-hoc data dumps that bypass the saved-report system.
-
-  Quick routing test: *"would the answer to this prompt be a TL report (a list of entities I'd want to come back to)?"* — if yes, route to `tl-cli:tl-report-builder`. If no (it's a number, a chart, a single record, or an exploratory analysis), use this skill.
+  Use for analytical answers — counts, metrics, trends, single-record
+  drill-downs, cross-source business questions. For
+  list-of-entities-with-filters requests that would produce a saved
+  TL report, route to `tl-cli:tl-report-builder` instead.
 ---
 
 # ThoughtLeaders Data Analyst
 
 Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc.
+
+## When to route elsewhere
+
+This skill answers analytical / lookup questions against TL data. One adjacent skill carries a related but distinct intent — route to it instead when the user's request matches its shape:
+
+### Route to `tl-cli:tl-report-builder` (list-of-entities-with-filters as the deliverable)
+
+When the user wants **a list of channels, videos, brands, or sponsorships shaped as a TL report deliverable** — even if they don't literally say "report" or "campaign" — route to `tl-cli:tl-report-builder`. That skill owns the four report types (content / brands / channels / sponsorships) and the preview/save flow against the TL web app.
+
+Concrete examples that belong over there, not here:
+- *"Show me partnerships from last quarter for beauty creators"*
+- *"Find me gaming channels with 100K+ subs"*
+- *"List the brands flagged as Managed Services"*
+- *"All sponsorships for channel X"*
+- *"Build me a TPP fintech list"*
+
+Using this skill for those produces ad-hoc data dumps that bypass the saved-report system.
+
+### Quick routing test
+
+*"Would the answer to this prompt be a TL report — a list of entities I'd want to come back to?"* If yes, route to `tl-cli:tl-report-builder`. If no (it's a number, a chart, a single record, or an exploratory analysis), use this skill.
 
 ## Core Principles
 
