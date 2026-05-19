@@ -14,19 +14,36 @@ SERVICE_NAME = "tl-cli"
 FALLBACK_FILE = "credentials.json"
 
 
+KIND_BEARER = "bearer"
+KIND_API_KEY = "api_key"
+
+
 @dataclass
 class StoredTokens:
-    """Tokens stored in the keychain."""
+    """Auth credentials stored in the keychain.
+
+    `kind` distinguishes the OAuth2/Auth0 access-token flow ("bearer") from
+    a long-lived API key flow ("api_key"). API keys don't expire client-side
+    and have no refresh token — `refresh_token` and `expires_at` stay unset
+    in that case.
+    """
 
     access_token: str
     refresh_token: str | None
-    expires_at: float  # Unix timestamp
+    expires_at: float  # Unix timestamp; 0 for API keys
     email: str | None = None
+    kind: str = KIND_BEARER
 
     @property
     def is_expired(self) -> bool:
+        if self.kind == KIND_API_KEY:
+            return False
         # 5-minute buffer before actual expiry
         return time.time() > (self.expires_at - 300)
+
+    @property
+    def is_api_key(self) -> bool:
+        return self.kind == KIND_API_KEY
 
     def to_json(self) -> str:
         return json.dumps({
@@ -34,6 +51,7 @@ class StoredTokens:
             "refresh_token": self.refresh_token,
             "expires_at": self.expires_at,
             "email": self.email,
+            "kind": self.kind,
         })
 
     @classmethod
@@ -42,8 +60,9 @@ class StoredTokens:
         return cls(
             access_token=parsed["access_token"],
             refresh_token=parsed.get("refresh_token"),
-            expires_at=parsed["expires_at"],
+            expires_at=parsed.get("expires_at") or 0,
             email=parsed.get("email"),
+            kind=parsed.get("kind", KIND_BEARER),
         )
 
 

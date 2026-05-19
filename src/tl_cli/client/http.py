@@ -67,14 +67,23 @@ class TLClient:
         return response.json()
 
     def _auth_headers(self) -> dict[str, str]:
-        """Get authorization headers from API key or stored tokens."""
-        # API key takes priority (for CI/scripts)
+        """Get authorization headers from API key env var or stored credentials."""
+        # API key env var takes priority (for CI/scripts)
         if self._config.api_key:
-            return {"Authorization": f"Bearer {self._config.api_key}"}
+            return {
+                "Authorization": f"Bearer {self._config.api_key}",
+                "X-TL-Auth": "API-KEY",
+            }
 
         tokens = load_tokens()
         if not tokens:
             raise ApiError(401, "Not authenticated. Run: tl auth login")
+
+        if tokens.is_api_key:
+            return {
+                "Authorization": f"Bearer {tokens.access_token}",
+                "X-TL-Auth": "API-KEY",
+            }
 
         if tokens.is_expired and tokens.refresh_token:
             tokens = refresh_access_token(tokens.refresh_token)
