@@ -166,10 +166,12 @@ tl proposals create --channel <id> --brand <id>  # Create proposal
 tl uploads list [filters...]           # Video uploads from ES
 tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
+tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
 tl channels update <id> '<json>'       # Update a channel
 tl channels history <id-or-name>       # Sponsorship history
 tl channels similar <id-or-name>       # Similarity recommender (Intelligence plan)
 tl brands show <id-or-name>            # Brand detail
+tl brands find <query>                 # Resolve a string to {id, name}; matches name, slug, domain, or keyword
 tl brands history <id-or-name>         # Sponsorship history
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
 tl brands history-stats <id-or-name>   # Aggregate roll-up: counts, total/avg/median views, first/last seen, by-year, top channels
@@ -229,6 +231,10 @@ tl sponsorships create --channel 5607 --brand 11459 --price 2500
 # Short flags:
 tl sponsorships create -c 5607 -b 11459 -p 2500
 
+# JSON body — same shape as the server expects. Use this form when the
+# fields come from another tool, or when scripting:
+tl sponsorships create '{"channel_id": 5607, "brand_id": 11459, "price": 2500}'
+
 # Capture the new adlink id for follow-up update calls:
 tl sponsorships create -c 5607 -b 11459 --json | jq -r '.results[0].sponsorship_id'
 
@@ -237,7 +243,7 @@ tl matches create -c 5607 -b 11459      # creates with publish_status=matched (7
 tl proposals create -c 5607 -b 11459    # creates with publish_status=proposed (0)
 ```
 
-Required: `--channel/-c <int>`, `--brand/-b <int>`. Optional: `--price/-p <float>`, `--json`, `--toon`. Returns the created adlink with a `tl sponsorships show <id>` hint.
+Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "proposed"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
 
 The adlink is owned by the **brand's** advertiser profile (not the calling user's profile) and its `list` FK is set to the requested brand — so the new sponsorship appears under the brand's pipeline, not the AM's.
 
@@ -259,7 +265,7 @@ After a sponsorship exists, `tl sponsorships update <id> '<json>'` is the single
 - The CLI caller is acting for / on behalf of a **Publisher** (Channel) → use `publisher_reject`.
 - If you don't know which side, ask before running the update — the two labels are not interchangeable downstream (they drive different reporting and different KPIs).
 
-Optionally include a rejection reason in the same update:
+**`rejection_reason` is mandatory whenever you set `publish_status` to any rejection label** (`advertiser_reject`, `publisher_reject`, or `agency_reject`). Do not issue a rejection update without it — a rejection with no reason is treated as an incomplete record by downstream reporting and AM workflows. If the user hasn't given you a reason, ask before running the update. Add `rejection_reason_details` whenever the user gives you more context — it's free-form supporting text and is fine to omit when the short `rejection_reason` is self-evident.
 
 ```bash
 tl sponsorships update 98765 '{
@@ -277,7 +283,7 @@ Full set of `publish_status` labels the CLI accepts: `proposed`, `unavailable`, 
 # 1. Create the proposal and capture its id.
 sid=$(tl sponsorships create -c 5607 -b 11459 -p 2500 --json | jq -r '.results[0].sponsorship_id')
 
-# 2. Later, the brand declines.
+# 2. Later, the brand declines. rejection_reason is mandatory.
 tl sponsorships update "$sid" '{
   "publish_status": "advertiser_reject",
   "rejection_reason": "budget cut for Q3"
@@ -551,6 +557,21 @@ tl snapshots video def789 --channel 456 --json
 ```bash
 tl reports --json  # Find the report ID first
 tl reports run 42 --json
+```
+
+"Look up a channel or brand from whatever the user pasted":
+```bash
+# Channel: accepts name, slug, YouTube channel URL, handle (@…), raw channel ID
+# (UC…), or any video URL. On ambiguity returns 400 with candidate {id, name};
+# on an unrecognised YouTube URL it queues a scrape and returns 404 with the
+# QueuedChannel record so the caller knows to retry later.
+tl channels find "https://www.youtube.com/@MrBeast"
+tl channels find "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+tl channels find UCX6OQ3DkcsbYNE6H8uQQuVA
+
+# Brand: matches name, slug, website domain, or any keyword in kw/keywords.
+tl brands find nike.com
+tl brands find "Just Do It"
 ```
 
 "Find Cooking channels with US-heavy mobile audiences":

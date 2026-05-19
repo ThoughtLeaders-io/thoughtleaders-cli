@@ -1,5 +1,6 @@
 """tl brands — Brand detail and sponsorship history."""
 
+import json as _json
 import urllib.parse
 
 import typer
@@ -159,6 +160,39 @@ def history_stats_cmd(
         data = client.get(f"/brands/{encoded_query}/history-stats", params=params)
         output_single(data, fmt)
     except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("find")
+def find_cmd(
+    query: str = typer.Argument(..., help="Brand name, slug, domain, or keyword"),
+) -> None:
+    """Resolve a string to a single brand and print {id, name} as JSON.
+
+    Searches across name, slug, website domain, and the brand's keyword
+    fields (kw + keywords). Ambiguous matches return an error with the
+    candidate IDs and names so the caller can pick a better query.
+
+    Examples:
+        tl brands find Nike
+        tl brands find nike.com
+        tl brands find https://www.nike.com/
+        tl brands find 21416
+    """
+    client = get_client()
+    try:
+        data = client.get("/brands/find", params={"q": query})
+        results = data.get("results", [])
+        record = results[0] if results else {}
+        print(_json.dumps({"id": record.get("id"), "name": record.get("name")}, ensure_ascii=False))
+    except ApiError as e:
+        if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
+            err = Console(stderr=True)
+            err.print(f"[yellow]{e.detail}[/yellow]")
+            print(_json.dumps({"error": e.detail, "candidates": e.raw["candidates"]}, ensure_ascii=False))
+            raise typer.Exit(1)
         handle_api_error(e)
     finally:
         client.close()
