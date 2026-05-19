@@ -151,44 +151,44 @@ Note that if you're working on Windows, you need to set up UTF-8 in the console,
 
 ### Data queries
 ```bash
-tl sponsorships list [filters...]      # Sponsorships — list curve, mult 1.0
-tl sponsorships show <id>              # Sponsorship detail (2 credits)
-tl sponsorships create --channel <id> --brand <id>  # Create proposal (free)
-tl sponsorships update <id> '<json>'   # Update a sponsorship (2 credits)
-tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal); same curve as sponsorships list
-tl deals show <id>                     # Deal detail (2 credits)
-tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match); same curve
-tl matches show <id>                   # Match detail (2 credits)
-tl matches create --channel <id> --brand <id>  # Create match (free)
-tl proposals list [filters...]         # Shortcut: proposed matches (status:proposal); same curve
-tl proposals show <id>                 # Proposal detail (2 credits)
-tl proposals create --channel <id> --brand <id>  # Create proposal (free)
-tl uploads list [filters...]           # Video uploads from ES — list curve, mult 1.0
-tl uploads show <id>                   # Upload detail (2 credits)
-tl channels show <id-or-name>          # Channel detail (2 credits; accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
-tl channels update <id> '<json>'       # Update a channel (2 credits)
-tl channels history <id-or-name>       # Sponsorship history (5 credits/result, linear)
-tl channels similar <id-or-name>       # Similarity recommender (25 credits flat; Intelligence plan)
-tl brands show <id-or-name>            # Brand detail (1 credit)
-tl brands history <id-or-name>         # Sponsorship history (5 credits/result, linear)
+tl sponsorships list [filters...]      # Sponsorships
+tl sponsorships show <id>              # Sponsorship detail
+tl sponsorships create --channel <id> --brand <id>  # Create proposal
+tl sponsorships update <id> '<json>'   # Update a sponsorship
+tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal)
+tl deals show <id>                     # Deal detail
+tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match)
+tl matches show <id>                   # Match detail
+tl matches create --channel <id> --brand <id>  # Create match
+tl proposals list [filters...]         # Shortcut: proposed matches (status:proposal)
+tl proposals show <id>                 # Proposal detail
+tl proposals create --channel <id> --brand <id>  # Create proposal
+tl uploads list [filters...]           # Video uploads from ES
+tl uploads show <id>                   # Upload detail
+tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
+tl channels update <id> '<json>'       # Update a channel
+tl channels history <id-or-name>       # Sponsorship history
+tl channels similar <id-or-name>       # Similarity recommender (Intelligence plan)
+tl brands show <id-or-name>            # Brand detail
+tl brands history <id-or-name>         # Sponsorship history
 tl brands history <query> --channel <id>  # Brand mentions on specific channel
-tl brands history-stats <id-or-name>   # Aggregate roll-up: counts, total/avg/median views, first/last seen, by-year, top channels (5 credits flat)
+tl brands history-stats <id-or-name>   # Aggregate roll-up: counts, total/avg/median views, first/last seen, by-year, top channels
 tl brands history-stats <q> --channel <id>  # Same roll-up, narrowed to one channel
-tl brands similar <id-or-name>         # Find similar brands via similarity search (25 credits flat)
-tl recommender tags [query]            # List similarity tag names — categories, demographics, formats (free)
-tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (25 credits; Intelligence)
-tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a similarity tag (25 credits)
-tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag (25 credits)
-tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (25 credits; Intelligence)
-tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (25 credits; Intelligence)
-tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal profile (25 credits; Intelligence)
+tl brands similar <id-or-name>         # Find similar brands via similarity search
+tl recommender tags [query]            # List similarity tag names — categories, demographics, formats
+tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (Intelligence)
+tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a similarity tag
+tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag
+tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (Intelligence)
+tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (Intelligence)
+tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal profile (Intelligence)
 tl snapshots channel <id>              # Channel metrics over time (Firebolt-backed)
 tl snapshots video <id> --channel <id> # Video view curve (--channel required!)
 tl reports                             # List saved reports
-tl reports run <id>                    # Run a saved report (credits vary)
+tl reports run <id>                    # Run a saved report
 tl <entity> comment-list <id>          # List comments on a sponsorship/channel/brand/upload
-tl <entity> comment-add <id> "msg"     # Add a comment (free)
-tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser; free)
+tl <entity> comment-add <id> "msg"     # Add a comment
+tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser)
 ```
 
 **Credit costs are server-authoritative — run `tl describe` (overview) or `tl describe show <resource>` (one resource) to see the current rates and multipliers for every endpoint. Do not memorise rate values — they change.**
