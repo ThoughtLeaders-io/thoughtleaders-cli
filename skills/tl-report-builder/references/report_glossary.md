@@ -22,38 +22,27 @@ Phase 1 + 2 disambiguation: report-type synonyms, TL terminology, field-pair cho
 | **"pipeline"** *(no other context)* | Type 8 with active-stage filter | Default to type 8; confirm. |
 | **"book of business"** | Type 8 with `tl_sponsorships_only: true` | Default to type 8 + filter; confirm scope. |
 
-### TL role / pool synonyms
+### TL role / pool synonyms + TL terminology
 
-| Term | Meaning | Where it shows up |
-|---|---|---|
-| **MSN** | Media Selling Network — broad ~11K opted-in channel pool | `msn_channels_only` |
-| **TPP** | ThoughtLeaders Premier Partners — smaller ~169 high-touch managed pool. **Resolve-and-pin pattern**: `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels`. TPP IS a recognized filter; the implementation detail is resolve-and-pin. | `is_tl_channel = TRUE` resolved → `filterset.channels` |
-| **MBN** | Media Buying Network — managed-services advertisers | `cross_references` type `include_sponsored_by_mbn` |
-| **AM** / **Account Manager** | Advertiser-side deal owner | `owner_advertiser_name` (in `filters_json` for type 8) |
-| **TM** / **Talent Manager** / **Publisher Manager** | Publisher-side deal owner | `owner_publisher_name` (in `filters_json` for type 8) |
+> **Canonical source**: [`tl/references/business-glossary.md`](../../tl/references/business-glossary.md) — the canonical home for TL business terminology (MSN, TPP, MBN, AM/TM ownership, View Guarantees, Net revenue, TL profit, performance grade, industry-vs-TL vocabulary translations). Do NOT redefine these terms here; this skill defers to the glossary.
 
-## TL terminology — use these
+Quick **FilterSet-mapping reference** (where these business terms appear in the report-builder context — for full definitions see the canonical glossary):
 
-| Term | Meaning | Where it shows up |
-|---|---|---|
-| **Reach** | TL's rolling audience-size metric (not raw YouTube subs) | `reach_from` / `reach_to` |
-| **Projected Views (PV)** | Pricing estimate for next video; drives sponsorship pricing | `projected_views_from` / `projected_views_to`; column `Projected Views` |
-| **View Guarantee (VG)** | Contractual floor on views for a deal. Type-8 only. | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
-| **Net revenue** | TL's earned revenue. NOT "margin." | Type 8 column: `Revenue` |
-| **TL profit** | `Price - Cost`. NOT "margin." | Custom formula `{Price} - {Cost}` |
-| **Sold sponsorship** | Contractually agreed deal | Type 8 `filters_json.publish_status` |
-| **Match / Proposal / Deal** | Funnel: Match (possible) → Proposal (offered) → Deal (sold) | `filters_json.publish_status` for type 8 |
+| Term | FilterSet / `filters_json` mapping in this skill |
+|---|---|
+| **MSN** | `msn_channels_only: true` |
+| **TPP** | resolve-and-pin pattern — `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels` |
+| **MBN** | `cross_references` type `include_sponsored_by_mbn` |
+| **AM** / Account Manager | `owner_advertiser_name` (in `filters_json` for type 8) |
+| **TM** / Talent Manager | `owner_publisher_name` (in `filters_json` for type 8) |
+| **Reach** | `reach_from` / `reach_to` (narrate as "subscribers" per business-glossary) |
+| **Projected Views (PV)** | `projected_views_from` / `projected_views_to`; column `Projected Views` |
+| **View Guarantee (VG)** | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
+| **Net revenue** | Type 8 column: `Revenue` |
+| **TL profit** | Custom formula `{Price} - {Cost}` (NOT "margin" — see glossary) |
+| **Sold sponsorship / Match / Proposal / Deal** | `filters_json.publish_status` (see "Deal-stage jargon" below for ID mapping) |
 
-## TL terminology — DON'T use
-
-Industry-default terms that don't translate; never put in field names, formulas, columns, or user-facing copy:
-
-- ❌ **"flight"** (MarTech) → say "campaign" or "date range"
-- ❌ **"hero / hero-tier / hero channel"** → say "high-priority" or "TPP" if appropriate
-- ❌ **"margin"** (accounting) → say `Net revenue` or `TL profit`
-- ❌ **"impressions"** in YouTube context → say `Views` or `Projected Views`
-
-Mirror the user's language in the *clarifying question*; emit TL terms in the config.
+For **industry terms NOT used at TL** (flight, hero, margin, impressions, etc.) — translation table lives in `business-glossary.md` "Industry Terms vs TL Vocabulary". Mirror the user's language in clarifying questions; emit TL terms in the config.
 
 ## Deal-stage jargon (type 8)
 
@@ -71,7 +60,7 @@ Map informal descriptions → `filters_json.publish_status` IDs (integer; platfo
 | **"in progress"** / **"active"** | `0, 2, 3, 6` | — | Active incl. sold |
 | **"live"** / **"currently running"** | `3` | `ad_publish_status: "0"` | Sold AND published |
 
-Status reference: `0` Creator Approved, `1` Unavailable, `2` Pending, `3` Sold, `4` Rejected by Brand, `5` Rejected by Creator, `6` Proposal Approved, `7` Matched, `8` Reached Out, `9` Rejected by Agency.
+Full `publish_status` enum (all 12 codes incl. CLIENT_SIDE_* and pipeline weights) lives at the canonical schema home: [`tl/references/postgres-schema.md` → `publish_status` Constants](../../tl/references/postgres-schema.md#publish_status-constants). The NL → ID mapping above is what this skill consumes; refer to the schema doc for the full enum and Django-side constants.
 
 ## Field-pair disambiguation
 
