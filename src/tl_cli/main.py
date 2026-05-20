@@ -28,7 +28,6 @@ from tl_cli.commands.sponsorships import app as sponsorships_app
 from tl_cli.commands.describe import app as describe_app
 from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.doctor import app as doctor_app
-from tl_cli.commands.feedback import app as feedback_app
 from tl_cli.commands.reports import app as reports_app
 from tl_cli.commands.setup import app as setup_app
 from tl_cli.commands.snapshots import app as snapshots_app
@@ -109,7 +108,6 @@ app.add_typer(balance_app, name="balance")
 app.add_typer(credits_app, name="credits")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
-app.add_typer(feedback_app, name="feedback")
 
 # `changelog` is a single command (not a sub-typer) so positional version args
 # don't get interpreted as subcommand names.
