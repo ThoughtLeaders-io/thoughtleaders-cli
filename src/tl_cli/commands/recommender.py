@@ -268,8 +268,8 @@ def inspect_brand_cmd(
         client.close()
 
 
-@app.command("similar-to-profile")
-def similar_to_profile_cmd(
+@app.command("channels-for-profile")
+def channels_for_profile_cmd(
     profile_id: int = typer.Argument(..., help="Profile ID (numeric)"),
     args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
@@ -288,8 +288,8 @@ def similar_to_profile_cmd(
         msn:<yes|no>        Restrict to MSN channels (default: no)
 
     Examples:
-        tl recommender similar-to-profile 842
-        tl recommender similar-to-profile 842 msn:yes --limit 30
+        tl recommender channels-for-profile 842
+        tl recommender channels-for-profile 842 msn:yes --limit 30
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     filters = parse_filters(args or [])
@@ -315,8 +315,63 @@ def similar_to_profile_cmd(
         client.close()
 
 
-@app.command("similar-brands-to-channel")
-def similar_brands_to_channel_cmd(
+@app.command("channels-for-brand")
+def channels_for_brand_cmd(
+    brand_ref: str = typer.Argument(..., help="Brand ID, name, slug, or domain (resolved via tl brands find)"),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Channels closest to a brand's ideal similarity profile.
+
+    Resolves the brand to its most-recently-created profile that has an
+    indexed search vector and runs the same KNN that
+    `channels-for-profile` uses. Costs 25 credits per call. Intelligence
+    plan required. Channels the brand has already worked with or been
+    proposed are excluded.
+
+    Filters:
+        language:<iso>      Content language (default: en)
+        msn:<yes|no>        Restrict to MSN channels (default: no)
+
+    Examples:
+        tl recommender channels-for-brand 6037
+        tl recommender channels-for-brand Nike msn:yes --limit 30
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    filters = parse_filters(args or [])
+    params = {k: v for k, v in filters.items() if k in {"language", "msn"}}
+    params["limit"] = str(limit)
+    encoded = urllib.parse.quote(brand_ref, safe="")
+    client = get_client()
+    try:
+        data = client.get(f"/recommender/brands/{encoded}/channels-for-profile", params=params)
+        for r in data.get("results", []):
+            score = r.get("score")
+            if isinstance(score, (int, float)) and fmt in ("table", "md"):
+                r["score"] = f"{score * 100:.1f}%"
+        title = f"Channels for brand {brand_ref}"
+        prof = data.get("profile") or {}
+        if prof.get("brand_name") and prof.get("id"):
+            title = f"Channels for {prof['brand_name']} (via profile {prof['id']})"
+        output(
+            data,
+            fmt,
+            columns=["score", "channel_id", "channel_name", "slug"],
+            title=title,
+            column_config={"score": {"justify": "right"}},
+        )
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("brands-for-channel")
+def brands_for_channel_cmd(
     channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
     args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
@@ -335,8 +390,8 @@ def similar_brands_to_channel_cmd(
         mbn:<yes|no|all>    MBN membership of the underlying profile (default: all)
 
     Examples:
-        tl recommender similar-brands-to-channel 12345
-        tl recommender similar-brands-to-channel "MrBeast" mbn:yes --limit 30
+        tl recommender brands-for-channel 12345
+        tl recommender brands-for-channel "MrBeast" mbn:yes --limit 30
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     filters = parse_filters(args or [])
@@ -361,3 +416,17 @@ def similar_brands_to_channel_cmd(
         _handle_recommender_error(e)
     finally:
         client.close()
+
+
+@app.command("similar-brands-to-channel", hidden=True)
+def similar_brands_to_channel_cmd(
+    channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
+    args: list[str] = typer.Argument(None, help="Filters (key:value pairs)."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results (1-100)"),
+) -> None:
+    """Hidden alias for `brands-for-channel` (older name kept for back-compat)."""
+    brands_for_channel_cmd(channel_ref, args, json_output, csv_output, md_output, toon_output, limit)

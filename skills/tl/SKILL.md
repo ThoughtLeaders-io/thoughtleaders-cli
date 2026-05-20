@@ -153,9 +153,9 @@ Note that if you're working on Windows, you need to set up UTF-8 in the console,
 
 ### Data queries
 
-**Filtered queries go through `tl db pg|fb|es`.** The list commands (`tl sponsorships`, `tl deals`, `tl matches`, `tl proposals`, `tl uploads`) are intentionally not part of this surface — write the SELECT/ES body yourself for any non-trivial filter and you get the full schema, joins, and aggregations. The show/create/update commands stay because they target a single record by ID.
+**Filtered queries go through `tl db pg|fb|es`.** Write the SELECT/ES body yourself, and freely perform joins and aggregations. The show/create/update commands exist because they target a single record by ID. Where needed, write Python scripts or duckdb queries to join data from different databases.
 
-Filter-to-SQL cheatsheet (deals/matches/proposals all live on `thoughtleaders_adlink`, differentiated by `publish_status`):
+Filter-to-SQL examples (deals/matches/proposals all live on `thoughtleaders_adlink`, differentiated by `publish_status`):
 
 | Want | Raw-DB equivalent |
 | --- | --- |
@@ -163,7 +163,7 @@ Filter-to-SQL cheatsheet (deals/matches/proposals all live on `thoughtleaders_ad
 | Sold deals (`publish_status=3`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 3"` |
 | Matched (`publish_status=7`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 7"` |
 | Proposed (`publish_status=0`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 0"` |
-| Video uploads from ES | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
+| Video uploads from ElasticSearch | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
 
 Single-record / mutation commands remain:
 
@@ -195,7 +195,9 @@ tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a similari
 tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag
 tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (Intelligence)
 tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (Intelligence)
-tl recommender similar-to-profile <id> # Channels closest to a brand profile's ideal profile (Intelligence)
+tl recommender channels-for-profile <id> # Find channels closest to a brand profile's ideal profile (Intelligence)
+tl recommender channels-for-brand <ref>  # Same as above but takes a brand ref; uses the brand's newest profile with a vector (Intelligence)
+tl recommender brands-for-channel <ref>  # Brands most likely to sponsor a channel; runs the channel's vector against the brand-profile index (Intelligence)
 tl snapshots channel <id>              # Channel metrics over time (Firebolt-backed)
 tl snapshots video <id> --channel <id> # Video view curve (--channel required!)
 tl reports                             # List saved reports
@@ -663,6 +665,23 @@ tl recommender top-brands "USA share" mbn:yes --limit 30       # Top brands (ded
 tl recommender top-channels "Tech" exclude-for-profile:842     # Drop channels already proposed for profile 842
 tl recommender inspect-channel 29834                           # Per-tag breakdown of a channel's vector
 tl recommender inspect-brand Nike                              # Per-tag breakdown of a brand's ideal profile
-tl recommender similar-to-profile 842 --limit 30               # Channels closest to a brand profile's ideal profile
+tl recommender channels-for-profile 842 --limit 30                  # Channels closest to a brand profile's ideal profile
+tl recommender channels-for-profile 842 msn:yes language:en          # Same, filtered to English MSN channels
+tl recommender channels-for-brand Nike --limit 30                    # Same, but takes a brand ref (uses the brand's newest profile with a vector)
+tl recommender channels-for-brand 6037 msn:yes language:en --limit 30
+tl recommender brands-for-channel 29834 --limit 30                   # Brands likely to sponsor this channel
+tl recommender brands-for-channel "MrBeast" mbn:yes --limit 30       # Same, restricted to MBN brand profiles
 ```
+
+**Filters on the recommender commands:**
+
+| Command | Filters |
+| --- | --- |
+| `top-channels` | `msn:<yes\|no\|all>` (default all), `exclude-for-profile:<id>` |
+| `top-profiles` | `mbn:<yes\|no\|all>` (default all), `exclude-for-channel:<id>` |
+| `top-brands` | `mbn:<yes\|no\|all>` (default all) |
+| `channels-for-profile` | `language:<iso>` (default `en`), `msn:<yes\|no>` (default `no`) |
+| `channels-for-brand` | same as `channels-for-profile` |
+| `brands-for-channel` | `mbn:<yes\|no\|all>` (default `all`) |
+
 Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches.

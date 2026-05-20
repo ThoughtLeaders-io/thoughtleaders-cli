@@ -285,8 +285,12 @@ def update_cmd(
 @app.command("find")
 def find_cmd(
     query: str = typer.Argument(..., help="Name, slug, YouTube URL, handle, channel ID, or video URL"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Resolve a string to a single channel and print {id, name} as JSON.
+    """Resolve a string to a single channel.
 
     Accepts:
       - A partial channel name or slug (ILIKE match)
@@ -295,6 +299,10 @@ def find_cmd(
       - A raw YouTube channel ID (UC...) or @handle
       - A YouTube video URL — the video's channel is resolved via the
         platform's article index
+
+    Default output is a pretty `id  name` line on stdout. Pass --json /
+    --csv / --md / --toon for machine-readable output (the JSON shape is
+    `{"id": ..., "name": ...}`).
 
     Ambiguous matches return an error with candidate IDs and names.
     If the input is a YouTube URL and no channel matches, the URL is
@@ -306,12 +314,26 @@ def find_cmd(
         tl channels find https://www.youtube.com/watch?v=dQw4w9WgXcQ
         tl channels find UCX6OQ3DkcsbYNE6H8uQQuVA
     """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
     client = get_client()
     try:
         data = client.get("/channels/find", params={"q": query})
         results = data.get("results", [])
         record = results[0] if results else {}
-        print(_json.dumps({"id": record.get("id"), "name": record.get("name")}, ensure_ascii=False))
+        if fmt == "table":
+            cid = record.get("id")
+            name = record.get("name")
+            if cid is None:
+                Console(stderr=True).print("[yellow]No match.[/yellow]")
+                raise typer.Exit(1)
+            Console().print(f"[bold cyan]{cid}[/bold cyan]  {name}")
+        else:
+            output(
+                {"results": [{"id": record.get("id"), "name": record.get("name")}]},
+                fmt,
+                columns=["id", "name"],
+                title=f"Channel match for {query}",
+            )
     except ApiError as e:
         if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
             _print_channel_candidates(e.detail, e.raw["candidates"])
@@ -319,12 +341,10 @@ def find_cmd(
         if e.status_code == 404 and isinstance(e.raw, dict) and e.raw.get("queued"):
             err = Console(stderr=True)
             err.print(f"[yellow]{e.detail}[/yellow]")
-            print(_json.dumps({
-                "error": e.detail,
-                "queued": True,
-                "queued_channel_id": e.raw.get("queued_channel_id"),
-                "queued_url": e.raw.get("queued_url"),
-            }, ensure_ascii=False))
+            err.print(
+                f"  [dim]queued_channel_id={e.raw.get('queued_channel_id')}"
+                f"  queued_url={e.raw.get('queued_url')}[/dim]"
+            )
             raise typer.Exit(1)
         handle_api_error(e)
     finally:

@@ -168,12 +168,20 @@ def history_stats_cmd(
 @app.command("find")
 def find_cmd(
     query: str = typer.Argument(..., help="Brand name, slug, domain, or keyword"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Resolve a string to a single brand and print {id, name} as JSON.
+    """Resolve a string to a single brand.
 
     Searches across name, slug, website domain, and the brand's keyword
-    fields (kw + keywords). Ambiguous matches return an error with the
-    candidate IDs and names so the caller can pick a better query.
+    fields (kw + keywords). Default output is a pretty `id  name` line on
+    stdout; pass --json / --csv / --md / --toon for machine-readable
+    output (the JSON shape is `{"id": ..., "name": ...}`).
+
+    Ambiguous matches return an error with the candidate IDs and names so
+    the caller can pick a better query.
 
     Examples:
         tl brands find Nike
@@ -181,12 +189,26 @@ def find_cmd(
         tl brands find https://www.nike.com/
         tl brands find 21416
     """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
     client = get_client()
     try:
         data = client.get("/brands/find", params={"q": query})
         results = data.get("results", [])
         record = results[0] if results else {}
-        print(_json.dumps({"id": record.get("id"), "name": record.get("name")}, ensure_ascii=False))
+        if fmt == "table":
+            bid = record.get("id")
+            name = record.get("name")
+            if bid is None:
+                Console(stderr=True).print("[yellow]No match.[/yellow]")
+                raise typer.Exit(1)
+            Console().print(f"[bold yellow]{bid}[/bold yellow]  {name}")
+        else:
+            output(
+                {"results": [{"id": record.get("id"), "name": record.get("name")}]},
+                fmt,
+                columns=["id", "name"],
+                title=f"Brand match for {query}",
+            )
     except ApiError as e:
         if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
             _print_brand_find_candidates(e.detail, e.raw["candidates"])
