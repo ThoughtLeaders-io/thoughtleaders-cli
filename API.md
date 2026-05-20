@@ -381,7 +381,7 @@ def post(path, body):
     r.raise_for_status()
     return r.json()
 
-# 1) Find Holafly's brand id (free name lookup endpoint covered elsewhere — use db_pg here)
+# 1) Find Holafly's brand id
 brand = post('/raw/pg', {'query':
     "SELECT id FROM thoughtleaders_brand WHERE name = 'Holafly' LIMIT 1 OFFSET 0"
 })['results'][0]['id']
