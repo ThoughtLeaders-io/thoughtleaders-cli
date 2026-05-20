@@ -73,23 +73,25 @@ def register_comment_commands(app: typer.Typer, entity_type: str, entity_label: 
     text (e.g. "sponsorship", "channel").
     """
 
-    @app.command("comment-list")
+    # `help=` is passed explicitly because Typer reads the function's
+    # `__doc__` for the per-subcommand help text, and `f"""…"""` as the
+    # first statement is a runtime f-string expression — not a docstring
+    # — so `__doc__` ends up None and the help column renders blank.
+    @app.command("comment-list", help=f"List comments on a {entity_label} (free, no credits).")
     def comment_list(
         entity_id: str = typer.Argument(..., help=f"{entity_label.capitalize()} ID"),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
         toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     ) -> None:
-        f"""List comments on a {entity_label} (free, no credits)."""
         list_comments(entity_type, entity_id, json_output, toon_output)
 
-    @app.command("comment-add")
+    @app.command("comment-add", help=f"Add a comment to a {entity_label} (free, no credits).")
     def comment_add(
         entity_id: str = typer.Argument(..., help=f"{entity_label.capitalize()} ID"),
         message: str = typer.Argument(..., help="Comment text"),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
         toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     ) -> None:
-        f"""Add a comment to a {entity_label} (free, no credits)."""
         add_comment(entity_type, entity_id, message, json_output, toon_output)
 
     @app.command("comment-edit")

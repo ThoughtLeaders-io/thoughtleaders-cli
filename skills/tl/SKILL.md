@@ -55,7 +55,7 @@ This section defines business terminology. Any other skill files, command, and p
 
 ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers / media buyers) with **Channels** (YouTube creators, podcasters / media sellers).
 
-The centre of the data model is **Sponsorships** — business relationships between brands and channels. Sponsorships have a funnel of types, from broad to narrow:
+The centre of the data model are **Sponsorships** — business relationships between brands and channels. Sponsorships statuses form a sales funnel, from broad to narrow:
 
 - **Sponsorships** — the broadest category, encompassing all stages, stored in the `thoughtleaders_adlink` table.
   - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work
@@ -64,25 +64,27 @@ The centre of the data model is **Sponsorships** — business relationships betw
 
 Sponsorships are sometimes called "Ads" or "Ad campaigns". **"AdLink"** is another name for the same thing — it's the term the database uses (`thoughtleaders_adlink`) and shows up across internal code, schema docs, and AM Slack threads. Treat "sponsorship" and "adlink" as interchangeable; the user-facing word is "sponsorship," the engineering/DB word is "adlink."
 
-The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These filter `tl sponsorships` by status.
+The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These are aliases for `tl sponsorships` with filtering by status.
 
 Other key concepts:
+- **Channels** — YouTube channels, but could also be podcasts
+- **Brands** — Entities (usually companies / organizations, but could be narrowed down to individual brands of a company)
 - **Uploads** — YouTube videos indexed from Elasticsearch
 - **Snapshots** — historical time-series metrics for channels and videos (Firebolt)
 - **Reports** — saved report configurations that can be re-run
-- **Comments** — notes attached to sponsorships
-- **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
-- **Profiles** — per-organization actors that own sponsorship records on behalf of either side of a deal. A profile is buyer-side or seller-side:
+- **Comments** — notes attached to sponsorships, channels, or brands
+- **Adspots** — types of ads a channel is willing to publish (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
+- **Profiles** — actors that own sponsorship records on behalf of either side of a deal. A profile is either buyer-side or seller-side:
   - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `creator_profile` is the buyer-side profile.
   - *Seller-side (publisher) profiles* — attached to a `Publication`, which in turn owns one or more `Channel` records. A channel's adspots therefore inherit ownership through `channel.publication.profile`.
   - **How to tell them apart** — three signals on the `thoughtleaders_profile` row, used in this order:
     1. **`persona`** (canonical) — `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
     2. **`is_advertiser` / `is_publisher`** booleans — feature flags; either or both can be true for staff-style profiles, but on normal user profiles they reliably mark side.
   - Org scoping for sponsorships is profile-mediated: a sponsorship belongs to your org if **either** `creator_profile.organization` (brand side) **or** `ad_spot.channel.publication.profile.organization` (publisher side) matches yours.
-- **MSN** (Media Selling Network) — the ~11k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
+- **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
 - **MBN** (Media Buying Network) — the brand-side counterpart to MSN: brand profiles that have opted in to receive proposed sponsorships. A profile is in the MBN group if the `profile.media_buying_network_join_date` field is not null.
-- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the ~169 channels TL has the closest working relationship with. A channel is in the TPP group if `channel.is_tl_channel` is True. **Prefer TPP channels when booking**: they respond fastest, are the easiest to close, and don't need an outreach round-trip — treat them as immediately bookable. TPP is a strict subset of MSN, so the same booking rules (one active mention adspot, etc.) apply.
-- **`demographics_updated_at`** (on channel detail) — ISO timestamp of when demographic screenshots were last uploaded and processed via OCR. If non-null, the channel has demographics screenshots on file. If null, no screenshots have been uploaded. Use this to check whether a channel has demographics data from screenshots.
+- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the ~170 channels TL has the closest working relationship with. A channel is in the TPP group if `channel.is_tl_channel` is True. **Prefer TPP channels when booking**: they respond fastest, are the easiest to close, and don't need an outreach round-trip — treat them as immediately bookable. TPP is a strict subset of MSN, so the same booking rules (one active mention adspot, etc.) apply.
+- **`demographics_updated_at`** (on channels) — If non-null, the channel has demographics screenshots on file. If null, no demographics screenshots have been uploaded. Use this to check whether a channel has demographics data from screenshots.
 - **`impression`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed.
 - **`views`** (on sponsorships) — actual view count of the sold and published sponsored video, accessible when `article_id` is set.
 - **`impressions_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric.
@@ -90,7 +92,7 @@ Other key concepts:
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
   - **Channel CPM** = `(adspot.price / channel.impression) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
   - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
-  - **CPM does not have a range filter.** To find sponsorships in a CPM range (e.g. "around $15"), fetch the record set with other filters first, then apply the CPM range in post-processing (jq, Python, etc.) on the returned `cpm` field. Plan queries and pagination accordingly — the server cannot reduce the result count based on CPM.
+  - CPM does not have a range filter. To find sponsorships in a CPM range (e.g. "around $15"), fetch the record set with other filters first, then apply the CPM range in post-processing (jq, Python, etc.) on the returned `cpm` field. Plan queries and pagination accordingly — the server cannot reduce the result count based on CPM.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
@@ -103,13 +105,13 @@ Users see data scoped by their organization and plan:
 - **Media sellers** see sponsorships where their org is the publisher. They see `cost` but never `price`.
 - **Intelligence plan** is required for accessing information not strictly related to the user's organisation.
 
-When querying sponsorship bookings, query by `status:sold` and filter the the date range only by `purchase_date`. Otherwise, query for state:sold by `created_at`.
+When querying sponsorship bookings, query by `status:sold` and filter the the date range only by `purchase_date`. Otherwise, query for `status:sold` and filter by `created_at`.
 
 ## Methodology
 
 Where possible, if searching for a sponsorship match between channels and brands, first search for what do similar brands sponsor / which brands is the channel usually sponsored by. The similarity judgement should be preferably based on similar topics, similar upload frequency, similar channel sizes, and only after all that, on demographics.
 
-Use the `tl channels similar` and `tl brands similar` commands to explore 1:1 similarity between known channels or brands. For category- or topic-driven discovery (e.g. "find me Cooking channels", "who scores high on USA share?"), use `tl recommender top-channels "<tag>"` (or `top-brands`/`top-profiles`) against the recommender — that's faster, ranked by category-strength. Run `tl recommender tags` to discover the valid tag names.
+Use the `tl channels similar` and `tl brands similar` commands to find channels or brands similar to a particular channel or brand. For category- or topic-driven discovery (e.g. "Find me Cooking channels", "Who scores high on USA share?"), use `tl recommender top-channels "<tag>"` (or `top-brands`/`top-profiles`) against the recommender — that's faster, ranked by category-strength. Run `tl recommender tags` to discover the valid tag names.
 
 ## Workflow
 
