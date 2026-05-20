@@ -26,7 +26,7 @@ All requests must carry both of:
 | `Authorization` | `Bearer <api_key>` | The credential. |
 | `X-TL-Auth` | `API-KEY` | Opts into API-key auth. Without it the server interprets the Bearer as an Auth0 JWT and rejects the API-key string. |
 
-Create an API key from Django Admin → **API keys** → Add. The shown 64-char hex value is the only secret — keep it out of version control. Keys carry an `is_active` flag and an `expires_at` (defaults to 1 year from creation). Inactive or expired keys return `401`; if the owning user is deactivated the request fails with `403`.
+Inactive or expired keys return `401`; if the owning user is deactivated the request fails with `403`.
 
 A quick set of shell variables used throughout this page:
 
@@ -76,7 +76,7 @@ Multi-row responses share one shape:
   "usage": {
     "credits_charged": 4.12,
     "credit_rate": 1.4,
-    "balance_remaining": 9_995.88
+    "balance_remaining": 9995.88
   },
   "_breadcrumbs": [
     { "hint": "next page", "command": "..." }
@@ -127,7 +127,7 @@ print(get('/whoami'))
     "name": "Acme Marketing",
     "plan": "Intelligence",
     "is_managed_services": false,
-    "credits_balance": 9_995.88
+    "credits_balance": 9995.88
   },
   "associated_profiles": [ ... ],
   "brands": [ ... ]
@@ -200,13 +200,13 @@ print(post('/raw/pg', {'query': sql}))
 ```json
 {
   "results": [
-    {"id": 12345, "channel_name": "MrBeast", "reach": 320_000_000},
+    {"id": 12345, "channel_name": "MrBeast", "reach": 320000000},
     ...
   ],
   "total": 5,
   "limit": 5,
   "offset": 0,
-  "usage": { "credits_charged": 1.84, "credit_rate": 1.4, "balance_remaining": 9_994.04 }
+  "usage": { "credits_charged": 1.84, "credit_rate": 1.4, "balance_remaining": 9994.04 }
 }
 ```
 
