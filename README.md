@@ -2,6 +2,13 @@
 
 ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence from the terminal.
 
+## Requirements
+
+- Python 3.12+
+- [jq](https://stedolan.github.io/jq/)
+- [ripgrep](https://github.com/BurntSushi/ripgrep)
+- [duckdb](https://duckdb.org/)
+
 ## Install
 
 ### As a developer
@@ -139,13 +146,6 @@ sponsorship types: the pool of Sponsorships is large, the pool of Matches (consi
 the pool of Proposals is yet smaller, and the pool of Deals is the smallest.
 
 # Integrations
-
-## Requirements
-
-- Python 3.12+
-- [jq](https://stedolan.github.io/jq/)
-- [ripgrep](https://github.com/BurntSushi/ripgrep)
-- [duckdb](https://duckdb.org/)
 
 ## Claude Code Integration
 
