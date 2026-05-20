@@ -108,7 +108,7 @@ Status reference: `0` Creator Approved, `1` Unavailable, `2` Pending, `3` Sold, 
 |---|---|---|
 | Match keywords in video transcripts/titles | `content_fields` includes `content`, `title`, `transcript` | Standard type 1 |
 | Match channel descriptions only | `content_fields = ["channel_description", "channel_description_ai", "channel_topic_description"]` | Standard type 3 |
-| Different keywords need different fields | `keyword_content_fields_map` (per-position) | E.g., brand name → `channel_name`; topic → descriptions |
+| Different keywords need different fields | `keyword_content_fields_map` (per-position) | E.g., brand name → `channel.channel_name`; topic → descriptions |
 | "But not X" | `keywords` includes `X` + `keyword_exclude_map["<index>"] = true` | Substring negation per-position |
 | User wants ALL keywords to match | `keyword_operator = "AND"` | Default is OR |
 
