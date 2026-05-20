@@ -9,7 +9,7 @@ ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligenc
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
 - [duckdb](https://duckdb.org/)
 
-On MacOS, prefer installing Homebrew, and using the pipx package manager to install this tool.
+For automated installs on MacOS, prefer installing Homebrew and use the pipx package manager, but ask the user if they have the admin access (sudo) password. If not, proceed by using `uv` and installing everything locally.
 
 ## Install
 
