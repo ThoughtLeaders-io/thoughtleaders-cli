@@ -3,8 +3,6 @@ name: tl-report-builder
 description: |
   Build TL reports from natural-language requests. Produces an in-chat preview (sample-rows table + filter summary + takeaways) by default, or auto-saves a TL report when the user's wording is explicit about it ("save", "create the report", "make a campaign for me to come back to"). Covers the four report types: content/videos (1), brands (2), channels (3), sponsorships/deals (8).
 
-  **Use this skill — NOT `tl-cli:tl` — for ANY request that returns a list of channels, videos, brands, or sponsorships with filters applied**, even when the user doesn't say "report" or "campaign". This is the canonical path for list-shaped requests.
-
   Triggers on every variant of "list me / find me / show me / give me / pull me / build me / make me X with filters Y", including:
   - **Channels**: "Find me gaming channels with 100K+ subs", "show me TPP fintech creators in MSN", "channels we haven't pitched to <brand>", "look-alike channels to X", "non-MSN travel channels", "build me a list of <niche> creators", "channels matching <criteria>".
   - **Brands**: "all brands flagged as Managed Services", "brand activity report for these specific brands: ...", "brands sponsoring <channel> in the past 6 months", "competitor brands of X".
@@ -331,10 +329,10 @@ USER_QUERY → Phase 1 → Phase 2 → Phase 3 → Phase 4 → deliverable
 >    Couldn't save the report — the temp directory at <resolved-path>
 >    isn't writable, so I couldn't stage the config for the CLI. This
 >    is a bug in the skill / environment, not something you need to do.
->    
+>
 >    The validated config is below as a recovery artifact in case you
 >    want to retry from a different machine. I haven't sent it to TL.
->    
+>
 >    <inline JSON in a code block, fenced>
 >    ```
 >
