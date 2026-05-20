@@ -42,7 +42,16 @@ Quick **FilterSet-mapping reference** (where these business terms appear in the 
 | **TL profit** | Custom formula `{Price} - {Cost}` (NOT "margin" — see glossary) |
 | **Sold sponsorship / Match / Proposal / Deal** | `filters_json.publish_status` (see "Deal-stage jargon" below for ID mapping) |
 
-For **industry terms NOT used at TL** (flight, hero, margin, impressions, etc.) — translation table lives in `business-glossary.md` "Industry Terms vs TL Vocabulary". Mirror the user's language in clarifying questions; emit TL terms in the config.
+### Industry terms — DON'T emit in config
+
+Industry-default terms that don't translate; never put in field names, formulas, columns, or user-facing copy:
+
+- ❌ **"flight"** (MarTech) → say "campaign" or "date range" (full flight-variant translation lives in [`business-glossary.md`](../../tl/references/business-glossary.md) "Industry Terms vs TL Vocabulary")
+- ❌ **"hero / hero-tier / hero channel"** → say "high-priority" or "TPP" if appropriate
+- ❌ **"margin"** (accounting) → say `Net revenue` or `TL profit`
+- ❌ **"impressions"** in YouTube context → say `Views` or `Projected Views`
+
+Mirror the user's language in the *clarifying question*; emit TL terms in the config.
 
 ## Deal-stage jargon (type 8)
 

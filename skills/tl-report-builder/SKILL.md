@@ -637,7 +637,14 @@ Brand-aggregated, so the ES query is an aggregation. **`tl db es` accepts at mos
 
 Type 8 stays on Postgres because the data plane is the sponsorship deal record (relations + status + dates), not text search.
 
-**Use the denormalized view `v_adspot_brand_profiles`, not raw `thoughtleaders_adlink`.** Column catalogue + join paths + "columns that don't exist on adlink" (no direct `brand_id`/`channel_id` FKs) all live at the canonical schema home: [`tl/references/postgres-schema.md`](../tl/references/postgres-schema.md). Direct joins like `JOIN thoughtleaders_brand ON adlink.brand_id = ...` are rejected by the planner because the FK doesn't exist on adlink.
+**Use the denormalized view `v_adspot_brand_profiles`, not raw `thoughtleaders_adlink`.** The base adlink table does NOT carry `brand_id` or `channel_id` columns — those relations live on the view. Direct joins like `JOIN thoughtleaders_brand ON adlink.brand_id = ...` will be rejected by the planner because the FK doesn't exist on adlink.
+
+The view exposes one row per (adlink × brand × channel) and surfaces these columns the skill cares about:
+- `adlink_id`, `adlink_publish_status`, `adlink_created_at`, `adlink_updated_at`
+- `brand_id`, `brand_name`
+- `channel_id`, `channel_name`, `channel_msn_join_date`
+- `organization_id`, `organization_name`, `organization_is_managed_services`
+- `adlink_owner_advertiser_email`, `adlink_owner_sales_email`
 
 **Important: count and sample MUST be deduped by `adlink_id`.** The view holds one row per `(adlink × brand × channel)` — a sponsorship spanning multiple brands or channels produces multiple rows. Type-8 counts sponsorship records (AdLinks), not view rows. **Always `COUNT(DISTINCT adlink_id)` for `db_count`; dedupe samples by `adlink_id`.** Direct `COUNT(*)` overcounts multi-brand/multi-channel adlinks.
 
