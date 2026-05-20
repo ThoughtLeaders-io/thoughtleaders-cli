@@ -337,8 +337,7 @@ Structured commands are still the right tool for: single-record `show` by ID, sa
 | Transcript / brand-mention search inside video content | **`tl db es`** (no structured equivalent for content text) |
 | Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | **`tl db fb`** |
 | Single-record detail lookup by ID | `tl <resource> show <id>` |
-| Filtered list of sponsorships/deals/matches/proposals/uploads | **`tl db pg` / `tl db es`** (no structured `list` surface) |
-| Channel/brand similarity (server-implemented similarity search) | `tl channels similar`, `tl brands similar` |
+| Channel/brand similarity (server-implemented similarity search) | `tl channels similar`, `tl brands similar`, `tl recommender ...` |
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
 
@@ -454,35 +453,6 @@ tl changelog v0.4.17 v0.4.18           # Notes for explicit versions
 tl changelog since v0.4.10             # Notes from v0.4.10 to latest
 tl changelog --md > CHANGELOG.md       # Capture for a doc
 ```
-
-`tl changelog` summaries are LLM-generated server-side from full commit messages and cached per version, so repeat calls are fast and don't re-bill the LLM. The release date and a 2–4 sentence prose summary come back per version.
-
-### Filter syntax
-
-There is no structured `list` filter syntax anymore — write the predicate against the underlying store. Equivalents for the common shorthand:
-
-```bash
-# was: tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
-tl db pg "SELECT al.id, al.weighted_price, al.purchase_date
-          FROM thoughtleaders_adlink al
-          JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
-          JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
-          JOIN thoughtleaders_brand b ON b.id = pb.brand_id
-          WHERE al.publish_status = 3
-            AND b.name = 'Nike'
-            AND al.purchase_date >= '2026-01-01'
-            AND al.purchase_date <  '2026-02-01'
-          ORDER BY al.purchase_date DESC
-          LIMIT 500 OFFSET 0"
-
-# was: tl uploads list channel:12345 type:longform
-tl db es '{"size":500,"query":{"bool":{"filter":[
-  {"term":{"channel.id":12345}},
-  {"term":{"content_type":"longform"}}
-]}}}'
-```
-
-For dates, build the explicit `>=` / `<` range yourself — there are no `today`/`yesterday`/`tomorrow` keyword shortcuts on the raw-DB path.
 
 #### Channel discovery — recommender first, raw SQL second
 
