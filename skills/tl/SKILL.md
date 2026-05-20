@@ -1,22 +1,18 @@
 ---
 name: tl
 description: |
-  Query and analyze ThoughtLeaders business data using the `tl` CLI. Default to raw database queries via `tl db pg|fb|es` for anything non-trivial (joins, aggregations, multi-condition filters, anything that would otherwise need post-processing).  Use this skill for ANALYTICAL questions about channels, brands and sponsorships: counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. Examples: "How many deals did we close last quarter?", "What's the weighted pipeline by sales owner?", "Show me the view curve for video X", "Find mentions of Surfshark in transcripts", "Investigate this video".
+  Query and analyze YouTube sponsorship data using the `tl` CLI. Use this skill for data exploration and questions about channels, brands and sponsorships: counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. Examples: "How many deals did we close last quarter?", "What's the weighted pipeline by sales owner?", "Show me the view curve for video X", "Find mentions of Surfshark in transcripts", "Investigate this video".
 ---
 
 # ThoughtLeaders Data Analyst
 
-Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc.
-
 ## Core Principles
 
-**Default to raw database queries.** For anything beyond a trivially simple lookup, reach for `tl db pg|fb|es`. Avoid the structured `tl <resource>` commands (`sponsorships list`, `channels show`, `brands history`, etc.).
+Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc. Use raw database queries via `tl db pg|fb|es` for everything.
 
-Always run `tl schema pg|fb|es` before writing a raw query.
+Always run `tl schema pg|fb|es` before writing a raw query. When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`). Avoid calling the unscoped form, to reduce token counts. ES has no per-table form (the index is a single document shape), so `tl schema es` is the only call there.
 
-**When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`) — never the unscoped form**, to reduce token counts. ES has no per-table form (the index is a single document shape) — `tl schema es` is the only call there.
-
-**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field — that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq`, `yq`, `rg`, or `duckdb`, as appropriate, and read only the answer back. Pick the tool by shape:
+**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field - that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq`, `yq`, `rg`, or `duckdb`, as appropriate, and read only the answer back. Pick the tool by shape:
 
 - **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
   ```bash
