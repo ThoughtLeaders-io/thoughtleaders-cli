@@ -189,13 +189,23 @@ def find_cmd(
         print(_json.dumps({"id": record.get("id"), "name": record.get("name")}, ensure_ascii=False))
     except ApiError as e:
         if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
-            err = Console(stderr=True)
-            err.print(f"[yellow]{e.detail}[/yellow]")
-            print(_json.dumps({"error": e.detail, "candidates": e.raw["candidates"]}, ensure_ascii=False))
+            _print_brand_find_candidates(e.detail, e.raw["candidates"])
             raise typer.Exit(1)
         handle_api_error(e)
     finally:
         client.close()
+
+
+def _print_brand_find_candidates(detail: str, candidates: list[dict]) -> None:
+    """Pretty-print an ambiguous brand match (id, website, name) to stderr."""
+    err = Console(stderr=True)
+    err.print(f"[yellow]{detail}[/yellow]")
+    err.print()
+    err.print(f"  {'brand_id':>10}  {'website':<30}  name")
+    err.print(f"  {'-' * 10}  {'-' * 30}  {'-' * 40}")
+    for c in candidates:
+        website = (c.get("website") or "")[:30]
+        err.print(f"  {c['id']:>10}  {website:<30}  {c['name']}")
 
 
 SIMILAR_COLUMNS = ["score", "brand_id", "brand_name", "website", "mbn"]

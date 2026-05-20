@@ -75,6 +75,22 @@ def show_cmd(
         client.close()
 
 
+def _print_channel_candidates(detail: str, candidates: list[dict]) -> None:
+    """Pretty-print an ambiguous-match list (id, subscribers, name) to stderr."""
+    err = Console(stderr=True)
+    err.print(f"[yellow]{detail}[/yellow]")
+    err.print()
+    err.print(f"  {'channel_id':>10}  {'subscribers':>12}  name")
+    err.print(f"  {'-' * 10}  {'-' * 12}  {'-' * 40}")
+    for c in candidates:
+        subs = c.get("subscribers") or 0
+        try:
+            subs_str = f"{int(subs):>12,}"
+        except (TypeError, ValueError):
+            subs_str = f"{'?':>12}"
+        err.print(f"  {c['id']:>10}  {subs_str}  {c['name']}")
+
+
 def _handle_channel_api_error(e: ApiError) -> None:
     """Print a candidates list for 400 responses with `candidates` in the
     body (ambiguous channel name) and exit 1; otherwise defer to the
@@ -298,9 +314,7 @@ def find_cmd(
         print(_json.dumps({"id": record.get("id"), "name": record.get("name")}, ensure_ascii=False))
     except ApiError as e:
         if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
-            err = Console(stderr=True)
-            err.print(f"[yellow]{e.detail}[/yellow]")
-            print(_json.dumps({"error": e.detail, "candidates": e.raw["candidates"]}, ensure_ascii=False))
+            _print_channel_candidates(e.detail, e.raw["candidates"])
             raise typer.Exit(1)
         if e.status_code == 404 and isinstance(e.raw, dict) and e.raw.get("queued"):
             err = Console(stderr=True)
