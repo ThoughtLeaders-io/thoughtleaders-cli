@@ -646,7 +646,7 @@ The view exposes one row per (adlink × brand × channel) and surfaces these col
 - `organization_id`, `organization_name`, `organization_is_managed_services`
 - `adlink_owner_advertiser_email`, `adlink_owner_sales_email`
 
-**Important: count and sample MUST be deduped by `adlink_id`.** The view holds one row per `(adlink × brand × channel)` — a single sponsorship that involves multiple brands or multiple channel relations produces multiple rows. Type-8 reports count sponsorship records (AdLinks), not view rows. **Always use `COUNT(DISTINCT adlink_id)` for `db_count` and dedupe samples by `adlink_id`.** A globally-confirmed 184 view rows correspond to fewer underlying adlinks — direct `COUNT(*)` overcounts those cases.
+**Important: count and sample MUST be deduped by `adlink_id`.** The view holds one row per `(adlink × brand × channel)` — a sponsorship spanning multiple brands or channels produces multiple rows. Type-8 counts sponsorship records (AdLinks), not view rows. **Always `COUNT(DISTINCT adlink_id)` for `db_count`; dedupe samples by `adlink_id`.** Direct `COUNT(*)` overcounts multi-brand/multi-channel adlinks.
 
 ##### Filter predicate mapping (must mirror the saved FilterSet)
 
