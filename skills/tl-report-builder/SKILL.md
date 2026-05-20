@@ -136,84 +136,19 @@ Narrate like a colleague describing what they're doing — not like a logger ann
 
 **Talk TO the user, not ABOUT them.** Second person, not third person. ❌ "The user wants channels for outreach." ✅ "You want channels for outreach — got it." Or just describe what you're doing without referring to the user at all.
 
-### Worked example — running a full request
+### Narration shape — leaky vs clean
 
-Here's a real request and the gap between leaky narration (the failure mode) and clean narration (the target). Both sides describe the SAME execution; only the surface text differs. **The intent here is "save" (not preview)** — the prompt says "Create a campaign", which is one of the explicit save-intent phrases listed in the Save-or-preview policy.
+A save-mode run for *"Create a campaign of investing channels we haven't pitched to investing.com"* shows the gap between leaky and clean narration. Both describe the SAME execution; only the surface differs.
 
-❌ **Leaky** (the failure mode: phase numbers, type numbers, identifier-shaped names, third-person framing). The `[bracketed]` placeholders mark where the agent leaked specific internal identifier names — the lesson is that any identifier-shaped name appeared at all:
+❌ **Leaky** (phase numbers, type numbers, identifier-shaped names, third-person framing):
+> "I'll work through this as a TL outreach campaign... **Phase 1 — Report Type: Type 3 (CHANNELS)**. The user wants channels for outreach... **Phase 2 setup**: I need to resolve "investing.com" to a `[platform-id-name]`... Now composing the final campaign config. **Phase 3 (columns)** — outreach intent. **Phase 4 (widgets)** — Type 3 standard set."
 
-> I'll work through this as a TL outreach campaign. Let me start by resolving the brand and exploring the request structure.
->
-> **Phase 1 — Report Type: Type 3 (CHANNELS)**. The user wants channels for outreach to a brand — clear channels-side request with a cross-reference exclusion.
->
-> **Phase 2 setup**: I need to resolve "investing.com" to a `[platform-id-name]` first, then build the `[platform-filter-object]`. Let me check the brand.
->
-> *(...later...)* Now let me check what `[platform-deal-statuses]` count as "pitched" and how many channels match.
->
-> *(...later...)* Sample for `[validation-step-name]`. […] V2 is worse — "portfolio" pulls in music labels and entertainment via AI-generated topic descriptions.
->
-> Now composing the final campaign config. **Phase 3 (columns)** — outreach intent. **Phase 4 (widgets)** — Type 3 standard set with outreach overlay.
+✅ **Clean** (plain English, no leaks, second person):
+> "I'll set this up as a channels report — creators for outreach, with anyone already pitched to investing.com filtered out. Looking up investing.com... **Found it.** Pulling channels pitched in the last year so I can exclude them. **668 already pitched** — out. **1,838 unpitched investing channels**, 9 of 10 in the spot-check are on-target — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra. Putting it together now (outreach-focused columns + standard charts). *(saving…)* **TL report saved.** [Investing channels](https://app.thoughtleaders.io/...) (report #12345)."
 
-✅ **Clean** (same execution, plain English, no leaks, second person):
+What's preserved (brand resolution outcome, real exclusion count, noise example with specific names, reasoning, sample names, saved-report link, takeaways) vs stripped (every phase number, type number, identifier-shaped name, "The user wants…", raw IDs, the campaign-config JSON itself — that lives in the portable-temp transport file, never the chat). Clean is also *more informative* — describes what's happening to the data, not which step in the spec is firing.
 
-> I'll set this up as a channels report — creators for outreach, with anyone we've already pitched to investing.com in the last year filtered out.
->
-> First — let me look up investing.com in our brand list… **Found it.** Now I'll pull the list of channels we've pitched to them in the last 12 months so I can exclude them.
->
-> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
->
-> *(...later...)* **2,842 unpitched investing-aligned channels** — that's a healthy pool. Spot-checking the top matches to make sure they actually look like investing creators…
->
-> *(...later...)* 7 of 10 are strong matches, but 2 are Pokémon channels — they're hitting on "Trading Card Game" because of a loose "trading" keyword. Let me tighten that up. *(tightening the search…)* Tried adding "portfolio" but that pulls in music labels via AI-generated topic descriptions, so I dropped it. *(trying a tighter set…)* **1,838 unpitched investing channels, 9 of 10 in the spot-check are clean** — Pushkar Raj Thakur, Mark Tilbury, warikoo, Pranjal Kamra, all on-target.
->
-> Putting the final report together now — outreach-focused columns (deal history, contact info, demographic fit) and the standard channels-report charts. *(saving…)*
->
-> **TL report saved.** [Investing — unpitched investing channels](https://app.thoughtleaders.io/...) (report #12345)
->
-> **Worth knowing**:
-> - 668 channels already pitched to investing.com are excluded.
-> - Topic anchored on the curated investing keyword set; spot-check looked clean.
-> - Sort is most-recently-active first so dormant channels don't crowd the top.
-
-Notice what's preserved (the brand resolution outcome, the actual exclusion count, the noise example with specific channel names like "Pokémon", the reasoning across attempts, the final sample names, the saved-report link, the takeaways) and what's stripped (every phase number, every type number, every identifier-shaped name, "The user wants…", raw IDs the user doesn't need to see, **and the campaign-config JSON itself** — the JSON is written to a temp file and handed to `tl reports create --config-file <path> --yes`, not echoed back into the chat where it's just noise once the report is saved). The clean version is also *more informative* — it tells the user what's happening to their data, not which step in the spec is firing.
-
-### Worked example — preview-by-default (no save)
-
-Same architecture, different intent. The prompt is exploratory; the policy says default to preview.
-
-**Request**: *"Find me investing/finance channels we haven't pitched to investing.com in the last year"*
-
-✅ **Clean preview output** (same Phase 1–4 execution, but no temp file, no `tl reports create`, no Campaign row):
-
-> Pulling investing/finance channels we haven't pitched to investing.com lately.
->
-> First — let me look up investing.com in our brand list… **Found it.** Pulling the list of channels we've pitched to them in the last 12 months so I can exclude them.
->
-> *(...later...)* **668 channels we've already pitched** — those are out. Looking at the rest now to see how many fit an investing/finance niche…
->
-> *(...later...)* **1,838 unpitched investing channels.** Spot-checked the top 10; 9 of 10 are clearly on-target.
->
-> **Top by reach (sample):**
->
-> | Channel | Subscribers | Last published |
-> |---|---|---|
-> | Pushkar Raj Thakur | 11.4M | 2 days ago |
-> | Mark Tilbury | 4.2M | yesterday |
-> | warikoo | 3.8M | today |
-> | Pranjal Kamra | 6.1M | 4 days ago |
-> | Meet Kevin | 1.9M | 6 days ago |
-> | New Money | 870K | yesterday |
-> | Hamish Hodder | 250K | 3 days ago |
-> | … | … | … |
->
-> **Worth knowing**:
-> - 668 channels already pitched to investing.com are excluded.
-> - Topic anchored on the curated investing keyword set; the spot-check looked clean (1 Pokémon channel slipped in via a "trading" keyword match — easy to filter further if needed).
-> - Sort is most-recently-active first so dormant channels don't crowd the top.
->
-> *If you want this saved as a TL report you can come back to, just say save.*
-
-If the user replies *"yes save it"* or *"save"* → run the save step (resolve a portable temp path → write → verify → invoke `tl reports create --config-file <that-exact-path> --yes`; see Save-or-preview policy step 1+2 for the full mechanics) using the **same config that's already in working memory**. Don't re-run Phases 1–4. The follow-up reply is just the takeaways + saved-report link.
+The same shape applies to **preview mode** (no save intent): same Phase 1-4 execution, but the reply ends with the sample-rows table + takeaways + save tail instead of the saved-report URL. If the user replies *"yes save it"* / *"save"* → run the save step using the **same config that's already in working memory**; don't re-run Phases 1-4.
 
 ### Editing a saved report (post-save refinement flow)
 
@@ -290,17 +225,17 @@ The failure mode the skill is preventing: silent auto-create on every refinement
 }
 ```
 
-**Anti-patterns to avoid** (real failure shape pinned here — agent has been observed producing four saves in eight minutes for what should have been one create + three updates; subsequent verification of the CLI edit endpoint surfaced additional constraints):
+**Anti-patterns to avoid** (failure modes observed in real runs):
 
-- ❌ Running Phase 1–4 from scratch on a *non-filter* refinement (column/title/widget change). The phases trust working memory; rerunning them composes a parallel config rather than patching the existing one.
-- ❌ Calling `tl reports create` instead of `tl reports update` after a save when the new prompt is a column/widget/title refinement. Pick by intent shape, not by reflex.
-- ❌ Sending the full working-memory config as the `tl reports update` payload. The endpoint's `_reject_unknown_fields` validation is atomic — including `filterset`, `cross_references`, or `filters_json` in the payload 400s the WHOLE request, even if the user's actual edit was to a legitimate field like `columns`. Send ONLY editable fields.
-- ❌ Attempting to patch any FilterSet field (keywords, brands, channels, filters_json, msn_channels_only, demographics, date ranges, cross_references, etc.) via `tl reports update`. The backend explicitly rejects these — `CliReportEditView` docstring: *"Filterset edits are not supported here."* For FilterSet changes, route the user to "save as a new variant" (run Phase 1–4 with the prior config as starting point + the user's delta, save as a NEW report). Do NOT fabricate a working `tl reports update` call with a filterset payload.
-- ❌ Asserting that ALL editing is impossible (the opposite over-correction). Campaign-level fields — title, description, columns, widgets, histogram_bucket_size, emoji, display_mode, subscribers, webhook, notifications — ARE editable. Don't tell the user *"the CLI can't edit anything on a saved report"*; the truth is *"the CLI can edit these fields, not these others."*
-- ❌ Inventing a `tl reports show` command to refetch config. That command does not exist today; if config isn't in working memory, ask the user, don't fabricate a fetch step.
-- ❌ Passing the patch via a `--config-file` flag on `tl reports update`. That flag exists only on `tl reports create`. For `update`, the JSON goes as the second positional argument.
+- ❌ Re-running Phase 1–4 on a non-filter refinement (column/title/widget) — composes a parallel config instead of patching
+- ❌ `tl reports create` instead of `tl reports update` for column/widget/title refinements
+- ❌ Sending the full working-memory config as the update payload — `_reject_unknown_fields` is atomic and 400s the whole request if `filterset`/`cross_references`/`filters_json` are included. Send ONLY editable fields.
+- ❌ Patching any FilterSet field via `tl reports update` — backend explicitly rejects ("Filterset edits are not supported here"). Route to "save as a new variant" instead.
+- ❌ Over-correcting to "CLI can't edit anything" — title/description/columns/widgets/histogram_bucket_size/emoji/display_mode/subscribers/webhook/notifications ARE editable
+- ❌ Inventing `tl reports show` to refetch config — doesn't exist. If config isn't in working memory, ask the user.
+- ❌ Passing the patch via `--config-file` — that flag exists only on `create`, not `update`. For `update`, JSON goes as the second positional argument.
 
-When in doubt about whether a follow-up is an edit, a new variant, or a fresh save, ask. The clarifier is one ignorable line if the user wanted a new variant anyway; the cost of getting it wrong is a duplicate report or a 400 the user has to debug.
+When in doubt: ask. Cost of asking when the user wanted a new variant = one ignorable line; cost of guessing wrong = duplicate report or unrecoverable 400.
 
 What changes between save-mode and preview-mode:
 
@@ -315,130 +250,48 @@ What changes between save-mode and preview-mode:
 
 ## Process Flow (Strictly Sequential)
 
-Each phase consumes the previous phase's output. No phase runs out of order. No phase runs in parallel. Every phase may pause for a follow-up question with the user before proceeding.
+Each phase consumes the previous phase's output. No phase runs out of order or in parallel. Every phase may pause for a follow-up question before proceeding.
 
 ```
-USER_QUERY
-   │
-   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 1 — Report Selection                                              │
-│   Input:    USER_QUERY                                                  │
-│   Output:   ReportType ∈ {1 CONTENT | 2 BRANDS | 3 CHANNELS | 8 SPONS}  │
-│   Tools:    none (heuristic over USER_QUERY only)                       │
-│   Routing:  see "Phase 1 — Report Type Selection (detail)" below for   │
-│             the routing rules + authoritative G07 / G06 examples       │
-│   ↘ FOLLOW-UP TRIGGER: report type ambiguous / input invalid → ask user │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  ReportType
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 2 — Schema Phase + Validation                                     │
-│   Input:    USER_QUERY, ReportType                                      │
-│   Output:   { filterset, filters_json, cross_references,                │
-│               _routing_metadata, _validation }                          │
-│   Loads:    references/<intel|sponsorship>_filterset_schema.json        │
-│             references/report_glossary.md (on-demand)                   │
-│             tools/sample_judge.md (validation sub-step)                 │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Compose the FilterSet (filterset + filters_json + cross_refs)     │
-│     • Apply defaults per ReportType (days_ago, channel_formats, sort)   │
-│     • VALIDATE the FilterSet against live data:                         │
-│         – db_count → threshold classify                                 │
-│         – db_sample (LIMIT 10) → sample_judge                           │
-│         – Decide: proceed | retry | alternatives | fail                 │
-│         – Retry with feedback to T1/T2 (cap 1) on empty/too_broad       │
-│                                                                          │
-│   ┌─── Conditional Tool Invocation (within Phase 2 only) ─────────────┐ │
-│   │   T1  tools/topic_matcher.md           — fires per criteria       │ │
-│   │   T2  tools/keyword_research.md        — fires per criteria       │ │
-│   │   T3  tools/database_query.md          — cross-reference query    │ │
-│   │   T4  tools/name_resolver.md           — fires per criteria       │ │
-│   │   T5  tools/similar_channels.md        — fires per criteria       │ │
-│   │   sample_judge  tools/sample_judge.md  — validation sub-step      │ │
-│   │                                                                    │ │
-│   │   Tools are NOT phases. See "Conditional Tool Invocation" below   │ │
-│   │   for explicit criteria. Tool warnings propagate to Phase 4.      │ │
-│   └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Filters missing or incomplete (e.g., no topic + no entity-name) │
-│      • Filter inputs ambiguous (vague keywords, unclear targeting)     │
-│      • Tool-output requires confirming an assumption before proceeding │
-│      • Multi-candidate name resolution surfaced an ambiguity (T4)      │
-│      • Cross-reference query (T3) returned an unexpected size or       │
-│        timed out — confirm narrowing with the user                     │
-│      • Validation: sample_judge returned looks_wrong → Mode B prompt   │
-│        (save anyway / refine / cancel)                                 │
-│      • Validation: 1 retry exhausted on empty/too_broad → alternatives │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  validated schema
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3 — Columns Phase                                                 │
-│   Input:    validated schema, ReportType                                │
-│   Output:   { columns, dataset_structure, pending_refinement_sugg. }    │
-│   Loads:    tools/column_builder.md (always — picks the columns)        │
-│             references/columns_<type>.md (catalog)                      │
-│             references/sortable_columns.json                            │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Select relevant columns based on ReportType + filters + intent   │
-│     • Ensure selected columns are valid for the chosen ReportType      │
-│     • Ensure compatibility between selected columns                    │
-│     • Prepare dataset structure aligned with the selected columns      │
-│     • Run validation:                                                  │
-│         – Schema compliance (all columns exist for ReportType)         │
-│         – Data consistency (column types align with sort + filters)    │
-│         – Pagination defaults applied per ReportType                   │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Column selection requires user confirmation (e.g., template     │
-│        reference + extra columns user enumerated explicitly)           │
-│      • Selected columns incompatible with each other or with filters   │
-│      • No columns provided AND no clear intent → suggest defaults      │
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  + columns
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ PHASE 4 — Widget Phase (FINAL)                                          │
-│   Input:    validated schema, columns, ReportType                       │
-│   Output:   FINAL { campaign_config_json, takeaways }                   │
-│   Loads:    tools/widget_builder.md (always — picks the widgets)       │
-│             references/<intel|spons>_widget_schema.json (catalog +     │
-│                  axis branching + intent overrides; for widget_builder) │
-│             references/<intel|spons>_filterset_schema.json (final      │
-│                  JSON-shape validation source of truth)                 │
-│                                                                          │
-│   Responsibilities:                                                     │
-│     • Define aggregations (sums, averages, counts, breakdowns)          │
-│     • Configure widgets aligned to ReportType + filters + columns      │
-│     • Type-3: subscriber/views aggregators                             │
-│     • Type-8: count_sponsorships, sum_price (axis branches on          │
-│       publish_status — send_date for proposals, purchase_date for sold)│
-│     • histogram_bucket_size set per date range                         │
-│     • Generate report_title + report_description from final config     │
-│       (must happen BEFORE validation — both fields are mandatory       │
-│        on save and the validation step below checks for them)          │
-│     • PERFORM FINAL JSON-SHAPE VALIDATION of the campaign config:      │
-│         – All Phase 2 + Phase 3 + Phase 4 outputs compose validly      │
-│         – API-contract pre-check (type=2 DYNAMIC, valid report_type,   │
-│           non-empty columns, sort references an emitted column,        │
-│           report_title ≤60 chars non-empty, report_description         │
-│           1–3 sentences non-empty — both mandatory on save; CLI        │
-│           rejects with HTTP 400 if either is missing)                  │
-│     • Compose key takeaway insights                                    │
-│                                                                          │
-│   ↘ FOLLOW-UP TRIGGERS:                                                 │
-│      • Widget or aggregation preferences need user confirmation        │
-│      • Desired breakdowns/groupings ambiguous                          │
-│      • No aggregation requested → suggest defaults per ReportType      │
-│      • Final validation surfaced issues that need user resolution      │
-└─────────────────────────────────────────────────────────────────────────┘
+USER_QUERY → Phase 1 → Phase 2 → Phase 3 → Phase 4 → deliverable
+              (type)   (schema   (columns)  (widgets + final
+                       + valid.)             JSON validation)
 ```
 
-There is no fifth phase. Phase 4's output IS the deliverable. The skill itself never writes to the database directly — reads use raw `tl db es` (intelligence reports — types 1/2/3) or raw `tl db pg` (sponsorship reports — type 8); writes go through `tl reports create --config-file <path> --yes`, which posts to the report-creation API.
+### Phase 1 — Report Selection
+- **In/Out**: `USER_QUERY` → `ReportType ∈ {1 CONTENT | 2 BRANDS | 3 CHANNELS | 8 SPONSORSHIPS}`
+- **Tools**: none (heuristic over USER_QUERY)
+- **Routing**: see "Phase 1 — Report Type Selection (detail)" + golden examples (G07, G06)
+- **Follow-up**: ambiguous / invalid input → ask user
+
+### Phase 2 — Schema Phase + Validation
+- **In/Out**: `(USER_QUERY, ReportType)` → `{filterset, filters_json, cross_references, _routing_metadata, _validation}`
+- **Loads**: `references/<intel|sponsorship>_filterset_schema.json`; `references/report_glossary.md` on-demand; `tools/sample_judge.md` for validation
+- **Responsibilities**: compose FilterSet (filterset + filters_json + cross_refs), apply ReportType defaults (`days_ago`, `channel_formats`, `sort`), then VALIDATE against live data: `db_count` → threshold classify → `db_sample` (LIMIT 10) → `sample_judge` → decide `proceed | retry | alternatives | fail`. **Retry cap: 1** (feedback to T1/T2 on empty/too_broad).
+- **Conditional Tool Invocation** (Phase 2 only — tools are NOT phases):
+  - **T1** `tools/topic_matcher.md` — taxonomy match
+  - **T2** `tools/keyword_research.md` — off-taxonomy keyword set
+  - **T3** `tools/database_query.md` — cross-reference query
+  - **T4** `tools/name_resolver.md` — brand/channel name → ID
+  - **T5** `tools/similar_channels.md` — look-alike channels
+  - `sample_judge` `tools/sample_judge.md` — validation sub-step
+- **Follow-up triggers**: filters missing/incomplete, filter inputs ambiguous, tool-output needs confirming, T4 multi-candidate ambiguity, T3 unexpected size / timeout, `sample_judge` `looks_wrong` → Mode B (save anyway / refine / cancel), 1 retry exhausted on empty/too_broad → alternatives
+
+### Phase 3 — Columns Phase
+- **In/Out**: `(validated schema, ReportType)` → `{columns, dataset_structure, pending_refinement_suggestions}`
+- **Loads**: `tools/column_builder.md` (always); `references/columns_<type>.md`; `references/sortable_columns.json`
+- **Responsibilities**: pick columns by `ReportType + filters + intent`; validate (schema compliance, type alignment with sort+filters, pagination defaults applied)
+- **Follow-up triggers**: column selection needs confirmation (template + user-enumerated extras); incompatible columns; no columns + no clear intent → suggest defaults
+
+### Phase 4 — Widget Phase (FINAL)
+- **In/Out**: `(validated schema, columns, ReportType)` → FINAL `{campaign_config_json, takeaways}`
+- **Loads**: `tools/widget_builder.md` (always); `references/<intel|spons>_widget_schema.json`; `references/<intel|spons>_filterset_schema.json` for final JSON validation
+- **Responsibilities**: define aggregations (sums/averages/counts/breakdowns); pick widgets per `ReportType + filters + columns`; set `histogram_bucket_size` per date range; **generate `report_title` + `report_description` BEFORE final validation** (both mandatory on save; CLI 400s if missing); then run **FINAL JSON-shape validation** (all phase outputs compose; API-contract: `type=2` DYNAMIC, valid report_type, non-empty columns, sort references an emitted column, title ≤60 chars non-empty, description 1–3 sentences non-empty); compose takeaways.
+- **Type-3** aggregators: subscriber/views.
+- **Type-8** aggregators: `count_sponsorships`, `sum_price` with axis branching on `publish_status` (`send_date` for proposals, `purchase_date` for sold).
+- **Follow-up triggers**: widget/aggregation preferences need confirmation; breakdowns ambiguous; no aggregation requested → suggest defaults; final validation surfaced issues.
+
+**There is no fifth phase.** Phase 4's output IS the deliverable. The skill never writes to the database directly — reads via `tl db es` (types 1/2/3) or `tl db pg` (type 8); writes via `tl reports create --config-file <path> --yes`.
 
 **The deliverable can land in the chat in two shapes — pick the right one based on the user's intent:**
 
@@ -565,104 +418,78 @@ Phase 1 emits `{ report_type: <int>, clarifying_questions: [...] | [] }`. Phase 
 
 ## Conditional Tool Invocation
 
-Tools are invoked **from inside Phase 2 to figure out what the filter should be** — not as reactions to an existing filter. The user's natural-language request rarely names every filter field directly; tools resolve the gaps:
-- The user said "gaming channels" — `topic_matcher` figures out which topic ID(s) and curated keywords expand from that.
-- The user said "channels we've already proposed to Logitech" — `database_query` figures out which channel IDs the cross-reference condition resolves to.
-- The user said "MrBeast and PewDiePie" — `name_resolver` figures out the corresponding `channels` IDs.
-- The user said "no strong topic match" — `keyword_research` figures out a keyword candidate set from scratch.
+Tools fire from inside Phase 2 to resolve filter gaps the user's NL didn't name directly:
+- *"gaming channels"* → `topic_matcher` resolves topic IDs + curated keywords
+- *"channels we've proposed to Logitech"* → `database_query` resolves cross-reference IDs
+- *"MrBeast and PewDiePie"* → `name_resolver` resolves channel IDs
+- *"no strong topic match"* → `keyword_research` builds a keyword candidate set from scratch
 
-Each tool fires only when its criteria are explicitly met (no automatic / speculative invocation). Each may emit `warnings: [...]` that propagate through `_routing_metadata` to Phase 4's takeaways. Tools never reshape filters that have already been composed; they inform composition before validation.
+Each tool fires only on explicit criteria. May emit `warnings: [...]` propagating to Phase 4 takeaways. Tools inform composition; they don't reshape filters already composed.
 
 ### T1 — `tools/topic_matcher.md`
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic concept that could plausibly map to a curated topic in `thoughtleaders_topics`.
-**Skipped when**: `ReportType == 8` (sponsorships don't use topic matching at the SQL level) OR USER_QUERY is purely an entity-name lookup ("emails for these channels").
-**How to fetch the live topics**: use the canonical fetch SQL documented at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE` clause; table has <20 rows so client-side filtering after the full fetch is free.
+- **Fires when**: `ReportType ∈ {1, 2, 3}` AND USER_QUERY mentions a topic that could map to `thoughtleaders_topics`.
+- **Skipped when**: `ReportType == 8` OR USER_QUERY is purely entity-name lookup.
+- **Fetch**: canonical SQL at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE`. Behavior rules: no name-pattern WHERE clauses, no `information_schema` inspection, **empty fetch ≠ off-taxonomy** (data-plane failure — surface, don't fall through). Off-taxonomy = matcher emits `summary.no_match: true`.
+- **Output**: per-topic verdicts (strong/weak/none) + summary. Strong match → topic's `keywords[]` drives FilterSet `keywords`; can also emit `topics: [<id>]` directly.
 
-**Agent-behaviour rules** (encoded in [`tools/topic_matcher.md`](tools/topic_matcher.md); regression markers catalogued in the schema reference's "Cited regression markers" list):
+**Narrow-first FilterSet assembly** (mandatory — applies to both topic-strong and keyword_research paths). Assemble with narrowest viable shape, validate, expand only if below narrow threshold. Two levers, ranked by impact:
 
-- Don't push name-pattern `WHERE` clauses into the fetch query — agents have burnt credits + round-trips on this in multiple real runs.
-- Don't run `information_schema.columns` to inspect the table.
-- **Empty fetch ≠ off-taxonomy.** A zero-row result from the canonical (no-`WHERE`) fetch is a data-plane failure — surface it rather than silently falling through to T2. Off-taxonomy is when the fetch returns rows but the matcher emits `summary.no_match: true`.
-**Output**: per-topic verdicts (strong/weak/none) + summary. If `summary.strong_matches` non-empty, the topic's curated `keywords[]` array drives the FilterSet's `keywords` field (with per-position `content_fields` set via `keyword_content_fields_map` when a keyword targets a non-default match surface). Phase 2 may also emit the matched topic IDs directly via the FilterSet's `topics` field — both paths are valid; pick by intent.
+**Lever 1 (HIGHEST impact) — Field selection (Type 3 only)**
 
-**Narrow-first FilterSet assembly (mandatory — applies to topic-strong + keyword_research paths both)**: Phase 2c MUST assemble the FilterSet with the **narrowest viable shape first**, then validate. Expand only if the count is below the type's narrow threshold. The two narrowing levers, **ranked by impact on noisy-niche / multilingual runs**:
+Initial `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Schema enum values from `intelligence_filterset_schema.json` — FilterSet rejects unknown values.)
 
-**Lever 1 (HIGHEST impact) — Field selection (Type 3 / channel discovery)**
-
-The initial FilterSet's `content_fields` for Type 3 MUST be `["channel.channel_name", "channel_description"]` ONLY. Do NOT include `channel_description_ai` or `channel_topic_description` on the first cycle. (Use the schema enum values verbatim — these are the platform-recognised content-field names from `intelligence_filterset_schema.json`. The FilterSet rejects unknown values.)
-
-The mechanism: the two AI-summarised content fields (`channel_description_ai`, `channel_topic_description`) catalogue **every topic a channel has ever touched** — including incidental mentions, format crossovers, and adjacent-niche tags. A channel whose primary niche is X but that ran one video about Y will still match queries against `channel_topic_description` for Y. For channel-discovery intent, that's pure noise: you wanted channels *about* Y, not channels that *once mentioned* Y. The channel's own `channel.channel_name` + `channel_description` answer the channel-discovery question (*"is this channel ABOUT the niche?"*); the AI-summarised fields answer a strictly broader question (*"has this channel ever mentioned the niche?"*) that surfaces too many false positives at discovery time.
-
-Mechanism implication — **once `content_fields` is right, even a broad keyword set converges; even a tight keyword set produces noisy results with the AI-summarised fields included.** Field selection is the bigger dial; keyword pruning is the fine-tune. Restricting fields first reaches a clean count in one cycle; pruning keywords without addressing the AI-fields noise source typically takes 2–3 narrowing cycles.
-
-*Regression-marker anchor — multilingual niche-language preview (LATAM cooking, several thousand candidates)*: the cycle that finally converged kept the same keyword set as the previous noisy cycle but reduced `content_fields` from 4 fields (incl. the two AI-summarised ones) to 2 (`channel.channel_name` + `channel_description` only). Result went from ~4,000 noisy → ~1,350 signal-rich (80% on-target) in a single pass — bigger gain than the prior keyword-pruning cycles delivered combined. The principle is general (applies to fitness/wellness, beauty, aviation, any niche-discovery preview where channels cross over into adjacent topics); LATAM cooking is the run that calibrated it.
-
-Expand to AI fields only if `db_count` is below the narrow threshold (Type 3: < 50 channels) — that's the expansion path that re-opens the broader recall, not the default starting shape.
+The AI-summarised fields catalogue every topic a channel has ever touched — they answer *"has this channel ever mentioned the niche"* (too broad for discovery) rather than *"is this channel ABOUT the niche"* (what `channel_name` + `channel_description` answer). Once `content_fields` is right, even broad keywords converge; with AI fields included, even tight keywords stay noisy. Field selection is the bigger dial; keyword pruning is the fine-tune.
 
 **Lever 2 — Keyword selection**
 
-For topic-strong matches: include topic.keywords[] entries that fit the user's language scope. Concretely, for a multilingual prompt (LATAM, EU, Asia-Pacific, etc.) include **5–8 native-language head terms** — NOT just 2–3 English head terms (which would lose recall in non-English markets).
+Topic-strong: include `topic.keywords[]` entries fitting user's language scope. Multilingual prompts (LATAM/EU/APAC) need 5–8 native-language head terms — not just 2–3 English. Drop generic-overlap terms (single-word generics a lifestyle/family/entertainment channel might use in passing). Keep niche-specific (multi-word phrases or native-language vocab lifestyle channels wouldn't casually use).
 
-Drop **generic-overlap terms** — head terms that match the niche literally but also surface high volumes of adjacent-niche channels. Heuristic: any single-word generic that a lifestyle / family / entertainment channel might use about the niche in passing is a generic-overlap term. Keep the niche-specific terms — multi-word phrases or native-language vocabulary that lifestyle channels wouldn't casually use.
+Keyword_research outputs: include `core_head` (2–4 terms) + `sub_segment` (3–6 terms) = upper two tiers, ~5–10 total. `long_tail` held back as expansion fuel.
 
-*Concrete example from the LATAM cooking calibration run*: in `topic.keywords` for the Cooking topic, the head terms include both niche-specific Spanish/Portuguese phrases (`"recetas"`, `"cocina"`, `"receitas"`, `"culinária"`, `"gastronomia"`) and generic-overlap terms (`"food"`, `"chef"`, `"comida"`). The generic-overlap terms each matched several hundred extra lifestyle/family channels that mention food in passing; dropping them tightened the result from ~5,700 channels at 60% signal to ~4,050 at higher signal-density without sacrificing genuine cooking creators. Same pattern applies in other niches — fitness ("body", "training" are generic; "pilates", "calisthenics" are niche-specific); finance ("money", "rich" generic; "ETF", "options", "yield farming" niche-specific); etc.
+**Expansion trigger — Type 3 only, ONE cycle max**
 
-For `keyword_research` outputs: include the `core_head` tier (2–4 terms) **plus** the `sub_segment` tier (3–6 terms) — i.e. the upper two tiers, ~5–10 terms total. The `long_tail` tier is held back as expansion fuel.
+If initial Type 3 `db_count` is `narrow` / `very_narrow` (≤ 50 channels per Step 2.V3): one expansion step — add `channel_description_ai` + `channel_topic_description` to `content_fields`. Then:
+- Post-expansion `normal` / `broad` → proceed to sample
+- Post-expansion still `narrow` / `very_narrow` OR `empty` / `too_broad` → `decision: "alternatives"`, surface to user. No second skill-side cycle.
 
-**Expansion trigger — Type 3 (CHANNELS) only** (strictly one validation cycle, no second attempt): if the initial Type 3 FilterSet's `db_count` is `narrow` or `very_narrow` per the Step 2.V3 threshold table (`db_count` ≤ 50 channels), do **one** expansion step — add `channel_description_ai` and `channel_topic_description` to `content_fields` (the schema enum values). This opens recall to the AI-summarised surface. After this single expansion cycle, if the count is still narrow OR if it overshoots, do NOT compose another FilterSet — emit `decision: "alternatives"` and surface to the user with the count + the failing shape. Further widening (keyword changes, threshold relaxation) is the user's call via the alternatives prompt, not skill-side iteration.
-
-Why one and not two: field-set expansion is the high-leverage lever (re-opens AI-summarised recall); a follow-up keyword-set expansion adds 30–90s of LLM + ES round-trip for marginal extra recall, contradicting the speed-up goal. If field-expansion alone doesn't reach the narrow threshold, the underlying issue is data sparsity in this niche — a second skill-side cycle won't fix that; user judgment will.
-
-**For Type 1 (CONTENT) and Type 2 (BRANDS), this expansion rule does NOT apply.** The mechanism above is Type 3-specific because the lever it pulls (the AI-summarised channel-level fields `channel_description_ai` / `channel_topic_description`) only exists in Type 3's default `content_fields`. Types 1 and 2 default to video-level fields (`content`, `title`, `transcript` per the schema's `_tl_default_by_report_type`) which have no AI-summary surface to expand into. When a Type 1 / Type 2 FilterSet hits `narrow` / `very_narrow` on the same Step 2.V3 thresholds, **route directly to `decision: "alternatives"`** — there is no skill-side expansion to try first. The user's refinement options (via the alternatives prompt) are the only widening path.
-
-**Why field-selection-first matters more than keyword-count-first**: the historical broad-first pattern fails specifically because cycles 1 and 2 typically tighten keywords without addressing the AI-fields noise source — only when fields finally get tightened (often cycle 3 or later) does the result converge. Doing fields first (lever 1) reaches the converged shape immediately; the keyword-count axis (lever 2) is a second-order adjustment that fine-tunes within an already-clean field set. The calibration run that proved this in production (LATAM cooking, ~3 minutes wasted in cycles 1–2) is documented above; the principle applies to any niche-discovery preview where AI-summarized fields cross over into adjacent topics.
+**Type 1 / Type 2**: expansion rule does NOT apply (no AI-summary content fields to expand into — types 1/2 default to video-level `content`/`title`/`transcript`). Narrow / very_narrow → directly `decision: "alternatives"`.
 
 ### T2 — `tools/keyword_research.md`
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor is present in USER_QUERY (i.e., the user did not name specific channels or brands, and did not use look-alike phrasing like "similar to X").
-**Skipped when**: any of the above conditions fail. **Crucially, skipped when the user enumerates specific channels or brands** — those provide the filter anchor; keyword research is wasted work.
-**Output**: validated `KeywordSet` (head/sub_segment/long_tail + content_fields + recommended_operator + per-keyword `db_count`).
+- **Fires**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor in USER_QUERY.
+- **Skipped**: any condition above fails. Especially when user enumerates specific channels/brands (those are the anchor; keyword research is wasted).
+- **Output**: validated `KeywordSet` (head/sub_segment/long_tail + content_fields + recommended_operator + per-keyword `db_count`).
 
-### T3 — `tools/database_query.md` (cross-reference query)
-**Fires when**: the user's request includes a **cross-reference** condition — a sponsorship/proposal/pipeline history filter that gates the main report's channel set. Examples: "NOT proposed to Brand X" → `cross_references` entry; "channels from our 2025 gaming pipeline with >$5K price" → `multi_step_query`.
-**Skipped when**: the main report is type 2 (BRANDS) or type 8 (SPONSORSHIPS) — `cross_references` only applies to types 1 and 3. Also skipped when the condition is expressible as a typed FilterSet field (`msn_channels_only`, `tl_sponsorships_only`) or is a name lookup (T4).
-**Behavior**: mirrors v1's existing cross_references catalog (`exclude_proposed_to_brand`, `include_proposed_to_brand`, `include_sponsored_by_mbn`) and `multi_step_query` mechanism. The only thing v2 changed is **extracting this logic to a dedicated tool file**; the catalog, defaults, and status IDs are unchanged.
-**Output**: a `cross_references_entry` to append at the top level of the create_report config, OR a full `multi_step_query` payload that wraps the create_report. Caller composes into the final response.
-**Hard rule**: sponsorship-side `multi_step_query` source queries default to the last 12 months when the user's framing is "currently / active" without explicit dates (v1 line 112).
+### T3 — `tools/database_query.md` (cross-reference)
+- **Fires**: USER_QUERY has a cross-reference condition (sponsorship/proposal/pipeline history gating the main channel set). E.g. *"NOT proposed to Brand X"* → `cross_references`; *"channels from 2025 gaming pipeline with >$5K price"* → `multi_step_query`.
+- **Skipped**: report type 2 / 8 (cross_references applies to 1 + 3 only); condition expressible as typed FilterSet field (`msn_channels_only`, `tl_sponsorships_only`); name lookup (use T4).
+- **Catalog**: `exclude_proposed_to_brand`, `include_proposed_to_brand`, `include_sponsored_by_mbn` + `multi_step_query` (defaults, status IDs unchanged from v1).
+- **Output**: `cross_references_entry` (appends to create_report config) OR full `multi_step_query` payload.
+- **Hard rule**: sponsorship-side `multi_step_query` source queries default to last 12 months for "currently / active" framing without explicit dates.
 
 ### T4 — `tools/name_resolver.md`
-**Fires when**: USER_QUERY enumerates specific channel or brand names that need to be resolved to IDs.
-**Skipped when**: no entity names mentioned.
-**Behavior**: progressive matching — exact → ILIKE substring → emoji-stripped → fuzzy. Surfaces match-quality and ambiguity (>1 active candidate) explicitly.
-**Output**: `{ name → entity_id }` mapping per entity type, plus an `ambiguities: [...]` list when user disambiguation is required (FOLLOW-UP trigger).
+- **Fires**: USER_QUERY enumerates specific channel or brand names.
+- **Skipped**: no entity names.
+- **Behavior**: progressive matching (exact → ILIKE substring → emoji-stripped → fuzzy). Surfaces match-quality + ambiguity (>1 active candidate).
+- **Output**: `{ name → entity_id }` + `ambiguities: [...]` for follow-up.
 
 ### T5 — `tools/similar_channels.md`
-**Fires when**: USER_QUERY contains "like X" / "similar to X" / "creators inspired by X" / "channels in the style of X" patterns AND the seed channel(s) resolve via T4.
-**Skipped when**: no similarity phrasing, or the report type is 8.
-**Behavior**: simple wrapper. Resolves seed names via T4, then emits `filters_json: { similar_to_channels: [<canonical names>] }` for the platform's vector-similarity engine to expand at execution time.
-**Output**: `{ filterset_patch: { filters_json: { similar_to_channels: [...] } }, anti_overlap: { drop_if_present: [...] } }`. Caller merges the patch and drops any overlapping keyword/topic fields.
+- **Fires**: USER_QUERY contains "like X" / "similar to X" / "creators inspired by X" AND seeds resolve via T4.
+- **Skipped**: no similarity phrasing, or report type 8.
+- **Output**: `{ filterset_patch: { filters_json: { similar_to_channels: [...] } }, anti_overlap: { drop_if_present: [...] } }`. Caller merges + drops overlapping keyword/topic fields.
 
-### Phase 2 validation sub-tool
+### Phase 2 validation sub-tool — `tools/sample_judge.md`
 
-**`tools/sample_judge.md`** — fires inside Phase 2's validation step (Step 2.V4).
-**Fires when**: `ReportType ∈ {1, 2, 3}` AND the **post-V3-routing** `db_count` classification is `normal` (51–10000) or `broad` (10001–50000). "Post-V3-routing" means: the count actually routed to Step 2.V4 per the Step 2.V3 threshold table above — that is, either the **initial** count landed in `normal` / `broad`, OR (Type 3 only) the **post-Lever-1-expansion** count landed in `normal` / `broad`.
-**Skipped when** any of:
-- Type 8 — deal sample shape ≠ channel sample shape; sample_judge is not configured for sponsorship rows.
-- Initial `db_count` is `empty` / `too_broad` — V3 routes to the Step 2.V5 retry path, not to sampling.
-- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType ∈ {1, 2}` — V3 routes directly to `decision: "alternatives"`; no sample inspection because there's no Lever-1 expansion path for Types 1/2.
-- Initial `db_count` is `very_narrow` / `narrow` AND `ReportType == 3` — V3 routes to Lever 1 expansion first (one cycle, see Lever 1 above). If the **post-expansion** count is still `very_narrow` / `narrow` — or if it's `empty` / `too_broad` — it routes to `decision: "alternatives"` per the post-expansion table; sample_judge does NOT fire. (Post-expansion empty/too_broad does NOT re-enter V5 retry — the one-cycle cap is total, not per-direction.) sample_judge fires on Type 3 narrow-initial cases ONLY when the post-expansion count reclassifies to `normal` or `broad`.
-**Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` triggers a Phase 2 follow-up to the user with structured options (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires once Phase 2 emits a validated FilterSet.
+- **Fires**: `ReportType ∈ {1, 2, 3}` AND **post-V3-routing** `db_count` is `normal` (51–10000) or `broad` (10001–50000). Type 3 narrow-initial cases ONLY when post-expansion reclassifies to normal/broad.
+- **Skipped**: Type 8 (deal sample shape ≠ channel sample shape); initial `empty`/`too_broad` (V3 routes to V5 retry); Types 1/2 narrow/very_narrow (no Lever-1 expansion path → direct alternatives); Type 3 narrow that stays narrow post-expansion (alternatives, not re-sample). One-cycle cap is total, not per-direction.
+- **Output**: `{ judgment: matches_intent | looks_wrong | uncertain, reasoning, noise_signals, matching_signals }`. `looks_wrong` → Phase 2 follow-up (save anyway / refine / cancel). `widget_builder` (Phase 4) only fires after Phase 2 emits a validated FilterSet.
 
-### Phase 3 sub-tool
+### Phase 3 sub-tool — `tools/column_builder.md`
+Always fires in Phase 3. Reads `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA` + `references/columns_<type>.md` + `references/sortable_columns.json`. Picks 5–10 columns (up to 13 with intent), validates sort, queues custom-formula refinement suggestions.
+**Output**: `{ columns, dataset_structure, pending_refinement_suggestions, _column_metadata }`.
 
-**`tools/column_builder.md`** — always fires in Phase 3.
-**Behavior**: same builder-prompt pattern as `widget_builder`. Reads `REPORT_TYPE`, `FILTERSET`, `ROUTING_METADATA`, plus `references/columns_<type>.md` and `references/sortable_columns.json`. Picks 5–10 standard columns (up to 13 with intent), validates sort, queues custom-formula refinement suggestions.
-**Output**: `{ columns: {...}, dataset_structure: {...}, pending_refinement_suggestions: [...], _column_metadata: {...} }`.
-
-### Phase 4 sub-tool
-
-**`tools/widget_builder.md`** — always fires in Phase 4. Phase 2's validation already cleared the FilterSet, so widget_builder runs unconditionally.
-**Behavior**: mirrors v1's widget-builder approach. Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA`, plus the matching widget schema (`intelligence_widget_schema.json` for types 1/2/3, `sponsorship_widget_schema.json` for type 8). Picks 4–6 widgets that add value to the user's prompt; applies intent-driven swaps per the schema's `_tl_intent_overrides`; handles type-8 axis branching per `_tl_axis_branching`; sets `histogram_bucket_size`.
-**Output**: `{ widgets: [...], histogram_bucket_size: "week"|"month"|"year", _widget_metadata: {...} }`.
+### Phase 4 sub-tool — `tools/widget_builder.md`
+Always fires in Phase 4 (Phase 2 validation already cleared the FilterSet). Reads `REPORT_TYPE`, `FILTERSET`, `COLUMNS`, `ROUTING_METADATA` + matching widget schema (intel for 1/2/3, sponsorship for 8). Picks 4–6 widgets; applies `_tl_intent_overrides`; handles type-8 axis branching per `_tl_axis_branching`; sets `histogram_bucket_size`.
+**Output**: `{ widgets, histogram_bucket_size, _widget_metadata }`.
 
 ## Sort field — which phase owns it
 
@@ -789,109 +616,22 @@ Then enriches each sample row: `{ id: <article id>, title: <title>, channel_name
 
 ##### Type 2 (BRANDS) — aggregate over articles, group by brand
 
-Type 2 reports are brand-aggregated, so the ES query is an aggregation, not a flat search.
+Brand-aggregated, so the ES query is an aggregation. **`tl db es` accepts at most one aggregation per request (top-level + sub-agg counts as 2 and is rejected per `skills/tl/references/elasticsearch-schema.md` line 28)** — type-2 validation therefore needs multiple separate ES calls, merged client-side.
 
-**`tl db es` accepts at most one aggregation per request, recursively.** Top-level + sub-agg counts as 2 and is rejected (per `skills/tl/references/elasticsearch-schema.md` line 28). Type-2 validation therefore needs **multiple separate ES calls**, not one nested aggregation. The orchestration runs them in sequence and merges client-side.
+**Call 1 (db_count)** — `cardinality` over `sponsored_brand_mentions` (or `organic_brand_mentions` / `all_brand_mentions` per intent): returns the distinct-brand count in `aggregations.distinct_brands.value`. Filter clause: `doc_type=article` + language + date range + `multi_match` keyword (`type: "phrase"`, fields `[title, summary, content]`).
 
-##### Call 1 — distinct-brand count (`db_count`)
+**Call 2 (db_sample)** — `terms` agg over the same field with `size: 10` and the same filter clause. Each bucket has `key` (brand ID) and `doc_count` (per-brand mentions count). Use `doc_count` directly; do NOT add a `value_count` sub-agg (violates the one-agg limit).
 
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "distinct_brands": { "cardinality": { "field": "sponsored_brand_mentions" } }
-  }
-}
-```
-
-The cardinality aggregation returns the count of distinct sponsored-brand IDs matching the query in `aggregations.distinct_brands.value`. **This is the canonical type-2 `db_count` path**; do NOT use `sum_other_doc_count` from a `terms` agg as a count proxy — it counts documents (mentions) outside the returned buckets, not distinct omitted brands.
-
-##### Call 2 — top brands and per-brand mention counts (`db_sample`)
-
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "by_brand": {
-      "terms": { "field": "sponsored_brand_mentions", "size": 10 }
-    }
-  }
-}
-```
-
-Each `by_brand` bucket has `key` (brand ID) and `doc_count` (mentions count for that brand within the filter set). **The bucket's `doc_count` IS the per-brand mentions count — use it directly; don't add a `value_count` sub-agg (would violate the one-agg limit).**
-
-##### Optional Call 3 — channels-count per brand (one extra call per brand if needed)
-
-If `sample_judge` needs the distinct-channels count per brand for richer judgment, the orchestration can run one additional ES call per top brand (small N, ≤ 10). **Reuse the full Call 2 query body and add the brand-ID filter** — otherwise the count covers all channels mentioning that brand in the date/language scope, ignoring the report's content predicate.
-
-```json
-{
-  "size": 0,
-  "query": {
-    "bool": {
-      "filter": [
-        { "term":  { "doc_type": "article" } },
-        { "terms": { "channel.language": ["en"] } },
-        { "range": { "publication_date": { "gte": "now-180d/d" } } },
-        { "term":  { "sponsored_brand_mentions": "<brand_id>" } }
-      ],
-      "must": [
-        { "multi_match": { "query": "<keyword>", "type": "phrase", "fields": ["title", "summary", "content"] } }
-      ]
-    }
-  },
-  "aggs": {
-    "channels_count": { "cardinality": { "field": "channel.id" } }
-  }
-}
-```
-
-The query body is identical to Call 2 except (1) the `terms` agg over `sponsored_brand_mentions` is replaced by a `term` filter on a single brand ID, and (2) the aggregation is now `cardinality` over `channel.id`. The result lives in `aggregations.channels_count.value`.
-
-**Most type-2 validations skip Call 3** — the bucket `doc_count` from Call 2 is sufficient signal for `sample_judge` to judge whether the brands look on-target for `USER_QUERY`. Run Call 3 only when a per-brand drill-down is part of the user's intent (e.g., the user explicitly asked "which brands are mentioned across the most channels").
-
----
+**Optional Call 3** (per-brand channels count) — only when `sample_judge` needs the distinct-channels drill-down. Reuse Call 2's query body, add a `term` filter on the single brand ID, replace the agg with `cardinality` over `channel.id`. Most type-2 validations skip Call 3.
 
 **Field-source notes** (per `skills/tl/references/elasticsearch-schema.md`):
-- The "sponsored vs organic" distinction is **which keyword array you aggregate over**, not a `brand_mention_type` filter. Use `sponsored_brand_mentions` (sponsored only), `organic_brand_mentions` (organic only), or `all_brand_mentions` (both). There is no `brand_mention_type` field in ES.
-- The aggregation field is the keyword array name (e.g. `sponsored_brand_mentions`), NOT `brands.id`. The bucket keys are the brand IDs.
-- **Brand names are not in ES** — neither `brands.name` nor a top_hits inside the agg will return them. After Call 2 returns the buckets, the orchestration does a PG batch lookup against `thoughtleaders_brand` to resolve names: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
+- "Sponsored vs organic" distinction = which keyword array you aggregate over (`sponsored_brand_mentions` / `organic_brand_mentions` / `all_brand_mentions`). There is NO `brand_mention_type` filter field.
+- Aggregation field is the keyword array name, NOT `brands.id`. Bucket keys ARE the brand IDs.
+- Brand names are not in ES — after Call 2, PG batch lookup: `SELECT id, name FROM thoughtleaders_brand WHERE id = ANY(<bucket_keys>) LIMIT 50 OFFSET 0`.
 
-**Sample-row shaping for `sample_judge`** — orchestration merges Call 2's buckets + PG name lookup into the type-2 contract:
-```
-{ id: bucket.key, brand_name: <from PG lookup>, mentions_count: bucket.doc_count,
-  channels_count: <from Call 3 if run, else null>, last_mention_date: null }
-```
-`last_mention_date` is omitted in the standard path (would require yet another ES call per brand and isn't critical for `sample_judge`'s judgment).
+**Sample-row shape for `sample_judge`**: `{ id: bucket.key, brand_name: <PG lookup>, mentions_count: bucket.doc_count, channels_count: <Call 3 or null>, last_mention_date: null }`. The standard path omits `last_mention_date` (would need another ES call per brand; not critical for judgment).
 
----
-
-The ES `multi_match` with `type: "phrase"` matches the keyword as a contiguous phrase in any of the listed fields (no substring noise — phrase matching respects word boundaries). This is the architectural fix for the G03-class noise (`AI` matching `Tamil`/`captain`).
+**Why `multi_match type: "phrase"`**: contiguous phrase matching respects word boundaries — no substring noise (`AI` matching `Tamil`/`captain`).
 
 #### Sponsorship reports (8) — Postgres query
 
@@ -1177,128 +917,22 @@ In practice Path A only fires for the narrow case "created_at-only AND sort is a
 
 If `sponsorships`, `exclude_sponsorships`, `brands`, `exclude_brands`, `channels`, or `exclude_channels` is set on the FilterSet, the predicate MUST appear in BOTH `db_count` and `db_sample`, and in BOTH Path A and Path B when that path is eligible. Earlier drafts dropped channel filters from the sample query — that's a regression: channel-filtered reports could surface validation samples outside the requested set. Exclude filters are even riskier because the view is multi-row per adlink; apply them at adlink level with `NOT EXISTS`, not as row-local `<>` checks.
 
-##### Worked example A — `days_ago: 365` (the schema's default scope, no publish_status)
+##### Worked-example summary
 
-Input: `filterset = { days_ago: 365, brands: [29332] }`, no other date inputs, no publish_status.
+Three canonical shapes (templates documented above):
+- `days_ago` only — `send_lo` materialized as date literal, `send_hi_next` unbounded
+- `end_date` only — half-open `< next_day` (so `end_date: "2026-02-28"` → `< '2026-03-01'`), never `<= '2026-02-28'` which drops 23h59m
+- Sold-only with `sort: "-purchase_date"` — Path B with `al.purchase_date` projected into inner SELECT; outer ORDER BY references the bare column name with `NULLS LAST`
 
-Materialization: `send_lo` = `'2025-05-05'` (today minus 365 days, computed at query-build time); `send_hi_next` unbounded.
+**Why the inner/outer split**: `DISTINCT ON (adlink_id)` forces `ORDER BY adlink_id, ...` in the same SELECT — a syntactic Postgres requirement. Adding `LIMIT 10` to that returns the 10 smallest adlink IDs, not the 10 most recent. Wrap dedupe in a subquery; apply canonical sort + LIMIT in the outer SELECT.
 
-Resulting `db_count` (only `send_lo` and `brands` predicates emit; publish_status, send_hi_next, channels all omitted):
-```sql
-SELECT COUNT(DISTINCT v.adlink_id)
-FROM v_adspot_brand_profiles v
-JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE 1=1
-  AND al.send_date >= '2025-05-05'
-  AND v.brand_id = ANY(ARRAY[29332])
-LIMIT 1 OFFSET 0
-```
+#### Postgres CTE fallback (smoke-check only — niche path)
 
-##### Worked example B — `end_date: "2026-02-28"` (half-open upper bound)
-
-Input: `filterset = { end_date: "2026-02-28", brands: [29332] }`.
-
-Materialization: `send_lo` unbounded; `send_hi_next` = `'2026-03-01'` (the calendar day AFTER `end_date`).
-
-Resulting `db_count` (note `<` not `<=`):
-```sql
-SELECT COUNT(DISTINCT v.adlink_id)
-FROM v_adspot_brand_profiles v
-JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-WHERE 1=1
-  AND al.send_date < '2026-03-01'
-  AND v.brand_id = ANY(ARRAY[29332])
-LIMIT 1 OFFSET 0
-```
-This includes the entirety of Feb 28 — every timestamp from `'2026-02-28 00:00:00'` through `'2026-02-28 23:59:59.999'` — matching what a user means by "through Feb 28". A `<= '2026-02-28'` predicate would only match timestamps at exactly midnight at the start of Feb 28 (~0% of expected matches).
-
-##### Worked example C — sold-only intent with `sort: "-purchase_date"`
-
-Input: `filterset = { days_ago: 365, brands: [29332], sort: "-purchase_date", filters_json: { publish_status: [3] } }` (intent: won-deals; sort defaults to `-purchase_date`).
-
-Materialization: `send_lo` = `'2025-05-05'`; `send_hi_next` unbounded.
-
-Sort resolution (sort key `purchase_date`, descending direction from the leading `-`):
-- `<inner_sort_expr>` = `al.purchase_date DESC NULLS LAST` (table-qualified; inner ORDER BY)
-- `<outer_sort_expr>` = `purchase_date DESC NULLS LAST` (unqualified; outer ORDER BY references the projected column name, since `al` is out of scope outside the subquery)
-
-Resulting `db_sample` (Path B, sort column added to inner SELECT, NULLS LAST so unsold deals don't crowd out sold ones):
-```sql
-SELECT * FROM (
-  SELECT DISTINCT ON (v.adlink_id)
-         v.adlink_id, v.brand_name, v.channel_name, v.adlink_publish_status,
-         al.purchase_date
-  FROM v_adspot_brand_profiles v
-  JOIN thoughtleaders_adlink al ON al.id = v.adlink_id
-  WHERE 1=1
-    AND v.adlink_publish_status = ANY(ARRAY[3])
-    AND al.send_date >= '2025-05-05'
-    AND v.brand_id = ANY(ARRAY[29332])
-  ORDER BY v.adlink_id, al.purchase_date DESC NULLS LAST
-) deduped
-ORDER BY purchase_date DESC NULLS LAST
-LIMIT 10 OFFSET 0
-```
-The samples surface the brand's most-recently-sold deals, matching what the saved sold-only report will show — `sample_judge` evaluates whether the recent-sold mix looks right for the user's prompt, not whether the most-recently-pitched mix does.
-
-##### Why the inner/outer split
-
-`DISTINCT ON (adlink_id)` in PostgreSQL forces `ORDER BY adlink_id, ...` in the same SELECT — that's a syntactic requirement, not a stylistic choice. Putting `LIMIT 10` on that same query returns the 10 smallest adlink IDs (oldest pipeline entries by surrogate key), not the 10 most recent rows by date. Wrapping the dedupe in a subquery and applying the canonical sort + LIMIT in the outer SELECT is the only way to honor both the dedupe contract AND Phase 2's contract (line ~281: "10 rows, ordered by the canonical sort").
-
-Date filter required (per Phase 2 edge-case rule — type-8 without dates is rejected upfront). No keyword ILIKE pattern; sponsorships filter by relations, not content text.
-
-#### Postgres CTE fallback (smoke-check only)
-
-If ES is unavailable for an intelligence-report validation AND the FilterSet has tight indexed predicates (reach floor + narrow language + small keyword set), the PG smoke-check uses the CTE pattern with **`AS MATERIALIZED`** (this is mandatory — Postgres 12+ inlines CTEs by default, which collapses the pattern back into a flat WHERE that the sandbox planner rejects):
-
-```sql
-WITH filtered AS MATERIALIZED (
-  SELECT id, channel_name, description, reach
-  FROM thoughtleaders_channel
-  WHERE is_active = TRUE
-    AND <indexed-column predicates>
-)
-SELECT COUNT(*) FROM filtered
-WHERE <keyword ILIKE predicate>
-LIMIT 1 OFFSET 0
-```
-
-`MATERIALIZED` forces the CTE to evaluate first as an optimization fence; the outer ILIKE then runs on the small pre-filtered set instead of a flattened plan over the full table.
-
-**Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT.** Postgres can't index-optimize array-element ILIKE — it expands to a sequential scan with N ILIKE comparisons per row. Use explicit `OR`-chains, or better yet skip PG entirely for keyword work (next section).
-
-This pattern works only with substantial pre-filter pruning (≤ a few thousand rows after the indexed predicates). **Don't use the CTE smoke-check as the production validation path** — its limits (timeouts on broad predicates, substring noise from ILIKE, planner rejection on wide keyword sets) are real and surfaced in the e2e findings. ES is the right tool.
+If ES is unavailable AND the FilterSet has tight indexed predicates, fall back to a PG CTE with **`AS MATERIALIZED`** (Postgres 12+ inlines CTEs without it, collapsing the pattern into a flat WHERE the sandbox planner rejects). Do NOT use `ILIKE ANY(ARRAY[...])` in the outer SELECT — sequential scan with N comparisons per row. Use explicit OR chains. **Don't use this as the production path** — ES is the right tool.
 
 #### "Known ID set + keyword filter" pattern
 
-A common case: the FilterSet pins a small ID set in `channels: [...]` (TPP, similar-to-channels, cross-references) AND has keyword filters. When this happens, **don't try to do everything in PG** — the combination of `id IN (long list)` + multi-keyword ILIKE blows past the sandbox cost cap (this regression has been observed in the wild for TPP + niche-keyword queries).
-
-The correct shape is two queries on two engines:
-
-1. **PG** (already done if the IDs came from a previous resolution step): just have the ID list.
-2. **ES** (validation count + sample): use a `terms` filter on `id` to scope to the pinned set, combined with the standard intelligence-report `match_phrase` queries for keywords. ES handles keyword matching with proper indexes; passing the IDs as a filter sidesteps the missing `is_tl_channel` (or whatever scoping field) on the ES side.
-
-```json
-{
-  "query": {
-    "bool": {
-      "filter": [
-        { "terms":  { "id": [549, 1629, 2314, ...] } },
-        { "term":   { "is_active": true } },
-        { "range":  { "reach": { "gte": 100000 } } }
-      ],
-      "should": [
-        { "match_phrase": { "description":            "motorcycle" } },
-        { "match_phrase": { "channel_topic_description": "drone footage" } },
-        ...
-      ],
-      "minimum_should_match": 1
-    }
-  }
-}
-```
-
-This works whether or not ES has a `is_tl_channel`-like field — the resolved IDs are the scoping mechanism. **If you find yourself building a PG query with `id IN (long-list)` AND ILIKE keyword predicates, stop and switch to this pattern instead.**
+When the FilterSet pins a small ID set in `channels: [...]` AND has keyword filters, don't query PG with `id IN (long list)` + multi-keyword ILIKE — sandbox cost cap. Use ES with a `terms` filter on `id` (scoping) + `match_phrase` for keywords (indexed). The resolved IDs are the scoping mechanism; ES doesn't need an `is_tl_channel`-like field.
 
 ### Step 2.V2 — Run the count query (with timeout / fallback handling)
 
@@ -1683,9 +1317,7 @@ Pseudo-shape (not runnable JSON — `<int>`, `|`-unions, and `/* notes */` are p
 17. **Always render a plain-English filter summary in the user-facing reply** — both in save mode and preview mode. The summary is 4–7 short bullets describing **what the report contains**, not how it's stored. Use the "Filter summary pattern" translation table in the user-facing-language section near the top of this file. Mention only the filters that meaningfully shape what the user will see; skip platform defaults (e.g. don't bullet `channel_formats: [4]` when it's the type-3 default). Use the user's own brand and keyword wording verbatim where it fits. Example: *"results will be focused on fintech creators in MSN; only English-speaking channels with strong US audiences will be included; channels already pitched to Webull will be automatically excluded; results will prioritise creators with proven sponsorship history; outreach-ready columns and performance widgets will be added automatically"*. **Don't describe the report as "the config" or "the JSON" or "held in working memory"** — those are internal terms; the user wants to know what the report does.
 18. **Save-mode preflight on the temp file is mandatory.** Per the Save-or-preview policy step 1+2: resolve a portable temp path via `python -c "import tempfile, os; print(...)"` BEFORE writing, then verify with `test -f <path>` AFTER writing. Hardcoding `/tmp/` on Windows fails silently. If the verification fails, surface a clean error explaining what happened (path, why) and offer the user the inline JSON as a fallback. Do not invoke `tl reports create --config-file` if the file isn't confirmed to exist — that just produces a confusing "No such file or directory" error.
 19. **Narrate at phase-outcome level, not tool-call level.** The user doesn't need to see "Ran 19 commands, read 2 files" enumerated, or the raw text of every `tl db pg` query the skill issued during validation. Surface the phase outcomes in plain English: "Looking up StoryBlocks in the brand list… found it (47 deals on file)." not "Ran tl db pg --json 'SELECT id, name FROM thoughtleaders_brand WHERE name ILIKE %StoryBlocks%' which returned: {results: [{id: 868, name: 'StoryBlocks'}], total: 1, ...}". The harness shows tool-call detail in collapsible UI; the skill's narration is the high-level story alongside it.
-20. **Save tail is mandatory in every preview reply.** The previous "skip when the prompt is purely informational" exemption was over-applied (a live FRÉ Skincare run skipped the tail even though the prompt was clearly designing a TL report — specific filters, custom column, brand-exclusion logic; a live aviation/non-MSN run skipped it again, closing only with a refinement offer — *"If you want me to tighten to fixed-wing-only or drop drones, say the word and I'll re-filter."* — which is **not** the same thing). Always close the preview with *"If you want this as a saved TL report, just say save."* The line is one ignorable sentence if the user didn't want a save; if they did, it's the only signal that telling the agent to save is even an option.
-
-    **Refinement offers do NOT substitute for the save tail.** Both can appear in the same closing — refinements first ("Want to tighten to fixed-wing only? Drop drones? Add a CPM column?"), then the save tail on its own line ("If you want this as a saved TL report, just say save."). The save tail is **always last** so it's the line the user sees most recently when they read the reply bottom-up.
+20. **Save tail mandatory in every preview reply.** Always close with *"If you want this as a saved TL report, just say save."* The "skip when purely informational" exemption was over-applied; never skip it. Refinement offers do NOT substitute — both can appear (refinements first, save tail last on its own line — the last line is what the user sees most recently reading bottom-up).
 20a. **Channel/video/brand names in the sample-rows table MUST be hyperlinked to the TL platform page** (not to YouTube). The user is browsing the result *in TL*; the link is the affordance to drill into a row's full TL profile. URL patterns:
 
 | Sample-table column | Link target | Slug source |
@@ -1707,9 +1339,9 @@ If the slug is missing or empty for a row, fall back to the ID-based path the pl
 
 **Sample-row enrichment column names — read from the canonical schema, do NOT improvise.** When the rendered table needs columns beyond what the initial ES sample returned (typically a slug for the hyperlink and a "last published" date), look up the column names in [`tl/references/postgres-schema.md` → `thoughtleaders_channel`](../tl/references/postgres-schema.md#thoughtleaders_channel-youtube-channels) before composing the PG query. Agents have improvised semantically-plausible column names from intuition (date-shape variants, platform-name-prefixed ID forms, bare-noun forms without table prefix, user-facing-term forms), hit a 400 with *"column '\<name\>' does not exist"*, then run an `information_schema.columns` fishing query to recover — a wasted round-trip that the canonical column catalogue eliminates. **If you find yourself about to write a `SELECT ... FROM thoughtleaders_channel WHERE ...` query and you're not sure of a column name, consult the schema reference first** — do not guess and rely on the 400 to correct you, and do not fall back to `information_schema.columns` as the recovery path. See the schema reference's "Hallucination shapes to avoid" subsection for the recurring guess patterns.
 
-21. **No side-channel deliverables.** The skill produces exactly two output shapes: (a) a saved TL Campaign + a campaign URL (save mode), or (b) an in-chat preview with the sample-rows table + takeaways + save tail (preview mode). It does NOT write CSVs, Markdown reports, or any other "data dump" file to disk as a deliverable. A real run for FRÉ Skincare wrote a CSV to `<temp>\fre-skincare-shortlist.csv` and pointed the user at it as the "full list" — that's a fabricated alternative deliverable that bypasses the TL report-creation flow. If the user wants more than the preview shows, the answer is "save it as a campaign and run it" — not "I'll dump CSV". The only filesystem write the skill is allowed to make is the `<system-temp>/tl-report-builder-<slug>.json` transport file used in step 1 of the save mechanics, and even that is a transport (deleted whenever) — never a deliverable.
-22. **Phases 1–4 always run; the skill never short-circuits to a chat-only data answer.** When the skill is invoked, the output is **always** a Campaign (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a verification table, an analyst summary, a list cross-check, or any other "I'll just answer this directly in chat" deliverable is a regression bug. Real example to internalise: a prompt of *"Brands sponsoring Linus Tech Tips in the past 6 months: dbrand, Private Internet Access, Squarespace, Vessi, Secretlab, UGREEN, Odoo, Dell, Razer, Saily"* should route through Phase 1 → Type 2 brands report scoped to channel 1788 + last 180 days → Phases 2/3/4 → preview with the user's seed brands as a starting filter and the takeaways calling out *"your seed list is accurate but incomplete — TL data shows 60 distinct sponsors over 131 videos; top missing are War Thunder (7), Boot.dev (6), DeleteMe (6)…"*. Instead, a recent run produced exactly that analytical content **as a free-floating markdown table in chat** — no FilterSet emitted, no columns picked, no widgets, no save option. The analytical insight is welcome as a takeaway; it is **not** a substitute for the report. If you find yourself replying with a markdown table directly, ask: am I about to ship a Phase-4 preview, or am I bypassing the phases? The answer must always be the former.
-23. **No ad-hoc data-engineering pipelines.** The skill does NOT write Python consolidation scripts, multi-stage CSV merge tools, dedupe scripts, false-positive filters as standalone files, or any other custom data pipeline as part of producing the deliverable. The data plane is fixed: `tl db pg` (PG), `tl db es` (ES), `tl db fb` (Firebolt). Phase 2 issues queries against these directly to compose a FilterSet and validate it; that's the entire data-side surface. A real aviation/non-MSN run produced this anti-pattern: the agent issued five separate PG queries each writing a CSV (`/tmp/aviation_by_name.csv`, `/tmp/aviation_desc.csv`, `/tmp/aviation_desc2.csv`, `/tmp/aviation_desc3.csv`, `/tmp/aviation_pilot_desc.csv`), wrote a `consolidate_aviation.py` script to merge + dedupe + filter false positives, hit a Windows-vs-Linux `/tmp/` path mismatch, debugged it with `cygpath`, eventually rewrote the script to use `%LOCALAPPDATA%\Temp`, then produced `aviation_consolidated.csv` as the "full list". **None of this is the skill's job.** The right shape: one ES query with `terms` / `bool.should` filters covering the niche keywords + the `creator_countries` filter + `msn_channels_only: false` + `is_active: true` → get count + sample → emit the FilterSet → preview. If the skill's narration is starting to read like a data engineer's bash session ("Run consolidation script", "Try /tmp path resolution", "Resolve /tmp via cygpath", "Find where /tmp files actually are"), stop — the skill has gone off the rails. Restart from Phase 1 with a single composed query.
+21. **No side-channel deliverables.** Two output shapes only: (a) saved TL report + report URL (save mode), (b) in-chat preview with sample-rows table + takeaways + save tail (preview mode). NO CSVs, NO Markdown report files, NO data dumps. If the user wants more than the preview shows, the answer is *"save it as a TL report and run it"* (NEVER "save it as a campaign" — rule 6). Only filesystem write allowed is the portable-temp transport file in save mode — transport, never deliverable.
+22. **Phases 1–4 always run; never short-circuit to chat-only.** Output is ALWAYS a saved TL report (save mode) or a Phase-4 preview (preview mode). Bypassing Phase 1–4 to produce a free-floating markdown table / verification list / analyst summary is a regression bug. The analytical insight is welcome as a takeaway; it's NOT a substitute for the report. If you find yourself about to reply with a markdown table directly, ask: am I shipping a Phase-4 preview or bypassing the phases? Answer must always be the former.
+23. **No ad-hoc data-engineering pipelines.** No Python consolidation scripts, no multi-stage CSV merge tools, no dedupe scripts, no false-positive filters as standalone files. The data plane is fixed: `tl db pg`, `tl db es`, `tl db fb`. Phase 2 issues queries directly to compose + validate the FilterSet — that's the entire data-side surface. If narration starts reading like a data engineer's bash session ("Run consolidation script", "Resolve /tmp via cygpath", "Find where /tmp files actually are"), STOP — restart from Phase 1 with a single composed query.
 
 ## Follow-Up Interactions
 
