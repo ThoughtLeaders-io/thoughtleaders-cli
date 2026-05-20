@@ -2,6 +2,36 @@
 
 ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligence from the terminal.
 
+## What you can do with it
+
+`tl` is a thin client over the ThoughtLeaders sponsorship platform. It exposes the same data the internal web app uses — deals, brands, channels, transcripts, view-curves, recommender — to a terminal, and is designed to be driven by AI agents (Claude Code, OpenCode, Gemini, Codex) as well as humans. Typical things teams build on top of it:
+
+### For account managers and sales
+
+- **Pipeline reporting on the fly.** *"How many deals did we close in Q1?"*, *"What's my weighted pipeline by sales owner?"*, *"Which proposals are stuck in `pending` for more than 14 days?"* — one raw SQL or one structured command, instead of waiting on a dashboard.
+- **Brand intelligence in seconds.** *"What channels does Nike sponsor?"*, *"Which brands sponsor `MrBeast`?"*, *"What's Holafly's sponsorship history through us vs. through everyone?"* — answers are one `tl brands history` or one `tl db es` call away.
+- **Vetting candidates before a pitch.** Look up a channel by ID, name, YouTube URL, or `@handle`; pull its adspots, audience demographics, evergreenness score, and detected sponsor history before drafting the IO.
+- **Pre-flight before booking.** Confirm MSN/TPP membership, integration availability, and persona/plan eligibility for a brand profile with one SQL join.
+
+### For media buyers and brand-side analysts
+
+- **Find channels that look like a known winner.** `tl channels similar` runs vector similarity over a ~200-dim audience/category profile and ranks candidates by score; `tl channels look-alike` is the same command under the AM-facing name.
+- **Discover topical creators without guessing category codes.** `tl recommender top-channels "<tag>"` ranks channels by how strongly they load on a topic, demographic, or format tag — `Cooking`, `Age 18-24`, `USA share`, etc. Browse valid tag names with `tl recommender tags`.
+- **Surface the right channels for a brand.** `tl recommender channels-for-brand Nike` runs the brand's ideal-audience vector against the channel index and returns the closest unproposed channels.
+- **Surface the right brands for a channel.** `tl recommender brands-for-channel <ref>` runs the inverse search — brands most likely to sponsor a given channel, ranked.
+
+### For data, finance, and reporting
+
+- **Ad-hoc SQL against the production schema.** `tl db pg` accepts any read-only `SELECT` (sanitised, capped at 500 rows per page) with the full set of aggregates, window functions, joins, and JSONB operators. `tl schema pg [<table>]` prints the live column catalogue. `tl db fb` and `tl db es` expose Firebolt (time-series view-curves, subscriber growth) and Elasticsearch (transcripts, brand mentions, current channel/video metrics).
+- **Exports for the spreadsheet on the other side of the conversation.** `--csv` exports stream straight to a file; `--md` produces tables you can paste into Slack or a brief; `--toon` produces a token-efficient encoding for LLM round-trips.
+- **Saved reports as a contract.** `tl reports run <id>` re-runs a campaign config someone set up in the web app, so a report that lives in a Slack thread can be a one-command rerun next week.
+
+### For AI agents
+
+- **Built-in skills install for free.** `tl setup claude` / `opencode` / `gemini` / `codex` drop ready-made skill files into the right agent directories so the agent answers natural-language questions like *"how many deals did we close last quarter?"* by composing the right `tl db pg|fb|es` calls itself.
+- **Discoverable surface.** `tl describe` lists every resource and its credit cost; `tl describe show <resource>` lists fields and filters; `tl <command> --help` is detailed enough that an agent can plan without external documentation.
+- **Predictable output shapes.** Every command's `--json` envelope follows the same `{results, total, limit, offset, usage, _breadcrumbs}` contract, so an agent can pipe one command's IDs into the next without bespoke parsing.
+
 ## Requirements
 
 - Python 3.12+
@@ -35,10 +65,18 @@ pip install thoughtleaders-cli
 
 Then set up:
 ```bash
-tl auth login          # authenticate with ThoughtLeaders
+tl auth login          # authenticate with ThoughtLeaders (OAuth2 browser flow, device code, or API key)
 tl setup claude        # install Claude Code plugin (optional)
 tl setup opencode      # install OpenCode skill (optional)
+tl setup gemini        # install Gemini CLI skill (optional)
+tl setup codex         # install Codex CLI skill (optional)
 ```
+
+`tl auth login` offers three options:
+
+1. **OAuth2 in a local browser** (default) — opens a URL on this machine.
+2. **Device code** — for headless environments; complete the flow on another device.
+3. **API key** — paste a pre-issued `APIKey` from Django admin. The CLI verifies it via `/whoami` and stores it tagged so every request sends `X-TL-Auth: API-KEY`.
 
 ## Quick Start
 
@@ -46,66 +84,78 @@ tl setup opencode      # install OpenCode skill (optional)
 # Login
 tl auth login
 
-# Query sponsorships
-tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
+# Show information about the logged-in user
+tl whoami
 
-# Shortcut commands for sponsorship types
-tl deals list brand:"Nike"                    # Agreed-upon sponsorships
-tl deals list created-at:today                # Deals created today (date keywords: today, yesterday, tomorrow)
-tl matches list                               # Possible brand-channel pairings
-tl proposals list                             # Matches proposed to both sides
+# Sold sponsorships for Nike in Q1 — write the SQL directly.
+# `publish_status = 3` is sold; brand is reached via the
+# profile → profile_brands → brand chain.
+tl db pg "SELECT al.id, al.weighted_price, al.purchase_date
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
+          JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
+          WHERE al.publish_status = 3
+            AND b.name = 'Nike'
+            AND al.purchase_date >= '2026-01-01'
+            AND al.purchase_date <  '2026-04-01'
+          ORDER BY al.purchase_date DESC
+          LIMIT 500 OFFSET 0"
 
-# Show a specific sponsorship
+# Show a specific sponsorship by ID
 tl sponsorships show 12345
 
-# Search videos (note: this only shows "your" videos)
-tl uploads list q:code --csv
+# Resolve a free-form string to a single channel — accepts names,
+# slugs, YouTube channel URLs, @handles, raw channel IDs, or video URLs.
+# Default output is a pretty `id  name` line; --json / --csv / --md / --toon
+# return machine-readable shapes. Ambiguous matches print candidates.
+tl channels find "MrBeast"
+tl channels find https://www.youtube.com/@MrBeast
+tl channels find https://www.youtube.com/watch?v=dQw4w9WgXcQ --json
 
-# Show upload details (supports colon-containing IDs)
-tl uploads show 1174310:0BehkmVa7ak
-
-# Search channels via raw SQL — `tl db pg` against thoughtleaders_channel
-# (run `tl schema pg` once to confirm the live column set).
-# NOTE: For topic / category discovery, prefer the recommender over
-# `content_category` equality — `tl recommender top-channels "<tag>"`
-# returns channels ranked by how strongly they load on the topic, not just
-# rows where the single category code matches exactly.
-tl db pg "SELECT id, channel_name, total_views FROM thoughtleaders_channel
-          WHERE content_category = <COOKING_CODE> AND total_views >= 100000
-          ORDER BY total_views DESC LIMIT 50 OFFSET 0"
-tl db pg "SELECT id, channel_name FROM thoughtleaders_channel
-          WHERE is_tl_channel = TRUE LIMIT 200 OFFSET 0"             # all TPP channels (~169)
-# MSN status: filter on `media_selling_network_join_date IS [NOT] NULL`
-# in the same raw SQL query (column is scrubbed from advertiser sandboxes).
+# Same for brands — matches name, slug, website domain, or any keyword.
+tl brands find Nike
+tl brands find nike.com
 
 # Show channel detail — accepts numeric ID or channel name.
-# Names that match more than one active channel print a candidate list
-# and exit; retry with a specific ID.
 tl channels show 12345
 tl channels show "Economics Explained"
 
 # Find similar channels (recommender, 25 credits, Intelligence plan).
-# msn: is tri-state (default msn:yes): yes = MSN only, no = non-MSN only, both = no filter.
-# tpp: is tri-state (default tpp:both): yes = TPP only, no = non-TPP only, both = no filter.
-# Same ID-or-name resolution rules as `channels show`.
+# msn: tri-state (default yes): yes = MSN only, no = non-MSN only, both = no filter.
+# tpp: tri-state (default both): yes = TPP only, no = non-TPP only, both = no filter.
 tl channels similar 12345 --limit 10
 tl channels similar "Tremending girls" min-score:0.85 --limit 5
 
 # Recommender — discovery by category/demographic tag (Intelligence plan).
-# `tags` is free; `top-*`, `inspect-*`, `similar-to-profile`, and `similar-brands-to-channel` cost 25 credits flat.
+# `tags` is free; everything else costs 25 credits flat.
 tl recommender tags                              # List every tag (free)
 tl recommender tags cooking                      # Search tag names by substring
-tl recommender top-channels "Cooking" msn:yes --limit 50  # Top channels for a tag
-tl recommender top-profiles "Cooking" mbn:yes --limit 30  # Top brand profiles (one brand → potentially multiple profiles)
-tl recommender top-brands "Cooking" --limit 30            # Top brands (deduped from profiles)
+tl recommender top-channels "Cooking" msn:yes --limit 50   # Top channels for a tag
+tl recommender top-profiles "Cooking" mbn:yes --limit 30   # Top brand profiles (one brand → potentially multiple profiles)
+tl recommender top-brands "Cooking" --limit 30             # Top brands (deduped from profiles)
 tl recommender inspect-channel 12345             # Per-tag breakdown of a channel's vector
 tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal profile
-tl recommender similar-to-profile 842            # Channels closest to a brand profile
+tl recommender channels-for-profile 842          # Channels closest to a specific brand profile
+tl recommender channels-for-brand Nike msn:yes   # Same, but takes a brand ref (uses its newest profile with a vector)
+tl recommender brands-for-channel 12345          # Brands most likely to sponsor a channel
 
 # Brand intelligence
 tl brands show Nike
+tl brands history Nike                # Detected sponsorships from ES
+tl brands history-stats Nike          # Aggregate roll-up (totals, first/last seen, top channels)
+
+# Search videos and transcripts via Elasticsearch
+tl db es '{"size":20,"query":{"term":{"channel.id":12345}},"_source":["title","views"]}'
+tl db es '{"size":50,"query":{"term":{"sponsored_brand_mentions":"5612"}}}'
+
+# Historical view-curves (Firebolt — channel_id required by index)
+tl db fb "SELECT id, age, view_count FROM article_metrics
+          WHERE channel_id = 12345 AND id IN ('abc', 'def')
+          ORDER BY id, age"
 
 # Run a saved report
+tl reports                            # list saved reports
 tl reports run 42
 
 # Comments — available on sponsorships, channels, brands, and uploads
@@ -113,11 +163,13 @@ tl sponsorships comment-list 12345
 tl sponsorships comment-add 12345 "Looks good"
 tl channels comment-add 7890 "Strong recent winners"
 
-# Show information about the logged-in user
-tl whoami
-
 # Check credits
 tl balance
+
+# Health check — auth, connectivity, version, latency, and required external tools.
+# Run this first when something feels off; it surfaces token expiry,
+# missing `jq`/`rg`/`duckdb`, and slow endpoints in one snapshot.
+tl doctor
 ```
 
 ## Credits
@@ -125,41 +177,42 @@ tl balance
 Every data query costs credits based on the type and number of results. Use `tl describe` to see credit rates and `tl balance` to check your balance.
 
 ```bash
-tl describe                           # All resources + credit costs
+tl describe                                # All resources + credit costs
 tl describe show sponsorships --filters    # Available filters for sponsorships
-tl balance                     # Your credit balance
+tl balance                                 # Your credit balance
 ```
+
+`tl db pg` is priced **per-query**: a base rate plus a surcharge for every priced table and column referenced. Sensitive fields (demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live surcharge map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
 # Terminology
 
 ThoughtLeaders has its internal terminology that's exposed throughout this tool.
 
-* **Brands** - Usually companies, sometimes individual products. Brands are the sponsors.
-* **Channels** - Usually YouTube channels, sometimes podcasts. Channels are creators, they are being sponsored.
-* **Sponsorships** - Either possible or realised business deals between brands and channels. There are several specific types of sponsorships:
-    * *Deals* - Contractually agreed-upon sponsorships. AKA sold sponsorships. They can be either in a production pipeline or already published / live.
-    * *Matches* - Possible matches between brands and channels, i.e. all pairings that ThoughtLeaders thinks could possibly be right for each other.
-    * *Proposals* - Matches that are actually proposed to both sides to consider.
-- **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and computed CPM.
+* **Brands** — Usually companies, sometimes individual products. Brands are the sponsors.
+* **Channels** — Usually YouTube channels, sometimes podcasts. Channels are creators, they are being sponsored.
+* **Sponsorships** — Either possible or realised business relationships between brands and channels, stored in `thoughtleaders_adlink`. There are several specific sub-types differentiated by the row's `publish_status`:
+    * *Deals* — Contractually agreed-upon sponsorships (sold; `publish_status = 3`). They can be in a production pipeline or already published.
+    * *Matches* — Possible brand-channel pairings (`publish_status = 7`); ThoughtLeaders thinks they could work.
+    * *Proposals* — Matches that have been proposed to both sides (`publish_status = 0`).
+* **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and a computed CPM.
+* **AdLink** — engineering / DB name for the row that backs a sponsorship. Treat as interchangeable with "sponsorship"; the table is `thoughtleaders_adlink`.
+* **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channel is in MSN if `channel.media_selling_network_join_date IS NOT NULL`.
+* **TPP** (ThoughtLeaders Partner Program) — TL's closest-partner channels, a strict subset of MSN. A channel is TPP if `channel.is_tl_channel = TRUE`. Prefer TPP channels when booking — fastest response, easiest to close.
+* **MBN** (Media Buying Network) — the brand-side counterpart to MSN: profiles that have opted in to receive proposed sponsorships (`profile.media_buying_network_join_date IS NOT NULL`).
 
-Sponsorships are the centre of attention in ThoughtLeaders - all other analytics and operations serve to produce or optimise sponsorships.
-Note that the term "Sponsorship" is wide, and can encompass deals that yet need to be approved by either side. There is a funnel of
-sponsorship types: the pool of Sponsorships is large, the pool of Matches (considered from either Brand or Channel side) is smaller,
-the pool of Proposals is yet smaller, and the pool of Deals is the smallest.
+Sponsorships are the centre of attention in ThoughtLeaders — all other analytics and operations serve to produce or optimise sponsorships. Note that the term "Sponsorship" is wide and encompasses pre-deal stages. The funnel is large at the Sponsorship end and narrowest at the Deal end.
 
 # Integrations
 
-## Claude Code Integration
+The same set of natural-language skills is published for every supported agent. Running `tl update` after an upgrade re-syncs every agent whose binary is on PATH.
 
-If you use Claude Code, install the plugin for natural language access:
+## Claude Code
 
 ```bash
 tl setup claude
 ```
 
-This registers the ThoughtLeaders marketplace, installs the plugin, and copies skills to `~/.claude/` for short `/tl` invocation. If the `claude` binary isn't on PATH, it still installs the standalone skills and prints manual instructions for the plugin.
-
-### Using the skills
+Registers the ThoughtLeaders marketplace, installs the plugin, and copies skills to `~/.claude/` for short `/tl` invocation. If the `claude` binary isn't on PATH, it still installs the standalone skills and prints manual instructions for the plugin.
 
 Talk naturally in Claude Code:
 
@@ -168,6 +221,7 @@ Talk naturally in Claude Code:
 /tl sold sponsorships for Nike in Q1
 /tl show me pending proposals with send dates in April
 /tl what channels does Nike sponsor?
+/tl find me Cooking creators in the US with mobile-heavy audiences
 /tl check my balance
 ```
 
@@ -178,40 +232,46 @@ Resource-specific slash commands:
 /tl-balance
 ```
 
-### Updating
+## OpenCode, Gemini, Codex
 
 ```bash
-tl setup claude                    # re-installs skills and updates plugin
+tl setup opencode      # copies skills to ~/.config/opencode/skills/
+tl setup gemini        # copies skills to ~/.agents/skills/
+tl setup codex         # copies skills to ~/.agents/skills/ (same target as gemini)
 ```
 
-## OpenCode Integration
+Each agent discovers the skill automatically and uses it when you ask about sponsorships, deals, channels, brands, or intelligence. Gemini and Codex share the `~/.agents/skills/` install target.
 
-```bash
-tl setup opencode
-```
+## Skills shipped with the CLI
 
-This copies the tl skill to `~/.config/opencode/skills/` where OpenCode discovers it automatically. The agent will use it when you ask about sponsorships, deals, channels, or brands.
+The plugin ships several focused skills (installed by all the `tl setup *` commands):
+
+- **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` / `history` commands for single-record lookups and the special cases they were built for (similarity search, ID resolution, sponsorship history). Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
+- **`tl-report-builder`** — builds TL reports (channels / brands / sponsorships / videos) from natural-language requests. Produces an in-chat preview by default; saves a real campaign when the user is explicit ("save", "create the report").
+- **`tl-import`** / **`bulk-import`** — superuser-only; bulk-add or exclude lists of channels, brands, videos, or sponsorships against a report.
 
 ## Output Formats
 
 By default, output is a styled table in the terminal and JSON when piped.
 
 ```bash
-tl sponsorships list status:sold                          # Pretty table
-tl sponsorships list status:sold --json                   # JSON
-tl sponsorships list status:sold --json | jq '.results'   # Pipe to jq
-tl sponsorships list status:sold --csv > sponsorships.csv # CSV
-tl sponsorships list status:sold --toon                   # TOON (token-efficient for LLMs)
+tl sponsorships show 12345 --json | jq '.results'
+tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE is_tl_channel = TRUE
+          LIMIT 200 OFFSET 0" --csv > tpp.csv
+tl channels show "MrBeast" --md      # markdown table for Slack / docs
+tl channels show "MrBeast" --toon    # token-efficient encoding for LLMs
 ```
 
 TOON (Token-Oriented Object Notation) is a compact text format designed to encode structured data with fewer tokens than JSON when feeding output back into an LLM. See [the TOON format repository](https://github.com/toon-format/toon) for the specification.
 
 ## Documentation
 
-- [Architecture & Design](docs/architecture.md) — full design doc covering commands, data scoping, credit metering, and server-side API
+- [Calling the HTTP API directly](API.md) — `curl` and Python recipes for the `whoami`, `balance`, `db pg|fb|es`, and `schema pg|fb|es` endpoints, authenticated with an API key.
 - `tl describe` — discover available resources, fields, filters, and credit costs from the CLI itself
+- `tl schema pg|fb|es` — live schema for the underlying stores
 - `tl <command> --help` — detailed help for any command
+- `tl doctor` — diagnostic snapshot of auth, connectivity, version, latency, and required external tools
 
 # Notes
 
-* Tested with OpenCode and the `nemotron-cascade-2-30b-a3b-i1` local model.
+* Tested with Claude Code, OpenCode (including the `nemotron-cascade-2-30b-a3b-i1` local model), Gemini CLI, and Codex CLI.
