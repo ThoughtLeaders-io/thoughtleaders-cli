@@ -16,22 +16,32 @@ Always run `tl schema pg|fb|es` before writing a raw query. When you only need t
 
 - **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
   ```bash
-  tl sponsorships list status:sold --json | jq '.results[] | select(.price > 5000) | {id, brand, price}'
+  tl db pg "SELECT id, weighted_price FROM thoughtleaders_adlink
+            WHERE publish_status = 3 AND price > 5000
+            LIMIT 500 OFFSET 0" --json \
+    | jq '.results[] | {id, price: .weighted_price}'
   ```
 - **`yq`** — same idea for YAML/TOML, useful when reading config files or `--md` blocks.
-- **`rg`** — fast text search across CLI output, transcripts, and the codebase. Better than `grep` for searching large `--csv` exports or transcript dumps.
+- **`rg`** — fast text search across CLI output, transcripts, and the codebase. Better than `grep` for searching large `--csv` exports or transcript dumps from ES.
   ```bash
   tl db es '{"size":500,"query":{"term":{"channel.id":5607}},"_source":["id","transcript"]}' --json | rg -o "NordVPN[^.]*"
   ```
 - **`duckdb`** — embedded analytical SQL over CSV/JSON files. Use when you need joins, aggregations, or window functions across multiple `tl` exports without spinning up a database.
   ```bash
-  tl deals list purchase-date-start:2026-01 --csv > deals.csv
+  tl db pg "SELECT al.id, b.name AS brand, al.weighted_price AS price
+            FROM thoughtleaders_adlink al
+            JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
+            JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
+            JOIN thoughtleaders_brand b ON b.id = pb.brand_id
+            WHERE al.publish_status = 3
+              AND al.purchase_date >= '2026-01-01'
+            LIMIT 500 OFFSET 0" --csv > deals.csv
   duckdb -c "SELECT brand, SUM(price) AS revenue FROM 'deals.csv' GROUP BY brand ORDER BY revenue DESC LIMIT 10"
   ```
 
-The pattern is always: server-side narrowing first (filter in the `tl db` query or the structured filters), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
+The pattern is always: server-side narrowing first (usuakky by filters in the `tl db` query, but could be from similarity searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
 
-Always assume there will be more than 1 page of results. You MUST always use `--limit` and `--offset` options in the `tl list` commands to retrieve the entire data set (all pages, until the total records are fetched). You must also always use pagination in scripts you write to collect results. The maximum number of results per page is 500.
+Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is 500.
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 
@@ -75,8 +85,8 @@ Other key concepts:
 - **`demographics_updated_at`** (on channel detail) — ISO timestamp of when demographic screenshots were last uploaded and processed via OCR. If non-null, the channel has demographics screenshots on file. If null, no screenshots have been uploaded. Use this to check whether a channel has demographics data from screenshots.
 - **`impression`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed.
 - **`views`** (on sponsorships) — actual view count of the sold and published sponsored video, accessible when `article_id` is set.
-- **`impressions_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric; rounded to int in list output.
-- **Sponsorship detail fields** (returned by `tl sponsorships show <id> --json`) — in addition to the list-view columns, the detail payload includes `integration` (raw int), `publish_count`, `common_name`, `outreach_email`, nested `publisher` (`first_name`, `last_name`, `email`), nested `brand_contact` (`first_name`, `last_name`, `email`), and `brand.organization_name`. Use these when generating IOs, contracts, or outreach.
+- **`impressions_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric.
+- **Sponsorship detail fields** (returned by `tl sponsorships show <id> --json`) — the detail payload includes `integration` (raw int), `publish_count`, `common_name`, `outreach_email`, nested `publisher` (`first_name`, `last_name`, `email`), nested `brand_contact` (`first_name`, `last_name`, `email`), and `brand.organization_name`. Use these when generating IOs, contracts, or outreach.
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
   - **Channel CPM** = `(adspot.price / channel.impression) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
   - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
@@ -140,20 +150,30 @@ Prefer writing Python code, shell code, or `jq` commands that fetche or analysis
 Note that if you're working on Windows, you need to set up UTF-8 in the console, because all of these commands return UTF-8 data.
 
 ### Data queries
+
+**Filtered queries go through `tl db pg|fb|es`.** The list commands (`tl sponsorships`, `tl deals`, `tl matches`, `tl proposals`, `tl uploads`) are intentionally not part of this surface — write the SELECT/ES body yourself for any non-trivial filter and you get the full schema, joins, and aggregations. The show/create/update commands stay because they target a single record by ID.
+
+Filter-to-SQL cheatsheet (deals/matches/proposals all live on `thoughtleaders_adlink`, differentiated by `publish_status`):
+
+| Want | Raw-DB equivalent |
+| --- | --- |
+| All sponsorships matching filters | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE …"` |
+| Sold deals (`publish_status=3`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 3"` |
+| Matched (`publish_status=7`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 7"` |
+| Proposed (`publish_status=0`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 0"` |
+| Video uploads from ES | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
+
+Single-record / mutation commands remain:
+
 ```bash
-tl sponsorships list [filters...]      # Sponsorships
 tl sponsorships show <id>              # Sponsorship detail
 tl sponsorships create --channel <id> --brand <id>  # Create proposal
 tl sponsorships update <id> '<json>'   # Update a sponsorship
-tl deals list [filters...]             # Shortcut: agreed-upon sponsorships (status:deal)
 tl deals show <id>                     # Deal detail
-tl matches list [filters...]           # Shortcut: possible brand-channel pairings (status:match)
 tl matches show <id>                   # Match detail
 tl matches create --channel <id> --brand <id>  # Create match
-tl proposals list [filters...]         # Shortcut: proposed matches (status:proposal)
 tl proposals show <id>                 # Proposal detail
 tl proposals create --channel <id> --brand <id>  # Create proposal
-tl uploads list [filters...]           # Video uploads from ES
 tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
@@ -302,7 +322,7 @@ Reasons to write a raw query (the common case):
 - **Multi-condition filtering** — compound boolean, `NOT IN`/`EXISTS`, `WHERE col IS NULL` on hidden fields, mixed range + enum + text predicates: write the SQL/ES body, don't over-fetch and post-filter.
 - **Fields the structured commands don't expose** — e.g. `media_selling_network_join_date` (only the `msn` boolean is surfaced), `weighted_price`, `tx_data`, raw `publish_status` integer, etc.
 
-Structured commands are still the right tool for: single-record `show` by ID, plain filtered `list` (one or two filters that the structured vocabulary already supports), saved `tl reports run`, and `tl snapshots channel|video` (these wrap interpolation logic you'd otherwise reimplement).
+Structured commands are still the right tool for: single-record `show` by ID, saved `tl reports run`, and `tl snapshots channel|video` (these wrap interpolation logic you'd otherwise reimplement). Anything that would have been a "filtered list" goes through `tl db pg|fb|es`.
 
 | Need | Use |
 |---|---|
@@ -313,7 +333,7 @@ Structured commands are still the right tool for: single-record `show` by ID, pl
 | Transcript / brand-mention search inside video content | **`tl db es`** (no structured equivalent for content text) |
 | Custom Firebolt shape (milestone-age slices, multi-channel growth comparisons) | **`tl db fb`** |
 | Single-record detail lookup by ID | `tl <resource> show <id>` |
-| Plain filtered list with one or two simple filters | `tl <resource> list` |
+| Filtered list of sponsorships/deals/matches/proposals/uploads | **`tl db pg` / `tl db es`** (no structured `list` surface) |
 | Channel/brand similarity (server-implemented similarity search) | `tl channels similar`, `tl brands similar` |
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
@@ -434,13 +454,31 @@ tl changelog --md > CHANGELOG.md       # Capture for a doc
 `tl changelog` summaries are LLM-generated server-side from full commit messages and cached per version, so repeat calls are fast and don't re-bill the LLM. The release date and a 2–4 sentence prose summary come back per version.
 
 ### Filter syntax
-Structured list commands accept `key:value` filters (use them for trivially simple lookups):
+
+There is no structured `list` filter syntax anymore — write the predicate against the underlying store. Equivalents for the common shorthand:
+
 ```bash
-tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
-tl uploads list channel:12345 type:longform
+# was: tl sponsorships list status:sold brand:"Nike" purchase-date:2026-01
+tl db pg "SELECT al.id, al.weighted_price, al.purchase_date
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
+          JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
+          JOIN thoughtleaders_brand b ON b.id = pb.brand_id
+          WHERE al.publish_status = 3
+            AND b.name = 'Nike'
+            AND al.purchase_date >= '2026-01-01'
+            AND al.purchase_date <  '2026-02-01'
+          ORDER BY al.purchase_date DESC
+          LIMIT 500 OFFSET 0"
+
+# was: tl uploads list channel:12345 type:longform
+tl db es '{"size":500,"query":{"bool":{"filter":[
+  {"term":{"channel.id":12345}},
+  {"term":{"content_type":"longform"}}
+]}}}'
 ```
 
-Date filters accept keywords: `today`, `yesterday`, `tomorrow`.
+For dates, build the explicit `>=` / `<` range yourself — there are no `today`/`yesterday`/`tomorrow` keyword shortcuts on the raw-DB path.
 
 #### Channel discovery — recommender first, raw SQL second
 
@@ -507,8 +545,8 @@ While analysing results, you must always examine the `results` field in the JSON
 
 Every query costs credits. Before running expensive queries:
 1. Check the credit rate: `tl describe show <resource> --json | jq '.credits'` and the user balance.
-2. **List endpoints (sponsorships/channels/uploads/snapshots/comments/reports/db) are priced non-linearly:** `cost = 1 + mult × 0.126 × n^1.2`, where `mult` is the per-resource complexity factor (1.0 for cheap reads, 1.2 for snapshots, 1.3 for reports, 1.4 for raw db). Detail/history/similar endpoints are linear (`rate × results`). See the table in the command list above.
-3. Estimate cost from the formula or the table; for non-list endpoints use `results × rate`.
+2. **Multi-row endpoints (snapshots, comments, reports, `tl db pg|fb|es`) are priced non-linearly:** `cost = 1 + mult × 0.126 × n^1.2`, where `mult` is the per-resource complexity factor (1.0 for cheap reads, 1.2 for snapshots, 1.3 for reports, 1.4 for raw db). Detail/history/similar endpoints are linear (`rate × results`).
+3. Estimate cost from the formula or the table; for non-row-priced endpoints use `results × rate`.
 4. If estimated cost is more than 10% of the remaining balance, ask the user to confirm the operation before running.
 
 ## Data Scoping
@@ -516,7 +554,7 @@ Every query costs credits. Before running expensive queries:
 Users only see data their plan allows:
 - **Media buyers** see deals where their org is the brand. They see `price` but never `cost`.
 - **Media sellers** see deals where their org is the publisher. They see `cost` but never `price`.
-- **Intelligence plan** required for `tl brands`, the full `tl recommender` surface, and full `tl uploads list`.
+- **Intelligence plan** required for `tl brands`, the full `tl recommender` surface, and `tl db es` access to full transcript / brand-mention data.
 - **Paid plan** required for `tl snapshots`.
 
 ## Important: Status Labels
@@ -531,7 +569,15 @@ When presenting sponsorship status data, always use human-readable labels — ne
 
 "Show me my sold sponsorships this quarter":
 ```bash
-tl deals list purchase-date-start:2026-01-01 --json
+tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
+          JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
+          JOIN thoughtleaders_brand b ON b.id = pb.brand_id
+          WHERE al.publish_status = 3
+            AND al.purchase_date >= '2026-01-01'
+          ORDER BY al.purchase_date DESC
+          LIMIT 500 OFFSET 0" --json
 ```
 
 "What channels does Nike sponsor?":
@@ -583,7 +629,14 @@ tl recommender top-channels "Cooking" msn:yes --limit 100 --json \
 
 "Show sold sponsorships targeting mobile US audiences":
 ```bash
-tl sponsorships list status:sold primary-device:mobile min-us-share:60 --json
+tl db pg "SELECT al.id, c.channel_name, c.demographic_device_primary, c.demographic_usa_share, al.weighted_price
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_adspot s ON s.id  = al.ad_spot_id
+          JOIN thoughtleaders_channel c ON c.id = s.channel_id
+          WHERE al.publish_status = 3
+            AND c.demographic_device_primary = 'mobile'
+            AND c.demographic_usa_share >= 60
+          LIMIT 500 OFFSET 0" --json
 ```
 
 "Find channels similar to one I know" (similarity recommender, 25 credits per call):
