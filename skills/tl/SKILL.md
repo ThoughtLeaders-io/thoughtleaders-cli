@@ -39,7 +39,7 @@ Always run `tl schema pg|fb|es` before writing a raw query. When you only need t
   duckdb -c "SELECT brand, SUM(price) AS revenue FROM 'deals.csv' GROUP BY brand ORDER BY revenue DESC LIMIT 10"
   ```
 
-The pattern is always: server-side narrowing first (usuakky by filters in the `tl db` query, but could be from similarity searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
+The pattern is always: server-side narrowing first (usually by filters in the `tl db` query, but could be from similarity / recommender searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
 
 Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is 500.
 
