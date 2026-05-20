@@ -120,9 +120,18 @@ Every Firebolt workflow has two steps:
 tl recommender top-channels "Tech" msn:yes --limit 50 --json \
   | jq '.results[].channel_id'
 
-# Or videos for a specific brand's deals (Postgres side, via tl sponsorships)
-tl deals list brand:"Nike" --json --limit 500 \
-  | jq -r '.results[] | select(.article_id != null) | "\(.channel_id):\(.article_id)"'
+# Or videos for a specific brand's deals (Postgres side, via raw SQL)
+tl db pg "SELECT al.id, al.article_id, s.channel_id
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_adspot s            ON s.id  = al.ad_spot_id
+          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
+          JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
+          WHERE al.publish_status = 3
+            AND b.name = 'Nike'
+            AND al.article_id IS NOT NULL
+          LIMIT 500 OFFSET 0" --json \
+  | jq -r '.results[] | "\(.channel_id):\(.article_id)"'
 
 # Or videos via Elasticsearch content search
 tl db es '{

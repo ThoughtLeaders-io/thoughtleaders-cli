@@ -64,8 +64,6 @@ The centre of the data model are **Sponsorships** — business relationships bet
 
 Sponsorships are sometimes called "Ads" or "Ad campaigns". **"AdLink"** is another name for the same thing — it's the term the database uses (`thoughtleaders_adlink`) and shows up across internal code, schema docs, and AM Slack threads. Treat "sponsorship" and "adlink" as interchangeable; the user-facing word is "sponsorship," the engineering/DB word is "adlink."
 
-The CLI has shortcut commands for each type: `tl matches`, `tl proposals`, `tl deals`. These are aliases for `tl sponsorships` with filtering by status.
-
 Other key concepts:
 - **Channels** — YouTube channels, but could also be podcasts
 - **Brands** — Entities (usually companies / organizations, but could be narrowed down to individual brands of a company)
@@ -92,7 +90,7 @@ Other key concepts:
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
   - **Channel CPM** = `(adspot.price / channel.impression) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
   - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
-  - CPM does not have a range filter. To find sponsorships in a CPM range (e.g. "around $15"), fetch the record set with other filters first, then apply the CPM range in post-processing (jq, Python, etc.) on the returned `cpm` field. Plan queries and pagination accordingly — the server cannot reduce the result count based on CPM.
+  - Where possible, calculate the correct CPM in a SQL expression.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
@@ -105,7 +103,7 @@ Users see data scoped by their organization and plan:
 - **Media sellers** see sponsorships where their org is the publisher. They see `cost` but never `price`.
 - **Intelligence plan** is required for accessing information not strictly related to the user's organisation.
 
-When querying sponsorship bookings, query by `status:sold` and filter the the date range only by `purchase_date`. Otherwise, query for `status:sold` and filter by `created_at`.
+When querying sponsorship bookings, filter the rows with `publish_status = 3` (sold) and use `purchase_date` for the date range. For all-flow / not-yet-sold inclusive queries, drop the `publish_status` predicate and filter by `created_at` instead.
 
 ## Methodology
 
@@ -137,19 +135,18 @@ Notes:
 
 Unless the user specifically asks for running a specific report or showing the result of a specific report, find the data by using other, low-level commands.
 
-1. **Discover first**: Run `tl describe show <resource> --json` to learn available fields, filters, and credit costs before querying. Use `tl schema pg`, `tl schema es`, and `tl schema fb` to find information about the main database (pg), the articles / uploads database (es), and the channel metrics database (fb).
-2. **Check saved reports**: Run `tl reports --json` to see if the user has a saved report that already answers their question
-3. **Check credits**: Run `tl balance --json` before expensive queries. Warn the user if a query will cost many credits.
-4. **Query with filters**: Use `key:value` filter syntax for structured queries
-5. **Always use --json**: Parse JSON output for multi-step analysis.
-6. **Chain commands**: For complex questions, chain multiple `tl` commands
-7. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers.
+1. **Discover first**: Use `tl schema pg`, `tl schema es`, and `tl schema fb` to find information about the main database (pg), the articles / uploads database (es), and the channel metrics database (fb).
+2. **Check credits**: Run `tl balance --json` before expensive queries. Warn the user if a query will cost many credits.
+3. **Decide the method of discovery**: If the user want to explore certain topics, use the recommender commands. If it's more about filtering, construct a query for PG or ES.
+4. **Always use --json**: Parse JSON output for multi-step analysis.
+5. **Chain commands**: For complex questions, chain multiple `tl` commands, shell commands, and other tools.
+6. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers. In this case, ask the user if they want to save the list as a report, and invoke the `tl-save-report` skill.
 
-Prefer writing Python code, shell code, or `jq` commands that fetche or analysise large sets of data, instead of analysing it yourself. Create temporary files in `/tmp` that can be analysed later in different ways. Before bulk data analysis by running `jq`, Python or Bash commands, first try fetching just a single result with `--limit 1` without `jq` etc, to see the shape of the data and any error messages.
+Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or analysise large sets of data instead of analysing it yourself. Create temporary files in `/tmp` that can be analysed later in different ways. Before analysing a potentially large result set, first try fetching just a single result with `LIMIT 1` without `jq` etc, to see the shape of the data and any error messages.
 
 ## Available Commands
 
-Note that if you're working on Windows, you need to set up UTF-8 in the console, because all of these commands return UTF-8 data.
+Note that if you're working on Windows, you must set up UTF-8 in the console, because all of these commands return UTF-8 data.
 
 ### Data queries
 
@@ -224,8 +221,6 @@ tl channels update 12345 '{"demographic_male_share": 62}'
 tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
 ```
-
-Each call costs 2 credits. If a request is rejected with a 400, the response body names the offending key — read it and retry with a smaller body. If the user wants to edit something the API rejects, the change has to be made in the app or by a human with DB access.
 
 ### Creating and vetting sponsorships
 
@@ -463,7 +458,7 @@ For category- or demographic-driven discovery, **use the recommender, not `conte
 tl recommender tags cooking
 tl recommender tags "usa"
 
-# Top channels & profiles loaded on a similarity tag (25 credits; Intelligence)
+# Top channels & profiles loaded on a similarity tag (Intelligence)
 tl recommender top-channels "Cooking" msn:yes --limit 50
 tl recommender top-channels "Tech" --limit 30
 tl recommender top-brands "USA share" mbn:yes --limit 50

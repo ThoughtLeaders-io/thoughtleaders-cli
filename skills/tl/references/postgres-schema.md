@@ -1,28 +1,21 @@
 # ThoughtLeaders PostgreSQL Schema Reference
 
-> **Canonical home (within this plugin).** This file is the single source of truth for TL Postgres schema facts inside `tl-cli` (tables, columns, fetch SQL, hallucinated-column markers, join paths). Dependent skills here — most notably `tl-report-builder` — must **link to entries in this file** rather than restate columns / fetch SQL / "do not exist" markers in their own `references/*.md`. Forking schema content into a parallel `<skill>/references/*.md` produces silent drift; that anti-pattern is what this preamble exists to prevent. Upstream source of truth is `thoughtleaders-skills/tl-data/references/postgres-schema.md`; this file is a managed sync.
+**Canonical anchor (within this plugin).** This file is the single source of truth for TL Postgres schema facts for the `tl` command (tables, columns, fetch SQL, hallucinated-column markers, join paths).
 
-## How to query
-
-```bash
-tl db pg "SELECT id, weighted_price FROM thoughtleaders_adlink
-          WHERE publish_status = 2
-          LIMIT 50 OFFSET 0"
-```
-
-`tl schema pg` prints the live table/column listing visible to your user.
+This file does not describe every table and column. For the actual current schema, execute `tl schema pg --json`.
 
 Accepted SQL:
 - **SELECT only**, single statement. No DDL/DML/transactions/SET/COPY/MERGE.
 - Functions accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-resolving casts (`::regclass`, `::regprocedure`, …) are not accepted.
 - `LIMIT` and `OFFSET` are optional. Omit them and the server fills in `LIMIT 50 OFFSET 0`. Explicit `LIMIT` must be an integer literal ≤ 500. Explicit `OFFSET` ≥ 10,000 is rejected with HTTP 403 (`OFFSET_TOO_DEEP`); paginate with the response's `next_offset`/breadcrumbs instead of jumping deep.
-- SQL ≤ 50,000 chars; AST depth ≤ 64; node count ≤ 5,000.
 
 ## Core Tables
 
 ### `thoughtleaders_adlink` (Deals/Sponsorships)
 
-The main deals table. Each row = one sponsorship deal between a brand and a YouTube channel. Also called "AdLink" in code, exposed as **sponsorship** in the CLI.
+The main sponsorships table. Each row = one sponsorship between a brand and a YouTube channel. Also called "AdLink" in code, exposed as **sponsorship** in the CLI.
+
+The profile table is tightly coupled with the brand table for media buyers, so many reports that operate on the brand levels must access the profile data first.
 
 > 🚨 **Columns that DO NOT exist on `thoughtleaders_adlink` — common hallucinations:**
 > - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `creator_profile_id → profile → profile_brands → brand`.
@@ -32,9 +25,7 @@ The main deals table. Each row = one sponsorship deal between a brand and a YouT
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
 
-The profile table is tightly coupled with the brand table for media buyers, so many reports that operate on the brand levels must access the profile data first.
-
-#### Key Columns
+#### Key Columns for the thoughtleaders_adlink table
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -42,11 +33,6 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `created_at` | timestamptz | When the deal was created |
 | `updated_at` | timestamptz | Last modification |
 | `publish_status` | int | Deal status (see constants below) |
-| `price` | numeric | Deal price (USD) |
-| `price_currency` | varchar | Always USD |
-| `weighted_price` | numeric | `price * (status_weight/100)`, pre-calculated on save |
-| `weighted_price_currency` | varchar | Always USD |
-| `cost` | numeric | Cost to TL |
 | `ad_spot_id` | int FK | → `thoughtleaders_adspot.id` |
 | `creator_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `creator_profile` — the "creator_" prefix lives on the FK column, not the table. |
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
@@ -63,13 +49,13 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `actual_end_date` | timestamptz | Actual end date |
 | `scheduled_end_date` | timestamptz | Scheduled end date |
 | `rejection_reason` | int | Rejection reason code (1–24). See "`rejection_reason` Constants" below for the code → label mapping. Set when `publish_status IN (4, 5, 9)` (closed-lost). |
-| `rejection_reason_details` | text | Free-text rejection details. Often empty (~78% of lost deals). When populated, contains AM/agency notes like *"english content only"*, *"isn't talking about stocks"*, *"channel does not exist"*. Use as supplementary context, not primary classification. |
+| `rejection_reason_details` | text | Free-text rejection details. Sometimes contains AM/agency notes like *"english content only"*, *"isn't talking about stocks"*, *"channel does not exist"*. Use as supplementary context, not primary classification. |
+| `cost` | float | Cost of the deal to TL |
+| `price` | float | The price of the deal for the brand |
 | `payment_status` | int | 0=Unpaid, 1=Paid |
 | `performance_grade` | int | Performance rating (see business-glossary) |
 | `article_id` | varchar | Compound `<channel_id>:<youtube_id>` — links to ES `_id` and ES `id` field |
-| `dashboard_campaign_id` | int FK | Campaign grouping |
-| `created_where` | varchar | Where the deal originated |
-| `tx_data` | jsonb | Transaction metadata |
+| `created_where` | varchar | What mechanism / software / agent created the record |
 
 #### `publish_status` Constants
 
@@ -85,26 +71,8 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | 7 | MATCHED | Matched (default) | 1% |
 | 8 | OUTREACH | Reached Out | 5% |
 | 9 | REJECTED_AGENCY | Rejected by Agency | 0% |
-| -1 | CLIENT_SIDE_AVAILABLE | Client Side Available | — |
-| -2 | CLIENT_SIDE_TAKEN | Client Side Taken | — |
 
 #### `rejection_reason` Constants
-
-Source of truth: `thoughtleaders.models.AdLink.REJECTION_REASON` (Django `IntegerField` choices in the main `thoughtleaders` repo).
-
-**Storage model:** `thoughtleaders_adlink.rejection_reason` is an `IntegerField`. **Postgres stores only the integer code.** The labels live in the Django `IntegerField.choices` tuple in application code — they are NOT a queryable column or a join key. The integer is the only thing you can `WHERE` against; the labels below are display mappings only.
-
-The **Enum Label** column is the verbatim string from the Django choices tuple (some have typos / internal vocabulary). The **AM-friendly label** is the recommended phrasing for AM-facing reports and proposals — use it when surfacing rejection reasons in any human-readable output.
-
-**Grouping — be careful, codes 18–24 are NOT homogeneous:**
-- **Codes 1–9** — brand-side rejections (brand said no)
-- **Codes 10–17** — publisher-side rejections (channel said no)
-- **Code 18 (`DEMOGRAPHICS_NO_MATCH`)** — audience-fit mismatch. Neither side is "wrong"; the channel may be excellent but its audience doesn't align with the brand's target. Don't bucket as "channel quality."
-- **Codes 19, 21, 22, 24** (`NOT_BRAND_SAFE`, `HIGH_VOLATILITY`, `LOW_ENGAGEMENT`, `NO_FACE_ON_SCREEN`) — channel-quality / channel-performance signals (production and delivery).
-- **Code 20 (`POOR_BRAND_HISTORY`)** — **brand-quality**, NOT channel quality. The brand has a poor sponsorship track record (e.g., known to ghost / pay late / be difficult). Do not include when reporting on channel quality.
-- **Code 23 (`DUPLICATE_PROPOSAL`)** — **process/timing**, NOT channel quality. Channel was pitched too recently. Outreach-cadence issue.
-
-⚠️ Naïve "codes 18–24 = channel quality" bucketing will misattribute brand-quality (20), audience-fit (18), and process (23) failures to channel quality and skew rejection-rate analysis.
 
 | Code | Constant | Enum Label (verbatim from Django) | AM-friendly label |
 |------|----------|---------------------|-------------------|
@@ -186,7 +154,7 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `is_active` | boolean | Active flag |
 | `publisher_id` | int FK | → `auth_user.id` (NOT `thoughtleaders_profile.id` — see gotcha below) |
 
-### `thoughtleaders_channel` (YouTube Channels)
+### Key columns for the `thoughtleaders_channel` table
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -194,98 +162,43 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `channel_name` | varchar | Display name. ⚠️ The column is `channel_name`, NOT `name`. |
 | `external_channel_id` | varchar | YouTube channel ID (e.g., `UCxxxxxx`). ⚠️ There is NO `youtube_id` column — use this one. |
 | `url` | varchar | Channel URL (external — usually the YouTube URL). |
-| `slug` | varchar | TL platform slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any AM-facing surface (reports, samples, Slack posts) — the TL URL keeps the user inside the platform and is the company's hyperlink contract. Falls back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
+| `slug` | varchar | TL-platform-specific slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any user-facing surface (reports, samples, Slack posts). Fall back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
+| `total_views` | int | Total views for the entire channel |
 | `reach` | bigint | Subscriber count. ⚠️ There is NO `subscribers` column — `reach` is the subscriber count. Many internal docs and outputs use the word "subscribers"; in SQL, always query `reach`. |
-| `media_selling_network_join_date` | date/timestamptz | When channel joined MSN. **MSN membership = this column IS NOT NULL.** |
-| `is_tl_channel` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ reach), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **Not the MSN flag.** Naive `WHERE is_tl_channel = true` as an "MSN filter" silently drops ~98% of the MSN pool (8,652 → 144 at 100k+). For MSN, use `media_selling_network_join_date IS NOT NULL`. |
-| `content_category` | int | Content category code (1–22). See "`content_category` Constants" below for the code → label mapping. ⚠️ **Data-quality notes:** (1) per-row category assignments are often inconsistent with the official label (e.g. cat 15 = Technology, but many top-`reach` channels in cat 15 are clearly Entertainment). (2) Several codes are essentially unused in practice — codes 1, 2, 4, 6, 7, 8, 9, 11, 13 (Backend Development, Design, Frontend Development, Marketing, Mobile Development, Sales, Travel, Photography, Personal Finance) return ~0 active high-reach channels. Most travel creators land under Lifestyle (5), not Travel (9). The label table below is authoritative; the per-row assignment is best-effort. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` (ranked) over `WHERE content_category = <code>` (equality). |
+| `media_selling_network_join_date` | date/timestamptz | When the channel joined the MSN. **MSN membership = this column IS NOT NULL.** |
+| `is_tl_channel` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ reach), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **This is not the MSN flag.** For MSN, use `media_selling_network_join_date IS NOT NULL`. |
+| `content_category` | int | Content category code (1–22), as assigned by YouTube. This assignment is too unreliable, do not use it for discovering channels. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` |
 | `is_active` | boolean | Whether the channel is active. ⚠️ **Always include `is_active = true` in channel queries** unless explicitly looking for archived rows. |
-| `country` | varchar | Channel's primary country (ISO 3166-1 alpha-2 code, e.g. `US`, `GB`, `BR`). Often the cleanest answer to "geo" questions on sponsorships (since adlink itself has no geo). May be NULL or blank on ~10% of channels. |
-| `language` | varchar | Primary content language. ⚠️ **Short ISO 639 codes — NOT BCP-47.** Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with `language = 'en-US'` returns zero rows. **Don't assume `LENGTH(language) = 2`** — that silently drops the 3-letter long-tail. May be NULL on ~10% of channels. |
-| `last_published` | date | Date of the channel's most recent video. Use for "is the channel still active?" filters — e.g. `last_published >= CURRENT_DATE - INTERVAL '120 days'`. |
-| `sponsorship_score` | double precision | TL-internal channel quality score (higher is better). Useful as a tiebreaker when ranking candidate channels. |
-| `description` | text | LLM-generated description of the channel. Sometimes useful as a regex-target for thematic filtering when the integer category is too coarse (e.g. filtering "Technology" cat 15 down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
-| `evergreenness` | float | Cached evergreen score |
+| `country` | varchar | Channel's primary country (ISO 3166-1 alpha-2 code, e.g. `US`, `GB`, `BR`). This is often the cleanest answer to "geography" questions on sponsorships. May be NULL or blank. |
+| `language` | varchar | Primary content language. ⚠️ **Short ISO 639 codes — NOT BCP-47.** Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with `language = 'en-US'` returns zero rows. **Don't assume `LENGTH(language) = 2`** — that silently drops the 3-letter long-tail. May be NULL. |
+| `last_published` | date | Date of the channel's most recently seen video. Use for "is the channel still active?" filters — e.g. `last_published >= CURRENT_DATE - INTERVAL '120 days'`. |
+| `sponsorship_score` | double precision | TL-internal channel quality score (range 0-10, higher is better, if below 5, the channel is low quality). Useful as a tiebreaker when ranking candidate channels. |
+| `ai_description` | JSON | Descriptive information about a channel. Contains fields such as `description`, `audience`, `topic_descriptions`, and `brand_safety`. Useful as a regex-target for thematic filtering when the recommender results are too coarse (e.g. filtering "technology" down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
+| `evergreenness` | float | Evergreen score |
+| `demographic_usa_share` | smallint (0–100) | Percentage of the channel's audience based in the US. Convenience for the common "is this a US-heavy channel?" filter — pre-computed from `demographic_geo['US']`. NULL when the channel has no demographic data. |
+| `demographic_male_share` | smallint (0–100) | Percentage of the channel's audience that's male. `female_share = 100 - demographic_male_share` (no separate column). NULL when the channel has no demographic data. |
+| `demographic_age_median_value` | varchar | The age-bucket label (e.g. `25-34`) corresponding to the median of `demographic_age`, pre-computed on save. Indexed; cheap to filter on. NULL when there's no age data. |
+| `demographic_device_primary` | varchar | The dominant viewing-device token from `demographic_device` (e.g. `mobile`, `computer`, `tablet`, `tv`, `game_console`). Pre-computed on save. ⚠️ The DB uses `computer` (not `desktop`) and `game_console` (not `game-console`); the CLI's structured filters translate, but raw SQL filters do not. Indexed. NULL when there's no device data. |
+| `demographic_age` | JSONB | Audience age distribution, e.g. `{"18-24": 7, "25-34": 20, "35-44": 21, "45-54": 18, "55-64": 15}`. Percentages don't always sum to 100 (the long-tail buckets are dropped). NULL when the channel has no demographic data. Filter with `demographic_age->>'25-34' >= '20'` (text comparison) or cast to int. |
+| `demographic_geo` | JSONB | Audience geography as 2-letter ISO country code → percentage, e.g. `{"US": 53.0, "UK": 12.0, "CA": 8.0, "IN": 5.0}`. Long tail is dropped — entries summing to ≥ ~95% is normal. Filter with `(demographic_geo->>'US')::float >= 60`. NULL when there's no demographic data. |
+| `demographic_device` | JSONB | Audience device-mix percentages, e.g. `{"computer": 35, "mobile": 45, "tablet": 8, "tv": 10, "game_console": 2}`. Same DB-token caveats as `demographic_device_primary`. Filter with `(demographic_device->>'mobile')::float >= 60`. NULL when there's no demographic data. |
+| `demographics_updated_at` | timestamptz | When any of the demographic_* fields last changed (auto-stamped on save via `Channel.FIELDS_TO_CHECK`). Use as a recency filter when sampling — older demographics are stale. NULL when demographics were never set. |
+| `outreach_email` | varchar | Channel outreach email |
+
+**IMPORTANT**: Demographics and outreach columns have additional pricing attached! They are the most valuable, and the most expensive fields to fetch. Never do "SELECT *" on this table because that will also fetch these expensive columns.
 
 #### Hallucination shapes to avoid
 
-When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the column table above. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring shapes:
+When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the output of `tl schema pg thoughtleaders_channel` or the column table above. The `tl schema` command is authoritative. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring problems:
 
-- ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns above use bare names.
+- ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns  use bare names.
 - ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
 - ❌ **Bare-noun forms without the table-prefix** (e.g. `name` instead of `channel_name`). This table prefixes its display fields with `channel_` to avoid SQL keyword collisions and ambiguity in joins.
 - ❌ **User-facing-term forms used as SQL column names** (the user-facing word is sometimes different from the SQL column name; consult [business-glossary](business-glossary.md) for the canonical mapping when the two diverge).
 
-When the canonical column you need isn't obvious from the table above, consult the column table first. Do **not** rely on a 400 to correct you, and do **not** fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
+When the canonical column you need isn't obvious from the table above, consult `tl schema pg thoughtleaders_channel` or the above table first. Do **not** rely on a 400 to correct you, and do **not** fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
 
-#### `content_category` Constants
-
-Source of truth: `thoughtleaders.taxonomies.ContentCategory` (Django `IntEnum` in the main `thoughtleaders` repo).
-
-| Value | Constant | Pretty Label |
-|-------|----------|--------------|
-| 1 | BACKEND_DEVELOPMENT | Backend Development |
-| 2 | DESIGN | Design |
-| 3 | ENTREPRENEURSHIP | Entrepreneurship |
-| 4 | FRONTEND_DEVELOPMENT | Frontend Development |
-| 5 | LIFESTYLE | Lifestyle |
-| 6 | MARKETING | Marketing |
-| 7 | MOBILE_DEVELOPMENT | Mobile Development |
-| 8 | SALES | Sales |
-| 9 | TRAVEL | Travel |
-| 10 | BUSINESS | Business |
-| 11 | PHOTOGRAPHY | Photography |
-| 12 | GENERAL_KNOWLEDGE | General Knowledge |
-| 13 | PERSONAL_FINANCE | Personal Finance |
-| 14 | NEWS_POLITICS | News & Politics |
-| 15 | TECHNOLOGY | Technology |
-| 16 | GAMING | Gaming |
-| 17 | FOOD | Food |
-| 18 | SPORTS | Sports |
-| 19 | HOWTO | How To & Crafts |
-| 20 | ENTERTAINMENT | Entertainment |
-| 21 | HEALTH_FITNESS | Health & Fitness |
-| 22 | MUSIC | Music |
-
-### `thoughtleaders_topics` (Curated Topic Taxonomy)
-
-A small (under 20 rows), live-edited taxonomy of curated topics. Each row bundles a topic name with a one-paragraph description and a `keywords` JSONB array of head + long-tail terms. The report-builder skill's `topic_matcher` tool consumes this table to match a user's natural-language report query against curated topics; downstream filter-building uses the matched topics' `keywords` arrays as keyword groups. The taxonomy is **actively migrating** — content drifts week to week — so consumers must fetch live, never bundle a snapshot.
-
-#### Fetch query (canonical — use verbatim)
-
-```bash
-tl db pg --json "SELECT id, name, description, keywords FROM thoughtleaders_topics ORDER BY id LIMIT 100 OFFSET 0"
-```
-
-The table has fewer than 20 rows; client-side filtering after a full fetch is free. **Do not push name-pattern WHERE clauses into the SQL** — the agent has guessed `WHERE is_active = TRUE` and `WHERE name ILIKE ANY(...)` in past runs and burnt round-trips on hallucinated columns.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | int | Primary key |
-| `name` | varchar | Topic display name (e.g. "Artificial Intelligence", "PC Games") |
-| `description` | varchar | One-paragraph human-readable description; the matcher uses it for tie-breaks |
-| `keywords` | jsonb | Array of curated keyword strings — the matcher's primary signal. Mixes head terms (`"cooking"`) with long-tail (`"5-ingredient meals"`); long-tail matches are still strong signals, don't downgrade them. |
-| `created_at` | timestamptz | Rarely needed |
-| `updated_at` | timestamptz | Rarely needed |
-| `source` | varchar | Provenance, rarely needed |
-
-#### Columns that DO NOT exist on `thoughtleaders_topics`
-
-Common hallucinations the agent has tried in real runs (each wasted a round-trip). All return *"column '\<name\>' does not exist"*:
-
-- ❌ `is_active`
-- ❌ `type` (topics are not subtyped at the schema level)
-- ❌ `parent_id` (topics are flat, not hierarchical)
-- ❌ `slug`, `topic_id` (the PK is `id`), `archived`, `is_published`
-
-Cited regression markers from real runs:
-- AI/marketing channels run: tried `thoughtleaders_topic` (singular — table doesn't exist), then `WHERE is_active = TRUE`. Three round-trips before consulting `information_schema`.
-- Travel/digital-nomad run: tried `SELECT id, name, type, parent_id FROM thoughtleaders_topics WHERE name ILIKE ANY(...)`.
-- **Name-pattern WHERE-clause loop (general pattern)**: when the user's niche has no obvious curated topic, agents have run progressively broader name-pattern `WHERE` queries against this table — typically two or three rounds of `WHERE name ILIKE '%<term1>%' OR name ILIKE '%<term2>%' OR ...`, sometimes interleaved with an `information_schema.columns` inspection between them — each returning zero rows. The correct path is one canonical fetch (above) + the matcher's `summary.no_match: true` verdict for the off-taxonomy case. **A zero-row canonical fetch (no WHERE clause) is a data-plane failure, NOT off-taxonomy** — surface the failure rather than silently falling through to keyword_research.
-
-If a query against this table errors with *"column '\<X\>' does not exist"*, that's the regression marker — go back to the verbatim fetch above.
-
-### `auth_user` (Django Users)
+### Key columns for the `auth_user` table (Django Users)
 
 Standard Django user table. Used for owner lookups.
 
@@ -327,6 +240,10 @@ thoughtleaders_adlink
 ⚠️ thoughtleaders_adlink has NO direct brand_id, organization_id, or channel_id column.
 ⚠️ thoughtleaders_brand has NO organization_id column — org lives on profile.
 ```
+
+## Finding a single channel or brand ID
+
+As a special case, the `tl channels find` and `tl brands find` commands accept a name of the channel / brand (be sure to properly quote them for the shell) and will return the respective ID. Use this instead of constructing SQL for this particular case. The commands will return a list of possible choices
 
 ### Common Join Paths
 
@@ -408,7 +325,7 @@ ORDER BY media_selling_network_join_date DESC
 LIMIT 500 OFFSET 0
 ```
 
-**Deal with brand and channel name:**
+**A specific sponsorship info with brand and channel name:**
 ```sql
 SELECT a.id, a.price, a.publish_status, b.name AS brand, ch.channel_name
 FROM thoughtleaders_adlink a
