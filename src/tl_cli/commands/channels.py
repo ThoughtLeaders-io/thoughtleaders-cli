@@ -336,15 +336,39 @@ def find_cmd(
             )
     except ApiError as e:
         if e.status_code == 400 and isinstance(e.raw, dict) and e.raw.get("candidates"):
-            _print_channel_candidates(e.detail, e.raw["candidates"])
+            if fmt == "table":
+                _print_channel_candidates(e.detail, e.raw["candidates"])
+            else:
+                # Machine-readable output: emit candidates through the
+                # standard formatter so --json / --csv / --md / --toon all
+                # produce the same structural surface the success path uses.
+                Console(stderr=True).print(f"[yellow]{e.detail}[/yellow]")
+                output(
+                    {"detail": e.detail, "results": e.raw["candidates"]},
+                    fmt,
+                    columns=["id", "name", "subscribers"],
+                    title="Ambiguous match — candidates",
+                )
             raise typer.Exit(1)
         if e.status_code == 404 and isinstance(e.raw, dict) and e.raw.get("queued"):
-            err = Console(stderr=True)
-            err.print(f"[yellow]{e.detail}[/yellow]")
-            err.print(
-                f"  [dim]queued_channel_id={e.raw.get('queued_channel_id')}"
-                f"  queued_url={e.raw.get('queued_url')}[/dim]"
-            )
+            if fmt == "table":
+                err = Console(stderr=True)
+                err.print(f"[yellow]{e.detail}[/yellow]")
+                err.print(
+                    f"  [dim]queued_channel_id={e.raw.get('queued_channel_id')}"
+                    f"  queued_url={e.raw.get('queued_url')}[/dim]"
+                )
+            else:
+                Console(stderr=True).print(f"[yellow]{e.detail}[/yellow]")
+                output_single(
+                    {
+                        "detail": e.detail,
+                        "queued": True,
+                        "queued_channel_id": e.raw.get("queued_channel_id"),
+                        "queued_url": e.raw.get("queued_url"),
+                    },
+                    fmt,
+                )
             raise typer.Exit(1)
         handle_api_error(e)
     finally:
