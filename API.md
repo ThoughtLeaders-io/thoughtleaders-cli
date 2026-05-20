@@ -154,7 +154,7 @@ print(get('/balance'))
 
 ```json
 {
-  "balance": 9_995.88,
+  "balance": 9995.88,
   "allow_overage": false,
   "recent_usage": [
     {
