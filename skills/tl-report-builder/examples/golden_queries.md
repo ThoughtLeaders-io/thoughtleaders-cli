@@ -84,7 +84,7 @@ A small, hand-curated test set the skill must handle correctly. Used during prom
 - **Expected report type**: CHANNELS (3)
 - **Expected topic match(es)**: none — `topic_matcher` returns weak/none for all topics ("Personal Investing" overlap is partial at best — `keywords[]` covers stocks/portfolio/budgeting, NOT crypto/Web3)
 - **Expected keywords**: crypto, bitcoin, ethereum, web3, defi
-- **Notes**: Tests the no-topic-match path. `topic_matcher` returns no strong verdicts → Phase 2 invokes `keyword_research`. Should *not* force a weak topic match into the FilterSet's `topics` field.
+- **Notes**: Tests the no-topic-match path. `topic_matcher` returns no strong verdicts → Phase 2 invokes the keyword-research step (delegates to the `tl-keyword-research` skill). Should *not* force a weak topic match into the FilterSet's `topics` field.
 
 ## 10. Cross-reference with date scope
 - **ID**: G10
@@ -105,15 +105,15 @@ These exercise paths the off-taxonomy keyword research takes that G09 alone does
 - **Query**: `"channels about IRS tax debt forgiveness programs"`
 - **Expected report type**: CHANNELS (3)
 - **Expected topic match(es)**: 97 (Personal Investing) — **weak** (tax-adjacent finance vertical, but `keywords[]` covers stocks/portfolio/budgeting, NOT tax debt resolution); rest none
-- **Expected `keyword_research` behavior**: runs (no strong matches); produces tax-debt-resolution candidates AND avoids overlap with Topic 97's stocks/ETFs/portfolio territory
-- **Notes**: Tests `keyword_research`'s anti-overlap rule. Validation will show TL data is sparse on this niche (most candidates near-zero) — Phase 4 will likely surface a "narrow result" takeaway. That's a real-data feature, not a bug. **This is the canonical `sample_judge` regression test**: substring noise (`IRS` matching inside "first") can produce inflated counts of obviously-wrong channels (Cocomelon, music labels, etc.); `sample_judge` must catch this and route to a Mode-B follow-up rather than emit silently.
+- **Expected keyword-research behavior**: runs (no strong matches); the agent's Phase 1 expansion produces tax-debt-resolution candidates and applies WEAK_MATCHES anti-overlap to avoid Topic 97's stocks/ETFs/portfolio territory; the `tl-keyword-research` script then ranks them by count
+- **Notes**: Tests the anti-overlap rule (now agent-applied during Phase 1 of `tl-keyword-research`, not enforced inside the tool). Validation will show TL data is sparse on this niche (most candidates near-zero) — Phase 4 will likely surface a "narrow result" takeaway. That's a real-data feature, not a bug. **This is the canonical `sample_judge` regression test**: substring noise (`IRS` matching inside "first") can produce inflated counts of obviously-wrong channels (Cocomelon, music labels, etc.); `sample_judge` must catch this and route to a Mode-B follow-up rather than emit silently.
 
 ## 12. Obscure niche, all-none
 - **ID**: G12
 - **Query**: `"channels about competitive speedcubing"`
 - **Expected report type**: CHANNELS (3)
 - **Expected topic match(es)**: none (no topic covers Rubik's cube solving or twisty-puzzle hobby)
-- **Expected `keyword_research` behavior**: runs; emits hobby-specific terms (`speedcubing`, `cubing`, `Rubik`, `twisty puzzles`) — has to discipline itself to not over-propose adjacencies (e.g. "puzzle games", which would drift into PC Games territory)
+- **Expected keyword-research behavior**: runs; the agent's Phase 1 expansion emits hobby-specific terms (`speedcubing`, `cubing`, `Rubik`, `twisty puzzles`) — has to discipline itself to not over-propose adjacencies (e.g. "puzzle games", which would drift into PC Games territory). `tl-keyword-research`'s script ranks them; expect very low counts for most.
 - **Notes**: Tests the LLM's ability to stay narrow on a small niche.
 
 ## 13. Off-taxonomy with explicit AND
@@ -121,7 +121,7 @@ These exercise paths the off-taxonomy keyword research takes that G09 alone does
 - **Query**: `"channels about both 3D printing and miniature painting"`
 - **Expected report type**: CHANNELS (3)
 - **Expected topic match(es)**: none (no topic covers either)
-- **Expected `keyword_research` behavior**: runs; `recommended_operator: "AND"` because user said "both X and Y"; emits keyword candidates for each side independently
+- **Expected keyword-research behavior**: runs; agent infers `operator: "AND"` because user said "both X and Y" and passes `--operator AND` to the `tl-keyword-research` script. Under AND the expansion stays inside the intersection — candidates must be terms that plausibly co-occur with BOTH `3D printing` AND `miniature painting` (e.g. `miniature 3D printing`, `tabletop miniatures`, `resin printing minis`), not independent broadenings of each side.
 - **Notes**: Combines AND-inference with off-taxonomy. AND intersection in TL data is narrow but non-zero. Distinguishes from G09's OR-default path.
 
 ---
@@ -133,7 +133,7 @@ For each golden, Phase 1 + Phase 2 output is **defensible** if:
 2. `topic_matcher` returns the expected verdicts (`strong` for the listed IDs, `weak`/`none` for others).
 3. Reasoning string explains *why* — at least one quoted phrase from the query.
 4. For type-8 goldens (G04, G07): no topic_matcher invocation, no `keywords` emitted.
-5. For off-taxonomy goldens (G09, G11–G13): `keyword_research` is invoked; its candidates have non-zero `db_count` after validation; the resulting FilterSet's `keywords` array is tight (3–6 entries, no obvious adjacencies).
+5. For off-taxonomy goldens (G09, G11–G13): the keyword-research step is invoked (delegates to the `tl-keyword-research` skill); its ranked output carries non-zero `count` entries that Phase 2 prunes to ~3–6 tight terms in the FilterSet's `keywords` array (no obvious adjacencies).
 
 ---
 

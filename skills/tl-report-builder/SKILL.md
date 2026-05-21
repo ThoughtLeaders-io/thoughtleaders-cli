@@ -268,7 +268,7 @@ USER_QUERY → Phase 1 → Phase 2 → Phase 3 → Phase 4 → deliverable
 - **Responsibilities**: compose FilterSet (filterset + filters_json + cross_refs), apply ReportType defaults (`days_ago`, `channel_formats`, `sort`), then VALIDATE against live data: `db_count` → threshold classify → `db_sample` (LIMIT 10) → `sample_judge` → decide `proceed | retry | alternatives | fail`. **Retry cap: 1** (feedback to T1/T2 on empty/too_broad).
 - **Conditional Tool Invocation** (Phase 2 only — tools are NOT phases):
   - **T1** `tools/topic_matcher.md` — taxonomy match
-  - **T2** `tools/keyword_research.md` — off-taxonomy keyword set
+  - **T2** off-taxonomy keyword set (delegates to the `tl-keyword-research` skill)
   - **T3** `tools/database_query.md` — cross-reference query
   - **T4** `tools/name_resolver.md` — brand/channel name → ID
   - **T5** `tools/similar_channels.md` — look-alike channels
@@ -430,7 +430,7 @@ Each tool fires only on explicit criteria. May emit `warnings: [...]` propagatin
 - **Fetch**: canonical SQL at [`tl/references/postgres-schema.md` → `thoughtleaders_topics` → Fetch query](../tl/references/postgres-schema.md#fetch-query-canonical--use-verbatim). Single query, no `WHERE`. Behavior rules: no name-pattern WHERE clauses, no `information_schema` inspection, **empty fetch ≠ off-taxonomy** (data-plane failure — surface, don't fall through). Off-taxonomy = matcher emits `summary.no_match: true`.
 - **Output**: per-topic verdicts (strong/weak/none) + summary. Strong match → topic's `keywords[]` drives FilterSet `keywords`; can also emit `topics: [<id>]` directly.
 
-**Narrow-first FilterSet assembly** (mandatory — applies to both topic-strong and keyword_research paths). Assemble with narrowest viable shape, validate, expand only if below narrow threshold. Two levers, ranked by impact:
+**Narrow-first FilterSet assembly** (mandatory — applies to both topic-strong and keyword-research paths). Assemble with narrowest viable shape, validate, expand only if below narrow threshold. Two levers, ranked by impact:
 
 **Lever 1 (HIGHEST impact) — Field selection (Type 3 only)**
 
@@ -442,7 +442,7 @@ The AI-summarised fields catalogue every topic a channel has ever touched — th
 
 Topic-strong: include `topic.keywords[]` entries fitting user's language scope. Multilingual prompts (LATAM/EU/APAC) need 5–8 native-language head terms — not just 2–3 English. Drop generic-overlap terms (single-word generics a lifestyle/family/entertainment channel might use in passing). Keep niche-specific (multi-word phrases or native-language vocab lifestyle channels wouldn't casually use).
 
-Keyword_research outputs: include `core_head` (2–4 terms) + `sub_segment` (3–6 terms) = upper two tiers, ~5–10 total. `long_tail` held back as expansion fuel.
+Keyword-research outputs (the `tl-keyword-research` ranked list): take the **top 5–10 entries by `count`** for the initial FilterSet. Hold the remaining non-zero entries as expansion fuel for the one allowed expansion cycle below. Prefer mid-band counts when the highest-count entries are obviously generic (a head term like `crypto` ranks above more discriminating sub-area terms like `DeFi` / `ethereum` because it's broader — picking only the head terms re-introduces the noise the narrow-first rule exists to avoid). Drop zero-count entries; flag any suspiciously-low non-zero counts as `validation_concerns` for the takeaways.
 
 **Expansion trigger — Type 3 only, ONE cycle max**
 
@@ -452,10 +452,17 @@ If initial Type 3 `db_count` is `narrow` / `very_narrow` (≤ 50 channels per St
 
 **Type 1 / Type 2**: expansion rule does NOT apply (no AI-summary content fields to expand into — types 1/2 default to video-level `content`/`title`/`transcript`). Narrow / very_narrow → directly `decision: "alternatives"`.
 
-### T2 — `tools/keyword_research.md`
+### T2 — Off-taxonomy keyword set
 - **Fires**: `ReportType ∈ {1, 2, 3}` AND `topic_matcher.summary.strong_matches.length == 0` AND no entity-name anchor in USER_QUERY.
-- **Skipped**: any condition above fails. Especially when user enumerates specific channels/brands (those are the anchor; keyword research is wasted).
-- **Output**: validated `KeywordSet` (head/sub_segment/long_tail + content_fields + recommended_operator + per-keyword `db_count`).
+- **Skipped**: any condition above fails. Especially when user enumerates specific channels/brands (those are the anchor; keyword research is wasted). Type 8 also skipped — sponsorship reports filter by relations, not content text.
+- **Mechanics**: delegate to the `tl-keyword-research` skill. Its `SKILL.md` is the canonical procedure (Phase 1 seed expansion → Phase 2 ranking script → strict JSON output). Apply two report-builder-specific adjustments on top of that procedure:
+  - **WEAK_MATCHES anti-overlap (Phase 1)**: for each weak topic in `topic_matcher`'s output, avoid generating its `matching_keywords` set or the head terms from its territory. Example: if Topic 97 (Personal Investing) is weak for a crypto query, do NOT propose `"investing"`, `"stocks"`, `"portfolio"` — those dilute the niche.
+  - **`--fields` per REPORT_TYPE (Phase 2)**: override the skill's default (`title,summary,transcript`) so probe counts reflect the actual field set the downstream FilterSet matches against.
+    - Type 1 (CONTENT) / Type 2 (BRANDS): `title,summary` (transcript excluded by default — too noisy).
+    - Type 3 (CHANNELS): `title,summary,channel_description,channel_topic_description` — channel-level fields ensure niche-channel matches, not just incidental video mentions.
+    - Only add `transcript` if `USER_QUERY` explicitly mentions transcripts / captions / spoken-word.
+- **Operator**: agent infers `OR` (default) or `AND` (composite-noun phrases like `"AI cooking"`, or explicit `"both X and Y"`) from USER_QUERY and passes via `--operator`.
+- **Output**: `{operator: "AND"|"OR", keywords: [{keyword, count}, …]}` sorted desc by count. Zero-count entries are pruned at consumption (Lever 2 above); `operator` stamps onto the FilterSet's keyword combinator.
 
 ### T3 — `tools/database_query.md` (cross-reference)
 - **Fires**: USER_QUERY has a cross-reference condition (sponsorship/proposal/pipeline history gating the main channel set). E.g. *"NOT proposed to Brand X"* → `cross_references`; *"channels from 2025 gaming pipeline with >$5K price"* → `multi_step_query`.
@@ -1422,7 +1429,6 @@ Load on-demand — don't read all upfront:
 
 **Conditional tools** (loaded only when Phase 2 invokes them)
 - **[tools/topic_matcher.md](tools/topic_matcher.md)** — Topic verdicts against live `thoughtleaders_topics`.
-- **[tools/keyword_research.md](tools/keyword_research.md)** — ES-validated keyword set when no topic anchor exists.
 - **[tools/database_query.md](tools/database_query.md)** — Cross-reference query: resolves a prerequisite condition into a set of IDs that the main FilterSet includes/excludes.
 - **[tools/name_resolver.md](tools/name_resolver.md)** — Progressive name → entity_id matching with ambiguity surface.
 - **[tools/similar_channels.md](tools/similar_channels.md)** — Look-alike helper: emits `filters_json.similar_to_channels` for the platform's vector-similarity engine.

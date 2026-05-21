@@ -78,6 +78,10 @@ printf 'crypto\nbitcoin\nDeFi\n' | python3 <SKILL_DIR>/scripts/probe.py
 
 # Optional time window
 python3 <SKILL_DIR>/scripts/probe.py --since 2025-01-01 --until 2026-01-01 crypto bitcoin
+
+# Override probed fields (default: title,summary,transcript) — useful when
+# the caller knows the downstream search will only consult a subset
+python3 <SKILL_DIR>/scripts/probe.py --fields title,summary crypto bitcoin
 ```
 
 The script:

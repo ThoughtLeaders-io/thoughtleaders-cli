@@ -19,16 +19,16 @@ import json
 import subprocess
 import sys
 
-FIELDS = ["title", "summary", "transcript"]
+DEFAULT_FIELDS = ["title", "summary", "transcript"]
 PROBE_TIMEOUT = 60  # per-keyword ES probe, seconds
 
 
-def build_body(keyword, since, until):
+def build_body(keyword, fields, since, until):
     multi_match = {
         "multi_match": {
             "query": keyword,
             "type": "phrase",
-            "fields": FIELDS,
+            "fields": fields,
         }
     }
     if not since and not until:
@@ -62,8 +62,8 @@ def extract_total(data):
     return 0
 
 
-def probe(keyword, since, until):
-    body = build_body(keyword, since, until)
+def probe(keyword, fields, since, until):
+    body = build_body(keyword, fields, since, until)
     proc = subprocess.run(
         ["tl", "db", "es", "-", "--json"],
         input=json.dumps(body),
@@ -129,14 +129,23 @@ def main():
         default="OR",
         help="How the caller intends to combine these keywords downstream (default: OR). Echoed in the output envelope as `operator`.",
     )
+    ap.add_argument(
+        "--fields",
+        default=",".join(DEFAULT_FIELDS),
+        help=f"Comma-separated ES fields to probe with `multi_match phrase` (default: {','.join(DEFAULT_FIELDS)}). Use to scope probes to per-report-type field sets.",
+    )
     args = ap.parse_args()
+
+    fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    if not fields:
+        sys.exit("--fields must list at least one ES field")
 
     keywords = dedupe_case_insensitive(collect_keywords(args.keywords))
     if not keywords:
         sys.exit("provide at least one keyword (positional args or JSON array on stdin)")
 
     results = [
-        {"keyword": kw, "count": probe(kw, args.since, args.until)}
+        {"keyword": kw, "count": probe(kw, fields, args.since, args.until)}
         for kw in keywords
     ]
     results.sort(key=lambda r: r["count"], reverse=True)

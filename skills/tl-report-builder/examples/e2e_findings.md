@@ -97,15 +97,20 @@ Phase 1 surfaces a clarifying question per the inlined example: *"Which beauty c
 
 **`topic_matcher`**: Topic 97 (Personal Investing) — keywords cover stocks/portfolio/budgeting, not tax-debt resolution. Verdict: `weak`. All other topics: `none`. Summary: `no_match: true` (zero strong, only weak).
 
-**`keyword_research`**: invoked because no strong topic match. Output (predicted):
+**`keyword_research`**: invoked because no strong topic match. The `tl-keyword-research` skill returns a ranked list (predicted shape):
 ```json
 {
-  "keywords": ["IRS", "tax debt", "tax debt forgiveness", "tax debt relief", "tax resolution"],
-  "validation_concerns": ["'IRS' is a 3-character keyword — risks substring noise (matches 'first', 'irish', etc.)"]
+  "operator": "OR",
+  "keywords": [
+    {"keyword": "tax debt", "count": 12000},
+    {"keyword": "tax resolution", "count": 7800},
+    {"keyword": "tax debt forgiveness", "count": 4200},
+    {"keyword": "tax debt relief", "count": 3100},
+    {"keyword": "IRS", "count": 89000}
+  ]
 }
 ```
-
-**FilterSet composed** with `validation_concerns` propagated.
+**Validation concern surfaced separately**: `"IRS"`'s very high count compared with the niche-specific phrases is a substring-noise warning — `IRS` is a 3-character token that matches incidentally inside many unrelated docs. Phase 2 propagates this as a `validation_concerns` entry on the FilterSet for `column_builder` to surface in takeaways.
 
 **Validation**:
 - **`db_count`** (description-only after channel_name ILIKE timeout): **16,910** → classification `broad` (10001–50000 bucket).
@@ -126,7 +131,7 @@ Phase 1 surfaces a clarifying question per the inlined example: *"Which beauty c
 
 **Zero of these are about IRS tax debt.** Music artists, children's content, general entertainment, sitcoms. Substring noise from `IRS` matching inside `first`, `irish`, etc. — exactly as the inlined SKILL.md G11 example predicts.
 
-**`sample_judge` verdict**: `looks_wrong`. Reasoning: "All 10 samples are music artists, children's content, or general entertainment — none are about IRS tax debt or financial services. Confirms the substring-noise warning from `keyword_research`."
+**`sample_judge` verdict**: `looks_wrong`. Reasoning: "All 10 samples are music artists, children's content, or general entertainment — none are about IRS tax debt or financial services. Confirms the substring-noise warning carried over from the keyword-research step."
 
 **Phase 2 decision**: `decision: "alternatives"` with Mode-B prompt:
 - Save anyway (inspect the long tail manually)
@@ -165,11 +170,11 @@ Phase 3 + Phase 4 do NOT fire. ✓
 
 **Surfaced by**: G01 (XXXTENTACION, Dude Perfect false positives).
 
-**Issue**: Expanding Topic 98 to just `["gaming", "esports", "gameplay"]` (head terms) catches non-gaming channels whose descriptions happen to mention the words. Topic 98's curated `keywords[]` has 18 entries including more specific terms (`"PC gaming"`, `"video games"`, `"gaming PC build"`, `"gaming commentary"`, etc.) — using a tier-based subset (head + sub_segment) would tighten the result.
+**Issue**: Expanding Topic 98 to just `["gaming", "esports", "gameplay"]` (head terms) catches non-gaming channels whose descriptions happen to mention the words. Topic 98's curated `keywords[]` has 18 entries including more specific terms (`"PC gaming"`, `"video games"`, `"gaming PC build"`, `"gaming commentary"`, etc.) — using a more discriminating subset (mid-count, niche-specific phrases rather than head terms) would tighten the result.
 
 **Fix**: Not yet — calibration finding. Two options:
 1. Update `topic_matcher` to surface more of `keywords[]` for downstream expansion.
-2. Update Phase 2's keyword expansion to favor sub_segment / long_tail terms over head terms when both are present.
+2. Update Phase 2's keyword expansion to favor mid-count, niche-specific terms over high-count head terms when both are present in the ranked output.
 
 **Severity**: LOW — current behavior produces a usable report once the user refines; it's a precision-vs-recall trade-off, not a correctness bug.
 

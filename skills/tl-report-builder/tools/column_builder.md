@@ -23,7 +23,7 @@ The Phase 3 orchestration injects:
 3. **`ROUTING_METADATA`** — Phase 2's `_routing_metadata`. Critically:
    - **`intent_signal`**: phrases like `"product placements (outreach)"`, `"sponsorship outreach"`, `"audience-quality focus"`. When non-null, drives intent-based column additions.
    - **`tool_warnings`**: warnings from T1–T5 (e.g., `name_resolver` matched "Sanky" via emoji-stripped matching). Surface in `_column_metadata.concerns_surfaced` so Phase 4 can include them in takeaways.
-   - **`validation_concerns`**: noise warnings from `keyword_research` / `sample_judge`. Same surfacing path.
+   - **`validation_concerns`**: noise warnings from the keyword-research step (suspiciously-low non-zero counts) and from `sample_judge`. Same surfacing path.
 4. **`COLUMNS_REFERENCE`** — content of `references/columns_<channels|content|brands|sponsorships>.md` for the report type. Lists default columns, full available column catalog, intent-driven additions table, and custom-formula variables. **Do NOT inline the catalog into your reasoning; consult it.**
 5. **`SORTABLE_COLUMNS`** — content of `references/sortable_columns.json`. Per-column sort metadata (asc-only / desc-only / both) used to validate the FilterSet's `sort` field.
 
