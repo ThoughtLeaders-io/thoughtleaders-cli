@@ -46,15 +46,29 @@ Hard rules:
 - **Brand names — only mirror the seeds.** If the seed set is purely topic-shaped (`"crypto"`, `"productivity"`, `"home renovation"`), do NOT introduce brand names; brands should be resolved by `tl brands find` to integer IDs and queried through `sponsored_brand_mentions` / `organic_brand_mentions`, not by free-text match. Only if the seeds **already contain at least one brand name** (e.g. the caller is hunting for competitor coverage or adjacent sponsorship mentions in transcripts) is it appropriate to expand with adjacent brand names in the same category — e.g. seed `"NordVPN"` → `"Surfshark"`, `"ExpressVPN"`, `"Mullvad"` is fine; seed `"crypto"` → adding `"Coinbase"` is not.
 - DON'T propose specific channel names (e.g. `"MrBeast"`). Same path: `tl channels find`.
 - DON'T propose random-letter junk to pad the list.
-- For composite-noun queries with AND semantics (`"both Roman history and naval warfare"`), keep candidates inside the intersection — don't broaden across both components independently if the caller cares about the AND.
+
+#### Determine AND vs OR semantics
+
+Decide upfront how the caller will combine the keywords downstream, and pass the result to the script with `--operator AND|OR`. The decision shapes both the expansion (next bullet) and the output envelope:
+
+- **Default `OR`.** Most off-taxonomy queries are union-style ("crypto channels" matches any of crypto / bitcoin / Web3 / …).
+- **`AND` only when the user's phrasing carries clear intersection semantics:**
+  - **Composite noun phrases** — `"AI cooking"`, `"Roman naval warfare"`, `"vegan keto"`.
+  - **Explicit conjunctions** — `"both X and Y"`, `"covering both X and Y"`.
+- When in doubt, OR.
+
+**Expansion shape under `AND`:** keep candidates **inside the intersection** — don't broaden across each component independently. For `"Roman naval warfare"`, expand within Roman-naval territory (`Punic Wars`, `Roman navy`, `trireme`, `Battle of Actium`); do NOT add generic Roman-empire or generic naval-warfare terms, because the downstream AND combine would then over-match unrelated channels.
 
 ### Phase 2 — Rank (mechanical, via the bundled script)
 
 Run the bundled script. It takes the candidate list, sends one `size:0` + `track_total_hits` phrase probe per keyword to `tl db es` against `["title", "summary", "transcript"]`, and prints the ranked JSON on stdout.
 
 ```bash
-# Positional args
+# Positional args (defaults to --operator OR)
 python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi "smart contract"
+
+# Composite-noun seeds — pass --operator AND
+python3 <SKILL_DIR>/scripts/probe.py --operator AND "Roman naval warfare" "Punic Wars" trireme
 
 # JSON array on stdin
 echo '["crypto","bitcoin","DeFi","smart contract"]' | python3 <SKILL_DIR>/scripts/probe.py
@@ -82,6 +96,7 @@ A **single JSON object** on stdout — no prose, no markdown fences:
 
 ```json
 {
+  "operator": "OR",
   "keywords": [
     {"keyword": "crypto",  "count": 18742},
     {"keyword": "bitcoin", "count": 15103},
@@ -91,7 +106,8 @@ A **single JSON object** on stdout — no prose, no markdown fences:
 }
 ```
 
-- Sorted **descending** by `count`.
+- `operator` is always present and is one of `"OR"` (default) or `"AND"`. It echoes whatever was passed via `--operator` and tells the caller how to combine the surviving keywords downstream (`bool.should` for OR, `bool.must` for AND, or the FilterSet equivalent).
+- `keywords` sorted **descending** by `count`.
 - **Zero-count entries are kept** — they signal that the agent's suggestion didn't match anything in the corpus, which is informative to the caller.
 - **Deduplicated case-insensitively** — `"Crypto"` and `"crypto"` collapse to one entry; the first spelling wins.
 - Each entry has exactly two keys: `keyword` (string) and `count` (integer).
@@ -106,7 +122,9 @@ Each probe is `size:0` + `track_total_hits:true` with no aggregations — no row
 ## Self-check before emitting
 
 1. Output is a single valid JSON object on stdout — no prose, no fences.
-2. Every keyword is a generic term (no specific brand or channel names).
-3. `keywords` array is sorted descending by `count`.
-4. Each entry has exactly `keyword` (string) and `count` (integer).
-5. The seed keyword(s) appear in the output.
+2. `operator` is `"AND"` only when the user phrasing carries clear intersection semantics (composite-noun phrase or explicit "both X and Y"); otherwise `"OR"`.
+3. Under `operator: "AND"`, candidates stay inside the intersection — no broadening across components independently.
+4. Every keyword is a generic term (no specific brand or channel names).
+5. `keywords` array is sorted descending by `count`.
+6. Each entry has exactly `keyword` (string) and `count` (integer).
+7. The seed keyword(s) appear in the output.

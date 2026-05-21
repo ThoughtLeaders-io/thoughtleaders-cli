@@ -123,6 +123,12 @@ def main():
     ap.add_argument("keywords", nargs="*", help="Keywords (or pipe a JSON array on stdin)")
     ap.add_argument("--since", help="publication_date >= YYYY-MM-DD")
     ap.add_argument("--until", help="publication_date <= YYYY-MM-DD")
+    ap.add_argument(
+        "--operator",
+        choices=["AND", "OR"],
+        default="OR",
+        help="How the caller intends to combine these keywords downstream (default: OR). Echoed in the output envelope as `operator`.",
+    )
     args = ap.parse_args()
 
     keywords = dedupe_case_insensitive(collect_keywords(args.keywords))
@@ -134,7 +140,7 @@ def main():
         for kw in keywords
     ]
     results.sort(key=lambda r: r["count"], reverse=True)
-    print(json.dumps({"keywords": results}, ensure_ascii=False))
+    print(json.dumps({"operator": args.operator, "keywords": results}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
