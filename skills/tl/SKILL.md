@@ -449,9 +449,18 @@ tl changelog since v0.4.10             # Notes from v0.4.10 to latest
 tl changelog --md > CHANGELOG.md       # Capture for a doc
 ```
 
-#### Channel discovery — recommender first, raw SQL second
+#### Channel & video discovery — pick the path for the question shape
 
-For category- or demographic-driven discovery, **use the recommender, not `content_category` SQL.** The recommender ranks channels by how strongly they load on a category/demographic tag (similarity scores), instead of forcing exact equality on a single integer code. It also returns the matching brand profiles alongside the channels — useful when the user actually wants to know "who buys this kind of inventory."
+Four first-class paths, each with a different signal. **Pick by the SHAPE of the user's question, not by habit.** "Recommender first" is the right default only for path 2 — for paths 1, 3, and 4 the recommender is the wrong tool.
+
+**1. Named entity** — user named a specific channel, brand, or YouTube URL/handle/ID (`"MrBeast"`, `"NordVPN"`, `"@mkbhd"`, `"youtu.be/..."`). Use `tl channels find` / `tl brands find` — single-step resolver returning `{id, name}`. Cheap, deterministic, no expansion.
+
+```bash
+tl channels find "MrBeast"
+tl brands find "NordVPN"
+```
+
+**2. Curated tag / category / demographic** — user named a topic that maps cleanly to a recommender tag (`"Cooking"`, `"Tech"`, `"USA share"`, content categories, format hints). Use the recommender — it ranks channels by how strongly they load on a tag, returning ranked similarity scores instead of forcing exact equality. It also returns matching brand profiles alongside the channels — useful when the user wants to know "who buys this kind of inventory."
 
 ```bash
 # Discover the right tag name first (free)
@@ -464,7 +473,45 @@ tl recommender top-channels "Tech" --limit 30
 tl recommender top-brands "USA share" mbn:yes --limit 50
 ```
 
-Use `tl db pg` only for predicates the recommender can't express — pure attribute filters (`is_tl_channel`, `language`, `demographic_device_primary`), aggregations, and joins. Run `tl schema pg` once to confirm the live column set; the columns referenced below are stable.
+**Hand-off to path 3 when the tag doesn't fit.** If `tl recommender tags <hint>` returns no clean match, the user's intent is OFF-TAG — drop to path 3, do NOT fake-fit a loose adjacent tag. E.g. `"crypto/Web3 channels"` is OFF-TAG even though `"cryptocurrency"` exists as a tag — `"cryptocurrency"` is a financial-product tag, not the cultural-niche the user named. Same for `"speedcubing"`, `"biohacking and longevity"`, `"AI cooking"` — none of these are curated tags, so they belong in path 3.
+
+**Also fall through to path 3 — NOT path 4 — when the recommender returns errors.** If `tl recommender top-channels "<tag>"` 5xx's or times out, the right fallback is path 3 (run the keyword-research skill against ES), not path 4 (PG `ILIKE` on `channel_name`). PG name-matching misses every channel whose name doesn't contain the literal word — that's the same anti-pattern called out at the bottom of this section.
+
+**3. Off-tag content keywords — invoke `tl-keyword-research`** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
+
+- **Channel search by topic** — `"crypto/Web3 channels"`, `"speedcubing channels"`, `"channels about biohacking and longevity"`, `"both 3D printing and miniature painting"`.
+- **Video search by topic** — `"videos where creators discuss budget meal prep"`, `"uploads about [topic]"`, `"find videos that talk about X"`.
+- **Channel–brand fit check** — does this candidate channel's content actually touch the brand's category? (Use with `channel.id` filter on the downstream ES query.)
+- **Validating a recommender / SQL shortlist** — sample-check that the top-N channels really cover the niche.
+
+**Do NOT compose keyword sets by hand for `tl db es`.** Always run the skill's script first. It broadens the seeds, probes each candidate via `multi_match phrase`, and returns ranked counts:
+
+```json
+{"operator": "OR", "keywords": [{"keyword": "crypto", "count": 18742}, {"keyword": "bitcoin", "count": 15103}, {"keyword": "rugpull", "count": 0}]}
+```
+
+Three invocations cover almost every case. **Pick by the question shape** (channel vs video vs AND-composite):
+
+```bash
+# (a) Channel search by topic — default fields (title, summary, transcript)
+python3 skills/tl-keyword-research/scripts/probe.py crypto bitcoin DeFi Web3 blockchain
+
+# (b) Video search by topic — REQUIRED: pass --fields title,summary
+#     The default field set includes `transcript`, which inflates counts via
+#     incidental mentions inside long videos. For video-level discovery the
+#     downstream ES query also uses title+summary, so the probe MUST match.
+python3 skills/tl-keyword-research/scripts/probe.py --fields title,summary \
+  "budget meal prep" "cheap meal prep" "meal prep on a budget" "frugal recipes"
+
+# (c) Composite noun ("both X and Y") — pass --operator AND so candidates stay
+#     inside the intersection (don't broaden each component independently)
+python3 skills/tl-keyword-research/scripts/probe.py --operator AND \
+  "3d printing" "miniature painting" "tabletop miniatures" "resin printing minis"
+```
+
+Then run the actual content search via `tl db es` (`multi_match` on the same fields) with the surviving high-count keywords. Zero-count entries are informative — they tell you which suggestions don't exist in the corpus. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in `skills/tl-keyword-research/SKILL.md`.
+
+**4. Pure attribute filter** — user wants channels matching attributes the recommender doesn't express: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` jsonb, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg` once to confirm the live column set; the columns below are stable.
 
 ```bash
 # All TPP (TL-managed) channels — pure attribute filter, not a category query
@@ -487,19 +534,7 @@ For per-country share beyond the recommender's "USA share" tag, use the `demogra
 
 **MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context. For MSN-only / non-MSN lookups, run the same raw SQL with `media_selling_network_join_date IS [NOT] NULL` from a context that has access to it (full-access role), or rely on the recommender's MSN-aware filters: `tl recommender top-channels "<tag>" msn:yes|no|all`.
 
-#### Content keyword discovery — `tl-keyword-research`
-
-What channels actually talk about (`title` / `summary` / `transcript` content) is a complementary signal to recommender tags and attribute filters. Reach for it when **exploring channels by topic / niche off-tag**, **assessing channel–brand fit by topical evidence**, or **validating a recommender or SQL shortlist** before pitching.
-
-Don't pick keywords by hand and immediately run `tl db es` — delegate to the **`tl-keyword-research`** skill first. It takes one or more seed keywords (or an NL phrase), widens them with synonyms / sub-areas / related concepts, probes each candidate against `title` / `summary` / `transcript`, and returns a strict JSON ranked by document count:
-
-```json
-{"keywords":[{"keyword":"crypto","count":18742},{"keyword":"bitcoin","count":15103},{"keyword":"rugpull","count":0}]}
-```
-
-Take the surviving high-count keywords from that output and run the actual `tl db es` content search (`multi_match` on `["title","summary","transcript"]`, narrowed by `publication_date` and / or `channel.id` as needed). Zero-count entries in the ranked output are informative — they tell you which suggestions don't exist in the corpus.
-
-Skip the skill when the user has explicit IDs / names (`tl channels find` / `tl brands find`) or when the intent maps cleanly to an existing recommender tag (`tl recommender top-channels "<tag>"`).
+**Anti-pattern: defaulting to `ILIKE` on `channel_name` for off-tag topic queries.** If the question is "channels about X" where X is a topic / concept / niche (not a literal substring you expect in channel names), reach for path 3 (`tl-keyword-research`), not `WHERE channel_name ILIKE '%X%'`. Channel-name `ILIKE` misses channels whose name doesn't literally contain X but whose content does; the keyword-research skill catches them via `title` / `summary` / `transcript`. Use `channel_name ILIKE` only when you actually expect the channel's name to contain the term (e.g. `"Crypto"` in `"My Happy Crypto"`) as a supplementary signal alongside path 3, not as a replacement for it.
 
 ### Output flags
 - `--json` — structured JSON (use this for parsing)

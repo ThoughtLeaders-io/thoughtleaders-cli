@@ -63,25 +63,36 @@ Decide upfront how the caller will combine the keywords downstream, and pass the
 
 Run the bundled script. It takes the candidate list, sends one `size:0` + `track_total_hits` phrase probe per keyword to `tl db es` against `["title", "summary", "transcript"]`, and prints the ranked JSON on stdout.
 
+**Pick the invocation shape by what the user is searching for:**
+
 ```bash
-# Positional args (defaults to --operator OR)
+# (a) Channel search by topic — default fields (title, summary, transcript)
 python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi "smart contract"
 
-# Composite-noun seeds — pass --operator AND
-python3 <SKILL_DIR>/scripts/probe.py --operator AND "Roman naval warfare" "Punic Wars" trireme
+# (b) Video search by topic — REQUIRED: pass --fields title,summary
+#     Without it, the probe includes transcript matches (noise from passing
+#     mentions inside long videos), and the count won't match the field set
+#     the downstream ES query uses for video-level discovery.
+python3 <SKILL_DIR>/scripts/probe.py --fields title,summary \
+  "budget meal prep" "cheap meal prep" "meal prep on a budget"
 
+# (c) Composite-noun phrase ("both X and Y" / "X-themed Y") — pass --operator AND
+#     to keep candidates inside the intersection
+python3 <SKILL_DIR>/scripts/probe.py --operator AND \
+  "Roman naval warfare" "Punic Wars" trireme "Roman navy"
+```
+
+Other input / scoping forms:
+
+```bash
 # JSON array on stdin
-echo '["crypto","bitcoin","DeFi","smart contract"]' | python3 <SKILL_DIR>/scripts/probe.py
+echo '["crypto","bitcoin","DeFi"]' | python3 <SKILL_DIR>/scripts/probe.py
 
 # Newline-separated on stdin
 printf 'crypto\nbitcoin\nDeFi\n' | python3 <SKILL_DIR>/scripts/probe.py
 
-# Optional time window
+# Time window (optional, applies to publication_date)
 python3 <SKILL_DIR>/scripts/probe.py --since 2025-01-01 --until 2026-01-01 crypto bitcoin
-
-# Override probed fields (default: title,summary,transcript) — useful when
-# the caller knows the downstream search will only consult a subset
-python3 <SKILL_DIR>/scripts/probe.py --fields title,summary crypto bitcoin
 ```
 
 The script:
