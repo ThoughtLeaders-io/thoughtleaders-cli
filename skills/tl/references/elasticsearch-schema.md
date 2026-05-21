@@ -261,6 +261,10 @@ tl db es '{
 }'
 ```
 
+## Text analyzer behavior
+
+`text` fields on article docs (`title`, `summary`, `transcript`) appear to use the `standard` analyzer (tokenize + lowercase, no stemmer, no English-possessive filter), so inflections, plurals, and possessives are each indexed as distinct terms. For example: `bitcoin` (4,466,300) vs `bitcoins` (489,262). For stemming-style recall, expand the query side with a `bool.should` over the variants.
+
 ## Notes & gotchas
 
 - **Composite IDs:** `tl-platform.id` and `_id` are `<channel_id>:<youtube_id>`. The `youtube_id` portion alone is what Firebolt's `article_metrics.id` stores.

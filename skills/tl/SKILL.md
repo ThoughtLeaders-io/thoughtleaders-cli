@@ -487,6 +487,20 @@ For per-country share beyond the recommender's "USA share" tag, use the `demogra
 
 **MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context. For MSN-only / non-MSN lookups, run the same raw SQL with `media_selling_network_join_date IS [NOT] NULL` from a context that has access to it (full-access role), or rely on the recommender's MSN-aware filters: `tl recommender top-channels "<tag>" msn:yes|no|all`.
 
+#### Content keyword discovery — `tl-keyword-research`
+
+What channels actually talk about (`title` / `summary` / `transcript` content) is a complementary signal to recommender tags and attribute filters. Reach for it when **exploring channels by topic / niche off-tag**, **assessing channel–brand fit by topical evidence**, or **validating a recommender or SQL shortlist** before pitching.
+
+Don't pick keywords by hand and immediately run `tl db es` — delegate to the **`tl-keyword-research`** skill first. It takes one or more seed keywords (or an NL phrase), widens them with synonyms / sub-areas / related concepts, probes each candidate against `title` / `summary` / `transcript`, and returns a strict JSON ranked by document count:
+
+```json
+{"keywords":[{"keyword":"crypto","count":18742},{"keyword":"bitcoin","count":15103},{"keyword":"rugpull","count":0}]}
+```
+
+Take the surviving high-count keywords from that output and run the actual `tl db es` content search (`multi_match` on `["title","summary","transcript"]`, narrowed by `publication_date` and / or `channel.id` as needed). Zero-count entries in the ranked output are informative — they tell you which suggestions don't exist in the corpus.
+
+Skip the skill when the user has explicit IDs / names (`tl channels find` / `tl brands find`) or when the intent maps cleanly to an existing recommender tag (`tl recommender top-channels "<tag>"`).
+
 ### Output flags
 - `--json` — structured JSON (use this for parsing)
 - `--csv` — CSV output
