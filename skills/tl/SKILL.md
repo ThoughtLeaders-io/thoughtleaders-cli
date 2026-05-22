@@ -492,7 +492,7 @@ Use `tl recommender top` for category/topic discovery (it's ranked) and `tl chan
 
 **Also fall through to path 3 if the user wants to broaden the search.** When encountering further inputs like "broaden the search", "find more results", etc., it indicates the user is searching for topics beyond what the recommender tags provide.
 
-**3. Content keywords beyond tags — invoke `tl-keyword-research`** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
+**3. Content keywords beyond tags — invoke the `tl-keyword-research` skill** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
 
 - **Channel search by topic** — `"crypto/Web3 channels"`, `"speedcubing channels"`, `"channels about biohacking and longevity"`, `"both 3D printing and miniature painting"`.
 - **Video search by topic** — `"videos where creators discuss budget meal prep"`, `"uploads about [topic]"`, `"find videos that talk about X"`.
@@ -507,7 +507,7 @@ Use `tl recommender top` for category/topic discovery (it's ranked) and `tl chan
 
 Then run the actual content search via `tl db es` (`multi_match` on the `title`, `summary`, `transcript` fields) with the surviving high-count keywords. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in the `tl-keyword-research` skill file.
 
-**4. Pure attribute filter** — user wants channels matching attributes the recommender doesn't express: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` jsonb, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg` once to confirm the live column set; the columns below are stable.
+**4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
 
 ```bash
 # All TPP (TL-managed) channels — pure attribute filter, not a category query
@@ -526,16 +526,17 @@ tl db pg "SELECT id, channel_name, demographic_device_primary, total_views
           LIMIT 100 OFFSET 0"
 ```
 
-For per-country share beyond the recommender's "USA share" tag, use the `demographic_geo` jsonb in raw SQL: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
+For per-country share beyond the recommender's "USA share" tag, use the `demographic_geo` JSONB field in raw SQL: `(demographic_geo->>'gb')::int >= 25`. Same pattern with `demographic_device->>'mobile'` for non-primary device shares.
 
 **MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context. For MSN-only / non-MSN lookups, run the same raw SQL with `media_selling_network_join_date IS [NOT] NULL` from a context that has access to it (full-access role), or rely on the recommender's MSN-aware filters: `tl recommender top-channels "<tag>" msn:yes|no|all`.
 
 **Anti-pattern: defaulting to `ILIKE` on `channel_name` for off-tag topic queries.** If the question is "channels about X" where X is a topic / concept / niche (not a literal substring you expect in channel names), reach for path 3 (`tl-keyword-research`), not `WHERE channel_name ILIKE '%X%'`. Channel-name `ILIKE` misses channels whose name doesn't literally contain X but whose content does; the keyword-research skill catches them via `title` / `summary` / `transcript`. Use `channel_name ILIKE` only when you actually expect the channel's name to contain the term (e.g. `"Crypto"` in `"My Happy Crypto"`) as a supplementary signal alongside path 3, not as a replacement for it.
 
 ### Output flags
-- `--json` — structured JSON (use this for parsing)
-- `--csv` — CSV output
-- `--md` — Markdown table
+- `--json` — structured JSON output format (use this for parsing)
+- `--toon` — [TOON](https://toonformat.dev/guide/getting-started.html) output format (efficient for large data sets while keeping metadata)
+- `--csv` — CSV output format
+- `--md` — Markdown table for user presentation only
 - `--limit N` — max results
 - `--offset N` — pagination
 
