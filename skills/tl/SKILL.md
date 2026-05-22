@@ -113,7 +113,7 @@ Use the `tl channels similar` and `tl brands similar` commands to find channels 
 
 ## Workflow
 
-At the start of session, always run `tl --help` to find out which command groups are available, and `tl whoami` to find out what you have access to.
+At the start of session, always run `tl whoami` to find out what you have access to.
 
 ### How to discover commands and subcommands
 
@@ -121,17 +121,15 @@ The CLI exposes three different discovery surfaces — pick by what you actually
 
 | You want to know… | Run |
 |---|---|
+| The live PG/ES/Firebolt schema for raw `tl db` queries - this is the interface to use to fetch data | `tl schema pg` / `tl schema es` / `tl schema fb` |
 | Top-level command groups (`sponsorships`, `channels`, `db`, `recommender`, etc.) | `tl --help` |
 | Subcommands of a group (`tl recommender` → `tags`, `top-channels`, `inspect-brand`, …) | `tl <group> --help` (e.g. `tl recommender --help`, `tl db --help`) |
 | Arguments and flags for a specific leaf command | `tl <group> <subcommand> --help` (e.g. `tl recommender top-channels --help`) |
 | Fields, filters, credit rates for a **data resource** (sponsorships, uploads, snapshots, reports, comments, recommender) | `tl describe show <resource> --json` |
-| The live PG/ES/Firebolt schema for raw `tl db` queries | `tl schema pg` / `tl schema es` / `tl schema fb` |
 | The schema of a **single** PG / Firebolt table | **`tl schema pg <table>`** / **`tl schema fb <table>`** — strongly preferred when you only need one |
 
 Notes:
-- Use `--help` everywhere — there is no separate `tl help` command. `tl help` returns "No such command 'help'".
-- **`tl describe show channels`** and **`tl describe show brands`** intentionally do not list fields/filters — channel and brand search live in raw SQL (`tl db pg`) and the recommender, not in a structured list endpoint. They print a notice steering you there.
-- `--help` describes **CLI shape**; `tl describe` describes **data shape**. They don't overlap.
+- Use `--help` to find out which options are available.
 
 Unless the user specifically asks for running a specific report or showing the result of a specific report, find the data by using other, low-level commands.
 
@@ -184,7 +182,6 @@ tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
 tl channels update <id> '<json>'       # Update a channel
-tl channels history <id-or-name>       # Sponsorship history
 tl channels similar <id-or-name>       # Similarity recommender (Intelligence plan)
 tl brands show <id-or-name>            # Brand detail
 tl brands find <query>                 # Resolve a string to {id, name}; matches name, slug, domain, or keyword
@@ -455,19 +452,21 @@ tl changelog --md > CHANGELOG.md       # Capture for a doc
 
 Four first-class paths, each with a different signal. **Pick by the SHAPE of the user's question, not by habit.** "Recommender first" is the right default only for path 2 — for paths 1, 3, and 4 the recommender is the wrong tool.
 
-**1. Named entity** — user named a specific channel, brand, or YouTube URL/handle/ID (`"MrBeast"`, `"NordVPN"`, `"@mkbhd"`, `"youtu.be/..."`). Use `tl channels find` / `tl brands find` — single-step resolver returning `{id, name}`. Cheap, deterministic, no expansion.
+**Path 1. Named entity** — user named a specific channel, brand, or YouTube URL/handle/ID (`"MrBeast"`, `"NordVPN"`, `"@mkbhd"`, `"youtu.be/..."`). Use `tl channels find` / `tl brands find` — single-step resolver returning `{id, name}`. Cheap, deterministic, no expansion.
 
 ```bash
 tl channels find "MrBeast"
 tl brands find "NordVPN"
 ```
 
-**2. Curated tag / category / demographic** — user named a topic that maps cleanly to a recommender tag (`"Cooking"`, `"Tech"`, `"USA share"`, content categories, format hints). Use the recommender — it ranks channels by how strongly they load on a tag, returning ranked similarity scores instead of forcing exact equality. It also returns matching brand profiles alongside the channels — useful when the user wants to know "who buys this kind of inventory."
+**Path 2. Curated tag / category / demographic** — user named a topic that maps cleanly to a recommender tag (`"Cooking"`, `"Tech"`, `"USA share"`, content categories, format hints). Use the recommender — it ranks channels by how strongly they load on a tag, returning ranked similarity scores instead of forcing exact equality. It also returns matching brand profiles alongside the channels — useful when the user wants to know "who buys this kind of inventory."
 
 ```bash
-# Discover the right tag name first (free)
+# Discover the available tag name first (free)
 tl recommender tags cooking
-tl recommender tags "usa"
+
+# Discover tag names containing the substring
+tl recommender tags crypto
 
 # Top channels & profiles loaded on a similarity tag (Intelligence)
 tl recommender top-channels "Cooking" msn:yes --limit 50
@@ -488,16 +487,16 @@ tl recommender top-brands "USA share" mbn:yes --limit 50
 
 Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches. This is the fast path.
 
-**Hand-off to path 3 when the tag doesn't fit** If `tl recommender tags <hint>` returns no clean match, the user's intent cannot be represented by recommender tags — drop to path 3, do NOT fake-fit a loose adjacent tag. E.g. `"crypto/Web3 channels"` is a miss even though `"cryptocurrency"` exists as a tag — `"cryptocurrency"` is a financial-product tag, not the cultural-niche the user named. Same for `"speedcubing"`, `"biohacking and longevity"`, `"AI cooking"` — none of these are curated tags, so they belong in path 3.
+**Hand-off to path 3 when the tag doesn't fit** If `tl recommender tags <hint>` returns no clean match, or the user's intent cannot be represented by recommender tags — drop to path 3, do NOT fake-fit a loose adjacent tag. E.g. `"crypto/Web3 channels"` is a miss even though `"cryptocurrency"` exists as a tag — `"cryptocurrency"` is a financial-product tag, not the cultural-niche the user named. Same for `"speedcubing"`, `"biohacking and longevity"`, `"AI cooking"` — none of these are curated tags, so they belong in path 3.
 
-**Also fall through to path 3 — NOT path 4 — when the recommender returns errors.** If `tl recommender top-channels "<tag>"` 5xx's or times out, the right fallback is path 3 (run the keyword-research skill against ES), not path 4 (PG `ILIKE` on `channel_name`). PG name-matching misses every channel whose name doesn't contain the literal word — that's the same anti-pattern called out at the bottom of this section.
+**Also fall through to path 3 — NOT path 4 — when the recommender returns errors.** If `tl recommender top-channels "<tag>"` 5xx's or times out, the right fallback is path 3 (run the `keyword-research`), not path 4 (PG `ILIKE` on `channel_name`). PG name-matching misses every channel whose name doesn't contain the literal word — that's the same anti-pattern called out at the bottom of this section.
 
 **Also fall through to path 3 if the user wants to broaden the search.** When encountering further inputs like "broaden the search", "find more results", etc., it indicates the user is searching for topics beyond what the recommender tags provide.
 
-**3. Content keywords beyond tags — invoke the `tl-keyword-research` skill** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
+**Path 3. Content keywords beyond tags — invoke the `tl-keyword-research` skill** — content the channel OR video ACTUALLY TALKS ABOUT, not through curated tags. Triggers:
 
 - **Channel search by topic** — `"crypto/Web3 channels"`, `"speedcubing channels"`, `"channels about biohacking and longevity"`, `"both 3D printing and miniature painting"`.
-- **Video search by topic** — `"videos where creators discuss budget meal prep"`, `"uploads about [topic]"`, `"find videos that talk about X"`.
+- **Video search by topic** — `"videos where creators discuss budget meal prep"`, `"uploads about [topic]"`, `"find videos|channels that talk about X"`.
 - **Channel–brand fit check** — does this candidate channel's content actually touch the brand's category? (Use with `channel.id` filter on the downstream ES query.)
 - **Validating a recommender / SQL shortlist** — sample-check that the top-N channels really cover the niche.
 
@@ -509,7 +508,7 @@ Use `tl recommender top` for category/topic discovery (it's ranked) and `tl chan
 
 Then run the actual content search via `tl db es` (`multi_match` on the `title`, `summary`, `transcript` fields) with the surviving high-count keywords. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in the `tl-keyword-research` skill file.
 
-**4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
+**Path 4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
 
 ```bash
 # All TPP (TL-managed) channels — pure attribute filter, not a category query
