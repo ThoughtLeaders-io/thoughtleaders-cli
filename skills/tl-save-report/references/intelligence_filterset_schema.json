@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tl-report-builder/intelligence_schema",
+  "$id": "tl-save-report/intelligence_filterset_schema",
   "title": "Intelligence FilterSet (report_type ∈ {1, 2, 3})",
-  "description": "Schema for the FilterSet payload of CONTENT (1), BRANDS (2), and THOUGHTLEADERS/CHANNELS (3) reports. Field names and types mirror dashboard.models.FilterSet 1:1 — no invented fields. Phase 2 emits a JSON object that conforms to this schema.",
+  "description": "Schema for the FilterSet payload of CONTENT (1), BRANDS (2), and CHANNELS (3) reports. Field names and types mirror the platform's FilterSet model 1:1 — no invented fields; unknown keys are rejected. The saved report's `filterset` JSON must conform to this schema.",
   "type": "object",
   "additionalProperties": false,
 
@@ -92,8 +92,8 @@
       "description": "Topic IDs from `thoughtleaders_topics`. Used to anchor a report to one or more curated topic clusters.",
       "_tl_django_field": "topics (ChoiceArrayField IntegerField)",
       "_tl_intent_hints": [
-        "Phase 2 may emit topic IDs when the topic_matcher tool returns at least one strong match.",
-        "When emitted, downstream still expands the topic's curated keywords[] into `keywords`/`content_fields` — `topics` is not a self-sufficient filter."
+        "Emit topic IDs when the user named a curated topic directly (e.g. by topic ID, or by exactly matching a topic name from `thoughtleaders_topics`).",
+        "When `topics` is set, the platform still expects the topic's curated `keywords[]` to be expanded into the FilterSet's `keywords` / `content_fields` — `topics` is not a self-sufficient filter on its own."
       ]
     },
 
@@ -318,7 +318,7 @@
 
     "filters_json": {
       "type": ["object", "null"],
-      "description": "Catch-all JSONField the platform interprets directly. Use for filter signals that don't have a first-class column. Phase 2 should prefer a typed field whenever one exists.",
+      "description": "Catch-all JSONField the platform interprets directly. Use for filter signals that don't have a first-class column. Always prefer a typed field whenever one exists — putting something in `filters_json` that has a typed equivalent confuses precedence and may silently override.",
       "_tl_emit_only_when": "No first-class field maps to the user's intent."
     },
 
@@ -326,7 +326,7 @@
       "type": ["array", "null"],
       "items": { "type": "integer", "minimum": 1 },
       "uniqueItems": true,
-      "description": "Resolved channel IDs (M2M). The skill resolves channel names → IDs via the name_resolver tool before emitting.",
+      "description": "Resolved channel IDs (M2M). Resolve channel names → IDs via `tl channels find <name>` before emitting; never put channel names here.",
       "_tl_django_m2m": "FilterSet.channels via FilterSetChannel"
     },
     "exclude_channels": {
@@ -381,9 +381,9 @@
     "Do NOT invent fields. If the user's intent has no matching field, encode it in `filters_json` (last resort) or surface it as a clarifying question.",
     "When emitting a date range, prefer days_ago/days_ago_to for rolling intent and start_date/end_date for absolute intent.",
     "Always set `languages: ['en']` and `channel_formats: [4]` (YouTube Video) unless the user explicitly contradicts them — these are TL's working defaults.",
-    "Resolve channel/brand names → IDs via the name_resolver tool BEFORE emitting `channels`/`brands` arrays.",
-    "When `keyword_operator` is unset and `keywords` has more than one entry, downstream defaults to OR — set it explicitly to AND if intent calls for it.",
-    "Keep `keywords` tight — better to ship 3 high-precision phrases than 12 noisy ones (Phase 3 sample_judge will catch noise either way, but tighter is faster)."
+    "Resolve channel/brand names → IDs via `tl channels find <name>` / `tl brands find <name>` BEFORE emitting `channels` / `brands` arrays.",
+    "When `keyword_operator` is unset and `keywords` has more than one entry, the platform defaults to OR — set it explicitly to AND if intent calls for it.",
+    "Keep `keywords` tight — better to ship 3 high-precision phrases than 12 noisy ones; noisy keywords expand the matched set and dilute the saved report."
   ],
 
   "_tl_intent_overrides": {

@@ -1,6 +1,6 @@
 # Columns — Content report (report_type = 1)
 
-Phase 3 reference. Each row = one upload (video / article / podcast episode). Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
+Column catalogue for Content reports. Each row of the saved report = one upload (video / article / podcast episode). The emitted `columns` dict has shape `display_name → {"display": true}` (plus optional `custom` / `formula` / `cellType`). Display names are case-sensitive and preserve spaces — the platform key-matches exactly.
 
 ## Defaults — always include
 
@@ -75,4 +75,4 @@ Surface custom formulas as refinement suggestions; user opts in.
 2. Don't dump every view-snapshot column. Pick the 1–2 that match the date scope: short windows → `Views at 7 days` / `Views at 30 days`; longer → `Views at 90 days` / `Views at 365 days`.
 3. Sponsorship columns only if intent involves deals (sparse + noisy on discovery).
 4. Display names match exactly.
-5. Pick 5–10 standard columns unless intent justifies more (flag in `_phase3_metadata.column_count`).
+5. Pick 5–10 standard columns unless intent justifies more (the platform allows up to 13).

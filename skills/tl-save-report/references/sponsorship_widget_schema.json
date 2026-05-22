@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tl-report-builder/sponsorship_widget_schema",
+  "$id": "tl-save-report/sponsorship_widget_schema",
   "title": "Sponsorship widgets (report_type = 8)",
-  "description": "Schema for widget objects emitted by Phase 4 for CAMPAIGN_MANAGEMENT (8) reports — sponsorship deal tracking. Defines the per-widget shape, the disjoint sponsorship aggregator catalog, and type-8 axis branching. Pair file: intelligence_widget_schema.json (types 1/2/3).",
+  "description": "Schema for widget objects on SPONSORSHIPS (8) reports — sponsorship deal tracking. Defines the per-widget shape, the disjoint sponsorship aggregator catalog, and type-8 axis branching. Pair file: intelligence_widget_schema.json (types 1/2/3).",
   "type": "object",
   "additionalProperties": false,
 

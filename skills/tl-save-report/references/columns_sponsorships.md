@@ -1,6 +1,6 @@
 # Columns — Sponsorships report (report_type = 8)
 
-Phase 3 reference. Each row = one sponsorship deal (AdLink). Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
+Column catalogue for Sponsorships reports. Each row of the saved report = one sponsorship deal (AdLink). The emitted `columns` dict has shape `display_name → {"display": true}` (plus optional `custom` / `formula` / `cellType`). Display names are case-sensitive and preserve spaces — the platform key-matches exactly.
 
 > Type 8 is **completely different** from types 1/2/3 — different rows, different catalog, different defaults. Don't reuse type-3 defaults like `TL Channel Summary` as primary columns; they're available but secondary.
 
@@ -93,4 +93,4 @@ Surface custom formulas as refinement suggestions; user opts in.
 5. `Match Grade` is the matching-engine score — useful for deal-quality fit questions, otherwise omit.
 6. Use TL-glossary terms in formulas. TL says **Net revenue** / **TL profit**, not "margin." For profit signal, prefer `{Price} - {Cost}` rather than naming it "margin."
 7. Display names match exactly — note `Weighted price` (lowercase `p`), `Gender (male %)` (parens included), `Demographics - Age Median` (spaces around `-`).
-8. Pick 5–10 standard columns unless intent justifies more (flag in `_phase3_metadata.column_count`).
+8. Pick 5–10 standard columns unless intent justifies more (the platform allows up to 13).

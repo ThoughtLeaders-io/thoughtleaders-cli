@@ -1,6 +1,6 @@
 # Columns — Channels report (report_type = 3)
 
-Phase 3 reference. Each row = one YouTube channel. Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
+Column catalogue for Channels reports. Each row of the saved report = one YouTube channel. The emitted `columns` dict has shape `display_name → {"display": true}` (plus optional `custom` / `formula` / `cellType`). Display names are case-sensitive and preserve spaces — the platform key-matches exactly.
 
 ## Defaults — always include
 
@@ -62,7 +62,7 @@ User's quick-evaluation surface. Always emit unless user explicitly says otherwi
 
 ## Intent-driven additions
 
-Layer these on top of defaults when Phase 1 / user signal points at intent:
+Layer these on top of defaults when the user signal points at intent (outreach, audience-quality focus, growth, demographic targeting, pricing, brand-safety, etc.):
 
 | Intent signal | Add columns |
 |---|---|
@@ -93,7 +93,7 @@ Don't silently activate a custom column — surface as a refinement suggestion; 
 
 1. `TL Channel Summary` is required. Always present in Channels reports.
 2. `Content` is the matching-uploads count when filters are applied — don't create a custom column to replicate it.
-3. Pick 5–10 standard columns (intent-heavy may go up to 13; flag in `_phase3_metadata.column_count` if > 10).
+3. Pick 5–10 standard columns; the platform allows up to 13 if intent calls for it (the dashboard's column rail starts to feel crowded past 10).
 4. Display names match exactly — no `Subscribers ` (trailing space), `subscribers` (lowercase), or made-up names like `Sub Count`.
 5. `Latest AdSpot Price` over `TL Sponsorship Calc. Price` — calc price is unreliable.
 6. Exclude pricing columns unless intent is sponsorship/outreach/cost (noise on discovery reports).

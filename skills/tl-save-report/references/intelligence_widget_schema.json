@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tl-report-builder/intelligence_widget_schema",
+  "$id": "tl-save-report/intelligence_widget_schema",
   "title": "Intelligence widgets (report_type ∈ {1, 2, 3})",
-  "description": "Schema for widget objects emitted by Phase 4 for CONTENT (1), BRANDS (2), and THOUGHTLEADERS/CHANNELS (3) reports. Defines the per-widget shape, the disjoint aggregator catalog for intelligence reports, and selection constraints. Pair file: sponsorship_widget_schema.json (type 8).",
+  "description": "Schema for widget objects on CONTENT (1), BRANDS (2), and CHANNELS (3) reports. Defines the per-widget shape, the disjoint aggregator catalog for intelligence reports, and selection constraints. Pair file: sponsorship_widget_schema.json (type 8).",
   "type": "object",
   "additionalProperties": false,
 
@@ -188,7 +188,6 @@
     "Pick 4–6 widgets total. First widget is the primary aggregate for the report type. Histograms last (highest index).",
     "Every widget MUST add value to the user's original prompt. Don't pad to hit 6 — emit fewer if the extras don't answer something the user implicitly cares about.",
     "Never mix this catalog with sponsorship_widget_schema.json. Crossing catalogs fails server-side.",
-    "histogram_bucket_size matches the date scope: < 90 days → week; 90 days–2 years → month (default); multi-year → year.",
-    "Echo intent_signal in the widget_builder's _widget_metadata.intent_consumed when swaps were applied."
+    "histogram_bucket_size matches the date scope: < 90 days → week; 90 days–2 years → month (default); multi-year → year."
   ]
 }

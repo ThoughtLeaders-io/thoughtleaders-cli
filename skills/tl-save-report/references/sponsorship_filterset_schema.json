@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tl-report-builder/sponsorship_schema",
+  "$id": "tl-save-report/sponsorship_filterset_schema",
   "title": "Sponsorship FilterSet (report_type = 8)",
-  "description": "Schema for the FilterSet payload of CAMPAIGN_MANAGEMENT (8) reports — sponsorship deal tracking. Field names and types mirror dashboard.models.FilterSet 1:1 — no invented fields. Phase 2 emits a JSON object that conforms to this schema.",
+  "description": "Schema for the FilterSet payload of SPONSORSHIPS (8) reports — sponsorship deal tracking. Field names and types mirror the platform's FilterSet model 1:1 — no invented fields; unknown keys are rejected. The saved report's `filterset` JSON must conform to this schema.",
   "type": "object",
   "additionalProperties": false,
 
@@ -34,7 +34,7 @@
       "type": ["array", "null"],
       "items": { "type": "integer", "minimum": 1 },
       "uniqueItems": true,
-      "description": "Restrict sponsorships to those involving specific channels. Resolve names → IDs via the name_resolver tool first.",
+      "description": "Restrict sponsorships to those involving specific channels. Resolve channel names → IDs via `tl channels find <name>` before emitting; never put channel names here.",
       "_tl_django_m2m": "FilterSet.channels via FilterSetChannel"
     },
     "exclude_channels": {
@@ -48,7 +48,7 @@
       "type": ["array", "null"],
       "items": { "type": "integer", "minimum": 1 },
       "uniqueItems": true,
-      "description": "Restrict sponsorships to those involving specific brands. Resolve names → IDs via the name_resolver tool first.",
+      "description": "Restrict sponsorships to those involving specific brands. Resolve brand names → IDs via `tl brands find <name>` before emitting; never put brand names here.",
       "_tl_django_m2m": "FilterSet.brands via FilterSetBrand"
     },
     "exclude_brands": {
@@ -167,7 +167,7 @@
       "description": "Catch-all JSONField the platform interprets directly. For type 8 this is the primary place to encode publish_status, deal_status, price ranges, and any sponsorship-specific signals that don't have a first-class column on FilterSet.",
       "_tl_intent_hints": [
         "publish_status: encode the user's intent ('live', 'pending', 'sold', 'proposed') here; the platform reads it.",
-        "ad_publish_status: live/currently-running intent uses string value '0' together with publish_status [3]; Phase 2 validation maps this to base-table publish_date IS NOT NULL and therefore must use SKILL.md Path B.",
+        "ad_publish_status: live/currently-running intent uses string value '0' together with publish_status [3] — the platform interprets that combination as 'sold deals that are currently live' (filters to base-table publish_date IS NOT NULL).",
         "Deal-stage filtering (matches → proposals → deals) goes through filters_json — there is no first-class status field on FilterSet."
       ]
     }
@@ -179,10 +179,10 @@
   },
 
   "_tl_rules": [
-    "Type 8 ALWAYS needs a date scope. If the user gives NO date hint at all, surface a follow-up question rather than silently defaulting — Phase 2's edge-case logic rejects unscoped type-8 queries upfront with `decision: 'fail'`. For vague-but-nonzero date language ('recent', 'lately', 'this year'), the `default_date_scope` intent override below applies the 365-day default with judgment.",
+    "Type 8 ALWAYS needs a date scope. If the user gave no date hint at all, surface a follow-up question rather than silently defaulting — an unscoped type-8 report returns the entire AdLink table and is almost never what the user wanted. For vague-but-nonzero date language ('recent', 'lately', 'this year'), the `default_date_scope` intent override below applies the 365-day default with judgment.",
     "Do NOT invent fields. Sponsorship status / publish_status / deal stage all live inside `filters_json` — encode them there, not as new top-level keys.",
     "publish_status values are NUMERIC IDs (0–9), not string labels. See `report_glossary.md`'s 'Deal-stage jargon' table for the canonical user-phrase → ID mapping. The intent overrides below already use numeric IDs; never emit `publish_status: ['live']` or `['sold']` — those strings are not in the platform's enum.",
-    "Resolve brand/channel names → IDs via the name_resolver tool BEFORE emitting `brands`/`channels` arrays. Type 8 with unresolved names is a hard failure mode.",
+    "Resolve brand/channel names → IDs via `tl brands find <name>` / `tl channels find <name>` BEFORE emitting `brands` / `channels` arrays. Type 8 with unresolved names is a hard failure mode — the saved report returns zero rows.",
     "Keyword fields (`keywords`, `keyword_operator`, `content_fields`, `keyword_content_fields_map`, `keyword_exclude_map`) exist on the model but are inert for type 8 — sponsorships are filtered by relations, not content text. Do not emit them.",
     "Topic fields (`topics`) are inert for type 8 — same reason. Do not emit.",
     "Default `channel_formats: [4]` and `languages: ['en']` unless the user explicitly contradicts them."
@@ -210,7 +210,7 @@
     },
     "default_date_scope": {
       "trigger_phrases": ["recent deals", "lately", "this year"],
-      "_describes": "Vague-but-nonzero date language. Applies the 365-day default. NOT a fallback for queries with NO date hint at all — those go through Phase 2 rejection per `_tl_rules` rule #1.",
+      "_describes": "Vague-but-nonzero date language. Applies the 365-day default. NOT a fallback for queries with NO date hint at all — unscoped type-8 queries are rejected per `_tl_rules` rule #1.",
       "set_with_judgment": { "days_ago": 365 }
     }
   }

@@ -1,6 +1,6 @@
 # Columns — Brands report (report_type = 2)
 
-Phase 3 reference. Each row = one brand, aggregated across matching content. Phase 3 emits a `columns` dict: `display_name → {"display": true}` (plus optional `custom`/`formula`/`cellType`). Names are case-sensitive, spaces preserved — platform key-matches.
+Column catalogue for Brands reports. Each row of the saved report = one brand, aggregated across matching content. The emitted `columns` dict has shape `display_name → {"display": true}` (plus optional `custom` / `formula` / `cellType`). Display names are case-sensitive and preserve spaces — the platform key-matches exactly.
 
 ## Defaults — always include
 
@@ -79,4 +79,4 @@ Surface custom formulas as refinement suggestions; user opts in.
 2. Don't include `Channels` + `Avg. Mentions` without `Mentions` — math gets confusing.
 3. Financial columns only when intent calls for them (discovery queries don't need `Price Sum`/`CPV` — often null, pollute the view).
 4. Display names match exactly — `Avg. price` and `Avg. cost` are lowercase `p`/`c`; `Avg. Mentions` is capitalized `M`.
-5. Pick 5–10 standard columns unless intent justifies more (flag in `_phase3_metadata.column_count`).
+5. Pick 5–10 standard columns unless intent justifies more (the platform allows up to 13).
