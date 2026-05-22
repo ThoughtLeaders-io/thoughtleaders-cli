@@ -458,8 +458,13 @@ def check_and_upgrade() -> None:
         pass
 
 
-def force_upgrade() -> None:
-    """Explicitly requested upgrade — bypasses cache, prints verbose output."""
+def force_upgrade(force: bool = False) -> None:
+    """Explicitly requested upgrade — bypasses cache, prints verbose output.
+
+    When `force` is True, runs the upgrade even when the local version
+    already matches the latest — useful for reinstalls or recovering from
+    a corrupted install.
+    """
     method = _detect_install_method()
     if not method:
         print(
@@ -482,8 +487,14 @@ def force_upgrade() -> None:
     except ValueError:
         newer = False
 
-    if not newer:
+    if not newer and not force:
         print(f"tl-cli {__version__} is already the latest version.", file=sys.stderr)
         return
+
+    if not newer and force:
+        print(
+            f"tl-cli {__version__} already matches latest {latest}; reinstalling because --force was passed.",
+            file=sys.stderr,
+        )
 
     _run_upgrade(method, latest)

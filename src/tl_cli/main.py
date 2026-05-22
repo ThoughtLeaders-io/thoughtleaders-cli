@@ -117,10 +117,15 @@ app.command(
 
 
 @app.command(name="update")
-def update_command() -> None:
+def update_command(
+    force: bool = typer.Option(
+        False, "--force", "-f",
+        help="Run the upgrade even if the local version already matches the latest (useful for reinstall / suspected corruption).",
+    ),
+) -> None:
     """Check for a newer version and upgrade if one is available."""
     from tl_cli.self_update import force_upgrade
-    force_upgrade()
+    force_upgrade(force=force)
     raise typer.Exit()
 
 
