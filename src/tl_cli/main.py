@@ -136,6 +136,9 @@ def cli() -> None:
     installs on every exit path — normal return, typer's SystemExit, or
     the sys.exit(1) in the error branch. Silent on failure.
     """
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
     from tl_cli.self_update import check_and_upgrade
     try:
         app()
