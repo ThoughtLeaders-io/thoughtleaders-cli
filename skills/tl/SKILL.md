@@ -146,7 +146,7 @@ Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or ana
 
 ## Available Commands
 
-Note that if you're working on Windows, you must set up UTF-8 in the console, because all of these commands return UTF-8 data.
+Note that if you're working on Windows, you must set up UTF-8 in the terminal with `PYTHONIOENCODING=utf-8 tl ...`, because all of these commands return UTF-8 data.
 
 ### Data queries
 
