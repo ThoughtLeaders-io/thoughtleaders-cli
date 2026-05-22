@@ -6,7 +6,16 @@ description: |
 
 # tl-save-report
 
-Persist what the user has been exploring as a saved TL report. The skill assumes the data-exploration phase has already happened — the agent doesn't re-run queries, doesn't re-validate the result set, doesn't ask the user what they were looking for. Its single job is **config-from-session**: build a campaign config that captures the user's intent, post it via `tl reports create --config-file`.
+Persist what the user has been exploring as a saved TL report. The skill assumes the data-exploration phase already happened — it does not re-run queries, re-validate the result set, or ask the user what they were looking for. Its single job is **config-from-session**.
+
+## The two paths
+
+Every save goes through exactly one of these:
+
+- **[Path A — List-style](#path-a--list-style)** uses `tl reports save-list`. Snapshot a curated set of entity IDs into a frozen list (no filter re-evaluation). One command; the platform applies sensible defaults for columns / widgets / sort, and the user refines via `tl reports update` afterwards if needed. Use when the user curated the set or when the session's filters can't be expressed as FilterSet fields.
+- **[Path B — Filter-style](#path-b--filter-style)** uses `tl reports create --config-file`. Translate the session's criteria into a live FilterSet that re-evaluates against current data every time someone re-runs the report. Builds a full config (columns + widgets + sort). Use when the session was driven by criteria the FilterSet can express directly.
+
+The only discovery-side work this skill performs is **name → ID resolution** (`tl brands find` / `tl channels find`) — required by the schema, not a re-evaluation of the result set. If the user has no prior session, run the relevant `tl db pg|fb|es` queries to produce a result set first, then invoke this skill on the result.
 
 ## Reference files (what each is for)
 
@@ -14,15 +23,15 @@ This skill is self-contained. Every reference it needs is in [`references/`](ref
 
 | File | Use when |
 | --- | --- |
-| [`intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json) | Building a filter-style **CONTENT / BRANDS / CHANNELS** FilterSet (report_type 1 / 2 / 3). Authoritative field catalogue; unknown keys are rejected by the platform with 400. |
-| [`sponsorship_filterset_schema.json`](references/sponsorship_filterset_schema.json) | Building a filter-style **SPONSORSHIPS** FilterSet (report_type 8). Disjoint field set from the intelligence schema — date axes, publish_status, no keyword fields. |
-| [`columns_content.md`](references/columns_content.md) / [`columns_brands.md`](references/columns_brands.md) / [`columns_channels.md`](references/columns_channels.md) / [`columns_sponsorships.md`](references/columns_sponsorships.md) | Picking columns per report type. Defaults, intent-driven additions, custom-formula guidance. |
-| [`intelligence_widget_schema.json`](references/intelligence_widget_schema.json) / [`sponsorship_widget_schema.json`](references/sponsorship_widget_schema.json) | Picking widgets. Each schema lists the aggregator catalogue, default widget sets per report type, intent overrides, and (for type 8) the date-axis branching rules. |
+| [`intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json) | Path B for **CONTENT / BRANDS / CHANNELS** FilterSets (report_type 1 / 2 / 3). Authoritative field catalogue; unknown keys are rejected by the platform with 400. |
+| [`sponsorship_filterset_schema.json`](references/sponsorship_filterset_schema.json) | Path B for **SPONSORSHIPS** FilterSets (report_type 8). Disjoint field set from the intelligence schema — date axes, publish_status, no keyword fields. |
+| [`columns_content.md`](references/columns_content.md) / [`columns_brands.md`](references/columns_brands.md) / [`columns_channels.md`](references/columns_channels.md) / [`columns_sponsorships.md`](references/columns_sponsorships.md) | Path B column choices per report type. Defaults, intent-driven additions, custom-formula guidance. |
+| [`intelligence_widget_schema.json`](references/intelligence_widget_schema.json) / [`sponsorship_widget_schema.json`](references/sponsorship_widget_schema.json) | Path B widget choices. Each schema lists the aggregator catalogue, default widget sets per report type, intent overrides, and (for type 8) the date-axis branching rules. |
 | [`widgets.md`](references/widgets.md) | Readable index of the widget catalogue. Equivalent content to the JSON schemas but easier to skim — start here, drill into the schema for the canonical shape. |
 | [`sortable_columns.json`](references/sortable_columns.json) | Per-column sort metadata (asc-only / desc-only / both). The `sort` value on a report must reference a column listed here with an allowed direction. |
 | [`report_glossary.md`](references/report_glossary.md) | Disambiguation: report-type synonyms, TL terminology (MSN / TPP / MBN / VG / Net revenue / TL profit), deal-stage jargon (numeric publish_status ↔ user phrasing), field-pair choices, common pitfalls. |
 
-The four report types and what each row of the saved report represents:
+## Report types
 
 | `report_type` | User-facing name | Row | Schema family |
 | --- | --- | --- | --- |
@@ -48,7 +57,7 @@ The entity being saved must be one of: **channels**, **brands**, **videos / uplo
 
 - The user wants to **add to an existing report** (`"add these channels to report 1234"`) → hand off to `tl-import`.
 - The user only wants the data **shown / counted / analysed in chat** without saving → stay in `tl`; don't invoke this skill.
-- The user wants to build a report **from scratch** with no prior session exploration to capture — that's a different shape of request (the user has a goal, not a result set). The agent should run the appropriate `tl db pg|fb|es` queries to produce a result set first; then this skill takes over for the save.
+- The user wants to build a report **from scratch** with no prior session exploration to capture — that's a different shape of request (the user has a goal, not a result set). Run the appropriate `tl db pg|fb|es` queries to produce a result set first; then this skill takes over for the save.
 
 ## Step 1 — Detect the report type
 
@@ -63,11 +72,31 @@ Match the session's primary entity to one of four report types:
 
 If the session joined entities (e.g. channels with their recent sponsorships), pick the **one the user actually wants to save** and ask if unclear. The other side becomes either a column or a filter, not the report subject.
 
-## Step 2 — Ask: filter-style or list-style?
+## Step 2 — Choose the path: list-style or filter-style?
 
-This is the single most important decision; ask the user before assembling anything. Don't pick silently.
+This branch determines everything downstream. **Style is decided by intent, not entity** — both styles work for all four report types.
 
-**Suggested wording**:
+| Style | Populates | Re-evaluates? | When it's the right answer |
+| --- | --- | --- | --- |
+| **List-style** | M2M field (`channels` / `brands` / `articles` / `sponsorships`) | No — frozen list | Curated set, manual review, custom-SQL filters that don't map to FilterSet fields |
+| **Filter-style** | Predicate fields (`keywords`, `reach_from`, dates, demographics, etc.) | Yes — every run | Criteria-driven discovery the user wants to keep refreshing |
+
+### Pick without asking when intent is clear
+
+Pick **list-style** when:
+
+- The session used custom-SQL joins, multi-source aggregation, or filter logic that doesn't map to any FilterSet field — the honest move is to snapshot the IDs.
+- The user said *"snapshot"*, *"freeze"*, *"this exact list"*, *"don't re-evaluate"*, *"the ones we picked"*, *"these N channels"*.
+- The session pulled IDs through a manual review pass (user accepted/rejected candidates one by one).
+
+Pick **filter-style** when:
+
+- The session's full filter logic maps cleanly to FilterSet fields (keyword + subscriber floor + country + date range — nothing exotic).
+- The user said *"refreshable"*, *"keep updating"*, *"any new channels that match"*, *"a saved search"*, *"channels in the X niche with >Y subs, all-time"*.
+
+### When to ask
+
+If both styles are plausible, ask before assembling anything:
 
 > Two ways to save this:
 >
@@ -77,32 +106,84 @@ This is the single most important decision; ask the user before assembling anyth
 >
 > Which do you want?
 
-The two styles differ in **which part of the FilterSet you populate**:
+### Hybrid (rare; confirm first)
 
-- **Filter-style → predicate fields populated** (`keywords`, `min_reach`, `country`, dates, demographics, etc.). Through-table M2M fields stay empty.
-- **List-style → through-table M2M fields populated** (`channels` / `brands` / `articles` / `sponsorships`). Predicate fields stay empty.
+Populating both predicate and M2M fields on the same FilterSet is *legal* but rarely intended. The result set becomes "IDs in the M2M that ALSO pass the predicate," which is almost never what the user said they wanted. The one common legit case is the `exclude_*` variants (e.g., *"channels matching X, except these specific IDs"*) — both halves get populated by design. Otherwise, confirm before mixing.
 
-A hybrid (some predicates + some M2M IDs) is *legal* but rarely what the user asked for — confirm before mixing them.
+Once you've picked the path, follow it linearly to the end. **Don't mix steps between paths.**
 
-### When filter-style is the right answer
+---
 
-Pick filter-style when the user's session was driven by criteria the platform's FilterSet can express directly — keyword searches over `title` / `summary` / `transcript` / channel description, attribute thresholds (`min_reach`, `min_views`, country / language), categorical scoping (content categories, demographics, MSN status), date ranges, similar-to-channels.
+# Path A — List-style
 
-When the user said something like *"channels in the cooking niche with >100K subs, all-time"* — the criteria map cleanly into a FilterSet, and the user almost certainly wants the report to keep refreshing as new channels meet the bar.
+The simple path: one command, no columns / widgets / sort to assemble. The platform applies defaults; the user refines via `tl reports update` afterwards if needed.
 
-### When list-style is the right answer
+## A1. Collect / resolve the entity IDs
 
-Pick list-style when:
+| Entity | ID shape | Exclude variant |
+| --- | --- | --- |
+| Channels | integer IDs | `exclude_channels` |
+| Brands | integer IDs | `exclude_brands` |
+| Videos / uploads / articles | composite string `<channel_id>:<youtube_id>` (matches ES `_id`) | `exclude_articles` |
+| Sponsorships | integer IDs (AdLink IDs) | `exclude_sponsorships` |
 
-- The session produced a **specifically curated set** the user wants frozen (manual review, similar-channel walks, cross-reference subtraction, sponsorship-history dedup) — *"these 14 channels are the ones we're pitching, save this exact list"*.
-- The session's **filters can't be mapped** into FilterSet fields cleanly (custom raw-SQL joins, multi-source aggregation in `jq`/`duckdb`, anything where the filter logic lived in the shell pipeline rather than in the platform schema). The honest move is list-style.
-- The user explicitly said *"snapshot"*, *"freeze"*, *"this exact list"*, *"don't re-evaluate"*.
+**Article IDs are the composite string form**, not bare YouTube video IDs. If the session has YouTube IDs (`dQw4w9WgXcQ`) without channel prefixes, fetch `channel.id` for each via `tl db es` and rebuild the composite form before saving.
 
-### Filter-style: mapping session criteria into the FilterSet
+If any IDs are still names (e.g., the session resolved channel names but not their numeric IDs), resolve before writing the IDs file:
 
-The authoritative field catalogues are in [`references/intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json) (types 1 / 2 / 3) and [`references/sponsorship_filterset_schema.json`](references/sponsorship_filterset_schema.json) (type 8). **Don't invent fields.** The schema's keys are the only ones the platform accepts; unknown keys come back as `400 Invalid filterset.<field>`. Read the schema file for the field you're about to emit if you're not sure of its exact name or type.
+```bash
+tl brands find "NordVPN" --json   | jq -r '.results[0].id'   # → 21416
+tl channels find "MrBeast" --json | jq -r '.results[0].id'   # → 11169
+```
 
-#### Resolve names → IDs BEFORE emitting
+## A2. Title and description
+
+Both are mandatory; `tl reports save-list` rejects blank values with HTTP 400.
+
+- **Title** — ≤ 60 chars. Capture the niche or intent: *"TPP fintech — May 2026 curated"*, *"Speedcubing top videos"*, *"Q1 2026 sold sponsorships — beauty brands"*.
+- **Description** — 1–3 sentences. **State explicitly "List-style"** so future readers know what they're looking at (the dashboard renders list-style and filter-style reports identically).
+
+Propose values and let the user edit. Don't ship blank strings.
+
+## A3. Save with `tl reports save-list`
+
+```bash
+# Write the IDs to a temp file, one per line —
+# integers for channels/brands/sponsorships;
+# composite `<channel_id>:<youtube_id>` strings for articles.
+IDS=$(mktemp -t tl-save-list-XXXX.txt)
+printf '5607\n12345\n67890\n' > "$IDS"
+
+tl reports save-list channels --ids-file "$IDS" \
+    --title "TPP fintech — May 2026 curated" \
+    --description "List-style: 3 channels hand-picked after the May 2026 review pass." \
+    --yes --json
+```
+
+- Entity must be one of: `channels`, `brands`, `articles`, `sponsorships`.
+- `--yes` skips the confirmation prompt (the user already chose the path).
+- `--json` makes the response parseable so you can extract `report_url` and `campaign_id` cleanly.
+
+The command builds the minimal config (M2M field populated, no predicate fields, platform defaults for columns/widgets/sort) and POSTs in one call. Skip directly to [Step 3 — Report back](#step-3--report-back) when done.
+
+## A4. List-style self-check (before posting)
+
+1. `--title` is non-empty and ≤ 60 chars; `--description` is 1–3 sentences and explicitly says "list-style".
+2. The entity argument matches the session's primary entity (`channels` / `brands` / `articles` / `sponsorships`).
+3. Every line in the IDs file is the right shape — integers for channels/brands/sponsorships; composite `<channel_id>:<youtube_id>` strings for articles.
+4. **No FilterSet predicate fields** to populate — list-style is the M2M IDs and nothing else. (If the user actually wants a predicate overlay, that's the hybrid case in Step 2; confirm and switch to Path B with a populated M2M.)
+
+---
+
+# Path B — Filter-style
+
+Assemble FilterSet + columns + widgets + sort, then POST via `tl reports create --config-file`.
+
+## B1. Map session criteria into the FilterSet
+
+The authoritative field catalogues are in [`references/intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json) (types 1 / 2 / 3) and [`references/sponsorship_filterset_schema.json`](references/sponsorship_filterset_schema.json) (type 8). **Don't invent fields.** The schema's keys are the only ones the platform accepts; unknown keys come back as a 400 with the offending field named in the error detail. Read the schema file for the field you're about to emit if you're not sure of its exact name or type.
+
+### Resolve names → IDs BEFORE emitting
 
 The platform rejects names in any field that expects an integer ID. Every brand name and channel name the user mentioned in the session must be resolved to an integer ID before it lands in the FilterSet:
 
@@ -118,7 +199,7 @@ Fields that need integer IDs (not names):
 
 For type 8 specifically: a SPONSORSHIPS report with unresolved names is a hard failure — the saved report returns zero rows because the M2M write silently skipped the bad entries.
 
-#### `keyword_operator` — AND vs OR
+### `keyword_operator` — AND vs OR
 
 Default `OR` (the platform defaults to OR when `keyword_operator` is null). Set `AND` only when the user's phrasing has clear intersection semantics:
 
@@ -127,7 +208,7 @@ Default `OR` (the platform defaults to OR when `keyword_operator` is null). Set 
 
 When in doubt, OR. Under AND, expand the keyword set conservatively — every keyword must match, so adding broad terms shrinks the result to near zero. If the session used `tl-keyword-research --operator AND`, mirror it; the skill emits the right operator already.
 
-#### `content_fields` per report type — narrow-first for type 3
+### `content_fields` per report type — narrow-first for type 3
 
 `content_fields` is the field set the keyword search runs against. **Pick by report type, and for type 3 specifically use the narrow-first rule** — broader `content_fields` means more matches but more noise:
 
@@ -138,7 +219,7 @@ When in doubt, OR. Under AND, expand the keyword set conservatively — every ke
 | 3 (CHANNELS) | **`["channel.channel_name", "channel_description"]` ONLY** on the first save | Add `channel_description_ai` + `channel_topic_description` only if the narrow set obviously misses channels the session matched. The AI-summarised fields catalogue every topic a channel has *ever* touched — they answer *"has this channel ever mentioned X"* (too broad for discovery) rather than *"is this channel ABOUT X"* (what `channel_name` + `channel_description` answer). Field selection is the bigger dial; keyword pruning is the fine-tune. |
 | 8 (SPONSORSHIPS) | n/a — keyword fields are inert for type 8 | Sponsorships filter by relations, not content text. Don't emit `keywords` / `keyword_operator` / `content_fields` at all for type 8. |
 
-#### Date scoping by report type
+### Date scoping by report type
 
 | `report_type` | Date fields | Notes |
 | --- | --- | --- |
@@ -147,7 +228,7 @@ When in doubt, OR. Under AND, expand the keyword set conservatively — every ke
 
 Date upper bounds: `start_date` / `end_date` are date-typed and use `< next_day` semantics internally, not `<=`. *"Through Feb 28"* → `end_date: "2026-02-28"`; don't add a day.
 
-#### `publish_status` (type 8 only) — numeric IDs, not strings
+### `publish_status` (type 8 only) — numeric IDs, not strings
 
 Sponsorship `publish_status` values are numeric IDs (0–9), **never string labels**. Don't emit `["sold"]` or `["live"]`. The canonical user-phrase → ID mapping is in [`references/report_glossary.md`](references/report_glossary.md) under "Deal-stage jargon". Quick anchors:
 
@@ -157,7 +238,7 @@ Sponsorship `publish_status` values are numeric IDs (0–9), **never string labe
 
 The `publish_status` field lives inside `filters_json`, not as a top-level FilterSet field.
 
-#### Working defaults (override only on user signal)
+### Working defaults (override only on user signal)
 
 Unless the user explicitly contradicts them, default these on the FilterSet:
 
@@ -166,14 +247,14 @@ Unless the user explicitly contradicts them, default these on the FilterSet:
 
 If the user said *"any language"* or *"Spanish creators"* / *"podcasts"*, override accordingly.
 
-#### Cross-references and similar-to-channels
+### Cross-references and similar-to-channels
 
 These compose with the rest of the FilterSet rather than replacing it:
 
 - **`cross_references[]`** — named cross-cuts that resolve to channel ID include / exclude lists at save time. Catalog: `exclude_proposed_to_brand`, `include_proposed_to_brand`, `include_sponsored_by_mbn`. Each item is `{"type": "<name>", "brand_id": <int>, "since_days_ago": <int?>}`. Use for *"channels we haven't pitched to brand X"* / *"channels sponsored by MBN brands"*. The platform's `/reports/confirm` endpoint resolves these into `channels` / `exclude_channels` M2M arrays during the save.
 - **`filters_json.similar_to_channels: [<id>, …]`** — vector-similarity expansion against seed channel IDs. Pair with **no `keywords` / `topics`** (similarity replaces topical filtering). Useful for *"channels like X and Y"* once you've resolved X/Y to IDs.
 
-#### Complete mapping (common session criteria → FilterSet field)
+### Complete mapping (common session criteria → FilterSet field)
 
 | Session criterion | FilterSet field |
 | --- | --- |
@@ -199,33 +280,16 @@ These compose with the rest of the FilterSet rather than replacing it:
 
 If the session used filters that don't map to any field above, tell the user: *"I can't express [the specific predicate] as a FilterSet field — the platform doesn't surface it directly. Want to fall back to list-style for this report?"* That's the honest move; don't fudge it into `filters_json` if a typed field doesn't already exist.
 
-### List-style: populating the M2M
+## B2. Title and description
 
-Collect the entity IDs from the session results into a single array and place them in the corresponding through-table M2M field:
+Both are mandatory; `tl reports create` rejects with HTTP 400 if either is missing.
 
-| Entity | FilterSet M2M field | ID shape | Exclude variant |
-| --- | --- | --- | --- |
-| Channels | `channels` | integer IDs | `exclude_channels` |
-| Brands | `brands` | integer IDs | `exclude_brands` |
-| Videos / uploads / articles | `articles` | composite string `<channel_id>:<youtube_id>` (matches ES `_id`) | `exclude_articles` |
-| Sponsorships | `sponsorships` | integer IDs (AdLink IDs) | `exclude_sponsorships` |
-
-**Article IDs are the composite string form**, not bare YouTube video IDs. If the session has YouTube IDs (`dQw4w9WgXcQ`) without channel prefixes, fetch `channel.id` for each via `tl db es` and rebuild the composite form before saving.
-
-All other FilterSet predicate fields stay empty (`null` or omitted). Populating both a predicate AND the M2M creates a hybrid filter — the platform will still accept it, but the result set then becomes "IDs in the M2M that ALSO pass the predicate", which is almost never what the user said they wanted. Confirm before mixing.
-
-The `exclude_*` variants pair with a separate predicate-style FilterSet — useful when the user said *"channels matching X, except these specific IDs"*. That's a hybrid by design; both halves get populated.
-
-## Step 3 — Title and description (mandatory)
-
-`tl reports create` rejects with HTTP 400 if either is missing — the validation regression has happened before. Always generate both:
-
-- **`report_title`** — ≤ 60 chars. Capture the niche or intent: *"TPP fintech channels — May 2026"*, *"Speedcubing channels — curated list"*, *"Q1 2026 sold sponsorships, beauty brands"*.
-- **`report_description`** — 1–3 sentences. Summarise what's in the report and how it was assembled. **Mention "filter-style" or "list-style" explicitly** so future readers know what they're looking at (list-style reports can look identical to filter-style ones from the dashboard if nobody documents the choice).
+- **`report_title`** — ≤ 60 chars. Capture the niche or intent: *"TPP fintech channels — May 2026"*, *"Q1 2026 sold sponsorships, beauty brands"*.
+- **`report_description`** — 1–3 sentences. Summarise what's in the report and how it was assembled. **State explicitly "Filter-style"** so future readers know what they're looking at (the dashboard renders list-style and filter-style reports identically).
 
 Propose values and let the user edit. Don't ship blank strings.
 
-## Step 4 — Pick columns and sort
+## B3. Pick columns and sort
 
 ### Columns
 
@@ -236,7 +300,7 @@ Use the type's default column set; agents shouldn't compose columns from scratch
 - Type 3: [`references/columns_channels.md`](references/columns_channels.md)
 - Type 8: [`references/columns_sponsorships.md`](references/columns_sponsorships.md)
 
-If the session showed the user specific columns (`"show reach, subscribers, country"`), include those PLUS the type's required defaults. Display names are case-sensitive and preserve spaces — `Subscribers` not `subscribers`, `Avg. Views` not `avg_views`. The platform key-matches exactly; a typo emits `400 Invalid columns.<name>`.
+If the session showed the user specific columns (`"show reach, subscribers, country"`), include those PLUS the type's required defaults. Display names are case-sensitive and preserve spaces — `Subscribers` not `subscribers`, `Avg. Views` not `avg_views`. The platform key-matches exactly; a typo comes back as a 400 with the offending column name in the error detail.
 
 Pick **5–10 columns** for most reports; the platform allows up to 13 if intent calls for it (the dashboard's column rail starts to feel crowded past 10).
 
@@ -274,7 +338,7 @@ Shape:
 
 Don't silently activate a custom column. Propose it in the title / description (*"with a custom Engagement column = Avg. Views / Subscribers"*) so the user knows it's there.
 
-## Step 5 — Pick widgets and `histogram_bucket_size`
+## B4. Pick widgets and `histogram_bucket_size`
 
 Widgets are the charts / metric boxes above the data table. Pick **4–6** per report. Catalogues live in:
 
@@ -327,11 +391,7 @@ For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_send_da
 
 **Both `_over_<axis>` histograms in the same report must share the same axis.** Don't mix `send_date` and `purchase_date` within one report — the dashboard renders confusingly when the two axes disagree.
 
-### Widget behaviour on list-style reports
-
-For list-style reports the widgets still render — they aggregate over the frozen ID list. Use the same defaults as filter-style; the user reading the saved report wants the dashboard view either way.
-
-## Step 6 — Assemble the config
+## B5. Assemble the config
 
 Final config shape (`Campaign` + `FilterSet` + columns + widgets):
 
@@ -363,53 +423,42 @@ ls -la "$TMP"   # verify before save
 
 **Don't write the transport file under the user's project directory.** It's a transport, not a deliverable.
 
-## Step 7 — Pre-flight validation
+## B6. Pre-flight validation
 
 Before posting, validate the assembled config against the schemas. The platform's own validation will catch most errors, but a pre-flight pass catches the cheap mistakes without burning a save-side round-trip:
 
 1. **Required fields present**: `type`, `report_type`, `report_title`, `report_description`, `filterset`.
 2. **`report_title`** is a non-empty string ≤ 60 chars.
-3. **`report_description`** is a non-empty 1–3 sentence string.
+3. **`report_description`** is a non-empty 1–3 sentence string that explicitly says "filter-style".
 4. **`report_type`** is `1` | `2` | `3` | `8`; `type` is `2`.
 5. **Every key in `filterset`** is a property in the matching schema (`intelligence_filterset_schema.json` for types 1/2/3, `sponsorship_filterset_schema.json` for type 8). Unknown keys → 400.
 6. **For type 8**: a date scope is populated on one of the two axes (send or created). Unscoped type-8 → silent return-all-deals, not what the user asked for.
-7. **For filter-style on types 1/2/3**: if `keywords` has > 1 entry, `keyword_operator` is set explicitly. The platform defaults to OR but explicit is clearer for the saved record.
+7. If `keywords` has > 1 entry, `keyword_operator` is set explicitly. The platform defaults to OR but explicit is clearer for the saved record.
 8. **Every entry in `channels`** / `brands` / `sponsorships` is an integer (not a name). For `articles`, every entry matches `<channel_id>:<youtube_id>`.
 9. **Every column in `columns`** is in the type's `columns_<type>.md` catalogue or is a custom-formula column with `custom: true`.
 10. **The `sort` value** references a column in the emitted `columns` dict, with a direction allowed by `references/sortable_columns.json`.
 11. **Every widget's `aggregator`** is in the matching schema (intelligence or sponsorship — they're disjoint).
 12. **`histogram_bucket_size`** matches the FilterSet's date scope (week / month / year).
+13. **For type 8** widgets: both `_over_<axis>` histograms in the same report share the same axis (send or purchase, not both).
+14. **No M2M `channels` / `brands` / `articles` / `sponsorships` populated** unless the user explicitly asked for a narrow-to-these-IDs overlay (the hybrid case from Step 2).
 
 If any check fails, fix in the working config before writing to the transport file. Don't post a config you can predict will 400.
 
-## Step 8 — Save
-
-Two save paths, pick by style:
-
-**List-style — `tl reports save-list`** is the simpler path. It accepts an entity + ID file + title + description, builds the minimal config, and POSTs in one call. Skip steps 4–6 entirely when you take this route — the command's defaults handle them, and the user can refine later via `tl reports update`.
-
-```bash
-# Write the IDs (one per line — integers for channels/brands/sponsorships;
-# composite `<channel_id>:<youtube_id>` strings for articles).
-printf '5607\n12345\n67890\n' > "$IDS"
-
-tl reports save-list channels --ids-file "$IDS" \
-    --title "TPP fintech — May 2026 curated" \
-    --description "List-style: 3 channels hand-picked after the May 2026 review pass." \
-    --yes --json
-```
-
-**Filter-style — `tl reports create --config-file`** is the path that needs the full config (columns + widgets + sort built from steps 4–6):
+## B7. Save with `tl reports create --config-file`
 
 ```bash
 tl reports create --config-file "$TMP" --yes --json
 ```
 
-- `--yes` skips the confirmation prompt (the user already chose).
+- `--yes` skips the confirmation prompt (the user already chose the path).
 - `--json` makes the response parseable so you can extract `report_url` and `campaign_id` cleanly.
 - `--config-file` (not `--config`) sidesteps shell-quoting issues with apostrophes / dollar signs / backticks in titles or keywords.
 
-On success the response envelope contains:
+---
+
+## Step 3 — Report back
+
+Both paths return the same envelope on success:
 
 ```json
 {
@@ -422,15 +471,6 @@ On success the response envelope contains:
 }
 ```
 
-On failure (HTTP 4xx / 5xx): **surface the error verbatim**. Do NOT silently report success. Common failure modes:
-
-- `400 Missing required field: report_title` / `report_description` → you skipped step 3, go back.
-- `400 Invalid filterset.<field>` → the mapping in step 2 produced an unknown FilterSet field; check against the schema and remove the offending key.
-- `400 Invalid columns.<column>` → the chosen column isn't in the type's `columns_<type>.md` catalogue.
-- `403 Forbidden` → the user lacks the plan required for this report type (Intelligence for 1/2/3 in some orgs; check `tl whoami`).
-
-## Step 9 — Report back
-
 Echo the saved URL + ID, plus a follow-up offer for refinement:
 
 > Saved as report **12345**: https://app.thoughtleaders.io/dashboard/reports/12345/
@@ -439,21 +479,20 @@ Echo the saved URL + ID, plus a follow-up offer for refinement:
 
 The follow-up offer matters because **FilterSet changes (keywords, demographics, M2M lists) can't be patched in place** via `tl reports update` — they require saving a new variant. Surface that limitation only if the user actually asks to change FilterSet fields.
 
-## Self-check before saving (headline rules)
+### On failure
 
-Step 7's pre-flight validation has the full list. Quick gut-check before posting:
+If the command exits non-zero, the CLI prints the error on stderr (shape: `Error (NNN): <detail>` for most codes; specific lines for 401/402/403). **Surface the error verbatim** — do NOT silently report success.
 
-1. `report_title` is non-empty and ≤ 60 chars; `report_description` is 1–3 sentences and explicitly says "filter-style" or "list-style".
-2. `report_type` matches the session's primary entity (1 / 2 / 3 / 8); `type` is `2`.
-3. `sort` references a column actually present in `columns`, with a direction allowed by `references/sortable_columns.json`.
-4. **For filter-style**: no M2M `channels` / `brands` / `articles` / `sponsorships` populated unless the user explicitly asked for a narrow-to-these-IDs overlay (hybrid case). All entries in M2M fields are integers / composite article IDs — never names.
-5. **For list-style**: no predicate fields (`keywords`, `min_reach`, dates, etc.) populated — the M2M is the entire filter.
-6. **For list-style with articles** (type 1): every entry in `filterset.articles` is the composite `<channel_id>:<youtube_id>` form, not a bare YouTube ID.
-7. **For type 8**: at least one date scope is populated on one of the two axes (send or created). Unscoped type-8 reports return the entire AdLink table.
-8. **For type 8** widgets: both `_over_<axis>` histograms in the same report share the same axis (send or purchase, not both).
-9. **For type 8** `publish_status`: numeric IDs in `filters_json.publish_status`, never string labels.
-10. Every key in `filterset` is a property in the matching schema; no invented fields.
-11. Transport file written to a portable temp path (not the user's working directory) and verified to exist before `tl reports create`.
+Map the visible code + detail to the likely cause:
+
+- **`Error (400): …missing… title|description…`** → you skipped A2 / B2; the title or description was empty. Go back and fill it in.
+- **`Error (400): …filterset…`** (Path B only) → the config has a key the platform doesn't recognise in `filterset`. Re-check against the matching schema (`intelligence_filterset_schema.json` or `sponsorship_filterset_schema.json`) and remove invented fields.
+- **`Error (400): …columns…`** (Path B only) → the config references a column display-name the platform doesn't recognise. Re-check against the type's `columns_<type>.md` catalogue; display names are case-sensitive and preserve spaces.
+- **`Error (400): …`** (any other detail) → read the detail; it usually names the offending field or value. Fix and retry.
+- **`Access denied: …`** (HTTP 403) → the user lacks the plan required for this report type (Intelligence for 1/2/3 in some orgs; confirm with `tl whoami`).
+- **`Insufficient credits.`** (HTTP 402) → the org is out of credits; tell the user to top up.
+
+The above maps the visible CLI output to the underlying cause — match on a substring of the detail rather than the exact string, since the platform's wording may evolve.
 
 ## What this skill does NOT do
 

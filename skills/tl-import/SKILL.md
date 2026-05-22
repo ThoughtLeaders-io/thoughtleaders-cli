@@ -1,6 +1,6 @@
 ---
 name: tl-import
-description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. **Trigger on explicit intent to import the listed entities into a report**, NOT on the mere presence of a list (a user can paste a list and want analysis, comparison, or similar-channel discovery — those go to `tl-cli:tl-report-builder` or `tl-cli:tl`). The deciding question is: *would the user be satisfied if those exact entities ended up as the report's contents, no transformation?* If yes, this is the skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
+description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. **Trigger on explicit intent to import the listed entities into a report**, NOT on the mere presence of a list (a user can paste a list and want analysis, comparison, or similar-channel discovery — those go to `tl-cli:tl`). The deciding question is: *would the user be satisfied if those exact entities ended up as the report's contents, no transformation?* If yes, this is the skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
 ---
 
 # tl-import
@@ -21,7 +21,7 @@ Trigger on:
 - "Make a campaign containing these brands: \<list\>" → **new-report flow**
 - "Build me a report from these adlinks: \<list\>" → **new-report flow** *(the verb "build" doesn't matter — what matters is that the user wants exactly those adlinks in the report.)*
 
-**Do NOT trigger** when the user pastes a list but wants something other than direct import — those belong to `tl-cli:tl-report-builder` or `tl-cli:tl`:
+**Do NOT trigger** when the user pastes a list but wants something other than direct import — those belong to `tl-cli:tl` (analysis / discovery) or `tl-cli:tl-save-report` (persist a session's result set):
 
 - *"Find me channels similar to these: \<list\>"* — discovery using the list as a seed, not as the answer.
 - *"Build a report of TPP channels in the same niche as these: \<list\>"* — discovery with filters and similarity expansion.
@@ -46,7 +46,7 @@ Never silently create a new report when the destination is ambiguous; never sile
 
 ## Create a fresh container first (new-report flow only)
 
-The user wants the report to contain exactly the identifiers they're about to import — nothing else. No keyword research, no discovery query, no review pipeline. Just a minimal container that holds the list. **The persistence step uses the same primitive `tl-cli:tl-report-builder` calls at the end of its workflow** (`tl reports create --config-file`), but with a tiny config and none of the upstream phases.
+The user wants the report to contain exactly the identifiers they're about to import — nothing else. No keyword research, no discovery query, no review pipeline. Just a minimal container that holds the list. **The persistence step is `tl reports create --config-file`** with a tiny config — no upstream discovery / review phases.
 
 Steps:
 
@@ -57,11 +57,11 @@ Steps:
    - `brands` → **2** (BRANDS)
    - `articles` (uploads/videos) → **1** (CONTENT)
    - `sponsorships` (adlinks/deals) → **8** (CAMPAIGN_MANAGEMENT)
-4. **Pick default columns.** Read the matching columns reference file in the sibling `tl-report-builder` skill and use its **"Defaults — always include"** section — that's where the canonical column list lives per type; do NOT restate it here. The four files:
-   - channels → `../tl-report-builder/references/columns_channels.md`
-   - brands → `../tl-report-builder/references/columns_brands.md`
-   - articles → `../tl-report-builder/references/columns_content.md`
-   - sponsorships → `../tl-report-builder/references/columns_sponsorships.md`
+4. **Pick default columns.** Read the matching columns reference file in the sibling `tl-save-report` skill and use its **"Defaults — always include"** section — that's where the canonical column list lives per type; do NOT restate it here. The four files:
+   - channels → `../tl-save-report/references/columns_channels.md`
+   - brands → `../tl-save-report/references/columns_brands.md`
+   - articles → `../tl-save-report/references/columns_content.md`
+   - sponsorships → `../tl-save-report/references/columns_sponsorships.md`
 
    Convert each display name from the "Defaults — always include" list into a column entry shape **`{"display": true, "width": "default"}`** — the `width` field is required by the dashboard's column renderer; without it, columns sometimes resolve but cells render empty. Use `"wide"` for narrative columns (e.g. `TL Channel Summary`, `Channel Description`, `Topic Descriptions`); use `"narrow"` for short numeric columns (e.g. `Status`, `Country`); `"default"` everywhere else is safe.
 
@@ -75,7 +75,7 @@ Steps:
    }
    ```
 
-   Per-type default sort. **Critical invariant:** the `sort` field must reference a `backend_code` whose display-name column is in the column set you emitted in step 4. The dashboard's renderer rejects sorts pointing at columns that aren't present in the report. So pick the intersection of (a) the type's "Defaults — always include" columns from `columns_<type>.md` and (b) sortable columns from `../tl-report-builder/references/sortable_columns.json`:
+   Per-type default sort. **Critical invariant:** the `sort` field must reference a `backend_code` whose display-name column is in the column set you emitted in step 4. The dashboard's renderer rejects sorts pointing at columns that aren't present in the report. So pick the intersection of (a) the type's "Defaults — always include" columns from `columns_<type>.md` and (b) sortable columns from `../tl-save-report/references/sortable_columns.json`:
 
    | report_type | entity | default `sort` | maps to (must be in column set) |
    |---|---|---|---|
@@ -101,7 +101,7 @@ Steps:
    ```
 
    `type: 2` is DYNAMIC (the only valid campaign type for save). `filterset: {}` is intentional — no keyword/topic/demographic filters; the report's contents will come entirely from the include list bulk-import populates next. **`dataset_structure` is what makes the rows render with actual values** — leave it out and the dashboard shows row numbers but blank cells.
-7. **Persist via the same primitive `tl-report-builder` uses.** Write the config dict to a temp file using your file-writing tool — **do not use shell `echo` or heredocs**, those break on titles containing apostrophes, dollar signs, backticks, etc. The whole point of `--config-file` is to bypass shell quoting entirely. Pick any temp path the agent's filesystem tool can write to (e.g. `/tmp/tl-import-container.json` on Unix, the OS temp dir on Windows).
+7. **Persist with `tl reports create --config-file`.** Write the config dict to a temp file using your file-writing tool — **do not use shell `echo` or heredocs**, those break on titles containing apostrophes, dollar signs, backticks, etc. The whole point of `--config-file` is to bypass shell quoting entirely. Pick any temp path the agent's filesystem tool can write to (e.g. `/tmp/tl-import-container.json` on Unix, the OS temp dir on Windows).
 
    Then run:
 
@@ -282,7 +282,7 @@ These are envelope-level failures, distinct from per-row `reason` values:
 
 ## What this skill does NOT do
 
-- Doesn't run `tl-report-builder`'s discovery pipeline (keyword research, topic matching, validation cycles, review). When a user gives a fixed list of identifiers, they've already done the discovery themselves — the report is a container for their list, not a query result. Use `tl-report-builder` only when the user wants you to *find* channels/brands/etc. by criteria.
+- Doesn't run a discovery pipeline (keyword research, topic matching, validation cycles, review). When a user gives a fixed list of identifiers, they've already done the discovery themselves — the report is a container for their list, not a query result. Use the `tl` skill to *find* channels/brands/etc. by criteria first; if the user then wants to save those criteria as a live report, use `tl-save-report`.
 - Doesn't change existing report metadata (title, description, columns, filters) after creation. For that, use the platform UI or a dedicated edit flow. The new-report flow in this skill sets minimum-required metadata once at creation and never revisits it.
 - Doesn't validate identifiers ahead of time — submit and let the per-row `reason` tell the user which ones failed. Pre-checking with `tl channels show` / etc. is wasteful (metered) and adds latency.
 - Doesn't sweep duplicates from the user's input list — submit them as-is. The response will mark the second occurrence as `Duplicate`, which is more informative than silently deduping.
