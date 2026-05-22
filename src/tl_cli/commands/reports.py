@@ -427,6 +427,138 @@ def create_report(
         client.close()
 
 
+ENTITY_TO_REPORT_TYPE = {
+    "channels": 3,
+    "brands": 2,
+    "articles": 1,
+    "sponsorships": 8,
+}
+
+# FilterSet M2M field per entity is identical to the entity name, except
+# article IDs are composite strings (`<channel_id>:<youtube_id>`) and the
+# others are integers. See the FilterSet schema references in
+# skills/tl-report-builder/references/ for the catalogue.
+
+
+def _read_ids(path: str, entity: str) -> list:
+    """Read IDs from a file, one per line. Type per entity."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = [line.strip() for line in fh if line.strip()]
+    except OSError as exc:
+        err.print(f"[red]Could not read --ids-file: {exc}[/red]")
+        raise typer.Exit(1)
+    if not raw:
+        err.print(f"[red]--ids-file is empty: {path}[/red]")
+        raise typer.Exit(1)
+    if entity == "articles":
+        # Composite string IDs `<channel_id>:<youtube_id>`.
+        bad = [r for r in raw if ":" not in r]
+        if bad:
+            err.print(
+                f"[red]Article IDs must be in composite form `<channel_id>:<youtube_id>` (matches ES `_id`). "
+                f"Bare YouTube IDs are not accepted. Offending: {bad[:5]}[/red]"
+            )
+            raise typer.Exit(1)
+        return raw
+    # channels / brands / sponsorships → integer IDs.
+    try:
+        return [int(r) for r in raw]
+    except ValueError:
+        err.print(f"[red]{entity} IDs must be integers, one per line.[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("save-list")
+def save_list_cmd(
+    entity: str = typer.Argument(..., help=f"Entity type: one of {', '.join(ENTITY_TO_REPORT_TYPE)}"),
+    ids_file: str = typer.Option(..., "--ids-file", "-f", help="Path to a file with one entity ID per line"),
+    title: str = typer.Option(..., "--title", "-t", help="Report title (≤60 chars)"),
+    description: str = typer.Option(..., "--description", "-d", help="Report description (1-3 sentences)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Save a list-style report from a curated set of entity IDs.
+
+    Sugar over `tl reports create --config-file` for the list-style flow:
+    builds a minimal campaign config with the FilterSet's M2M field
+    populated (no predicate filters), posts it to /reports/confirm, and
+    prints the new report's URL + ID.
+
+    The resulting report is a frozen snapshot — it always shows exactly
+    the IDs you supplied, with no filter re-evaluation. Refine columns,
+    widgets, title, or description via `tl reports update` afterwards.
+
+    Entity must be one of: channels, brands, articles, sponsorships.
+    Article IDs are the composite form `<channel_id>:<youtube_id>` —
+    bare YouTube IDs are not accepted.
+
+    Examples:
+        tl reports save-list channels --ids-file channels.txt \\
+            --title "TPP fintech curated set" --description "14 channels, May 2026 review"
+        tl reports save-list articles --ids-file videos.txt \\
+            --title "Speedcubing top videos" --description "Hand-picked from the long tail" --yes
+    """
+    if entity not in ENTITY_TO_REPORT_TYPE:
+        err.print(f"[red]entity must be one of: {', '.join(ENTITY_TO_REPORT_TYPE)}[/red]")
+        raise typer.Exit(2)
+    if len(title) > 60:
+        err.print(f"[red]Title is {len(title)} chars; max is 60.[/red]")
+        raise typer.Exit(1)
+
+    ids = _read_ids(ids_file, entity)
+    report_type = ENTITY_TO_REPORT_TYPE[entity]
+    filterset = {entity: ids}
+
+    config = {
+        "type": 2,
+        "report_type": report_type,
+        "report_title": title,
+        "report_description": description,
+        "filterset": filterset,
+    }
+
+    if not yes:
+        err.print(
+            f"\n[bold]About to save a list-style report:[/bold]"
+            f"\n  Title:        {title}"
+            f"\n  Type:         {entity} (report_type={report_type})"
+            f"\n  Entity IDs:   {len(ids)}"
+        )
+        if not typer.confirm("Save this report?", default=True):
+            err.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+    fmt = detect_format(json_output, False, False, toon_output)
+    client = get_client()
+    try:
+        data = client.post("/reports/confirm", json_body={"config": config, "prompts": [], "reasoning": ""})
+    except ApiError as e:
+        handle_api_error(e)
+        return
+    finally:
+        client.close()
+
+    if fmt == "toon":
+        print(toon_encode(data))
+        return
+    if fmt == "json":
+        print(json.dumps(data, indent=2, default=str))
+        return
+
+    results = data.get("results", [{}])
+    result = results[0] if results else {}
+    err.print()
+    err.print("[green bold]Report created![/green bold]")
+    err.print(f"  Campaign ID: {result.get('campaign_id', '?')}")
+    err.print(f"  URL: https://app.thoughtleaders.io{result.get('report_url', '')}")
+    err.print(
+        "\n[dim]Refine columns, widgets, title, or description with "
+        "`tl reports update <id>`.[/dim]"
+    )
+
+
 @app.command("update")
 def update_report(
     report_id: int = typer.Argument(..., help="Report ID"),

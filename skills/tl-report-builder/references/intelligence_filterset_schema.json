@@ -349,6 +349,21 @@
       "_tl_django_m2m": "FilterSet.exclude_brands via FilterSetExcludeBrand"
     },
 
+    "articles": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 3, "pattern": "^[0-9]+:[A-Za-z0-9_-]+$" },
+      "uniqueItems": true,
+      "description": "Resolved article (video / upload) IDs in the composite form `<channel_id>:<youtube_id>` (matches ES `_id`). M2M list — when populated, the report returns exactly these IDs, no filter logic. Used for list-style report-type-1 (CONTENT) reports.",
+      "_tl_django_m2m": "FilterSet.articles via FiltersetArticles"
+    },
+    "exclude_articles": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 3, "pattern": "^[0-9]+:[A-Za-z0-9_-]+$" },
+      "uniqueItems": true,
+      "description": "Article IDs to exclude (composite `<channel_id>:<youtube_id>` form). Pairs with a predicate-style FilterSet — useful for 'videos matching X, except these specific ones'.",
+      "_tl_django_m2m": "FilterSet.exclude_articles via FiltersetExcludeArticles"
+    },
+
     "networks": {
       "type": ["array", "null"],
       "items": { "type": "integer", "minimum": 1 },

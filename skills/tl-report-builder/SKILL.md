@@ -1,11 +1,13 @@
 ---
 name: tl-report-builder
 description: |
-  Build TL reports from natural-language requests. Produces an in-chat preview (sample-rows table + filter summary + takeaways) by default, or auto-saves a TL report when the user's wording is explicit about it ("save", "create the report", "make a campaign for me to come back to"). Covers the four report types: content/videos (1), brands (2), channels (3), sponsorships/deals (8).
+  **MANUAL-INVOCATION-ONLY skill — do NOT auto-trigger on natural-language report requests.** This skill is invoked explicitly by the user (via the `/tl-report-builder` slash command, by naming the skill directly, or via some other unambiguous indication). Phrases like "build me a report", "make a campaign", "find me channels with filters Y", or "save this as a report" do NOT route here automatically. Those phrases go to other skills: the `tl` skill (for analysis / exploration of channels / brands / videos / sponsorships), `tl-save-report` (for persisting an in-chat session's result set as a saved report — filter-style or list-style), or `tl-import` (for adding identifiers to an existing report). This skill itself builds a brand-new TL report config from scratch through a heavy four-phase orchestration (routing → schema + validation → columns → widgets), covering the four report types: content/videos (1), brands (2), channels (3), sponsorships/deals (8). Only fire it when the user has explicitly chosen this path — there's almost always a lighter skill that's the right answer.
 
 ---
 
 # TL Report Builder Skill
+
+> **Manual invocation only.** This skill is heavy (four phases, multiple tool fires, sample validation against live data, FilterSet schema mapping). It is not the default for "I want a list of channels" or "save this as a report" — those are `tl` and `tl-save-report` respectively. Reach this skill only when the user has explicitly invoked it.
 
 Translate natural-language report requests into the campaign config JSON the TL dashboard accepts (a `Campaign` + `FilterSet` payload, ready to commit). The skill owns the orchestration end-to-end; sub-tools are invoked conditionally from within the Schema phase based on explicit criteria. Every phase may pause for follow-up interaction with the user when input is ambiguous, incomplete, or invalid.
 
