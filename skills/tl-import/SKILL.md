@@ -135,7 +135,7 @@ Before running, confirm:
 2. **Entity type** — one of `channels` / `brands` / `articles` / `sponsorships`. Infer from context, but translate user-facing vocabulary:
    - YouTube URLs / handles / `UC…` IDs → `channels`
    - Domains / brand slugs → `brands`
-   - "videos" / "uploads" / video URLs / video IDs → `articles` *(the CLI calls them uploads in `tl uploads list`, but `bulk-import` expects `articles` — same concept, legacy naming)*
+   - "videos" / "uploads" / video URLs / video IDs → `articles` *(the CLI surfaces them as uploads — `tl uploads show <id>` — but `bulk-import` expects `articles`; same concept, legacy naming)*
    - "adlinks" / "deals" / "sponsorships" / numeric AdLink IDs → `sponsorships`
 3. **Identifiers** — the list. Accepted shapes per entity:
    - **channels**: numeric DB IDs, YouTube channel IDs (`UC…`), `@handles`, full YouTube URLs (`/@…`, `/channel/UC…`, `/user/…`)

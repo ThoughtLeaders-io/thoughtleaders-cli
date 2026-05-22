@@ -33,7 +33,6 @@ class Config:
     auth0_audience: str = field(
         default_factory=lambda: os.environ.get("TL_AUTH0_AUDIENCE", DEFAULT_AUTH0_AUDIENCE)
     )
-    llm_key: str | None = field(default_factory=lambda: os.environ.get("TL_LLM_KEY"))
 
     @property
     def cli_api_base(self) -> str:

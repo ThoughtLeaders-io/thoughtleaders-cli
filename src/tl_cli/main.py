@@ -12,7 +12,6 @@ from rich.console import Console
 from tl_cli import __version__
 from tl_cli import config as tl_config
 from tl_cli.auth.commands import app as auth_app
-from tl_cli.commands.ask import app as ask_app
 from tl_cli.commands.balance import app as balance_app
 from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
@@ -115,9 +114,6 @@ app.command(
     name="changelog",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )(changelog_command)
-
-# AI fallback
-app.add_typer(ask_app, name="ask")
 
 
 @app.command(name="update")

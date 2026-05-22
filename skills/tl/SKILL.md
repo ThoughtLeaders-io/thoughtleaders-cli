@@ -1,7 +1,7 @@
 ---
 name: tl
 description: |
-  Query and analyze YouTube sponsorship data using the `tl` CLI. Use this skill for data exploration and questions about channels, brands and sponsorships: counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. Examples: "How many deals did we close last quarter?", "What's the weighted pipeline by sales owner?", "Show me the view curve for video X", "Find mentions of Surfshark in transcripts", "Investigate this video".
+  Query and analyze YouTube sponsorship data using the `tl` CLI. Use this skill for finding channels, brands and sponsorships, and for data exploration, including counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. Examples: "How many deals did we close last quarter?", "What's the weighted pipeline by sales owner?", "Show me the view curve for video X", "Find mentions of Surfshark in transcripts", "Investigate this video", "Find channels...", "Find brands...".
 ---
 
 # ThoughtLeaders Data Analyst
@@ -391,7 +391,7 @@ See [references/postgres-schema.md](references/postgres-schema.md) for the accep
 ### Three sources, each authoritative for different things
 
 - **Postgres** — deals, pipeline, brands, channels, users, organizations, profiles, revenue. Source of truth for deal state. Reachable via the structured `tl` commands or raw `tl db pg`.
-- **Elasticsearch** — videos, transcripts, brand mentions, **current** channel/video metrics, demographics. Reachable via `tl uploads`, `tl channels`, and `tl db es`.
+- **Elasticsearch** — videos, transcripts, brand mentions, **current** channel/video metrics, demographics. Reachable via `tl db es`.
 - **Firebolt** — **historical** time-series snapshots only (view curves over time, subscriber-growth trends). Reachable via `tl snapshots` (preferred) or `tl db fb`.
 
 **Use Firebolt only when you need a value AT A POINT IN TIME that no longer exists in the current ES/PG snapshot.** For "current views/subs", use ES.

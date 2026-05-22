@@ -63,11 +63,31 @@ Decide upfront how the caller will combine the keywords downstream, and pass the
 
 Run the bundled script. It takes the candidate list, sends one `size:0` + `track_total_hits` phrase probe per keyword to `tl db es` against `["title", "summary", "transcript"]`, and prints the ranked JSON on stdout.
 
+Three invocations cover almost every case. **Pick by the question shape** (channel vs video vs AND-composite):
+
+```bash
+# (a) Channel search by topic — default fields (title, summary, transcript)
+python3 skills/tl-keyword-research/scripts/probe.py crypto bitcoin DeFi Web3 blockchain "smart contract"
+
+# (b) Video search by topic — REQUIRED: pass --fields title,summary
+#     The default field set includes `transcript`, which inflates counts via
+#     incidental mentions inside long videos. For video-level discovery the
+#     downstream ES query also uses title+summary, so the probe MUST match.
+python3 skills/tl-keyword-research/scripts/probe.py --fields title,summary \
+  "budget meal prep" "cheap meal prep" "meal prep on a budget" "frugal recipes"
+
+# (c) Composite noun ("both X and Y") — pass --operator AND so candidates stay
+#     inside the intersection (don't broaden each component independently)
+python3 skills/tl-keyword-research/scripts/probe.py --operator AND \
+  "3d printing" "miniature painting" "tabletop miniatures" "resin printing minis"
+```
+
+
 **Pick the invocation shape by what the user is searching for:**
 
 ```bash
 # (a) Channel search by topic — default fields (title, summary, transcript)
-python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi "smart contract"
+python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi
 
 # (b) Video search by topic — REQUIRED: pass --fields title,summary
 #     Without it, the probe includes transcript matches (noise from passing

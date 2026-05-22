@@ -97,7 +97,6 @@ All list endpoints return: `{ results, total, limit, offset, usage: { credits_ch
 - `TL_API_URL` — API base (default: `https://app.thoughtleaders.io`)
 - `TL_API_KEY` — Bearer token override for CI/scripts
 - `TL_AUTH0_DOMAIN`, `TL_AUTH0_CLIENT_ID`, `TL_AUTH0_AUDIENCE` — Auth0 config
-- `TL_LLM_KEY` — User's own LLM key for `tl ask` (avoids surcharge)
 
 ## Credit System
 
