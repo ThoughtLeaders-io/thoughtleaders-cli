@@ -1,14 +1,12 @@
 ---
 name: tl-save-report
 description: |
-  Save the results of an in-chat data-exploration session as a TL report. Triggers when the user wants to persist a channels / brands / videos (uploads) / sponsorships list or filtered set they've been working with — phrases like "save this as a report", "save the list", "turn this into a campaign", "persist this", "make a report from what you found", "save the result", "I want to come back to this". Asks the user up front whether to save it as a filter-style report (predicates re-evaluated against live data each run) or a list-style report (a frozen snapshot of the exact entity IDs from the session).
+  Save the results of an in-chat data-exploration session as a TL report. Triggers when the user wants to persist a channels / brands / videos (uploads) / sponsorships list or filtered set they've been working with — phrases like "save this as a report", "save the list", "turn this into a campaign", "persist this", "make a report from what you found", "save the result", "I want to come back to this".
 ---
 
 # tl-save-report
 
 Persist what the user has been exploring as a saved TL report. The skill assumes the data-exploration phase has already happened — the agent doesn't re-run queries, doesn't re-validate the result set, doesn't ask the user what they were looking for. Its single job is **config-from-session**: build a campaign config that captures the user's intent, post it via `tl reports create --config-file`.
-
-This is intentionally lighter than `tl-report-builder`. Report-builder runs a four-phase orchestration to TURN a natural-language request INTO a config; save-report TAKES a session that already produced data and writes that data out as a saved report. If the user is starting from scratch ("build me a list of …"), hand off to `tl-report-builder` — don't run save-report.
 
 ## When to invoke
 
@@ -23,9 +21,9 @@ The entity being saved must be one of: **channels**, **brands**, **videos / uplo
 
 **Skip when**:
 
-- The user wants the report **built from scratch** from a natural-language request (no prior session exploration to capture) → hand off to `tl-report-builder`.
 - The user wants to **add to an existing report** (`"add these channels to report 1234"`) → hand off to `tl-import`.
 - The user only wants the data **shown / counted / analysed in chat** without saving → stay in `tl`; don't invoke this skill.
+- The user wants to build a report **from scratch** with no prior session exploration to capture — that's a different shape of request (the user has a goal, not a result set). The agent should run the appropriate `tl db pg|fb|es` queries to produce a result set first; then this skill takes over for the save.
 
 ## Step 1 — Detect the report type
 
@@ -75,12 +73,12 @@ Pick list-style when:
 - The session's **filters can't be mapped** into FilterSet fields cleanly (custom raw-SQL joins, multi-source aggregation in `jq`/`duckdb`, anything where the filter logic lived in the shell pipeline rather than in the platform schema). The honest move is list-style.
 - The user explicitly said *"snapshot"*, *"freeze"*, *"this exact list"*, *"don't re-evaluate"*.
 
-### Filter-style — mapping session criteria into the FilterSet
+### Filter-style: mapping session criteria into the FilterSet
 
-The authoritative field catalogues live in the report-builder's references:
+The authoritative field catalogues live alongside this skill:
 
-- **Types 1 / 2 / 3** (CONTENT, BRANDS, CHANNELS): [`../tl-report-builder/references/intelligence_filterset_schema.json`](../tl-report-builder/references/intelligence_filterset_schema.json)
-- **Type 8** (SPONSORSHIPS): [`../tl-report-builder/references/sponsorship_filterset_schema.json`](../tl-report-builder/references/sponsorship_filterset_schema.json)
+- **Types 1 / 2 / 3** (CONTENT, BRANDS, CHANNELS): [`references/intelligence_filterset_schema.json`](references/intelligence_filterset_schema.json)
+- **Type 8** (SPONSORSHIPS): [`references/sponsorship_filterset_schema.json`](references/sponsorship_filterset_schema.json)
 
 Don't invent fields. The schema's keys are the only ones the platform accepts; unknown keys come back as `400 Invalid filterset.<field>`.
 
@@ -104,7 +102,7 @@ Common mappings (use the schema file for the full list):
 
 If the session used filters that don't map cleanly, tell the user: *"I can't map [the specific predicate] into a FilterSet — the platform doesn't expose that field directly. Want to fall back to list-style for this report?"*
 
-### List-style — populating the M2M
+### List-style: populating the M2M
 
 Collect the entity IDs from the session results into a single array and place them in the corresponding through-table M2M field:
 
@@ -134,10 +132,10 @@ Propose values and let the user edit. Don't ship blank strings.
 
 Use the type's default column set; agents shouldn't compose columns from scratch when the session didn't specify any. Defaults live in:
 
-- Type 1: [`../tl-report-builder/references/columns_content.md`](../tl-report-builder/references/columns_content.md)
-- Type 2: [`../tl-report-builder/references/columns_brands.md`](../tl-report-builder/references/columns_brands.md)
-- Type 3: [`../tl-report-builder/references/columns_channels.md`](../tl-report-builder/references/columns_channels.md)
-- Type 8: [`../tl-report-builder/references/columns_sponsorships.md`](../tl-report-builder/references/columns_sponsorships.md)
+- Type 1: [`references/columns_content.md`](references/columns_content.md)
+- Type 2: [`references/columns_brands.md`](references/columns_brands.md)
+- Type 3: [`references/columns_channels.md`](references/columns_channels.md)
+- Type 8: [`references/columns_sponsorships.md`](references/columns_sponsorships.md)
 
 If the session showed the user specific columns (`"show reach, subscribers, country"`), include those PLUS the type's required defaults. Validate that the `sort` value references a column that's actually present in the emitted `columns` dict — otherwise the report fails to render.
 
@@ -147,8 +145,8 @@ For **custom columns** (computed formulas the user defined inline during the ses
 
 Use a default set per report type. Don't over-engineer — the user can refine via `tl reports update` after saving. Widget catalogues:
 
-- Types 1 / 2 / 3: [`../tl-report-builder/references/intelligence_widget_schema.json`](../tl-report-builder/references/intelligence_widget_schema.json)
-- Type 8: [`../tl-report-builder/references/sponsorship_widget_schema.json`](../tl-report-builder/references/sponsorship_widget_schema.json)
+- Types 1 / 2 / 3: [`references/intelligence_widget_schema.json`](references/intelligence_widget_schema.json)
+- Type 8: [`references/sponsorship_widget_schema.json`](references/sponsorship_widget_schema.json)
 
 Pick 4–6 widgets. For type 8 specifically, the schema's `_tl_axis_branching` rules pick the correct axis based on which date field the FilterSet populates (`send_date` for proposals, `purchase_date` for sold).
 
@@ -257,6 +255,6 @@ The follow-up offer matters because **FilterSet changes (keywords, demographics,
 
 ## What this skill does NOT do
 
-- **No Phase 1–4 orchestration**, no AI-driven keyword research, no name resolution, no `sample_judge` validation pass. The session already produced the data — re-running discovery would be wasted effort. If the user comes in with a natural-language request and no prior session, that's `tl-report-builder`'s job, not this skill's.
+- **No discovery-side work** — no keyword research, no name resolution, no live-data sample validation, no result-set re-evaluation. The session already produced the data; re-running discovery would be wasted effort. If the user comes in with no prior session, run the relevant `tl db pg|fb|es` queries first to produce a result set, then invoke this skill on the result.
 - **No editing of existing reports.** If the user wants to refine an already-saved report's columns, widgets, title, or description, run `tl reports update <id>` directly. For FilterSet refinements, the platform requires saving a new variant.
 - **No bulk-importing into an existing report.** That's `tl-import`'s role. Save-report only creates new reports.
