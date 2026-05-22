@@ -4,6 +4,7 @@ import json
 import time
 
 import typer
+from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -320,6 +321,7 @@ def create_report(
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON config"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     timeout: int = typer.Option(300, "--timeout", help="Max orchestration time in seconds"),
 ) -> None:
     """Create a report from a natural-language prompt or a pre-built config.
@@ -366,14 +368,17 @@ def create_report(
             saved_prompts = [prompt]
 
         # --- Show preview ---
-        if json_output:
-            # Preview-only mode (--json without --yes): print the config and exit.
+        if json_output or toon_output:
+            # Preview-only mode (--json/--toon without --yes): print the config and exit.
             # With --yes, skip the preview emit entirely so the only thing on
-            # stdout is the single save-response JSON below — programmatic
-            # consumers can parse stdout with one json.loads() instead of having
+            # stdout is the single save-response payload below — programmatic
+            # consumers can parse stdout with one parser call instead of having
             # to split two documents.
             if not yes:
-                print(json.dumps(config, indent=2, default=str))
+                if toon_output:
+                    print(toon_encode(config))
+                else:
+                    print(json.dumps(config, indent=2, default=str))
                 raise typer.Exit(0)
         else:
             err.print()
@@ -398,7 +403,9 @@ def create_report(
         report_url = result.get("report_url", "")
         campaign_id = result.get("campaign_id", "")
 
-        if json_output:
+        if toon_output:
+            print(toon_encode(data))
+        elif json_output:
             print(json.dumps(data, indent=2, default=str))
         else:
             err.print()

@@ -3,6 +3,7 @@
 import json
 
 import typer
+from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -206,8 +207,7 @@ def whoami(
         if fmt == "json":
             print(json.dumps(data, indent=2, default=str))
         elif fmt == "toon":
-            from pytoon import encode
-            print(encode(data))
+            print(toon_encode(data))
         elif fmt == "md":
             _render_whoami_md(data)
         else:

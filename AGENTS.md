@@ -117,7 +117,7 @@ The version string is defined in three files and all three must be updated toget
 
 * Do not reference internal architecture of the ThoughtLeaders app in comments or skills. Specifially: do not reference internal table names, field names, API endpoints, Python modules or functions (including the sanitizer).
 * Do not let server implementation details into skill files (anything under `skills/`). Skills describe *what the CLI does* from the user's seat — observable command surface, inputs, outputs, examples. Do not say "the server enforces X", "the API validates Y on its side", "the backend rejects Z" — those are mechanism notes that drift the moment the server changes. State the user-visible behaviour ("unknown keys come back as 400") without naming where it's enforced.
-* Place all imports at the start of the Python module file
+* **All `import` and `from X import Y` statements live at the top of the Python module file** — after the module docstring, before any code. No inline imports inside function bodies, no lazy imports for "speed" or "optional dependency" reasons. `from __future__ import …` goes at the very top (Python requires that). The only legitimate inline-import exception is **platform-conditional imports** that cannot succeed on the other platform (e.g. `import msvcrt` on Linux, `import termios`/`tty` on Windows) — those stay inside their `if sys.platform == …:` guard. If a circular-import problem makes a top-level import impossible, fix the circular dependency rather than working around it with an inline import.
 
 # Git commit rules
 

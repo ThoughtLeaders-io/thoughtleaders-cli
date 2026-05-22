@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import typer
+from pytoon import encode as toon_encode
 from rich.console import Console
 
 from tl_cli.client.errors import ApiError, handle_api_error
@@ -59,6 +60,7 @@ def bulk_import_command(
     ids_file: str | None = typer.Option(None, "--ids-file", "-f", help="Path to file with one identifier per line. Omit to read from stdin."),
     exclude: bool = typer.Option(False, "--exclude", help="Mark these identifiers as excluded from the report instead of included"),
     json_output: bool = typer.Option(False, "--json", help="JSON output (default)"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Bulk-import entities into a report.
 
@@ -113,7 +115,9 @@ def bulk_import_command(
         client.close()
 
     output = {"task_id": task_id, **result}
-    if json_output or not sys.stdout.isatty():
+    if toon_output:
+        sys.stdout.write(toon_encode(output) + "\n")
+    elif json_output or not sys.stdout.isatty():
         json.dump(output, sys.stdout, indent=2)
         sys.stdout.write("\n")
     else:

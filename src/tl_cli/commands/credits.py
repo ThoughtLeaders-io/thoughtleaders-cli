@@ -18,6 +18,7 @@ import webbrowser
 from decimal import Decimal, InvalidOperation
 
 import typer
+from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
@@ -34,6 +35,7 @@ err = Console(stderr=True)
 @app.command("pricing")
 def pricing_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show the credit-to-USD rate, minimum purchase, and starter balance.
 
@@ -47,6 +49,10 @@ def pricing_cmd(
         return
     finally:
         client.close()
+
+    if toon_output:
+        print(toon_encode(data))
+        return
 
     if json_output:
         print(json.dumps(data, indent=2, default=str))
@@ -150,9 +156,10 @@ def history_cmd(
     limit: int = typer.Option(25, "--limit", help="Max rows to show"),
     offset: int = typer.Option(0, "--offset", help="Offset for pagination"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show recent credit top-ups for your organization (free)."""
-    fmt = detect_format(json_output, False, False, False)
+    fmt = detect_format(json_output, False, False, toon_output)
     client = get_client()
     try:
         data = client.get("/credit-purchases", params={"limit": limit, "offset": offset})
@@ -164,6 +171,10 @@ def history_cmd(
 
     if fmt == "json":
         print(json.dumps(data, indent=2, default=str))
+        return
+
+    if fmt == "toon":
+        print(toon_encode(data.get("results", [])))
         return
 
     rows = data.get("results", [])

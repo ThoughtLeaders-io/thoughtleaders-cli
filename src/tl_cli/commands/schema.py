@@ -5,6 +5,7 @@ import re
 
 import typer
 import yaml
+from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
@@ -79,11 +80,14 @@ def _try_render_yaml_tree(content: str) -> bool:
     return rendered
 
 
-def _show(db: str, json_output: bool, table: str | None = None) -> None:
+def _show(db: str, json_output: bool, table: str | None = None, toon_output: bool = False) -> None:
     client = get_client()
     try:
         params = {"table": table} if table else {}
         data = client.get(f"/raw/{db}/schema", params=params)
+        if toon_output:
+            print(toon_encode(data))
+            return
         if json_output:
             print(json.dumps(data, indent=2, default=str))
             return
@@ -108,6 +112,7 @@ def _show(db: str, json_output: bool, table: str | None = None) -> None:
 def pg_cmd(
     table: str = typer.Argument(None, help="Optional table name. When given, prints only that table's section in the same markdown format."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show PostgreSQL schema reference (for `tl db pg`).
 
@@ -123,13 +128,14 @@ def pg_cmd(
         tl schema pg thoughtleaders_channel
         tl schema pg thoughtleaders_adlink --json
     """
-    _show("pg", json_output, table=table)
+    _show("pg", json_output, table=table, toon_output=toon_output)
 
 
 @app.command("fb")
 def fb_cmd(
     table: str = typer.Argument(None, help="Optional table name (`article_metrics` or `channel_metrics`). When given, prints only that table's section."),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show Firebolt schema (live: tables and column types) for `tl db fb`.
 
@@ -144,12 +150,13 @@ def fb_cmd(
         tl schema fb article_metrics
         tl schema fb channel_metrics --json
     """
-    _show("fb", json_output, table=table)
+    _show("fb", json_output, table=table, toon_output=toon_output)
 
 
 @app.command("es")
 def es_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
     """Show Elasticsearch document shape for `tl db es`."""
-    _show("es", json_output)
+    _show("es", json_output, toon_output=toon_output)

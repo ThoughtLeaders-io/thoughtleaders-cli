@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import typer
+from pytoon import encode as toon_encode
 from rich.console import Console
 
 from tl_cli import __version__
@@ -172,6 +173,7 @@ def _print_manual_instructions() -> None:
 @app.command("claude")
 def setup_claude(
     json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs, non-interactive)"),
 ) -> None:
     """Install the TL CLI plugin for Claude Code.
 
@@ -183,8 +185,8 @@ def setup_claude(
         tl setup claude
         tl setup claude --json
     """
-    if json_output:
-        _setup_noninteractive()
+    if json_output or toon_output:
+        _setup_noninteractive(fmt="toon" if toon_output else "json")
         return
 
     console.print()
@@ -283,8 +285,16 @@ def _install_standalone_skills_step(plugin_root: Path) -> None:
         console.print("  [yellow]![/yellow] No skills found to install")
 
 
-def _setup_noninteractive() -> None:
-    """Non-interactive setup for --json/agent usage."""
+def _emit_setup_result(result: dict, fmt: str) -> None:
+    """Emit a setup-status dict in JSON (default) or TOON."""
+    if fmt == "toon":
+        print(toon_encode(result))
+    else:
+        print(json.dumps(result, indent=2))
+
+
+def _setup_noninteractive(fmt: str = "json") -> None:
+    """Non-interactive setup for --json / --toon / agent usage."""
     result = {
         "cli_version": __version__,
         "marketplace_source": MARKETPLACE_SOURCE,
@@ -296,7 +306,7 @@ def _setup_noninteractive() -> None:
     if plugin_root is None:
         result["status"] = "error"
         result["error"] = "Plugin assets not found"
-        print(json.dumps(result, indent=2))
+        _emit_setup_result(result, fmt)
         raise SystemExit(1)
 
     claude_bin = _find_claude_binary()
@@ -326,7 +336,7 @@ def _setup_noninteractive() -> None:
     (version_dir / ".version").write_text(__version__)
 
     result["status"] = "ok"
-    print(json.dumps(result, indent=2))
+    _emit_setup_result(result, fmt)
 
 
 # --- OpenCode setup ---
@@ -375,6 +385,7 @@ def _setup_external_agent(
     target_dir: Path,
     post_install_lines: list[str] | None,
     json_output: bool,
+    toon_output: bool = False,
 ) -> None:
     """Shared body for the OpenCode / Gemini / Codex setup commands.
 
@@ -388,19 +399,20 @@ def _setup_external_agent(
     """
     plugin_root = _find_plugin_root()
 
-    if json_output:
+    if json_output or toon_output:
+        fmt = "toon" if toon_output else "json"
         result: dict = {"cli_version": __version__}
         if plugin_root is None:
             result["status"] = "error"
             result["error"] = "Plugin assets not found"
-            print(json.dumps(result, indent=2))
+            _emit_setup_result(result, fmt)
             raise SystemExit(1)
         result[f"{agent_binary}_detected"] = shutil.which(agent_binary) is not None
         count = _install_skill_trees(plugin_root, target_dir)
         result["skills_installed"] = count
         result["install_dir"] = str(target_dir)
         result["status"] = "ok"
-        print(json.dumps(result, indent=2))
+        _emit_setup_result(result, fmt)
         return
 
     console.print()
@@ -449,6 +461,7 @@ def _setup_external_agent(
 @app.command("opencode")
 def setup_opencode(
     json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs, non-interactive)"),
 ) -> None:
     """Install the TL CLI skills for OpenCode.
 
@@ -469,6 +482,7 @@ def setup_opencode(
             "The agent can use it when you ask about sponsorships, deals, channels, or brands.",
         ],
         json_output=json_output,
+        toon_output=toon_output,
     )
 
 
@@ -478,6 +492,7 @@ def setup_opencode(
 @app.command("gemini")
 def setup_gemini(
     json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs, non-interactive)"),
 ) -> None:
     """Install the TL CLI skills for the Gemini CLI.
 
@@ -496,12 +511,14 @@ def setup_gemini(
         target_dir=AGENTS_SKILLS_DIR,
         post_install_lines=None,
         json_output=json_output,
+        toon_output=toon_output,
     )
 
 
 @app.command("codex")
 def setup_codex(
     json_output: bool = typer.Option(False, "--json", help="JSON output (non-interactive)"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs, non-interactive)"),
 ) -> None:
     """Install the TL CLI skills for the Codex CLI.
 
@@ -520,4 +537,5 @@ def setup_codex(
         target_dir=AGENTS_SKILLS_DIR,
         post_install_lines=None,
         json_output=json_output,
+        toon_output=toon_output,
     )
