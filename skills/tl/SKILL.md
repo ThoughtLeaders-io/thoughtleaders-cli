@@ -151,13 +151,13 @@ Unless the user specifically asks for running a specific report or showing the r
 
 Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or analysise large sets of data instead of analysing it yourself. On Mac and Linux, create temporary files in `/tmp` that can be analysed later in different ways. On Windows, create them in `%USERPROFILE%\AppData\Local\Temp`.  Before analysing a potentially large result set, first try fetching just a single result with `LIMIT 1` without `jq` etc, to see the shape of the data and any error messages.
 
-## Available Commands
+## Available Flows
 
 Note that if you're working on Windows, you must set up UTF-8 in the terminal with `PYTHONIOENCODING=utf-8 tl ...`, because all of these commands return UTF-8 data.
 
 ### Data queries
 
-**Filtered queries go through `tl db pg|fb|es`.** Write the SELECT/ES body yourself, and freely perform joins and aggregations. The show/create/update commands exist because they target a single record by ID. Where needed, write Python scripts or duckdb queries to join data from different databases.
+**Filtered queries go through `tl db pg|fb|es`.** Write the SELECT/ES body yourself, and freely perform joins and aggregations. The show/create/update commands exist because they target a single record by ID. Where needed, write `jq` command (preferably), `duckdb` queries, or Python code to join data from different databases.
 
 Filter-to-SQL examples (deals/matches/proposals all live on `thoughtleaders_adlink`, differentiated by `publish_status`):
 
@@ -169,7 +169,7 @@ Filter-to-SQL examples (deals/matches/proposals all live on `thoughtleaders_adli
 | Proposed (`publish_status=0`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 0"` |
 | Video uploads from ElasticSearch | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
 
-Single-record / mutation commands remain:
+Single-record / mutation commands:
 
 ```bash
 tl sponsorships show <id>              # Sponsorship detail
@@ -307,7 +307,7 @@ tl sponsorships show "$sid" --json | jq '{id, status, rejection_reason}'
 
 ### Raw queries (`tl db`)
 
-`tl db pg|fb|es` is the default tool. Reach for it whenever the question is anything beyond a trivially simple lookup — and use the structured commands only for those trivial cases (single-record `show`, plain filtered `list`). Don't paginate-and-reduce in your head when one SQL or ES body would do it server-side.
+`tl db pg|fb|es` is the default tool. Use it to reach any database records needed.
 
 ```bash
 tl db pg "<SELECT ...>"     # PostgreSQL — read-only SELECT
@@ -338,6 +338,15 @@ Structured commands are still the right tool for: single-record `show` by ID, sa
 | Channel/brand similarity (server-implemented similarity search) | `tl channels similar`, `tl brands similar`, `tl recommender ...` |
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
+
+#### PostgreSQL table hints
+
+- If the user is working with channels, use the `tl schema pg thoughtleaders_channel` before querying to get the channels table structure
+- If with brands, use the `tl schema pg thoughtleaders_brand` command before querying to get the brands table structure
+- If with comments, use the `tl schema pg thoughtleaders_comment` command before querying to get the brands table structure
+- If with sponsorships, use the `tl schema pg thoughtleaders_adlink` command before querying to get the brands table structure
+
+If unsure about what information to find where, read the [references/postgresql-schema.md](references/postgresql-schema.md) file for instructions.
 
 #### `tl db es` — Elasticsearch
 
