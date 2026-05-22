@@ -70,7 +70,28 @@ Match the session's primary entity to one of four report types:
 | Videos / uploads / articles | CONTENT | `1` |
 | Sponsorships / deals / adlinks | SPONSORSHIPS | `8` |
 
-If the session joined entities (e.g. channels with their recent sponsorships), pick the **one the user actually wants to save** and ask if unclear. The other side becomes either a column or a filter, not the report subject.
+### Pick without asking when one entity is unambiguous
+
+If the session's exploration focused on a single entity type — e.g. only channel queries, only brand lookups, only sponsorship listings — the report type is the matching row above. No need to ask.
+
+### Ask the user when the entity is unclear
+
+Don't guess in any of these cases — ask the user before proceeding to Step 2:
+
+- **The session joined entities** — e.g. channels with their recent sponsorships, brands with their mentioning videos. Either side could plausibly be the saved row.
+- **The save request is ambiguous** — e.g. *"save what we just looked at"* after the session touched multiple entity types.
+- **The user's wording mixes terms** — e.g. *"save these creators and their deals"*; both `channels` (3) and `sponsorships` (8) are in play, the user has to pick one.
+
+Suggested wording:
+
+> The session touched a few different entity types. Which one should be the saved report's row?
+>
+> • **Channels** — one row per YouTube channel (report type 3)
+> • **Brands** — one row per brand, aggregated across mentions (report type 2)
+> • **Videos / uploads** — one row per upload (report type 1)
+> • **Sponsorships / deals** — one row per deal (report type 8)
+
+Don't proceed without an answer — guessing the wrong row makes the rest of the workflow (FilterSet shape, columns, widgets) wrong too. The non-chosen side becomes either a column or a filter on the saved report, not the report's subject.
 
 ## Step 2 — Choose the path: list-style or filter-style?
 
