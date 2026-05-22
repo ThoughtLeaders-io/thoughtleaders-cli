@@ -86,10 +86,12 @@ Suggested wording:
 
 > The session touched a few different entity types. Which one should be the saved report's row?
 >
-> • **Channels** — one row per YouTube channel (report type 3)
-> • **Brands** — one row per brand, aggregated across mentions (report type 2)
-> • **Videos / uploads** — one row per upload (report type 1)
-> • **Sponsorships / deals** — one row per deal (report type 8)
+> • **CHANNELS** — one row per YouTube channel
+> • **BRANDS** — one row per brand, aggregated across mentions
+> • **CONTENT** — one row per upload (video / podcast / article)
+> • **SPONSORSHIPS** — one row per deal (brand × channel × dates × status × price)
+
+Use the report-type name (CHANNELS / BRANDS / CONTENT / SPONSORSHIPS) when talking to the user — never the numeric `report_type` code. The numeric code is an internal config value; users don't think about reports as "type 3", they think about them as "a channels report".
 
 Don't proceed without an answer — guessing the wrong row makes the rest of the workflow (FilterSet shape, columns, widgets) wrong too. The non-chosen side becomes either a column or a filter on the saved report, not the report's subject.
 
