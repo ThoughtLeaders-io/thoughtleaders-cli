@@ -339,15 +339,6 @@ Structured commands are still the right tool for: single-record `show` by ID, sa
 | Saved reports | `tl reports`, `tl reports run` |
 | Time-series view-curve / channel growth (default shape with interpolation) | `tl snapshots channel`, `tl snapshots video` |
 
-#### PostgreSQL table hints
-
-- If the user is working with channels, use the `tl schema pg thoughtleaders_channel` before querying to get the channels table structure
-- If with brands, use the `tl schema pg thoughtleaders_brand` command before querying to get the brands table structure
-- If with comments, use the `tl schema pg thoughtleaders_comment` command before querying to get the brands table structure
-- If with sponsorships, use the `tl schema pg thoughtleaders_adlink` command before querying to get the brands table structure
-
-If unsure about what information to find where, read the [references/postgresql-schema.md](references/postgresql-schema.md) file for instructions.
-
 #### `tl db es` — Elasticsearch
 
 The CLI sends your JSON body to the server, which validates it before forwarding to ES. The index is fixed server-side (defaults to `tl-platform`); the client cannot select it. To narrow to a quarter or year, scope inside the body with a `publication_date` range filter rather than picking a different alias.
@@ -384,7 +375,7 @@ See [references/firebolt-schema.md](references/firebolt-schema.md) for accepted-
 #### `tl db pg` — PostgreSQL
 
 ```bash
-# Top brands by deal count
+# Example: Top brands by deal count
 tl db pg "SELECT b.name, COUNT(*) AS deals
           FROM thoughtleaders_adlink a
           JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
@@ -396,7 +387,14 @@ tl db pg "SELECT b.name, COUNT(*) AS deals
           LIMIT 20 OFFSET 0"
 ```
 
-See [references/postgres-schema.md](references/postgres-schema.md) for the accepted-SQL rules and the table/column catalogue. `tl schema pg` prints the live table/column listing visible to the caller.
+#### PostgreSQL table hints
+
+- If the user is working with channels, use the `tl schema pg thoughtleaders_channel` before querying to get the channels table structure
+- If with brands, use the `tl schema pg thoughtleaders_brand` command before querying to get the brands table structure
+- If with comments, use the `tl schema pg thoughtleaders_comment` command before querying to get the brands table structure
+- If with sponsorships, use the `tl schema pg thoughtleaders_adlink` command before querying to get the brands table structure
+
+If unsure about what information to find where, read the [references/postgresql-schema.md](references/postgresql-schema.md) file for instructions. Use just `tl pg schema` to see the entire SQL schema.
 
 **PG cost is per-query.** The credit rate for a `tl db pg` call equals a base rate plus a surcharge for every priced table referenced and every priced column referenced (additive on both sides). Most tables and columns carry no surcharge; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live surcharge map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
@@ -415,14 +413,6 @@ See [references/postgres-schema.md](references/postgres-schema.md) for the accep
 - `publication_id` is **deprecated** — don't use it.
 
 **Snapshots are sparse**, especially for older videos. Don't assume two arbitrary dates have data points. For approximations, prefer `tl snapshots` which already implements the project's interpolation logic; falling back to raw `tl db fb` means you handle gaps yourself.
-
-### Schema references
-
-Load these on demand — don't read all upfront. Pick the one(s) relevant to the question.
-
-- [references/postgres-schema.md](references/postgres-schema.md) — tables, columns, relationships, `publish_status` constants. Required reading for `tl db pg` queries, and useful for understanding what the structured `tl` commands return.
-- [references/elasticsearch-schema.md](references/elasticsearch-schema.md) — index aliases, video/channel fields, common query bodies for `tl db es`.
-- [references/firebolt-schema.md](references/firebolt-schema.md) — the two metric tables and their indexes; how to write valid `tl db fb` queries.
 
 ### Limitations of the `tl`-only data path
 
