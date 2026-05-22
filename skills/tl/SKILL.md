@@ -473,43 +473,39 @@ tl recommender top-channels "Tech" --limit 30
 tl recommender top-brands "USA share" mbn:yes --limit 50
 ```
 
-**Hand-off to path 3 when the tag doesn't fit.** If `tl recommender tags <hint>` returns no clean match, the user's intent is OFF-TAG — drop to path 3, do NOT fake-fit a loose adjacent tag. E.g. `"crypto/Web3 channels"` is OFF-TAG even though `"cryptocurrency"` exists as a tag — `"cryptocurrency"` is a financial-product tag, not the cultural-niche the user named. Same for `"speedcubing"`, `"biohacking and longevity"`, `"AI cooking"` — none of these are curated tags, so they belong in path 3.
+**Available filters on the recommender commands:**
+
+| Command | Filters |
+| --- | --- |
+| `top-channels` | `msn:<yes\|no\|all>` (default all), `exclude-for-profile:<id>` |
+| `top-profiles` | `mbn:<yes\|no\|all>` (default all), `exclude-for-channel:<id>` |
+| `top-brands` | `mbn:<yes\|no\|all>` (default all) |
+| `channels-for-profile` | `language:<iso>` (default `en`), `msn:<yes\|no>` (default `no`) |
+| `channels-for-brand` | same as `channels-for-profile` |
+| `brands-for-channel` | `mbn:<yes\|no\|all>` (default `all`) |
+
+Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches. This is the fast path.
+
+**Hand-off to path 3 when the tag doesn't fit** If `tl recommender tags <hint>` returns no clean match, the user's intent cannot be represented by recommender tags — drop to path 3, do NOT fake-fit a loose adjacent tag. E.g. `"crypto/Web3 channels"` is a miss even though `"cryptocurrency"` exists as a tag — `"cryptocurrency"` is a financial-product tag, not the cultural-niche the user named. Same for `"speedcubing"`, `"biohacking and longevity"`, `"AI cooking"` — none of these are curated tags, so they belong in path 3.
 
 **Also fall through to path 3 — NOT path 4 — when the recommender returns errors.** If `tl recommender top-channels "<tag>"` 5xx's or times out, the right fallback is path 3 (run the keyword-research skill against ES), not path 4 (PG `ILIKE` on `channel_name`). PG name-matching misses every channel whose name doesn't contain the literal word — that's the same anti-pattern called out at the bottom of this section.
 
-**3. Off-tag content keywords — invoke `tl-keyword-research`** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
+**Also fall through to path 3 if the user wants to broaden the search.** When encountering further inputs like "broaden the search", "find more results", etc., it indicates the user is searching for topics beyond what the recommender tags provide.
+
+**3. Content keywords beyond tags — invoke `tl-keyword-research`** — user described content the channel OR video ACTUALLY TALKS ABOUT, and it isn't a curated tag. Triggers:
 
 - **Channel search by topic** — `"crypto/Web3 channels"`, `"speedcubing channels"`, `"channels about biohacking and longevity"`, `"both 3D printing and miniature painting"`.
 - **Video search by topic** — `"videos where creators discuss budget meal prep"`, `"uploads about [topic]"`, `"find videos that talk about X"`.
 - **Channel–brand fit check** — does this candidate channel's content actually touch the brand's category? (Use with `channel.id` filter on the downstream ES query.)
 - **Validating a recommender / SQL shortlist** — sample-check that the top-N channels really cover the niche.
 
-**Do NOT compose keyword sets by hand for `tl db es`.** Always run the skill's script first. It broadens the seeds, probes each candidate via `multi_match phrase`, and returns ranked counts:
+**Do NOT compose keyword sets by hand for `tl db es`.** Always run the skill's script first. It broadens the user input, probes each candidate via `multi_match phrase`, and returns ranked counts:
 
 ```json
 {"operator": "OR", "keywords": [{"keyword": "crypto", "count": 18742}, {"keyword": "bitcoin", "count": 15103}, {"keyword": "rugpull", "count": 0}]}
 ```
 
-Three invocations cover almost every case. **Pick by the question shape** (channel vs video vs AND-composite):
-
-```bash
-# (a) Channel search by topic — default fields (title, summary, transcript)
-python3 skills/tl-keyword-research/scripts/probe.py crypto bitcoin DeFi Web3 blockchain
-
-# (b) Video search by topic — REQUIRED: pass --fields title,summary
-#     The default field set includes `transcript`, which inflates counts via
-#     incidental mentions inside long videos. For video-level discovery the
-#     downstream ES query also uses title+summary, so the probe MUST match.
-python3 skills/tl-keyword-research/scripts/probe.py --fields title,summary \
-  "budget meal prep" "cheap meal prep" "meal prep on a budget" "frugal recipes"
-
-# (c) Composite noun ("both X and Y") — pass --operator AND so candidates stay
-#     inside the intersection (don't broaden each component independently)
-python3 skills/tl-keyword-research/scripts/probe.py --operator AND \
-  "3d printing" "miniature painting" "tabletop miniatures" "resin printing minis"
-```
-
-Then run the actual content search via `tl db es` (`multi_match` on the same fields) with the surviving high-count keywords. Zero-count entries are informative — they tell you which suggestions don't exist in the corpus. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in `skills/tl-keyword-research/SKILL.md`.
+Then run the actual content search via `tl db es` (`multi_match` on the `title`, `summary`, `transcript` fields) with the surviving high-count keywords. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in the `tl-keyword-research` skill file.
 
 **4. Pure attribute filter** — user wants channels matching attributes the recommender doesn't express: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` jsonb, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg` once to confirm the live column set; the columns below are stable.
 
@@ -585,7 +581,7 @@ When presenting sponsorship status data, always use human-readable labels — ne
 
 ## Examples
 
-"Show me my sold sponsorships this quarter":
+### "Show me my sold sponsorships this quarter":
 ```bash
 tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
           FROM thoughtleaders_adlink al
@@ -598,24 +594,24 @@ tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
           LIMIT 500 OFFSET 0" --json
 ```
 
-"What channels does Nike sponsor?":
+### "What channels does Nike sponsor?":
 ```bash
 tl brands history Nike --json
 ```
 
-"Compare view curves for two videos":
+### "Compare view curves for two videos":
 ```bash
 tl snapshots video abc123 --channel 456 --json
 tl snapshots video def789 --channel 456 --json
 ```
 
-"Run my Q1 pipeline report":
+### "Run my Q1 pipeline report":
 ```bash
 tl reports --json  # Find the report ID first
 tl reports run 42 --json
 ```
 
-"Look up a channel or brand from whatever the user pasted":
+### "Look up a channel or brand from whatever the user pasted":
 ```bash
 # Channel: accepts name, slug, YouTube channel URL, handle (@…), raw channel ID
 # (UC…), or any video URL. On ambiguity returns 400 with candidate {id, name};
@@ -645,7 +641,7 @@ tl recommender top-channels "Cooking" msn:yes --limit 100 --json \
                           LIMIT 50 OFFSET 0" --json
 ```
 
-"Show sold sponsorships targeting mobile US audiences":
+### "Show sold sponsorships targeting mobile US audiences":
 ```bash
 tl db pg "SELECT al.id, c.channel_name, c.demographic_device_primary, c.demographic_usa_share, al.weighted_price
           FROM thoughtleaders_adlink al
@@ -657,7 +653,7 @@ tl db pg "SELECT al.id, c.channel_name, c.demographic_device_primary, c.demograp
           LIMIT 500 OFFSET 0" --json
 ```
 
-"Find channels similar to one I know" (similarity recommender, 25 credits per call):
+### "Find channels similar to one I know" (similarity recommender):
 ```bash
 tl channels similar 29834 --limit 10                         # by ID (defaults to msn:yes, tpp:both)
 tl channels similar "Tremending girls" --limit 5             # by unique name
@@ -669,7 +665,7 @@ tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-s
 ```
 **Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
 
-"Browse the recommender" (categories, demographics, formats — `tl recommender tags` is free):
+### "Browse the recommender" (categories, demographics, formats):
 ```bash
 tl recommender tags                                            # Full tag list (free)
 tl recommender tags cooking                                    # Search tag names by substring
@@ -686,16 +682,3 @@ tl recommender channels-for-brand 6037 msn:yes language:en --limit 30
 tl recommender brands-for-channel 29834 --limit 30                   # Brands likely to sponsor this channel
 tl recommender brands-for-channel "MrBeast" mbn:yes --limit 30       # Same, restricted to MBN brand profiles
 ```
-
-**Filters on the recommender commands:**
-
-| Command | Filters |
-| --- | --- |
-| `top-channels` | `msn:<yes\|no\|all>` (default all), `exclude-for-profile:<id>` |
-| `top-profiles` | `mbn:<yes\|no\|all>` (default all), `exclude-for-channel:<id>` |
-| `top-brands` | `mbn:<yes\|no\|all>` (default all) |
-| `channels-for-profile` | `language:<iso>` (default `en`), `msn:<yes\|no>` (default `no`) |
-| `channels-for-brand` | same as `channels-for-profile` |
-| `brands-for-channel` | `mbn:<yes\|no\|all>` (default `all`) |
-
-Use `tl recommender top` for category/topic discovery (it's ranked) and `tl channels similar` / `tl brands similar` for 1:1 lookalike searches.
