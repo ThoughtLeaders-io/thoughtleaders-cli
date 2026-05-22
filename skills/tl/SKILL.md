@@ -181,10 +181,6 @@ tl channels history <id-or-name>       # Sponsorship history
 tl channels similar <id-or-name>       # Similarity recommender (Intelligence plan)
 tl brands show <id-or-name>            # Brand detail
 tl brands find <query>                 # Resolve a string to {id, name}; matches name, slug, domain, or keyword
-tl brands history <id-or-name>         # Sponsorship history
-tl brands history <query> --channel <id>  # Brand mentions on specific channel
-tl brands history-stats <id-or-name>   # Aggregate roll-up: counts, total/avg/median views, first/last seen, by-year, top channels
-tl brands history-stats <q> --channel <id>  # Same roll-up, narrowed to one channel
 tl brands similar <id-or-name>         # Find similar brands via similarity search
 tl recommender tags [query]            # List similarity tag names — categories, demographics, formats
 tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (Intelligence)
@@ -595,9 +591,102 @@ tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
           LIMIT 500 OFFSET 0" --json
 ```
 
-### "What channels does Nike sponsor?":
+### Brand sponsorship history — what channels does Nike sponsor?
+
+Resolve the brand to an ID, then probe ES for articles where the brand appears in `sponsored_brand_mentions`. Channel names live in PG (the ES article doc only carries `channel.id`), so the third call joins them in.
+
 ```bash
-tl brands history Nike --json
+# 1. Resolve "Nike" → brand ID
+tl brands find Nike --json   # → results[0].id, say 21416
+
+# 2. Recent sponsored videos for that brand (sorted by publication_date desc)
+tl db es '{
+  "size": 50,
+  "track_total_hits": true,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"term": {"sponsored_brand_mentions": "21416"}}
+  ]}},
+  "sort": [{"publication_date": "desc"}],
+  "_source": ["title", "channel.id", "publication_date", "views"]
+}' --json > /tmp/nike_history.json
+
+# 3. Resolve channel.id → channel_name (one PG round-trip for the whole page)
+jq -r '[.results[].channel.id] | unique | map(tostring) | join(",")' /tmp/nike_history.json \
+  | xargs -I CH_IDS tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE id IN (CH_IDS)" --json
+
+# Narrow to a single channel:
+tl db es '{
+  "size": 50,
+  "track_total_hits": true,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"term": {"sponsored_brand_mentions": "21416"}},
+    {"term": {"channel.id": 5607}}
+  ]}},
+  "sort": [{"publication_date": "desc"}],
+  "_source": ["title", "publication_date", "views"]
+}'
+
+# Was the video a TL-brokered deal? Cross-check ES video_id against AdLink.article_id:
+tl db pg "SELECT article_id FROM thoughtleaders_adlink
+          WHERE article_id IN ('1247603:8LskGvKUA9I', '1247603:abc123')"
+```
+
+### Brand sponsorship roll-up — totals, first/last seen, top channels, by-year
+
+The same ES filter (`doc_type=article` + `sponsored_brand_mentions=<id>`) with `size:0` + aggregations replaces a roll-up call. ES accepts **one aggregation total per request** (top-level + sub-aggs all count), so what would be a single server-side roll-up here splits into a few `tl db es` calls and one client-side join.
+
+```bash
+# Totals + time range (one aggregation total — the four metric aggs are siblings under aggs and bill as a single body)
+tl db es '{
+  "size": 0,
+  "track_total_hits": true,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"term": {"sponsored_brand_mentions": "21416"}}
+  ]}},
+  "aggs": {
+    "views_sum":  {"sum":   {"field": "views"}},
+    "views_avg":  {"avg":   {"field": "views"}},
+    "first_seen": {"min":   {"field": "publication_date"}},
+    "last_seen":  {"max":   {"field": "publication_date"}}
+  }
+}'
+
+# By-year breakdown (date_histogram only — no sub-agg, that would push over the one-agg cap)
+tl db es '{
+  "size": 0,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"term": {"sponsored_brand_mentions": "21416"}}
+  ]}},
+  "aggs": {
+    "by_year": {"date_histogram": {
+      "field": "publication_date", "calendar_interval": "year",
+      "format": "yyyy", "min_doc_count": 1
+    }}
+  }
+}'
+
+# Top channels by sponsored-video count (terms agg only — for views per channel, run a second call per channel)
+tl db es '{
+  "size": 0,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"term": {"sponsored_brand_mentions": "21416"}}
+  ]}},
+  "aggs": {
+    "by_channel": {"terms": {"field": "channel.id", "size": 10, "order": {"_count": "desc"}}}
+  }
+}'
+
+# TL-brokered deal count for the brand (PG, not ES — adlinks where the brand is on the creator profile)
+tl db pg "SELECT COUNT(*) AS tl_brokered
+          FROM thoughtleaders_adlink al
+          JOIN thoughtleaders_profile p  ON p.id = al.creator_profile_id
+          JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
+          WHERE pb.brand_id = 21416 AND al.article_id IS NOT NULL"
 ```
 
 ### "Compare view curves for two videos":
