@@ -140,7 +140,7 @@ Unless the user specifically asks for running a specific report or showing the r
 3. **Decide the method of discovery**: If the user want to explore certain topics, use the recommender commands. If it's more about filtering, construct a query for PG or ES.
 4. **Always use --json**: Parse JSON output for multi-step analysis.
 5. **Chain commands**: For complex questions, chain multiple `tl` commands, shell commands, and other tools.
-6. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers. In this case, ask the user if they want to save the list as a report, and invoke the `tl-save-report` skill.
+6. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers. Sort the result by relevant criteria - if the user asked for "top performers", order by the performance metric; if the user asked for "most recent", sort by the pertinent date desc. When the result is a list, ask the user if they want to save the list as a report, and invoke the `tl-save-report` skill.
 
 Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or analysise large sets of data instead of analysing it yourself. On Mac and Linux, create temporary files in `/tmp` that can be analysed later in different ways. On Windows, create them in `%USERPROFILE%\AppData\Local\Temp`.  Before analysing a potentially large result set, first try fetching just a single result with `LIMIT 1` without `jq` etc, to see the shape of the data and any error messages.
 
