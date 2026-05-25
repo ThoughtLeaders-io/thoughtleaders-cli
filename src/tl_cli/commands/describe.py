@@ -264,13 +264,14 @@ def _print_pricing_section(credits: dict) -> None:
             "Estimate using the examples above before running with a large limit."
         )
 
-    # Surface live pg surcharges when the server included them (db resource only).
-    surcharges = credits.get("pg_surcharges")
-    if isinstance(surcharges, dict) and surcharges:
-        sub = Table(title="PG surcharges (live)")
+    # Surface live PG expensive-items pricing when the server included it
+    # (db resource only).
+    expensive = credits.get("pg_expensive")
+    if isinstance(expensive, dict) and expensive:
+        sub = Table(title="PG expensive items (live)")
         sub.add_column("Path", style="bold")
-        sub.add_column("Surcharge", justify="right")
-        for path, val in sorted(surcharges.items()):
+        sub.add_column("Extra", justify="right")
+        for path, val in sorted(expensive.items()):
             sub.add_row(path, _fmt_credits(val))
         console.print(sub)
 

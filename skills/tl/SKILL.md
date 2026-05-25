@@ -397,7 +397,7 @@ tl db pg "SELECT b.name, COUNT(*) AS deals
 
 If unsure about what information to find where, read the [references/postgresql-schema.md](references/postgresql-schema.md) file for instructions. Use just `tl pg schema` to see the entire SQL schema.
 
-**PG cost is per-query.** The credit rate for a `tl db pg` call equals a base rate plus a surcharge for every priced table referenced and every priced column referenced (additive on both sides). Most tables and columns carry no surcharge; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live surcharge map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
+**PG cost is per-query.** The credit rate for a `tl db pg` call equals a base rate plus an extra for every expensive table referenced and every expensive column referenced (additive on both sides). Most tables and columns are not expensive; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
 ### Three sources, each authoritative for different things
 

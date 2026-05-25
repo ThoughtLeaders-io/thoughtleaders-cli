@@ -182,7 +182,7 @@ tl describe show sponsorships --filters    # Available filters for sponsorships
 tl balance                                 # Your credit balance
 ```
 
-`tl db pg` is priced **per-query**: a base rate plus a surcharge for every priced table and column referenced. Sensitive fields (demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live surcharge map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
+`tl db pg` is priced **per-query**: a base rate plus an extra for every expensive table and column referenced. Sensitive fields (demographics, channel outreach emails) are expensive. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
 # Terminology
 

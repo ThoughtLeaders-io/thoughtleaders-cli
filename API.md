@@ -212,7 +212,7 @@ print(post('/raw/pg', {'query': sql}))
 
 ### Pricing
 
-PG cost is **per-query**: a base rate plus a surcharge for every priced table and column referenced. Most tables/columns are free; sensitive ones (demographics, channel outreach emails) cost more. The `usage.credit_rate` you get back is the effective multiplier the server applied — it's not the static value from `tl describe`. The `pricing` sub-key, when present, breaks the rate into base/per-table/per-column components.
+PG cost is **per-query**: a base rate plus an extra for every expensive table and column referenced. Most tables/columns are free; sensitive ones (demographics, channel outreach emails) are expensive. The `usage.credit_rate` you get back is the effective multiplier the server applied — it's not the static value from `tl describe`. The `pricing` sub-key, when present, breaks the rate into base/per-table/per-column components.
 
 ### Common rejections
 
