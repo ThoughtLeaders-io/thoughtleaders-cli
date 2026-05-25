@@ -10,9 +10,15 @@ description: |
 
 Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc. Use raw database queries via `tl db pg|fb|es` for everything.
 
-Always run `tl schema pg|fb|es` before writing a raw query. When you only need the schema of one table, you MUST call `tl schema pg <table>` (or `tl schema fb <table>`). Avoid calling the unscoped form, to reduce token counts. ES has no per-table form (the index is a single document shape), so `tl schema es` is the only call there.
+If doing a database query, follow this recipe:
 
-**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field - that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq`, `yq`, `rg`, or `duckdb`, as appropriate, and read only the answer back. Pick the tool by shape:
+* First, run `tl whoami` to confirm the API is working and to find out user metadata and limits.
+* Always read `references/business-glossary.md`
+* If doing a PostgreSQL (pg) query: first read `references/postgres-schema.md`, then run `tl schema pg`
+* If doing an ElasticSearch (es) query: first read `references/elasticsearch-schema.md`, then run `tl schema es`
+* If doing a Firebolt (fb) query: first read `references/firebolt-schema.md`, then run `tl schema fb`
+
+**Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field - that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq` (for JSON), `rg` or `duckdb` (for CSV), or `yq` (for YAML) as appropriate, and read only the answer back. Pick the tool by shape:
 
 - **`jq`** — filter, project, and transform JSON. The default for `tl … --json` post-processing.
   ```bash
@@ -39,15 +45,13 @@ Always run `tl schema pg|fb|es` before writing a raw query. When you only need t
   duckdb -c "SELECT brand, SUM(price) AS revenue FROM 'deals.csv' GROUP BY brand ORDER BY revenue DESC LIMIT 10"
   ```
 
-The pattern is always: server-side narrowing first (usually by filters in the `tl db` query, but could be from similarity / recommender searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them — `tl-internal setup` installs all four by default.
+The pattern is always: server-side narrowing first (usually by filters in the `tl db` query, but could be from similarity / recommender searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them.
 
-Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is 500.
+Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is present in the output of `whoami`.
 
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 
 Where possible reference sponsorships, brands, channel by numeric IDs.
-
-Always load the [references/business-glossary.md](references/business-glossary.md) file before running any query. It describes how business terms are mapped to database concepts (revenue, weighted pipeline, MSN, TPP, performance grade, team rosters).
 
 ## Data Model & Terminology
 

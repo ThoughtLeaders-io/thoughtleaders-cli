@@ -11,7 +11,7 @@ tl db es '{"size": 1, "query": {"match_all": {}}}' --json
 cat query.json | tl db es -
 ```
 
-The index is **fixed server-side** (defaults to `tl-platform`). The client cannot select an index — there is no `--index` flag. To narrow a query to a smaller time window, scope it inside the body with a `publication_date` range filter rather than picking a different alias.
+The index is **fixed server-side**. The client cannot select an index — there is no `--index` flag.
 
 Cost grows non-linearly with result size (raw db queries use the list curve at `mult=1.4`). Aggregation queries bill on `min(hits.total, 200)` instead of `len(hits)`. See `SKILL.md` for the curve formula and the row-count → credits table.
 
@@ -19,7 +19,7 @@ Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into ro
 
 ## Accepted query bodies
 
-Read `SKILL.md` → "Raw query reference → `tl db es`" for the full list. Highlights:
+See the output of `tl db es`" for the object schema. Highlights:
 
 - **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
 - `size` ≤ 500. `from + size` ≤ 10,000. Use `search_after` to page deeper.
@@ -27,25 +27,13 @@ Read `SKILL.md` → "Raw query reference → `tl db es`" for the full list. High
 - **No scripts** — any key whose name contains `script` is not accepted.
 - **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
 
-## Index Structure
+### ElasticSearch document structure ("articles")
 
-### `tl-platform-{year}-{quarter}` — Main Content Index
+The `doc_type.name` field in ES objects determins between records for video uploads and for channel data.
 
-The primary index. Contains videos AND channels as parent-child documents (`doc_type` join field).
+#### Upload/video Fields (selected — 73 total)
 
-Sharded by quarter going back to 2015. **~15.6M docs in Q1 2026 alone.**
-
-Through `tl db es`, all queries hit a server-fixed alias (typically `tl-platform`, which fans out across every quarter). **Always add `publication_date` range filters** when narrowing to a time window — that's the only knob the client has, since the alias itself isn't selectable.
-
-The underlying physical layout (one index per quarter, e.g. `tl-platform-2026-q1`, with year and full-platform aliases on top) is for context only.
-
-Raw mappings (read-only links — out of band, not via `tl`):
-- [articles](https://github.com/ThoughtLeaders-io/elk-stack-resources/blob/main/elasticsearch/templates/_mappings_article.kibana)
-- [channels](https://github.com/ThoughtLeaders-io/elk-stack-resources/blob/main/elasticsearch/templates/_mappings_channel.kibana)
-- [shared configuration](https://github.com/ThoughtLeaders-io/elk-stack-resources/blob/main/elasticsearch/templates/_mappings_common.kibana)
-- [vector indexes](https://github.com/ThoughtLeaders-io/elk-stack-resources/blob/main/elasticsearch/templates/vectors.kibana)
-
-#### Video Fields (selected — 73 total)
+Distinguished by `doc_type.name="article"`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -92,19 +80,11 @@ Raw mappings (read-only links — out of band, not via `tl`):
 
 #### Channel Fields
 
-> ⚠️ **The embedded `channel.*` object on video (article) docs is a denormalized SUBSET — NOT the full channel schema.** The full field list below exists only on **channel parent docs** (`doc_type: "channel"`). On article docs, `channel.*` contains at most **6 fields**: `id`, `country`, `language`, `content_category`, `format`, `publication_id`. **`reach`, `subscribers`, `impression`, `channel_name`, `sponsorship_score`, `is_tl_channel`, etc. are NOT on the embedded object.** Filtering article docs by `channel.reach` returns zero results silently — query the parent channel doc, or join PG `thoughtleaders_channel` for those fields.
->
-> Also: `channel.country` is missing on ~14% of article docs even when `channel` itself exists, so a bare `{"term": {"channel.country": "US"}}` filter silently drops those rows. **A bare `exists` clause does NOT fix this** — in a filter context it also rejects missing values, just explicitly. To include the missing-country rows alongside US (treat them as "country unknown"), use a `should` split:
-> ```json
-> {"bool": {"should": [
->   {"term": {"channel.country": "US"}},
->   {"bool": {"filter": [{"exists": {"field": "channel.id"}}],
->             "must_not": [{"exists": {"field": "channel.country"}}]}}
-> ], "minimum_should_match": 1}}
-> ```
-> To **separately count** the missing rows, use a `filters` aggregation with `exists` / `must_not exists` branches.
+Distinguished by `doc_type.name="channel"`.
 
-The full table below applies to **channel parent docs only**:
+Contains a denormalized subset of the PostgreSQL channel data.
+
+### Channel fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -154,13 +134,6 @@ The full table below applies to **channel parent docs only**:
 | `@timestamp` | date | Index timestamp |
 | `doc_type` | join | Parent-child join (channel→video) |
 | `es_index_tag` | object | Index routing metadata |
-
-### Other indices
-
-- `tl-ingest` — ingestion queue. **Don't query.** Internal pipeline state.
-- `tl-similarity-profiles-channel`, `tl-similarity-profiles-channel-profile` — channel similarity vectors.
-- `tl-vectors-brand-company-descriptions-*` — brand similarity vectors.
-- `tl-vectors-channel-audience-*`, `tl-vectors-channel-topic-descriptions-*`, `tl-vectors-channel-features` — channel similarity profiles.
 
 ## Common Query Patterns
 
