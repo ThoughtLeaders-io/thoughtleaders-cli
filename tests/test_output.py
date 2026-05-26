@@ -228,3 +228,145 @@ class TestOutputMarkdownNoCrashOnNaN:
         out = self._capture([{"x": 1234}], ["x"])
         # Numeric column gets thousands-separator formatting
         assert "1,234" in out
+
+
+class TestQuotaNotice:
+    """`_print_quota_notice` surfaces a stderr banner when the server
+    signals an expensive-column quota refusal or truncation."""
+
+    def test_no_quota_signal_no_banner(self, capsys):
+        from tl_cli.output.formatter import _print_quota_notice
+        _print_quota_notice({"results": [], "usage": {}})
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_quota_exhausted_emits_banner_with_both_caps(self, capsys):
+        from tl_cli.output.formatter import _print_quota_notice
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_retry_after_hours": 24,
+            "_billing_quota": {
+                "queries_used": 10, "queries_max": 10, "queries_remaining": 0,
+                "rows_used": 250, "rows_max": 500, "rows_remaining": 250,
+                "window_hours": 24,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "Billing quota reached" in err
+        # Older-server fallback uses the flat window ("within 24h").
+        assert "within 24h" in err
+        assert "10/10" in err
+        assert "250/500" in err
+
+    def test_quota_precise_retry_at_renders_hours_and_minutes(self, capsys):
+        from datetime import datetime, timedelta, timezone
+        from tl_cli.output.formatter import _print_quota_notice
+        retry_at = datetime.now(timezone.utc) + timedelta(hours=1, minutes=23, seconds=15)
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_retry_after_hours": 24,
+            "_billing_earliest_retry_at": retry_at.isoformat(),
+            "_billing_quota": {
+                "queries_used": 10, "queries_max": 10,
+                "rows_used": 250, "rows_max": 500,
+                "window_hours": 24,
+            },
+        })
+        err = capsys.readouterr().err
+        # Precise ETA wins over the flat fallback.
+        assert "1h 23m" in err
+        assert "within 24h" not in err
+
+    def test_quota_precise_retry_at_renders_minutes(self, capsys):
+        from datetime import datetime, timedelta, timezone
+        from tl_cli.output.formatter import _print_quota_notice
+        retry_at = datetime.now(timezone.utc) + timedelta(minutes=12, seconds=5)
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_earliest_retry_at": retry_at.isoformat(),
+            "_billing_quota": {
+                "queries_used": 1, "queries_max": 1,
+                "rows_used": 5, "rows_max": 100,
+                "window_hours": 1,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "12m" in err
+
+    def test_quota_precise_retry_at_renders_seconds(self, capsys):
+        from datetime import datetime, timedelta, timezone
+        from tl_cli.output.formatter import _print_quota_notice
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=45)
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_earliest_retry_at": retry_at.isoformat(),
+            "_billing_quota": {
+                "queries_used": 1, "queries_max": 1,
+                "rows_used": 5, "rows_max": 100,
+                "window_hours": 1,
+            },
+        })
+        err = capsys.readouterr().err
+        # Allow a couple of seconds of jitter in formatted output.
+        assert ("4" in err and "s" in err) or ("3" in err and "s" in err)
+        assert "try again in" in err
+
+    def test_quota_precise_retry_at_in_past_says_now(self, capsys):
+        from datetime import datetime, timedelta, timezone
+        from tl_cli.output.formatter import _print_quota_notice
+        retry_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_earliest_retry_at": retry_at.isoformat(),
+            "_billing_quota": {
+                "queries_used": 1, "queries_max": 1,
+                "rows_used": 5, "rows_max": 100,
+                "window_hours": 1,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "try again now" in err
+
+    def test_quota_no_retry_field_no_wait_clause(self, capsys):
+        from tl_cli.output.formatter import _print_quota_notice
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_quota": {
+                "queries_used": 1, "queries_max": 1,
+                "rows_used": 5, "rows_max": 100,
+                "window_hours": 1,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "Billing quota reached" in err
+        assert "try again" not in err
+
+    def test_quota_omits_rows_line_when_no_row_cap(self, capsys):
+        from tl_cli.output.formatter import _print_quota_notice
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_retry_after_hours": 12,
+            "_billing_quota": {
+                "queries_used": 5, "queries_max": 5,
+                "rows_used": 50, "rows_max": None,
+                "window_hours": 12,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "expensive queries: 5/5" in err
+        assert "expensive rows" not in err
+
+    def test_quota_omits_queries_line_when_no_query_cap(self, capsys):
+        from tl_cli.output.formatter import _print_quota_notice
+        _print_quota_notice({
+            "_billing_quota_exhausted": True,
+            "_billing_retry_after_hours": 6,
+            "_billing_quota": {
+                "queries_used": 0, "queries_max": None,
+                "rows_used": 500, "rows_max": 500,
+                "window_hours": 6,
+            },
+        })
+        err = capsys.readouterr().err
+        assert "expensive rows:    500/500" in err
+        assert "expensive queries" not in err

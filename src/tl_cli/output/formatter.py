@@ -6,6 +6,7 @@
 """
 
 import csv
+from datetime import datetime
 import io
 import json
 import math
@@ -81,10 +82,14 @@ def output(
 
     if fmt == "json":
         print(_dump_json(data))
+        # Banner still goes to stderr so it surfaces even when stdout is
+        # piped through `jq` or redirected to a file.
+        _print_quota_notice(data)
         return
 
     if not results:
         err_console.print("[dim]No results found.[/dim]")
+        _print_quota_notice(data)
         _print_usage(usage)
         return
 
@@ -103,6 +108,7 @@ def output(
         _output_table(results, columns, title, total, column_config, column_types)
 
     _print_pagination_notice(data)
+    _print_quota_notice(data)
     _print_usage(usage)
     _print_breadcrumbs(breadcrumbs)
 
@@ -444,6 +450,73 @@ def _print_pagination_notice(data: dict) -> None:
         err_console.print(
             f"[yellow]Showing {shown} of {total} results. "
             f"Use --offset {next_offset} for the next page.[/yellow]"
+        )
+
+
+def _format_wait_clause(data: dict) -> str:
+    """Build the "try again in …" suffix for the quota banner.
+
+    Prefers the precise ``_billing_earliest_retry_at`` ISO timestamp
+    emitted by newer servers — that's the moment the oldest in-window
+    expensive row rolls off and frees up a slot. Falls back to the
+    flat ``_billing_retry_after_hours`` window when only the older
+    envelope is available. Returns an empty string when neither field
+    is set.
+    """
+    earliest_iso = data.get("_billing_earliest_retry_at")
+    if earliest_iso:
+        try:
+            retry_at = datetime.fromisoformat(earliest_iso)
+        except (TypeError, ValueError):
+            retry_at = None
+        if retry_at is not None:
+            now = datetime.now(retry_at.tzinfo) if retry_at.tzinfo else datetime.now()
+            wait = retry_at - now
+            seconds = int(wait.total_seconds())
+            if seconds <= 0:
+                return " — try again now"
+            if seconds < 60:
+                return f" — try again in {seconds}s"
+            if seconds < 3600:
+                return f" — try again in {seconds // 60}m {seconds % 60}s"
+            hours, remainder = divmod(seconds, 3600)
+            return f" — try again in {hours}h {remainder // 60}m"
+    hours = data.get("_billing_retry_after_hours")
+    if hours:
+        return f" — try again within {hours}h"
+    return ""
+
+
+def _print_quota_notice(data: dict) -> None:
+    """Print a banner when the server signals a billing-quota refusal or
+    truncation on a raw-DB call.
+
+    The server emits `_billing_quota_exhausted` on the response envelope
+    in two cases: (a) the query was refused outright before execution
+    because the org has already used its expensive-query allowance for
+    the window; (b) the query ran but the result list was truncated
+    because the remaining expensive-row allowance was smaller than the
+    natural row count. Either way the response carries an empty or
+    short ``results`` array and the caller needs to know *why* and
+    *when they can retry*.
+    """
+    if not data.get("_billing_quota_exhausted"):
+        return
+    quota = data.get("_billing_quota") or {}
+    queries_used = quota.get("queries_used")
+    queries_max = quota.get("queries_max")
+    rows_used = quota.get("rows_used")
+    rows_max = quota.get("rows_max")
+    err_console.print(
+        f"[bold yellow]⚠ Billing quota reached{_format_wait_clause(data)}.[/bold yellow]"
+    )
+    if queries_max is not None:
+        err_console.print(
+            f"[yellow]  expensive queries: {queries_used}/{queries_max} this window[/yellow]"
+        )
+    if rows_max is not None:
+        err_console.print(
+            f"[yellow]  expensive rows:    {rows_used}/{rows_max} this window[/yellow]"
         )
 
 
