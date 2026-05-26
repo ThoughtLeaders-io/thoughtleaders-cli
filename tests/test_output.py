@@ -373,7 +373,7 @@ class TestQuotaNotice:
 
 
 class TestPgPricingEstimate:
-    """`output_pg_pricing_estimate` renders the --pricing dry-run result."""
+    """`output_pricing_estimate` renders the --pricing dry-run result."""
 
     _SAMPLE = {
         "pricing_estimate": {
@@ -394,12 +394,12 @@ class TestPgPricingEstimate:
     }
 
     def test_table_mode_renders_headline_and_breakdown(self, capsys):
-        from tl_cli.output.formatter import output_pg_pricing_estimate
-        output_pg_pricing_estimate(self._SAMPLE, "table")
+        from tl_cli.output.formatter import output_pricing_estimate
+        output_pricing_estimate(self._SAMPLE, "table")
         out = capsys.readouterr().out
-        assert "PG query cost estimate" in out
+        assert "Query cost estimate" in out
         assert "28,140.26" in out
-        assert "LIMIT 100" in out
+        assert "100 row(s)" in out
         assert "4.4" in out          # multiplier
         assert "280" in out          # per-row extra
         assert "thoughtleaders_channel.outreach_email" in out
@@ -408,8 +408,8 @@ class TestPgPricingEstimate:
 
     def test_json_mode_dumps_full_envelope(self, capsys):
         import json
-        from tl_cli.output.formatter import output_pg_pricing_estimate
-        output_pg_pricing_estimate(self._SAMPLE, "json")
+        from tl_cli.output.formatter import output_pricing_estimate
+        output_pricing_estimate(self._SAMPLE, "json")
         out = capsys.readouterr().out
         parsed = json.loads(out)
         assert parsed["pricing_estimate"]["multiplier"] == 4.4
@@ -419,15 +419,15 @@ class TestPgPricingEstimate:
 
     def test_json_mode_credits_footer_on_stderr_not_stdout(self, capsys):
         import json
-        from tl_cli.output.formatter import output_pg_pricing_estimate
-        output_pg_pricing_estimate(self._SAMPLE, "json")
+        from tl_cli.output.formatter import output_pricing_estimate
+        output_pricing_estimate(self._SAMPLE, "json")
         captured = capsys.readouterr()
         # stdout must be pure JSON (no usage banner) so `| jq` works.
         json.loads(captured.out)
         assert "credits" in captured.err
 
     def test_empty_expensive_items_still_renders_headline(self, capsys):
-        from tl_cli.output.formatter import output_pg_pricing_estimate
+        from tl_cli.output.formatter import output_pricing_estimate
         data = {
             "pricing_estimate": {
                 "base": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
@@ -437,7 +437,24 @@ class TestPgPricingEstimate:
             },
             "results": [], "usage": {"credits_charged": 1},
         }
-        output_pg_pricing_estimate(data, "table")
+        output_pricing_estimate(data, "table")
         out = capsys.readouterr().out
-        assert "PG query cost estimate" in out
+        assert "Query cost estimate" in out
         assert "3.8" in out
+
+    def test_flat_backend_no_limit_says_depends_on_rows(self, capsys):
+        # Firebolt query with no LIMIT → unbounded → no cost figure.
+        from tl_cli.output.formatter import output_pricing_estimate
+        data = {
+            "pricing_estimate": {
+                "base": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
+                "expensive_tables": {}, "expensive_columns": {},
+                "limit": None, "planner_estimated_rows": None,
+                "estimated_cost_at_limit": None,
+            },
+            "results": [], "usage": {"credits_charged": 1},
+        }
+        output_pricing_estimate(data, "table")
+        out = capsys.readouterr().out
+        assert "Query cost estimate" in out
+        assert "depends on rows returned" in out

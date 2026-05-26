@@ -7,7 +7,7 @@ import typer
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
-from tl_cli.output.formatter import detect_format, output, output_pg_pricing_estimate
+from tl_cli.output.formatter import detect_format, output, output_pricing_estimate
 
 app = typer.Typer(help="Raw read-only queries against PostgreSQL, Firebolt, or Elasticsearch (full-access only)")
 
@@ -25,7 +25,7 @@ def _run(path: str, body: dict, fmt: str, title: str, pricing: bool = False) -> 
     try:
         data = client.post(path, json_body=body)
         if pricing:
-            output_pg_pricing_estimate(data, fmt)
+            output_pricing_estimate(data, fmt)
             return
         output(data, fmt, title=title)
         aggs = data.get("aggregations")
@@ -75,6 +75,10 @@ def fb_cmd(
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output"),
+    pricing: bool = typer.Option(
+        False, "--pricing",
+        help="Estimate the query's credit cost without running it (flat 1 credit).",
+    ),
 ) -> None:
     """Run a raw Firebolt SELECT query.
 
@@ -86,7 +90,10 @@ def fb_cmd(
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     sql = _read_query(query)
-    _run("/raw/fb", {"query": sql}, fmt, "Firebolt results")
+    body: dict = {"query": sql}
+    if pricing:
+        body["pricing"] = True
+    _run("/raw/fb", body, fmt, "Firebolt results", pricing=pricing)
 
 
 @app.command("es")
@@ -96,6 +103,10 @@ def es_cmd(
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output"),
+    pricing: bool = typer.Option(
+        False, "--pricing",
+        help="Estimate the query's credit cost without running it (flat 1 credit).",
+    ),
 ) -> None:
     """Run a raw Elasticsearch search query.
 
@@ -112,4 +123,7 @@ def es_cmd(
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(f"Query is not valid JSON: {exc}") from exc
 
-    _run("/raw/es", {"query": body_query}, fmt, "Elasticsearch results")
+    body: dict = {"query": body_query}
+    if pricing:
+        body["pricing"] = True
+    _run("/raw/es", body, fmt, "Elasticsearch results", pricing=pricing)
