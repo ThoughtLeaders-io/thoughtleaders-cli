@@ -529,14 +529,20 @@ def _print_quota_notice(data: dict) -> None:
         )
 
 
-def output_pg_pricing_estimate(data: dict, fmt: str) -> None:
-    """Render the `--pricing` dry-run estimate for `tl db pg`.
+def output_pricing_estimate(data: dict, fmt: str) -> None:
+    """Render the `--pricing` dry-run estimate for `tl db pg|fb|es`.
 
     The server returns a `pricing_estimate` block (no `results`) plus the
     usual `usage` footer reflecting the flat dry-run charge. JSON mode
     dumps the whole envelope; table mode prints a headline cost line, the
     multiplier / per-row split, and a breakdown of the expensive items
     the query touches.
+
+    Firebolt and Elasticsearch have no per-column extras — their estimate
+    carries `per_row_extra=0` and empty expensive-item maps, so the
+    breakdown table is skipped and only the volume-curve cost shows.
+    A `limit`/cost of `None` (e.g. a Firebolt query with no `LIMIT`) means
+    the row count is unbounded and the cost can't be pinned ahead of time.
     """
     if fmt == "json":
         print(_dump_json(data))
@@ -552,11 +558,16 @@ def output_pg_pricing_estimate(data: dict, fmt: str) -> None:
     per_row = est.get("per_row_extra")
     planner_rows = est.get("planner_estimated_rows")
 
-    console.print("[bold]PG query cost estimate[/bold] [dim](query not run)[/dim]")
-    if cost is not None:
+    console.print("[bold]Query cost estimate[/bold] [dim](query not run)[/dim]")
+    if cost is not None and limit is not None:
         console.print(
             f"  Estimated cost: [bold yellow]up to {_fmt_credits(cost)} credits[/bold yellow] "
-            f"at LIMIT {limit} row(s)"
+            f"at {limit} row(s)"
+        )
+    else:
+        console.print(
+            "  Estimated cost: [yellow]depends on rows returned[/yellow] "
+            "(no row limit set — cost scales with the volume curve)"
         )
     console.print(f"  Multiplier (base + expensive tables): {multiplier}")
     console.print(f"  Per-row extra (expensive columns):    {per_row}")

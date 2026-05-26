@@ -399,7 +399,7 @@ If unsure about what information to find where, read the [references/postgresql-
 
 **PG cost is per-query.** The credit cost for a `tl db pg` call is a base rate plus a multiplier extra for every expensive table referenced, plus a **flat per-row charge** for every expensive column read (an expensive column costs its configured value for every row returned). Most tables and columns are not expensive; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` / `usage.pricing` in the response envelope after a query to see what your query was actually charged.
 
-**Preview cost before running.** Add `--pricing` to estimate a query's cost without executing it: `tl db pg "SELECT … LIMIT 100" --pricing` runs only `EXPLAIN`, prints the multiplier + per-row breakdown and an upper-bound cost (at the query's LIMIT), and costs a flat 1 credit. Use this before large or expensive-column queries. Works with `--json`.
+**Preview cost before running.** Add `--pricing` to estimate a query's cost without executing it: `tl db pg "SELECT … LIMIT 100" --pricing` runs only `EXPLAIN`, prints the multiplier + per-row breakdown and an upper-bound cost (at the query's LIMIT), and costs a flat 1 credit. Use this before large or expensive-column queries. Works with `--json`. `--pricing` also works on `tl db fb` and `tl db es` — those backends have no per-column charges, so the estimate is just the volume curve at the row ceiling (`LIMIT` for Firebolt; `size`, or the aggregation doc cap, for Elasticsearch).
 
 ### Three sources, each authoritative for different things
 
