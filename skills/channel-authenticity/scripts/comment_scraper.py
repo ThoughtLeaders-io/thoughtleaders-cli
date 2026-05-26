@@ -8,8 +8,7 @@ produce — which is what we're hunting. So we always pull `new`/recent.
 Backend: **yt-dlp with the `android` InnerTube player client**. This is the
 key to a cookie-free / no-API-key / no-"are you a bot" path: the android
 client is not subject to YouTube's web bot-check, so comments come back
-without any authentication. youtube-comment-downloader is kept only as a
-last-resort fallback (it breaks whenever YouTube changes its web API).
+without any authentication.
 
 Per-video dynamic limit by view count: >=100k -> 1000, >=20k -> 500, else 300.
 Needs no TL data — hits YouTube directly, works for anyone regardless of plan.
@@ -31,7 +30,7 @@ def limit_for_views(views: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Primary: yt-dlp
+# yt-dlp scrape (android InnerTube client — no cookies / API key)
 # --------------------------------------------------------------------------- #
 def _scrape_ytdlp(video_id: str, cap: int) -> list[dict]:
     import yt_dlp
@@ -76,63 +75,13 @@ def _scrape_ytdlp(video_id: str, cap: int) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Fallback: youtube-comment-downloader
-# --------------------------------------------------------------------------- #
-def _scrape_ycd(video_id: str, cap: int) -> list[dict]:
-    from youtube_comment_downloader import SORT_BY_RECENT, YoutubeCommentDownloader
-
-    dl = YoutubeCommentDownloader()
-    out: list[dict] = []
-    for c in dl.get_comments_from_url(
-        f"https://www.youtube.com/watch?v={video_id}", sort_by=SORT_BY_RECENT
-    ):
-        out.append(
-            {
-                "cid": c.get("cid"),
-                "text": (c.get("text") or "").strip(),
-                "author": c.get("author") or "",
-                "votes": _to_int(c.get("votes")),
-                "replies": _to_int(c.get("replies")),
-                "time": c.get("time"),
-                "is_reply": bool(c.get("reply")),
-                "is_creator": False,
-                "hearted": bool(c.get("heart")),
-            }
-        )
-        if len(out) >= cap:
-            break
-    return out
-
-
-def _to_int(v) -> int:
-    if v is None:
-        return 0
-    s = str(v).strip().upper().replace(",", "")
-    try:
-        if s.endswith("K"):
-            return int(float(s[:-1]) * 1_000)
-        if s.endswith("M"):
-            return int(float(s[:-1]) * 1_000_000)
-        return int(float(s))
-    except ValueError:
-        return 0
-
-
 def scrape(video_id: str, views: int = 0, *, hard_cap: int | None = None) -> list[dict]:
     cap = hard_cap or limit_for_views(views)
-    errors = []
-    for name, fn in (("yt-dlp", _scrape_ytdlp), ("ycd", _scrape_ycd)):
-        try:
-            res = fn(video_id, cap)
-            if res:
-                return res
-            errors.append(f"{name}: 0 comments")
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{name}: {exc}")
-            sys.stderr.write(f"[comment_scraper] {video_id} {name} failed: {exc}\n")
-    sys.stderr.write(f"[comment_scraper] {video_id}: no comments ({'; '.join(errors)})\n")
-    return []
+    try:
+        return _scrape_ytdlp(video_id, cap)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"[comment_scraper] {video_id} yt-dlp failed: {exc}\n")
+        return []
 
 
 if __name__ == "__main__":

@@ -43,5 +43,5 @@ baseline was weak. Prefer widening the reach band over trusting this.
 - The PG fallback uses `content_category` which is coarse; the recommender
   (`tl channels similar`) is materially better — prefer it.
 - Reach buckets are wide on purpose (engagement scales sub-linearly with
-  size); don't narrow them without re-checking false-positive rate on the
-  clean-control set in `case-studies.md`.
+  size); don't narrow them without re-checking the false-positive rate on a
+  known-clean channel.

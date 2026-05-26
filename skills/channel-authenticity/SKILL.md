@@ -118,8 +118,9 @@ Bands: ≥90 CLEAN · ≥70 MINOR_FLAGS · ≥40 MIXED · <40 FRAUD_LIKELY.
   bot-handle patterns, near-duplicates, reply ratio, creator engagement,
   cross-video commenter churn, time clustering, LLM organic share.
 
-Full catalogue + thresholds: `references/red-flags.md`.
-Exact `tl` queries each check issues: `references/tl-cli-recipes.md`.
+Full catalogue + thresholds: `references/red-flags.md`. The exact `tl` queries
+each check issues live in the scripts; the underlying channel/video/adlink
+schema is documented in the `tl` skill (`skills/tl/references/`).
 
 ## After a run
 

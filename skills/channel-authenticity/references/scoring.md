@@ -88,8 +88,8 @@ corroboration when the audience is independently suspect.
 
 Penalties intentionally let two criticals in a group drive it near zero — a
 channel with two independent strong fraud signals in one dimension should not
-score "mixed". Tune here as cases accumulate; record the reasoning in
-`case-studies.md`.
+score "mixed". Tune here as cases accumulate; record the reasoning in the
+commit message.
 
 ## Reference result
 

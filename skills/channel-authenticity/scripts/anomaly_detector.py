@@ -33,15 +33,11 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
         return None
     mx, my = statistics.mean(xs), statistics.mean(ys)
     num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    dx = math_sqrt(sum((x - mx) ** 2 for x in xs))
-    dy = math_sqrt(sum((y - my) ** 2 for y in ys))
+    dx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    dy = sum((y - my) ** 2 for y in ys) ** 0.5
     if dx == 0 or dy == 0:
         return None
     return num / (dx * dy)
-
-
-def math_sqrt(v: float) -> float:
-    return v ** 0.5
 
 
 def _analyze_video(channel_id: int, video: dict) -> dict:
@@ -204,7 +200,6 @@ def analyze(channel: dict, longform: list[dict], focus_video: dict | None = None
 
 
 if __name__ == "__main__":
-    import json
     import sys
 
     import resolve_channel

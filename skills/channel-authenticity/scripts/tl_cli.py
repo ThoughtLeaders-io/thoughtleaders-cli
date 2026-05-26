@@ -106,14 +106,17 @@ def _tl_json(args: list[str], *, input_text: str | None = None):
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+def _db(engine: str, sql: str) -> list[dict]:
+    """Run a raw query through `tl db <engine>` and return coerced rows."""
+    return _coerce_rows(_tl_json(["db", engine, sql, "--json"]))
+
+
 def db_pg(sql: str) -> list[dict]:
-    rows = _tl_json(["db", "pg", sql, "--json"])
-    return _coerce_rows(rows)
+    return _db("pg", sql)
 
 
 def db_fb(sql: str) -> list[dict]:
-    rows = _tl_json(["db", "fb", sql, "--json"])
-    return _coerce_rows(rows)
+    return _db("fb", sql)
 
 
 def db_es(body: dict) -> dict:
