@@ -397,7 +397,9 @@ tl db pg "SELECT b.name, COUNT(*) AS deals
 
 If unsure about what information to find where, read the [references/postgresql-schema.md](references/postgresql-schema.md) file for instructions. Use just `tl pg schema` to see the entire SQL schema.
 
-**PG cost is per-query.** The credit rate for a `tl db pg` call equals a base rate plus an extra for every expensive table referenced and every expensive column referenced (additive on both sides). Most tables and columns are not expensive; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
+**PG cost is per-query.** The credit cost for a `tl db pg` call is a base rate plus a multiplier extra for every expensive table referenced, plus a **flat per-row charge** for every expensive column read (an expensive column costs its configured value for every row returned). Most tables and columns are not expensive; sensitive ones (e.g. demographics, channel outreach emails) cost more. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` / `usage.pricing` in the response envelope after a query to see what your query was actually charged.
+
+**Preview cost before running.** Add `--pricing` to estimate a query's cost without executing it: `tl db pg "SELECT … LIMIT 100" --pricing` runs only `EXPLAIN`, prints the multiplier + per-row breakdown and an upper-bound cost (at the query's LIMIT), and costs a flat 1 credit. Use this before large or expensive-column queries. Works with `--json`.
 
 ### Three sources, each authoritative for different things
 
@@ -419,7 +421,7 @@ If unsure about what information to find where, read the [references/postgresql-
 
 | Capability | Status | Workaround |
 |---|---|---|
-| Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 500` + `OFFSET`, only certain SQL forms are allowed. See `references/postgres-schema.md`. |
+| Arbitrary read-only `SELECT` on Postgres | **Available** via `tl db pg`. | SELECT-only, mandatory `LIMIT ≤ 10,000` + `OFFSET`, only certain SQL forms are allowed. See `references/postgres-schema.md`. |
 | Cross-reference helpers ("channels proposed to brand X", "channels sponsored by MBN brands in last N days") | **Available** via `tl db pg`. | Write the join: `thoughtleaders_adlink` ↔ `adspot` ↔ `channel` ↔ `profile` ↔ `profile_brands` ↔ `brand`. Filter by `publish_status` for proposed/sold and by date range as needed. See `references/postgres-schema.md` for the exact column names. |
 | **AdLink INSERT** with custom price/cost/owner/`weighted_price`/`created_where` | **Unavailable** — `tl sponsorships create` exists but only creates a *proposal* between a channel and a brand. The `tl db pg` sanitizer accepts SELECT only — no INSERT/UPDATE. | Done in the app or by a human with DB access. |
 | Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Available** via `tl db pg`. | One SELECT joining the four tables. Use `thoughtleaders_channel.media_selling_network_join_date IS NOT NULL` for MSN, `thoughtleaders_adspot.integration = 1` for mention adspots, `thoughtleaders_profile.persona` for the persona code (see persona constants in `references/postgres-schema.md`). |

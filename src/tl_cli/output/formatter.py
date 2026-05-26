@@ -45,6 +45,15 @@ def _dump_json(data: object) -> str:
     return json.dumps(_sanitize_for_json(data), indent=2, default=str, allow_nan=False)
 
 
+def _fmt_credits(n: float) -> str:
+    """Render a credit count compactly: no trailing zeros, comma grouping >= 1000."""
+    if n is None:
+        return "-"
+    if isinstance(n, (int, float)) and float(n).is_integer():
+        return f"{int(n):,}"
+    return f"{n:,.2f}".rstrip("0").rstrip(".")
+
+
 def detect_format(json_flag: bool, csv_flag: bool, md_flag: bool, toon_flag: bool = False) -> str:
     """Determine output format from flags and TTY detection."""
     if json_flag:
@@ -518,6 +527,58 @@ def _print_quota_notice(data: dict) -> None:
         err_console.print(
             f"[yellow]  expensive rows:    {rows_used}/{rows_max} this window[/yellow]"
         )
+
+
+def output_pg_pricing_estimate(data: dict, fmt: str) -> None:
+    """Render the `--pricing` dry-run estimate for `tl db pg`.
+
+    The server returns a `pricing_estimate` block (no `results`) plus the
+    usual `usage` footer reflecting the flat dry-run charge. JSON mode
+    dumps the whole envelope; table mode prints a headline cost line, the
+    multiplier / per-row split, and a breakdown of the expensive items
+    the query touches.
+    """
+    if fmt == "json":
+        print(_dump_json(data))
+        _print_usage(data.get("usage"))
+        return
+
+    est = data.get("pricing_estimate") or {}
+    console = Console()
+
+    limit = est.get("limit")
+    cost = est.get("estimated_cost_at_limit")
+    multiplier = est.get("multiplier")
+    per_row = est.get("per_row_extra")
+    planner_rows = est.get("planner_estimated_rows")
+
+    console.print("[bold]PG query cost estimate[/bold] [dim](query not run)[/dim]")
+    if cost is not None:
+        console.print(
+            f"  Estimated cost: [bold yellow]up to {_fmt_credits(cost)} credits[/bold yellow] "
+            f"at LIMIT {limit} row(s)"
+        )
+    console.print(f"  Multiplier (base + expensive tables): {multiplier}")
+    console.print(f"  Per-row extra (expensive columns):    {per_row}")
+    if planner_rows is not None:
+        console.print(
+            f"  [dim]Planner row estimate (pre-LIMIT): {planner_rows:,}[/dim]"
+        )
+
+    tables = est.get("expensive_tables") or {}
+    columns = est.get("expensive_columns") or {}
+    if tables or columns:
+        sub = Table(title="Expensive items this query touches")
+        sub.add_column("Item", style="bold")
+        sub.add_column("Kind")
+        sub.add_column("Extra", justify="right")
+        for name, val in sorted(tables.items()):
+            sub.add_row(name, "table (multiplier)", _fmt_credits(val))
+        for path, val in sorted(columns.items()):
+            sub.add_row(path, "column (per row)", f"{_fmt_credits(val)}/row")
+        console.print(sub)
+
+    _print_usage(data.get("usage"))
 
 
 def _print_usage(usage: dict | None) -> None:

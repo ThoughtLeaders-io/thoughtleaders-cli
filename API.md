@@ -172,7 +172,7 @@ print(get('/balance'))
 
 ## db pg
 
-`POST /raw/pg` — execute a read-only PostgreSQL `SELECT`. Sanitised: SELECT only, no DDL/DML/transactions, `LIMIT ≤ 500`, function allowlist (aggregates, window, string, JSON, math, date/time, array). `OFFSET ≥ 10 000` is rejected with `OFFSET_TOO_DEEP` — paginate with the response's `next_offset` instead.
+`POST /raw/pg` — execute a read-only PostgreSQL `SELECT`. Sanitised: SELECT only, no DDL/DML/transactions, `LIMIT ≤ 10,000`, function allowlist (aggregates, window, string, JSON, math, date/time, array). `OFFSET ≥ 10 000` is rejected with `OFFSET_TOO_DEEP` — paginate with the response's `next_offset` instead.
 
 Body: `{"query": "<sql>"}`.
 
@@ -212,11 +212,34 @@ print(post('/raw/pg', {'query': sql}))
 
 ### Pricing
 
-PG cost is **per-query**: a base rate plus an extra for every expensive table and column referenced. Most tables/columns are free; sensitive ones (demographics, channel outreach emails) are expensive. The `usage.credit_rate` you get back is the effective multiplier the server applied — it's not the static value from `tl describe`. The `pricing` sub-key, when present, breaks the rate into base/per-table/per-column components.
+PG cost is **per-query**: a base rate plus a multiplier extra for every expensive table referenced, plus a flat per-row charge for every expensive column read. Most tables/columns are free; sensitive ones (demographics, channel outreach emails) are expensive. The `usage.credit_rate` you get back is the effective multiplier the server applied — it's not the static value from `tl describe`. The `pricing` sub-key, when present, breaks the rate into base/per-table/per-column components.
+
+#### Pre-run cost estimate
+
+Send `{"query": "…", "pricing": true}` to `POST /raw/pg` (CLI: `tl db pg "…" --pricing`) for a dry run: the server runs `EXPLAIN` only — **no SELECT executes** — and returns a `pricing_estimate` object instead of `results`:
+
+```json
+{
+  "pricing_estimate": {
+    "base": 1.4,
+    "multiplier": 4.4,
+    "per_row_extra": 280.0,
+    "expensive_tables": {"thoughtleaders_channel": 3.0},
+    "expensive_columns": {"thoughtleaders_channel.outreach_email": 80.0},
+    "limit": 100,
+    "planner_estimated_rows": 1299016,
+    "estimated_cost_at_limit": 28140.26
+  },
+  "results": [],
+  "usage": {"credits_charged": 1, ...}
+}
+```
+
+`multiplier` and `per_row_extra` are exact; `estimated_cost_at_limit` is an **upper bound** computed at the query's effective `LIMIT` (the query can't return more rows than that). A dry run costs a flat **1 credit**.
 
 ### Common rejections
 
-- `MISSING_LIMIT` / `LIMIT_TOO_HIGH` — always include `LIMIT N` with `N ≤ 500`.
+- `MISSING_LIMIT` / `LIMIT_TOO_HIGH` — always include `LIMIT N` with `N ≤ 10,000`.
 - `INSERT` / `UPDATE` / `DELETE` / `CREATE` / `DROP` — sanitiser is SELECT-only.
 - `LEAKY_CAST` — `::regclass`, `::regprocedure`, etc. are blocked.
 - `OFFSET_TOO_DEEP` — paginate via the next-page breadcrumb instead of jumping past 10 000.

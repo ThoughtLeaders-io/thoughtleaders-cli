@@ -7,7 +7,7 @@ import typer
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
-from tl_cli.output.formatter import detect_format, output
+from tl_cli.output.formatter import detect_format, output, output_pg_pricing_estimate
 
 app = typer.Typer(help="Raw read-only queries against PostgreSQL, Firebolt, or Elasticsearch (full-access only)")
 
@@ -20,10 +20,13 @@ def _read_query(query: str | None) -> str:
     return sys.stdin.read()
 
 
-def _run(path: str, body: dict, fmt: str, title: str) -> None:
+def _run(path: str, body: dict, fmt: str, title: str, pricing: bool = False) -> None:
     client = get_client()
     try:
         data = client.post(path, json_body=body)
+        if pricing:
+            output_pg_pricing_estimate(data, fmt)
+            return
         output(data, fmt, title=title)
         aggs = data.get("aggregations")
         if aggs and fmt != "json":
@@ -45,16 +48,24 @@ def pg_cmd(
     csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output"),
+    pricing: bool = typer.Option(
+        False, "--pricing",
+        help="Estimate the query's credit cost via EXPLAIN without running it (flat 1 credit).",
+    ),
 ) -> None:
     """Run a raw PostgreSQL SELECT query.
 
     Examples:
         tl db pg "SELECT id, name FROM thoughtleaders_brand LIMIT 10 OFFSET 0"
         cat query.sql | tl db pg -
+        tl db pg "SELECT * FROM thoughtleaders_channel LIMIT 100" --pricing
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     sql = _read_query(query)
-    _run("/raw/pg", {"query": sql}, fmt, "Postgres results")
+    body: dict = {"query": sql}
+    if pricing:
+        body["pricing"] = True
+    _run("/raw/pg", body, fmt, "Postgres results", pricing=pricing)
 
 
 @app.command("fb")

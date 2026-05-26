@@ -8,7 +8,7 @@ from rich.table import Table
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
-from tl_cli.output.formatter import detect_format
+from tl_cli.output.formatter import _fmt_credits, detect_format
 
 app = typer.Typer(help="Discover available resources, fields, filters, and credit costs")
 console = Console()
@@ -97,15 +97,6 @@ def show_cmd(
         handle_api_error(e)
     finally:
         client.close()
-
-
-def _fmt_credits(n: float) -> str:
-    """Render a credit count compactly: no trailing zeros, comma grouping >= 1000."""
-    if n is None:
-        return "-"
-    if isinstance(n, (int, float)) and float(n).is_integer():
-        return f"{int(n):,}"
-    return f"{n:,.2f}".rstrip("0").rstrip(".")
 
 
 def _modes_block(credits: dict) -> dict:
@@ -266,14 +257,38 @@ def _print_pricing_section(credits: dict) -> None:
 
     # Surface live PG expensive-items pricing when the server included it
     # (db resource only).
-    expensive = credits.get("pg_expensive")
-    if isinstance(expensive, dict) and expensive:
-        sub = Table(title="PG expensive items (live)")
-        sub.add_column("Path", style="bold")
-        sub.add_column("Extra", justify="right")
-        for path, val in sorted(expensive.items()):
-            sub.add_row(path, _fmt_credits(val))
-        console.print(sub)
+    _print_pg_expensive_section(credits.get("pg_expensive"))
+
+
+def _print_pg_expensive_section(expensive: object) -> None:
+    """Render the `credits.pg_expensive` block as a flat dotted-path table.
+
+    The server emits a three-level nested structure
+    ``{base: {pg: float}, tables: {name: float}, columns: {"t.c": float}}``;
+    flattening each leaf to ``<section>.<key>`` keeps the live extras
+    visible in one sorted scan, with the base rate clearly distinguished
+    from the per-table and per-column extras a query may or may not
+    incur.
+    """
+    if not isinstance(expensive, dict) or not expensive:
+        return
+    rows: list[tuple[str, float]] = []
+    for section, body in expensive.items():
+        if not isinstance(body, dict):
+            # Forward-compat: an unexpected leaf type — surface as-is
+            # under the section name rather than dropping it silently.
+            rows.append((str(section), body))  # type: ignore[arg-type]
+            continue
+        for key, val in body.items():
+            rows.append((f"{section}.{key}", val))
+    if not rows:
+        return
+    sub = Table(title="PG expensive items (live)")
+    sub.add_column("Path", style="bold")
+    sub.add_column("Extra", justify="right")
+    for path, val in sorted(rows):
+        sub.add_row(path, _fmt_credits(val))
+    console.print(sub)
 
 
 def _print_resource_detail(data: dict, filters_only: bool, fields_only: bool) -> None:

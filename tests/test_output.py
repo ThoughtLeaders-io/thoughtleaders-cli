@@ -370,3 +370,74 @@ class TestQuotaNotice:
         err = capsys.readouterr().err
         assert "expensive rows:    500/500" in err
         assert "expensive queries" not in err
+
+
+class TestPgPricingEstimate:
+    """`output_pg_pricing_estimate` renders the --pricing dry-run result."""
+
+    _SAMPLE = {
+        "pricing_estimate": {
+            "base": 1.4,
+            "multiplier": 4.4,
+            "per_row_extra": 280.0,
+            "expensive_tables": {"thoughtleaders_channel": 3.0},
+            "expensive_columns": {
+                "thoughtleaders_channel.outreach_email": 80.0,
+                "thoughtleaders_channel.demographic_male_share": 50.0,
+            },
+            "limit": 100,
+            "planner_estimated_rows": 1299016,
+            "estimated_cost_at_limit": 28140.26,
+        },
+        "results": [],
+        "usage": {"credits_charged": 1, "balance_remaining": 99},
+    }
+
+    def test_table_mode_renders_headline_and_breakdown(self, capsys):
+        from tl_cli.output.formatter import output_pg_pricing_estimate
+        output_pg_pricing_estimate(self._SAMPLE, "table")
+        out = capsys.readouterr().out
+        assert "PG query cost estimate" in out
+        assert "28,140.26" in out
+        assert "LIMIT 100" in out
+        assert "4.4" in out          # multiplier
+        assert "280" in out          # per-row extra
+        assert "thoughtleaders_channel.outreach_email" in out
+        assert "80/row" in out
+        assert "table (multiplier)" in out
+
+    def test_json_mode_dumps_full_envelope(self, capsys):
+        import json
+        from tl_cli.output.formatter import output_pg_pricing_estimate
+        output_pg_pricing_estimate(self._SAMPLE, "json")
+        out = capsys.readouterr().out
+        parsed = json.loads(out)
+        assert parsed["pricing_estimate"]["multiplier"] == 4.4
+        assert parsed["pricing_estimate"]["estimated_cost_at_limit"] == 28140.26
+        # The estimate keys survive a JSON round-trip for piping into jq.
+        assert parsed["pricing_estimate"]["per_row_extra"] == 280.0
+
+    def test_json_mode_credits_footer_on_stderr_not_stdout(self, capsys):
+        import json
+        from tl_cli.output.formatter import output_pg_pricing_estimate
+        output_pg_pricing_estimate(self._SAMPLE, "json")
+        captured = capsys.readouterr()
+        # stdout must be pure JSON (no usage banner) so `| jq` works.
+        json.loads(captured.out)
+        assert "credits" in captured.err
+
+    def test_empty_expensive_items_still_renders_headline(self, capsys):
+        from tl_cli.output.formatter import output_pg_pricing_estimate
+        data = {
+            "pricing_estimate": {
+                "base": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
+                "expensive_tables": {}, "expensive_columns": {},
+                "limit": 10, "planner_estimated_rows": 3,
+                "estimated_cost_at_limit": 3.8,
+            },
+            "results": [], "usage": {"credits_charged": 1},
+        }
+        output_pg_pricing_estimate(data, "table")
+        out = capsys.readouterr().out
+        assert "PG query cost estimate" in out
+        assert "3.8" in out
