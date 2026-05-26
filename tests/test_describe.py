@@ -43,6 +43,14 @@ class TestPrintPgExpensiveSection:
         # Title appears.
         assert "PG expensive items (live)" in out
 
+    def test_directs_user_to_pricing_flag(self, capsys):
+        _print_pg_expensive_section(_LIVE_PG_EXPENSIVE)
+        out = capsys.readouterr().out
+        # The note points at the per-query estimator and clarifies these
+        # are rates, not a total.
+        assert "--pricing" in out
+        assert "tl db pg" in out
+
     def test_sections_sort_into_dotted_order(self, capsys):
         """Entries sort lexicographically by their flattened dotted path,
         so `base.*` rows precede `columns.*`, which precede `tables.*`."""

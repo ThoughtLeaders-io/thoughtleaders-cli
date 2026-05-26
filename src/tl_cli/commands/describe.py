@@ -289,6 +289,11 @@ def _print_pg_expensive_section(expensive: object) -> None:
     for path, val in sorted(rows):
         sub.add_row(path, _fmt_credits(val))
     console.print(sub)
+    console.print(
+        "[dim]These are the rates, not a per-query total. For the actual cost "
+        "of a specific query (before running it), use[/dim] "
+        "[cyan]tl db pg \"SELECT ...\" --pricing[/cyan][dim].[/dim]"
+    )
 
 
 def _print_resource_detail(data: dict, filters_only: bool, fields_only: bool) -> None:
