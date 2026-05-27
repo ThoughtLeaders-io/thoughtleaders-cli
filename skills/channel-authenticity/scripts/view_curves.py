@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 import tl_cli
 
 

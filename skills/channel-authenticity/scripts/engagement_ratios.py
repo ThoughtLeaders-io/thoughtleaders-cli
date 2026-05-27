@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import statistics
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 import peer_cohort
 
 # code -> (penalty, severity)

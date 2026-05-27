@@ -23,6 +23,8 @@ import os
 import shutil
 import subprocess
 
+import _io_utf8
+
 TL_BIN = os.environ.get("TL_CLI_BIN", "tl")
 
 
@@ -67,6 +69,9 @@ def _tl(args: list[str], *, input_text: str | None = None) -> str:
             input=input_text,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_io_utf8.child_env(),
             timeout=180,
         )
     except FileNotFoundError as exc:

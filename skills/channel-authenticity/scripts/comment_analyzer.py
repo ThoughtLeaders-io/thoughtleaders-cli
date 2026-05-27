@@ -18,6 +18,7 @@ import re
 import statistics
 from collections import Counter
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 import comment_scraper
 
 PENALTIES = {

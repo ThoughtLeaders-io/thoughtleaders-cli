@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import statistics
 
-import tl_cli
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 import view_curves
+
+import tl_cli
 
 PENALTIES = {
     "B_burst_without_engagement": (25, "critical"),

@@ -9,6 +9,8 @@ to "do not book" regardless of the mean.
 """
 from __future__ import annotations
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 BANDS = [
     (90, "CLEAN", "Safe to book at standard rates."),
     (70, "MINOR_FLAGS", "Book but note caveats to the AM."),
@@ -72,5 +74,6 @@ if __name__ == "__main__":
     import json
     import sys
 
-    d = json.load(open(sys.argv[1]))
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        d = json.load(fh)
     print(json.dumps(composite(d["group_a"], d["group_b"], d["group_c"]), indent=2))

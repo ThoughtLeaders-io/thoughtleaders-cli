@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import sys
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 import tl_cli
 
 VIDEO_FETCH = 30  # how many recent of each content_type to pull

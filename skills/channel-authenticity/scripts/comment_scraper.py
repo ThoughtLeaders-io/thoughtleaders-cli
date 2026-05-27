@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import sys
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 
 def limit_for_views(views: int) -> int:
     if views >= 100_000:

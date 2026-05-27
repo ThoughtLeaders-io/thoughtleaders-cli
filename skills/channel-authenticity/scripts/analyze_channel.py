@@ -28,13 +28,15 @@ import sys
 import time
 from pathlib import Path
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 import anomaly_detector
 import comment_analyzer
 import engagement_ratios
 import resolve_channel
 import score as score_mod
-import tl_cli
 import video_integrity
+
+import tl_cli
 
 OUT_DIR = Path("/tmp")
 
@@ -74,8 +76,8 @@ def collect(ref: str) -> dict:
     }
     state_path = OUT_DIR / f"channel_authenticity_{cid}_{ts}.state.json"
     batch_path = OUT_DIR / f"channel_authenticity_{cid}_{ts}.llmbatch.json"
-    state_path.write_text(json.dumps(state, indent=2, default=str))
-    batch_path.write_text(json.dumps(gc.get("llm_batch", []), default=str))
+    state_path.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    batch_path.write_text(json.dumps(gc.get("llm_batch", []), default=str), encoding="utf-8")
 
     return {
         "phase": "collect_done",
@@ -95,11 +97,11 @@ def collect(ref: str) -> dict:
 
 
 def finalize(state_path: str, llm_paths: list[str]) -> dict:
-    state = json.loads(Path(state_path).read_text())
+    state = json.loads(Path(state_path).read_text(encoding="utf-8"))
     passes: list[list[dict]] = []
     for lp in llm_paths:
         try:
-            c = json.loads(Path(lp).read_text())
+            c = json.loads(Path(lp).read_text(encoding="utf-8"))
             if isinstance(c, dict):
                 c = c.get("classifications", [])
             if c:
@@ -116,12 +118,12 @@ def finalize(state_path: str, llm_paths: list[str]) -> dict:
     ts = time.strftime("%Y%m%d-%H%M%S")
     final_json = OUT_DIR / f"channel_authenticity_{cid}_{ts}.final.json"
     report_md = OUT_DIR / f"channel_authenticity_{cid}_{ts}.report.md"
-    final_json.write_text(json.dumps(state, indent=2, default=str))
+    final_json.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
 
     import report as report_mod
 
     md = report_mod.render(state)
-    report_md.write_text(md)
+    report_md.write_text(md, encoding="utf-8")
     return {"final_json": str(final_json), "report_md": str(report_md), "markdown": md}
 
 

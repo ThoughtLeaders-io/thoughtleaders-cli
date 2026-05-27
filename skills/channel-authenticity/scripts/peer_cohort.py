@@ -15,6 +15,8 @@ import statistics
 import time
 from pathlib import Path
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 import tl_cli
 
 CACHE = Path(__file__).resolve().parent.parent / "references" / "peer-cohort-cache.json"
@@ -46,7 +48,7 @@ def _cache_key(channel: dict) -> str:
 def _load_cache() -> dict:
     if CACHE.exists():
         try:
-            return json.loads(CACHE.read_text())
+            return json.loads(CACHE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return {}
     return {}
@@ -54,7 +56,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(cache, indent=2, default=str))
+    CACHE.write_text(json.dumps(cache, indent=2, default=str), encoding="utf-8")
 
 
 def _peer_ids_via_cli(channel_id: int) -> list[int]:

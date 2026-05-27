@@ -2,6 +2,8 @@
 """Render the markdown narrative report from a finalized state dict."""
 from __future__ import annotations
 
+import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
 SEV_ICON = {"critical": "🔴", "warning": "🟠", "info": "🟡"}
 VERDICT_ICON = {
     "CLEAN": "✅",
@@ -132,4 +134,5 @@ if __name__ == "__main__":
     import json
     import sys
 
-    print(render(json.load(open(sys.argv[1]))))
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        print(render(json.load(fh)))
