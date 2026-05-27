@@ -151,11 +151,11 @@ Unless the user specifically asks for running a specific report or showing the r
 
    Skip the save offer when the result clearly doesn't fit a report type — a single scalar count, an aggregate roll-up across entity types, view-curve time series, schema introspection output, or anything that isn't a list of channels / brands / videos / sponsorships. A trailing offer on those would just be noise.
 
-Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or analysise large sets of data instead of analysing it yourself. On Mac and Linux, create temporary files in `/tmp` that can be analysed later in different ways. On Windows, create them in `%USERPROFILE%\AppData\Local\Temp`.  Before analysing a potentially large result set, first try fetching just a single result with `LIMIT 1` without `jq` etc, to see the shape of the data and any error messages.
+Prefer writing shell code, `jq` commands, or `duckdb` commands that fetch or analysise large sets of data instead of analysing it yourself. On Mac and Linux, create temporary files in `/tmp` that can be analysed later in different ways. On Windows, create them in the directory pointed to by the `%TEMP%` environment variable. When coding, do it in Python.
 
 ## Available Flows
 
-Note that if you're working on Windows, you must set up UTF-8 in the terminal with `PYTHONIOENCODING=utf-8 tl ...`, because all of these commands return UTF-8 data.
+Note that if you're working on Windows, you must set up UTF-8 because all commands take UTF-8 as inputs and output UTF-8 data. If using the `bash` tool, write commands using the Bash syntax, like `export PYTHONIOENCODING=utf-8 tl db es ...`.
 
 ### Data queries
 
@@ -580,10 +580,6 @@ Users only see data their plan allows:
 - **Media sellers** see deals where their org is the publisher. They see `cost` but never `price`.
 - **Intelligence plan** required for `tl brands`, the full `tl recommender` surface, and `tl db es` access to full transcript / brand-mention data.
 - **Paid plan** required for `tl snapshots`.
-
-## Important: Status Labels
-
-When presenting sponsorship status data, always use human-readable labels — never raw codes. The `tl` CLI returns lowercase labels (`sold`, `pending`, `matched`, etc.) — capitalize them for display. Full mapping: proposed, unavailable, pending, sold, advertiser_reject → "Rejected by Advertiser", publisher_reject → "Rejected by Publisher", proposal_approved → "Proposal Approved", matched, outreach → "Reached Out", agency_reject → "Rejected by Agency".
 
 ## Important: Firebolt Snapshots
 

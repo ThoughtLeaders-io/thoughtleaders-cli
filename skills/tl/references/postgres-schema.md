@@ -191,12 +191,14 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 
 When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the output of `tl schema pg thoughtleaders_channel` or the column table above. The `tl schema` command is authoritative. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring problems:
 
+- Subscriber count is in the field named `reach`
+- Projected views is in the field named `impression`
 - ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns  use bare names.
 - ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
 - ❌ **Bare-noun forms without the table-prefix** (e.g. `name` instead of `channel_name`). This table prefixes its display fields with `channel_` to avoid SQL keyword collisions and ambiguity in joins.
 - ❌ **User-facing-term forms used as SQL column names** (the user-facing word is sometimes different from the SQL column name; consult [business-glossary](business-glossary.md) for the canonical mapping when the two diverge).
 
-When the canonical column you need isn't obvious from the table above, consult `tl schema pg thoughtleaders_channel` or the above table first. Do **not** rely on a 400 to correct you, and do **not** fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
+When the canonical column you need isn't obvious from the previous description, consult the output of `tl schema pg thoughtleaders_channel`. Do **not** rely on a 400 to correct you, and do **not** fall back to `information_schema.columns` as the recovery path — that's a regression marker too.
 
 ### Key columns for the `auth_user` table (Django Users)
 

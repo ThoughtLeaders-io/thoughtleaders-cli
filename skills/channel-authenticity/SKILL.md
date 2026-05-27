@@ -25,10 +25,10 @@ investigations.
   view-curves can be hand-waved ("the algorithm", "we ran ads"); reading what
   the audience actually says is the only direct proof. A run without it is
   invalid.
-- **Data access is CLI-only.** Everything goes through `tl_cli.py` → the
-  `tl` CLI (`tl db pg/fb/es`, `tl channels similar`). No database credentials
-  are ever used. If the CLI isn't authenticated the skill fails fast with a
-  clear message.
+- **Data access is CLI-only.** Everything goes through `tl_cli.py` and the
+  `tl` CLI (`tl db pg/fb/es`, `tl channels similar`).
+- Do all data processing with the "utf-8" encoding explicitly in all scripts
+  you create.
 
 ## Setup check
 
