@@ -12,10 +12,10 @@ description: >
 
 # Channel Authenticity
 
-Takes a channel (handle / URL / `channel.id` / channel name) — or
-`adlink:<id>` for a sponsorship drill-down — and returns a 0–100 authenticity
-score plus ranked red-flag findings. Built and calibrated from real
-bought-view and comment-farm investigations.
+Takes a channel (handle / URL / numeric id / name) — or `adlink:<id>` for a
+sponsorship drill-down — and returns a 0–100 authenticity score plus ranked
+red-flag findings. Built and calibrated from real bought-view and comment-farm
+investigations.
 
 ## Hard rules
 
@@ -41,7 +41,7 @@ If this errors with `cli_unavailable`, tell the user to run `tl auth login`
 (`pip install yt-dlp`) — it uses the android InnerTube client so **no cookies
 or API key are required**.
 
-## How to run (two phases — a Haiku subagent sits in the middle)
+## How to run (three phases — a classifier subagent sits between two CLI passes)
 
 **Phase 1 — collect.** From the `scripts/` dir:
 ```bash
@@ -58,23 +58,24 @@ candidates to the user — they're ordered by subscriber count, highest first
 (the most likely intended) — let them pick, then re-run Phase 1 with that
 numeric id.
 
-**Phase 2 — classify comments with the subagent (run it TWICE).** Read the
-file at `llm_batch_path` (a JSON array of `{i, text, author}`). Invoke the
+**Phase 2 — classify comments (run the subagent TWICE).** Read
+`llm_batch_path` (a JSON array of `{i, text, author}`) and send it to the
 `youtube-comment-classifier` agent via the **Agent tool**
-(`subagent_type: youtube-comment-classifier`) **two separate times** on the
-same batch. Prepend one context line: `channel niche: cat
-<content_category>, language <language>` (values are in the envelope). Each
-call returns a strict JSON array
-`[{"i":N,"label":"organic|generic-template|bot-like|promotional|spam"}]`.
-Save each reply verbatim to its own file, e.g. `/tmp/ca_llm1.json` and
-`/tmp/ca_llm2.json`. Two passes are majority-voted in finalize so the
-reported organic share is stable run-to-run (single-pass LLM labeling
-wobbles ±10pts; the verdict is robust either way but the number shouldn't
-move). Sophisticated AI-comment farms read as clean English with normal
-volume — only the classifier catches them, so the double pass matters.
+(`subagent_type: youtube-comment-classifier`) **twice** — two separate calls on
+the same batch. Prepend one context line: `channel niche: cat
+<content_category>, language <language>` (both values are in the envelope).
+Each call returns a strict JSON array
+`[{"i":N,"label":"organic|generic-template|bot-like|promotional|spam"}]`; save
+each reply verbatim to its own file (e.g. `/tmp/ca_llm1.json`,
+`/tmp/ca_llm2.json`).
+
+Why twice: single-pass LLM labeling wobbles ±10pts, so finalize majority-votes
+the two passes to keep the reported organic share stable. Sophisticated
+AI-comment farms read as clean English at normal volume — only the classifier
+catches them, so this pass is essential.
 
 If the batch is empty (channel had almost no comments), skip the subagent and
-pass an empty array `[]` — near-zero comments is itself the loudest signal
+pass an empty array `[]` — near-zero comments is itself the loudest signal,
 and Group C already penalizes it.
 
 **Phase 3 — finalize** (pass both classifier files):
@@ -91,7 +92,7 @@ flags, verdict).
 Three groups, each scored 0–100 independently (start at 100, subtract fixed
 per-flag penalties). **Final = simple mean of the three.** Two hard
 overrides force `FRAUD_LIKELY` (score capped at 39) regardless of the mean:
-(1) Group C — non-organic audience (<30% organic from the Haiku pass, or a
+(1) Group C — non-organic audience (<30% organic from the classifier, or a
 dead comment section); (2) Group B — concealed/misrepresented performance
 (≥2 sold+published sponsored videos deleted/unlisted, or one with ≥5k views;
 or ≥3 high-view videos scrubbed with ≥15% of tracked views gone).
@@ -101,22 +102,18 @@ Bands: ≥90 CLEAN · ≥70 MINOR_FLAGS · ≥40 MIXED · <40 FRAUD_LIKELY.
 ## What each group checks
 
 - **Group A — engagement & peer ratios** (`engagement_ratios.py`,
-  `peer_cohort.py`): like:view & comment:view vs a niche-matched peer
-  baseline, avg-views/subs, longform-vs-shorts engagement gap, organic floor
-  from shorts, per-video outliers.
-- **Group B — view-curve time-series + video integrity** (`view_curves.py`,
-  `anomaly_detector.py`, `video_integrity.py`): burst-without-engagement,
-  Δviews↔Δengagement incoherence, guarantee-cliff at round numbers,
-  slow-start/late-spike, late-life view drip with frozen likes,
-  subs-flat-while-views-surge, plus **intent-aware deleted/unlisted video
-  detection** (ES `offline_since` + `content_aspects:'unlisted'` × sold
-  adlinks; benign re-uploads excluded — deletion only counts when used to
-  conceal/misrepresent performance).
-- **Group C — comment content** (`comment_scraper.py`,
-  `comment_analyzer.py` + Haiku subagent): comment scarcity vs views,
-  length uniformity, language mismatch, generic templates, emoji-only,
-  bot-handle patterns, near-duplicates, reply ratio, creator engagement,
-  cross-video commenter churn, time clustering, LLM organic share.
+  `peer_cohort.py`): like/comment rates measured against a niche-matched peer
+  baseline, plus audience-size sanity checks across longforms vs shorts.
+- **Group B — view-curve anomalies + video integrity** (`view_curves.py`,
+  `anomaly_detector.py`, `video_integrity.py`): view-over-time curves that
+  don't behave like organic growth (bursts without engagement, guarantee
+  cliffs at round numbers, frozen likes, subs flat while views surge), plus
+  intent-aware detection of deleted/unlisted videos used to conceal or
+  misrepresent performance (benign re-uploads are excluded).
+- **Group C — comment content** (`comment_scraper.py`, `comment_analyzer.py`
+  + classifier subagent): whether the comments are a real, engaged audience —
+  scarcity vs views, templating and near-duplicates, language mismatch,
+  bot-handle patterns, and the classifier's organic-share verdict.
 
 Full catalogue + thresholds: `references/red-flags.md`. The exact `tl` queries
 each check issues live in the scripts; the underlying channel/video/adlink
