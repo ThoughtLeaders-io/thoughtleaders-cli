@@ -465,6 +465,8 @@ tl channels find "MrBeast"
 tl brands find "NordVPN"
 ```
 
+If finding channels and brands fail, try variation on the name with or without whitespace.
+
 **Path 2. Curated tag / category / demographic** — user named a topic that maps cleanly to a recommender tag (`"Cooking"`, `"Tech"`, `"USA share"`, content categories, format hints). Use the recommender — it ranks channels by how strongly they load on a tag, returning ranked similarity scores instead of forcing exact equality. It also returns matching brand profiles alongside the channels — useful when the user wants to know "who buys this kind of inventory."
 
 ```bash

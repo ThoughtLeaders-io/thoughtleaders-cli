@@ -38,6 +38,7 @@ ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligenc
 - [jq](https://stedolan.github.io/jq/)
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
 - [duckdb](https://duckdb.org/)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 
 For automated installs on MacOS, prefer installing Homebrew and use the pipx package manager, but ask the user if they have the admin access (sudo) password first. If not, proceed by using `uv` and installing everything locally.
 
@@ -168,7 +169,7 @@ tl balance
 
 # Health check — auth, connectivity, version, latency, and required external tools.
 # Run this first when something feels off; it surfaces token expiry,
-# missing `jq`/`rg`/`duckdb`, and slow endpoints in one snapshot.
+# missing `jq`/`rg`/`duckdb`/`yt-dlp`, and slow endpoints in one snapshot.
 tl doctor
 ```
 
