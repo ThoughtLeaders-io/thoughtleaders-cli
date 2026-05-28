@@ -251,6 +251,7 @@ The plugin ships several focused skills (installed by all the `tl setup *` comma
 - **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` commands for single-record lookups and similarity / ID-resolution special cases. Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
 - **`tl-report-builder`** — builds TL reports (channels / brands / sponsorships / videos) from natural-language requests. Produces an in-chat preview by default; saves a real campaign when the user is explicit ("save", "create the report").
 - **`tl-import`** / **`bulk-import`** — superuser-only; bulk-add or exclude lists of channels, brands, videos, or sponsorships against a report.
+- **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
 
 ## Output Formats
 
