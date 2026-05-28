@@ -1,4 +1,9 @@
-"""tl brands — Brand detail and sponsorship history."""
+"""tl brands — Brand detail, find, and similar-brand recommendations.
+
+The `history` / `history-stats` subcommands are deprecated; equivalent
+queries run against `tl db es` (`sponsored_brand_mentions`) joined to
+`tl db pg` for channel/brand names.
+"""
 
 import json as _json
 import urllib.parse
@@ -13,13 +18,28 @@ from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Brand intelligence (detail, sponsorship history, channel mentions)")
+app = typer.Typer(help="Brand intelligence (detail, find, similar)")
 register_comment_commands(app, "brand", "brand")
+
+
+_HISTORY_DEPRECATION = (
+    "[deprecation] `tl brands history` is deprecated and will be removed. "
+    "Use `tl db es` on docs with `sponsored_brand_mentions: <brand_id>` and "
+    "join channel names from `thoughtleaders_channel` via `tl db pg`."
+)
+_HISTORY_STATS_DEPRECATION = (
+    "[deprecation] `tl brands history-stats` is deprecated and will be removed. "
+    "Use a `tl db es` aggregation over `sponsored_brand_mentions: <brand_id>`."
+)
+
+
+def _warn_deprecated(message: str) -> None:
+    Console(stderr=True).print(f"[yellow]{message}[/yellow]")
 
 
 @app.callback(invoke_without_command=True)
 def brands(ctx: typer.Context) -> None:
-    """Brands — detail and sponsorship history."""
+    """Brands — detail, find, similar."""
     if ctx.invoked_subcommand is None:
         ctx.get_help()
         raise typer.Exit()
@@ -78,7 +98,7 @@ def show_cmd(
         client.close()
 
 
-@app.command("history")
+@app.command("history", deprecated=True)
 def history_cmd(
     query: str = typer.Argument(..., help="Brand name or numeric ID"),
     channel: int | None = typer.Option(None, "--channel", "-c", help="Filter to a specific channel"),
@@ -89,15 +109,14 @@ def history_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
-    """Show a brand's sponsorship history (videos where the brand was detected).
+    """Deprecated. Show a brand's sponsorship history (videos where the brand was detected).
 
-    Requires an Intelligence plan.
-
-    Examples:
-        tl brands history Nike                          # Nike's sponsorship history
-        tl brands history 21416                         # By brand ID
-        tl brands history Nike --channel 12345          # Nike mentions on a specific channel
+    Prefer a raw `tl db es` probe on `sponsored_brand_mentions` (joined to
+    `thoughtleaders_channel` via `tl db pg` for channel names). See
+    `skills/tl/SKILL.md` → "Brand sponsorship history" for the canonical
+    pattern. Requires an Intelligence plan.
     """
+    _warn_deprecated(_HISTORY_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     params: dict[str, str] = {"limit": str(limit), "offset": str(offset)}
@@ -121,7 +140,7 @@ def history_cmd(
         client.close()
 
 
-@app.command("history-stats")
+@app.command("history-stats", deprecated=True)
 def history_stats_cmd(
     query: str = typer.Argument(..., help="Brand name or numeric ID"),
     channel: int | None = typer.Option(None, "--channel", "-c", help="Restrict the roll-up to a specific channel"),
@@ -131,23 +150,13 @@ def history_stats_cmd(
     md_output: bool = typer.Option(False, "--md", help="Markdown output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Aggregate roll-up of a brand's sponsorship history (no per-row output).
+    """Deprecated. Aggregate roll-up of a brand's sponsorship history (no per-row output).
 
-    Same scope as `tl brands history` (videos where the brand is in
-    `sponsored_brand_mentions`), but returned as a single summary
-    record: total sponsored videos, view sums/avg/median, first/last
-    seen dates, per-year buckets, top channels by count, and
-    TL-brokered adlink counts. Computed via one ES aggregation +
-    one PG count — cost is flat regardless of how prolific the
-    brand is.
-
-    Requires an Intelligence plan. Costs 5 credits flat.
-
-    Examples:
-        tl brands history-stats Nike
-        tl brands history-stats 21416 --top-channels 25
-        tl brands history-stats Nike --channel 12345 --json
+    Prefer a `tl db es` aggregation over `sponsored_brand_mentions: <brand_id>`
+    for totals / per-year buckets / top channels. Requires an Intelligence
+    plan. Costs 5 credits flat.
     """
+    _warn_deprecated(_HISTORY_STATS_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
 
     params: dict[str, str] = {"top-channels": str(top_channels)}

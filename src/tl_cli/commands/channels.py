@@ -13,8 +13,19 @@ from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="YouTube channels (detail, history, and similar-channel recommendations)")
+app = typer.Typer(help="YouTube channels (detail and similar-channel recommendations)")
 register_comment_commands(app, "channel", "channel")
+
+_HISTORY_DEPRECATION = (
+    "[deprecation] `tl channels history` is deprecated and will be removed. "
+    "Use `tl db es` filtered by `channel.id: <id>` on docs with non-empty "
+    "`sponsored_brand_mentions`, joined to `thoughtleaders_brand` via "
+    "`tl db pg` for brand names."
+)
+
+
+def _warn_deprecated(message: str) -> None:
+    Console(stderr=True).print(f"[yellow]{message}[/yellow]")
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.
@@ -214,7 +225,7 @@ def similar_cmd(
     _do_similar(channel_ref, args or [], fmt, limit)
 
 
-@app.command("history")
+@app.command("history", deprecated=True)
 def history_cmd(
     channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
@@ -224,14 +235,13 @@ def history_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
     offset: int = typer.Option(0, "--offset", help="Pagination offset"),
 ) -> None:
-    """Show a channel's sponsorship history (videos with detected sponsors).
+    """Deprecated. Show a channel's sponsorship history (videos with detected sponsors).
 
-    Requires an Intelligence plan.
-
-    Examples:
-        tl channels history 157060
-        tl channels history "Economics Explained"
+    Prefer `tl db es` with `channel.id: <id>` + non-empty
+    `sponsored_brand_mentions`, joined to `thoughtleaders_brand` via
+    `tl db pg` for brand names. Requires an Intelligence plan.
     """
+    _warn_deprecated(_HISTORY_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     encoded_ref = urllib.parse.quote(channel_ref, safe="")
     client = get_client()

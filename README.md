@@ -9,7 +9,7 @@ ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligenc
 ### For account managers and sales
 
 - **Pipeline reporting on the fly.** *"How many deals did we close in Q1?"*, *"What's my weighted pipeline by sales owner?"*, *"Which proposals are stuck in `pending` for more than 14 days?"* — one raw SQL or one structured command, instead of waiting on a dashboard.
-- **Brand intelligence in seconds.** *"What channels does Nike sponsor?"*, *"Which brands sponsor `MrBeast`?"*, *"What's Holafly's sponsorship history through us vs. through everyone?"* — answers are one `tl brands history` or one `tl db es` call away.
+- **Brand intelligence in seconds.** *"What channels does Nike sponsor?"*, *"Which brands sponsor `MrBeast`?"*, *"What's Holafly's sponsorship history through us vs. through everyone?"* — answers are one `tl db es` call away.
 - **Vetting candidates before a pitch.** Look up a channel by ID, name, YouTube URL, or `@handle`; pull its adspots, audience demographics, evergreenness score, and detected sponsor history before drafting the IO.
 - **Pre-flight before booking.** Confirm MSN/TPP membership, integration availability, and persona/plan eligibility for a brand profile with one SQL join.
 
@@ -143,8 +143,7 @@ tl recommender brands-for-channel 12345          # Brands most likely to sponsor
 
 # Brand intelligence
 tl brands show Nike
-tl brands history Nike                # Detected sponsorships from ES
-tl brands history-stats Nike          # Aggregate roll-up (totals, first/last seen, top channels)
+tl brands find Nike                   # Resolve a string → single brand id
 
 # Search videos and transcripts via Elasticsearch
 tl db es '{"size":20,"query":{"term":{"channel.id":12345}},"_source":["title","views"]}'
@@ -249,7 +248,7 @@ Each agent discovers the skill automatically and uses it when you ask about spon
 
 The plugin ships several focused skills (installed by all the `tl setup *` commands):
 
-- **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` / `history` commands for single-record lookups and the special cases they were built for (similarity search, ID resolution, sponsorship history). Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
+- **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` commands for single-record lookups and similarity / ID-resolution special cases. Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
 - **`tl-report-builder`** — builds TL reports (channels / brands / sponsorships / videos) from natural-language requests. Produces an in-chat preview by default; saves a real campaign when the user is explicit ("save", "create the report").
 - **`tl-import`** / **`bulk-import`** — superuser-only; bulk-add or exclude lists of channels, brands, videos, or sponsorships against a report.
 
