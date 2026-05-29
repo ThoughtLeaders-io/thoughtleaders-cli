@@ -1,4 +1,4 @@
-"""Shared UTF-8 I/O setup for the channel-authenticity scripts.
+"""Shared UTF-8 I/O setup for the tl-channel-authenticity scripts.
 
 YouTube data is full of non-ASCII: channel names, comment text, emoji.
 On POSIX the default I/O encoding is already UTF-8, but on Windows the

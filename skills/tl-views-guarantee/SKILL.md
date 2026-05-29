@@ -1,5 +1,6 @@
 ---
 name: tl-views-guarantee
+tl-blurb: size a multi-video views guarantee
 description: Calculate the optimal views guarantee (VG) for a multi-video sponsorship buy with a YouTube creator. Given a channel ID or name, returns "video bundle size / views guarantee / likelihood to hit" based on bootstrap simulation of the channel's recent video performance (view counts measured at video age ~30 days). Use when someone asks "what VG should I push for with [creator]", "how many videos should I buy from [creator]", "calculate VG for [channel]", "what's a safe guarantee for [channel]", or anything involving setting views guarantees in a sponsorship deal. Triggers on "VG", "views guarantee", "views minimum", and any request to size a multi-video buy.
 ---
 

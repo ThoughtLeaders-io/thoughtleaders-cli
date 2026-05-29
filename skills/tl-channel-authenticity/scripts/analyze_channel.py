@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""channel-authenticity orchestrator — two-phase (subagent in the middle).
+"""tl-channel-authenticity orchestrator — two-phase (subagent in the middle).
 
 Phase 1 (collect):
     analyze_channel.py "<ref>"
@@ -128,7 +128,7 @@ def finalize(state_path: str, llm_paths: list[str]) -> dict:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="channel-authenticity orchestrator")
+    ap = argparse.ArgumentParser(description="tl-channel-authenticity orchestrator")
     ap.add_argument("ref", nargs="?", help="channel handle/url/id or adlink:<id>")
     ap.add_argument(
         "--finalize",

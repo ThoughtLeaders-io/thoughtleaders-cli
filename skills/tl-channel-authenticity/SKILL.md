@@ -1,5 +1,6 @@
 ---
-name: channel-authenticity
+name: tl-channel-authenticity
+tl-blurb: vet a channel for fake views
 description: >
   Detect non-organic views / fake engagement / bot comments on a YouTube
   channel before booking (or after delivering) a sponsorship. Use when asked
@@ -33,7 +34,7 @@ investigations.
 ## Setup check
 
 ```bash
-cd .claude/skills/channel-authenticity/scripts
+cd .claude/skills/tl-channel-authenticity/scripts
 python3 tl_cli.py preflight        # must print "OK"
 ```
 If this errors with `cli_unavailable`, tell the user to run `tl auth login`

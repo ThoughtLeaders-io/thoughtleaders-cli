@@ -1,5 +1,6 @@
 ---
 name: tl-keyword-research
+tl-blurb: rank content-search keywords
 description: |
   Broaden and rank a set of content-search keywords. Invoke when the user wants to find videos or channels by content keywords (topics, concepts, niches) — not by ID or exact name. Takes one or more seed keywords (or an NL phrase), proposes related candidates, probes Elasticsearch for each one against the `title` / `summary` / `transcript` fields, and returns a strict JSON object `{"keywords":[{"keyword","count"},...]}` sorted descending by document count. The output is meant to feed the next step (typically a `tl db es` content search with the surviving high-count keywords).
 ---

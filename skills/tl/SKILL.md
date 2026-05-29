@@ -1,5 +1,6 @@
 ---
 name: tl
+tl-blurb: data analyst (smart query router)
 description: |
   Query and analyze YouTube sponsorship data using the `tl` CLI. Use this skill for finding channels, brands and sponsorships, and for data exploration, including counts, metrics, trends, time-series, distributions, single-record drill-downs, revenue / pipeline-weighting math, view-curve analysis, cross-source business questions. Examples: "How many deals did we close last quarter?", "What's the weighted pipeline by sales owner?", "Show me the view curve for video X", "Find mentions of Surfshark in transcripts", "Investigate this video", "Find channels...", "Find brands...".
 ---

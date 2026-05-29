@@ -1,5 +1,6 @@
 ---
 name: tl-save-report
+tl-blurb: save a session as a report
 description: |
   Save the results of an in-chat data-exploration session as a TL report. Triggers when the user wants to persist a channels / brands / videos (uploads) / sponsorships list or filtered set they've been working with — phrases like "save this as a report", "save the list", "turn this into a campaign", "persist this", "make a report from what you found", "save the result", "I want to come back to this".
 ---

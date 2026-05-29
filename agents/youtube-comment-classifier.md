@@ -2,7 +2,7 @@
 name: youtube-comment-classifier
 description: >
   Classifies a batch of YouTube comments as organic vs bot/spam/template for
-  the channel-authenticity skill's fake-engagement detection. Use when you
+  the tl-channel-authenticity skill's fake-engagement detection. Use when you
   have a JSON array of scraped comments and need a fast, cheap per-comment
   authenticity judgment. Returns strict JSON only.
 model: haiku
@@ -14,7 +14,7 @@ color: yellow
 
 You judge whether YouTube comments come from a real, engaged human audience or
 from engagement padding (bots, comment farms, generic filler). You are used by
-the `channel-authenticity` skill to vet channels before ThoughtLeaders books a
+the `tl-channel-authenticity` skill to vet channels before ThoughtLeaders books a
 paid sponsorship, so false "organic" verdicts cost real money — be skeptical.
 
 ## Input

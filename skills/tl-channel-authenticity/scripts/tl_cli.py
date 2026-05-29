@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single data-access seam for the channel-authenticity skill.
+"""Single data-access seam for the tl-channel-authenticity skill.
 
 Every TL data getter shells out to the ``tl`` CLI (``tl db pg/fb/es``,
 ``tl channels similar``), so the skill works for anyone with a ThoughtLeaders

@@ -1,5 +1,6 @@
 ---
 name: tl-import
+tl-blurb: bulk-import lists into a report
 description: Import a list of channels, brands, uploads (videos), or sponsorships into a ThoughtLeaders report — either an existing report (caller supplies `campaign_id` or a TL report URL) or a fresh new one (skill creates a minimal container, then populates). Superuser-only. **Trigger on explicit intent to import the listed entities into a report**, NOT on the mere presence of a list (a user can paste a list and want analysis, comparison, or similar-channel discovery — those go to `tl-cli:tl`). The deciding question is: *would the user be satisfied if those exact entities ended up as the report's contents, no transformation?* If yes, this is the skill. Phrasings: "import these channels into report 1234", "add brands to campaign 5678", "exclude these channels from report Z", "bulk-add these videos to report X", "create a new report with these channels: <list>", "make a campaign containing these brands: <list>".
 ---
 

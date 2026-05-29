@@ -68,7 +68,7 @@ _RECOMMENDED_TOOLS: tuple[tuple[str, str, dict[str, str]], ...] = (
     ),
     (
         "yt-dlp",
-        "YouTube metadata/download tool — used by the channel-authenticity skill to fetch video and comment data.",
+        "YouTube metadata/download tool — used by the tl-channel-authenticity skill to fetch video and comment data.",
         {
             "Linux": "pipx install yt-dlp  (or `pip install yt-dlp` / `apt install yt-dlp`)",
             "Darwin": "brew install yt-dlp",

@@ -155,6 +155,41 @@ def _install_standalone_skills(plugin_root: Path) -> int:
     return count
 
 
+def _bundled_skill_blurbs(plugin_root: Path) -> list[tuple[str, str]]:
+    """Read (name, tl-blurb) for each bundled skill, for the setup summary.
+
+    Reads the `tl-blurb` frontmatter key from skills/<name>/SKILL.md so the
+    summary stays in sync with the skills actually shipped — no hand-maintained
+    list to drift. Skills without the key are skipped. Sorted by name.
+    """
+    skills_src = plugin_root / "skills"
+    if not skills_src.is_dir():
+        return []
+    blurbs: list[tuple[str, str]] = []
+    for skill_dir in skills_src.iterdir():
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        name = blurb = None
+        in_frontmatter = False
+        for line in skill_md.read_text(encoding="utf-8").splitlines():
+            if line.strip() == "---":
+                if in_frontmatter:
+                    break
+                in_frontmatter = True
+                continue
+            if not in_frontmatter:
+                continue
+            if line.startswith("name:"):
+                name = line[len("name:"):].strip()
+            elif line.startswith("tl-blurb:"):
+                blurb = line[len("tl-blurb:"):].strip()
+        if name and blurb:
+            blurbs.append((name, blurb))
+    blurbs.sort(key=lambda nb: nb[0])
+    return blurbs
+
+
 def _print_manual_instructions() -> None:
     """Print manual install instructions when claude binary is not found."""
     console.print()
@@ -264,10 +299,10 @@ def setup_claude(
     console.print("[green]Setup complete![/green]")
     console.print()
     console.print("Available skills in Claude Code:")
-    console.print("  [cyan]/tl[/cyan]                  — data analyst (smart query router)")
-    console.print("  [cyan]/tl-sponsorships[/cyan]     — sponsorship lookup")
-    console.print("  [cyan]/tl-reports[/cyan]          — saved reports")
-    console.print("  [cyan]/tl-balance[/cyan]          — credit balance")
+    blurbs = _bundled_skill_blurbs(plugin_root)
+    width = max((len(name) for name, _ in blurbs), default=0)
+    for name, blurb in blurbs:
+        console.print(f"  [cyan]/{name}[/cyan]{' ' * (width - len(name))}  — {blurb}")
     console.print()
     console.print("Try it:")
     console.print("  [cyan]/tl Which channels did we sponsor in Q1?[/cyan]")
