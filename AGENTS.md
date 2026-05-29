@@ -1,6 +1,6 @@
 # Project Overview
 
-**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (sponsorships, channels, brands, uploads, snapshots, reports, recommender). Built with Typer + Rich + httpx. Designed as an "agent-first tool" — the CLI handles structured commands and output, while the user's AI agent (Claude) provides intelligence.
+**tl-cli** is a Python CLI for querying ThoughtLeaders sponsorship data (sponsorships, channels, brands, uploads, snapshots, reports, recommender). Built with Typer + Rich + httpx. Designed as an "AI agent-first tool" — the CLI handles data commands and output, while the user's AI agent (Claude) provides decision making.
 
 # Architecture
 
@@ -20,7 +20,7 @@ When adding a new data command, follow this pattern. See `sponsorships.py` for t
 ## Auth Flow (`auth/`)
 
 - **PKCE + Auth0**: Browser-based login with localhost callback server (`login.py`)
-- **Token Storage** (`token_store.py`): OS keyring primary, `~/.config/tl/credentials.json` fallback (0o600)
+- **Token Storage** (`token_store.py`): OS keyring primary, `~/.config/tl/credentials.json` fallback (chmod 0o600)
 - **Env override**: `TL_API_KEY` env var takes priority over keyring (for CI)
 - **Auto-refresh**: `TLClient` refreshes expired tokens on 401
 
@@ -98,14 +98,19 @@ Warn the user if they are creating a release and the latest commit didn't bump t
 * Do not let server implementation details into skill files (anything under `skills/`). Skills describe *what the CLI does* from the user's seat — observable command surface, inputs, outputs, examples. Do not say "the server enforces X", "the API validates Y on its side", "the backend rejects Z" — those are mechanism notes that drift the moment the server changes. State the user-visible behaviour ("unknown keys come back as 400") without naming where it's enforced.
 * **All `import` and `from X import Y` statements live at the top of the Python module file** — after the module docstring, before any code. No inline imports inside function bodies, no lazy imports for "speed" or "optional dependency" reasons. `from __future__ import …` goes at the very top (Python requires that). The only legitimate inline-import exception is **platform-conditional imports** that cannot succeed on the other platform (e.g. `import msvcrt` on Linux, `import termios`/`tty` on Windows) — those stay inside their `if sys.platform == …:` guard. If a circular-import problem makes a top-level import impossible, fix the circular dependency rather than working around it with an inline import.
 
+# Updating
+
+The `tl update --force` command will force an update of the `thoughtleaders-cli` package.
+The auto-update feature keeps the package updated, by checking (cached) on each command invocation.
+
 # Git commit rules
 
 Do not reference internal architecture of the ThoughtLeaders app in commit messages.
 
-When a feature is purely server-side but changes the data the CLI receives (e.g. adding, removing, or renaming a field on a response, changing a credit rate, expanding an enum), make a forced empty commit on the tl-cli repo (`git commit --allow-empty`) describing the change. This keeps the CLI repo's history a complete log of what users see, even when no client code had to change.
+When a feature is purely server-side but changes the data the CLI receives (e.g. adding, removing, or renaming a field on a response, changing a credit rate, expanding an enum), make a forced empty commit on the tl-cli repo (`git commit --allow-empty`) describing the change. This keeps the CLI repo's history a complete log of what users see, even when no client code had to change. The `tl changelog` command will read this log to show to the users.
 
 # Be aware of tests
 
 For every feature or change, explicitly consider whether tests need to be added or updated, on this repo or on the server repo — new endpoint, new model field, new CLI command, new validation rule, new error path, anything that changes user-visible behaviour. Don't ship a feature without asking "what test covers this?" If no test does and the surface is non-trivial, write one. This applies across all repos involved in the change (server-side changes that ripple into the CLI need both server tests and CLI tests updated).
 
-Be sure to check if tests need to be updated when changing any data structures or function names, in all repos involved in the change.
+Be sure to check if tests need to be updated when changing any data structures or function names, in all repos involved in the change
