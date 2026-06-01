@@ -40,7 +40,7 @@ ThoughtLeaders CLI — query sponsorship data, channels, brands, and intelligenc
 - [duckdb](https://duckdb.org/)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 
-For automated installs on MacOS, prefer installing Homebrew and use the pipx package manager, but ask the user if they have the admin access (sudo) password first. If not, proceed by using `uv` and installing everything locally.
+For automated installs on MacOS, prefer installing Python and the requirements on Homebrew and use the pipx package manager, but ask the user if they have the admin access (sudo) password first. If not, proceed by using `uv`.
 
 ## Install
 
