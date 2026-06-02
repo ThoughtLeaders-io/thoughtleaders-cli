@@ -15,9 +15,9 @@ If doing a database query, follow this recipe:
 
 * First, run `tl whoami` to confirm the API is working and to find out user metadata and limits.
 * Always read `references/business-glossary.md`
-* If doing a PostgreSQL (pg) query: first read `references/postgres-schema.md`, then run `tl schema pg`
-* If doing an ElasticSearch (es) query: first read `references/elasticsearch-schema.md`, then run `tl schema es`
-* If doing a Firebolt (fb) query: first read `references/firebolt-schema.md`, then run `tl schema fb`
+* If doing a PostgreSQL (pg) query: always first read `references/postgres-schema.md`, then run `tl schema pg`
+* If doing an ElasticSearch (es) query: always first read `references/elasticsearch-schema.md`, then run `tl schema es`
+* If doing a Firebolt (fb) query: always first read `references/firebolt-schema.md`, then run `tl schema fb`
 
 **Process data with shell tools, not your context window.** Don't pull large result sets into your reasoning context just to filter, sort, count, or extract a field - that wastes tokens and slows you down. Pipe `tl … --json` (or `--csv`, or `--toon`) into `jq` (for JSON), `rg` or `duckdb` (for CSV), or `yq` (for YAML) as appropriate, and read only the answer back. Pick the tool by shape:
 
