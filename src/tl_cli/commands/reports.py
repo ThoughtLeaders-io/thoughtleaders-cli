@@ -22,6 +22,71 @@ REPORT_TYPE_LABELS = {1: "Content", 2: "Brands", 3: "Channels", 8: "Sponsorships
 
 POLL_INTERVAL = 2  # seconds between server polls
 
+# Filterset keys that pin specific entities into a report (the curated-ID
+# lists). A report built from these holds exactly those records; a report built
+# from predicate filters re-evaluates against live data and pins nothing.
+_PIN_ENTITIES = ("channels", "brands", "sponsorships", "articles")
+# Filterset keys that are structural, not user-facing predicate filters.
+_NON_PREDICATE_KEYS = {"keyword_operator", "sort"}
+
+
+def _summarize_report_contents(config: dict) -> dict:
+    """Summarize what a saved report config actually contains.
+
+    Returns the report-type label, a per-entity count of *pinned* IDs (the
+    curated lists that freeze specific channels/brands/sponsorships/articles
+    into the report), and the active predicate-filter keys. Lets a caller —
+    human or agent — catch a filters-vs-pinned-IDs mismatch (or a wholly blank
+    report) before sharing the link: a report built from a natural-language
+    prompt yields predicate filters and pins *nothing*, so "pinned: none" is
+    the tell that it doesn't contain the specific records the user named.
+    """
+    filterset = config.get("filterset") or {}
+    pinned = {
+        entity: len(filterset[entity])
+        for entity in _PIN_ENTITIES
+        if isinstance(filterset.get(entity), list) and filterset[entity]
+    }
+    skip = set(_PIN_ENTITIES) | {f"exclude_{e}" for e in _PIN_ENTITIES} | _NON_PREDICATE_KEYS
+    filters = sorted(
+        key
+        for key, value in filterset.items()
+        if key not in skip and value not in (None, "", [], {}, False)
+    )
+    return {
+        "report_type": REPORT_TYPE_LABELS.get(config.get("report_type"), config.get("report_type")),
+        "pinned": pinned,
+        "filters": filters,
+    }
+
+
+def _render_contents_line(summary: dict) -> str:
+    """One-line human rendering of a `_summarize_report_contents` result."""
+    pinned = summary.get("pinned") or {}
+    pin_str = ", ".join(f"{count} {entity}" for entity, count in pinned.items()) if pinned else "none"
+    filters = summary.get("filters") or []
+    filt_str = ", ".join(filters) if filters else "none"
+    return f"Contents: {summary.get('report_type')} report · pinned: {pin_str} · filters: {filt_str}"
+
+
+def _print_contents_summary(summary: dict) -> None:
+    """Surface a saved report's contents on stderr (safe in every output mode).
+
+    A report with no pinned entities *and* no filters gets a loud warning —
+    that blank/default state is the failure behind "you sent me an empty
+    report". Otherwise a dim one-liner lets the caller confirm the report holds
+    what the user actually asked for.
+    """
+    line = _render_contents_line(summary)
+    if not summary.get("pinned") and not summary.get("filters"):
+        err.print(
+            f"[yellow]⚠ {line}\n"
+            f"  This report has no filters and no pinned entities — it will show "
+            f"a blank/default view.[/yellow]"
+        )
+    else:
+        err.print(f"[dim]{line}[/dim]")
+
 
 @app.callback(invoke_without_command=True)
 def reports(
@@ -404,6 +469,13 @@ def create_report(
         report_url = result.get("report_url", "")
         campaign_id = result.get("campaign_id", "")
 
+        # Echo what the report actually contains. Surfaced even under
+        # --yes/--json (the agent path), so a report built from a prompt —
+        # which yields predicate filters and pins no specific IDs — can be
+        # spotted before its link is shared.
+        summary = _summarize_report_contents(config)
+        data["report_contents"] = summary
+
         if toon_output:
             print(toon_encode(data))
         elif json_output:
@@ -421,6 +493,8 @@ def create_report(
             usage = data.get("usage")
             if usage:
                 err.print(f"\n  [dim]{usage.get('credits_charged', 0)} credits · {usage.get('balance_remaining', '?')} remaining[/dim]")
+
+        _print_contents_summary(summary)
 
     except ApiError as e:
         handle_api_error(e)
@@ -541,23 +615,26 @@ def save_list_cmd(
     finally:
         client.close()
 
+    summary = _summarize_report_contents(config)
+    data["report_contents"] = summary
+
     if fmt == "toon":
         print(toon_encode(data))
-        return
-    if fmt == "json":
+    elif fmt == "json":
         print(json.dumps(data, indent=2, default=str))
-        return
+    else:
+        results = data.get("results", [{}])
+        result = results[0] if results else {}
+        err.print()
+        err.print("[green bold]Report created![/green bold]")
+        err.print(f"  Campaign ID: {result.get('campaign_id', '?')}")
+        err.print(f"  URL: https://app.thoughtleaders.io{result.get('report_url', '')}")
+        err.print(
+            "\n[dim]Refine columns, widgets, title, or description with "
+            "`tl reports update <id>`.[/dim]"
+        )
 
-    results = data.get("results", [{}])
-    result = results[0] if results else {}
-    err.print()
-    err.print("[green bold]Report created![/green bold]")
-    err.print(f"  Campaign ID: {result.get('campaign_id', '?')}")
-    err.print(f"  URL: https://app.thoughtleaders.io{result.get('report_url', '')}")
-    err.print(
-        "\n[dim]Refine columns, widgets, title, or description with "
-        "`tl reports update <id>`.[/dim]"
-    )
+    _print_contents_summary(summary)
 
 
 @app.command("update")

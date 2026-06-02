@@ -7,9 +7,66 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from tl_cli.commands.reports import _parse_config_arg, app
+from tl_cli.commands.reports import (
+    _parse_config_arg,
+    _render_contents_line,
+    _summarize_report_contents,
+    app,
+)
 
 runner = CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# _summarize_report_contents / _render_contents_line
+# ---------------------------------------------------------------------------
+
+
+class TestReportContentsSummary:
+    def test_filter_only_report_pins_nothing(self) -> None:
+        # The exact shape that caused the real bug: a sponsorships report the
+        # AI builder produced from a prompt — a generic format predicate, no
+        # pinned deals.
+        summary = _summarize_report_contents(
+            {"report_type": 8, "filterset": {"channel_formats": [4]}}
+        )
+        assert summary["report_type"] == "Sponsorships"
+        assert summary["pinned"] == {}
+        assert summary["filters"] == ["channel_formats"]
+
+    def test_pinned_ids_counted_per_entity(self) -> None:
+        summary = _summarize_report_contents(
+            {"report_type": 8, "filterset": {"sponsorships": [1, 2, 3, 4, 5]}}
+        )
+        assert summary["pinned"] == {"sponsorships": 5}
+        assert summary["filters"] == []
+
+    def test_blank_report_has_no_pins_and_no_filters(self) -> None:
+        summary = _summarize_report_contents({"report_type": 3, "filterset": {}})
+        assert summary["pinned"] == {}
+        assert summary["filters"] == []
+        line = _render_contents_line(summary)
+        assert "pinned: none" in line and "filters: none" in line
+
+    def test_structural_keys_are_not_counted_as_filters(self) -> None:
+        # keyword_operator / sort are structural, not user-facing predicates.
+        summary = _summarize_report_contents(
+            {"report_type": 3, "filterset": {"keyword_operator": "and", "sort": "x", "channels": [9]}}
+        )
+        assert summary["pinned"] == {"channels": 1}
+        assert summary["filters"] == []
+
+    def test_empty_and_falsey_filter_values_ignored(self) -> None:
+        summary = _summarize_report_contents(
+            {"report_type": 3, "filterset": {"languages": [], "is_offline": False, "reach_from": 1000}}
+        )
+        assert summary["filters"] == ["reach_from"]
+
+    def test_render_line_mentions_pins_and_filters(self) -> None:
+        line = _render_contents_line(
+            {"report_type": "Sponsorships", "pinned": {"sponsorships": 5}, "filters": ["channel_formats"]}
+        )
+        assert "5 sponsorships" in line and "channel_formats" in line
 
 
 # ---------------------------------------------------------------------------
