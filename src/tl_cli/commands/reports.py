@@ -330,6 +330,13 @@ def create_report(
     With a prompt, runs the AI Report Builder pipeline (keyword research, config
     generation, review) and saves the resulting campaign.
 
+    Have specific IDs already? A report of *exactly* the channels / brands /
+    sponsorships / articles you already have the IDs for is a different job —
+    use `tl reports save-list <entity> --ids-file` to pin those IDs into a new
+    report, or `tl bulk-import <entity> -c <report-id>` to add them to an
+    existing one. A natural-language prompt here builds *predicate filters* and
+    pins none of those IDs, so the report comes back showing unrelated records.
+
     With --config '<json>' or --config-file <path>, skips the orchestration
     pipeline and saves the provided config directly. Useful when an external
     agent (e.g. the tl-report-builder Claude Code skill) has already produced a
