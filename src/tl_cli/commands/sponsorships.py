@@ -4,6 +4,7 @@ import json as _json
 from typing import Optional
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 
 from tl_cli.client.errors import handle_api_error, ApiError
@@ -137,7 +138,7 @@ def do_create_body(body: dict, fmt: str) -> None:
 
 # --- Typer app ---
 
-app = typer.Typer(help="Sponsorships (deals, matches, proposals)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Sponsorships (deals, matches, proposals)")
 
 
 @app.callback(invoke_without_command=True)

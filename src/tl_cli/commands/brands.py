@@ -9,6 +9,7 @@ import json as _json
 import urllib.parse
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from rich.console import Console
 
@@ -18,7 +19,7 @@ from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Brand intelligence (detail, find, similar)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Brand intelligence (detail, find, similar)")
 register_comment_commands(app, "brand", "brand")
 
 

@@ -3,11 +3,12 @@
 from typing import Optional
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from tl_cli.commands.sponsorships import do_create, do_list, do_show
 from tl_cli.output.formatter import detect_format
 
-app = typer.Typer(help="Proposals — matches proposed to both sides (shortcut for sponsorships status:proposal)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Proposals — matches proposed to both sides (shortcut for sponsorships status:proposal)")
 
 
 @app.callback(invoke_without_command=True)

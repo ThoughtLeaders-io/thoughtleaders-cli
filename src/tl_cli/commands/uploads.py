@@ -1,13 +1,14 @@
 """tl uploads — Show video uploads by ID."""
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.commands._comments_common import register_comment_commands
 from tl_cli.output.formatter import detect_format, output_single
 
-app = typer.Typer(help="Video uploads (YouTube content from Elasticsearch)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Video uploads (YouTube content from Elasticsearch)")
 register_comment_commands(app, "upload", "upload")
 
 

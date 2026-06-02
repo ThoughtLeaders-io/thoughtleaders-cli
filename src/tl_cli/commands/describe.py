@@ -3,6 +3,7 @@
 import json
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 from rich.table import Table
 
@@ -10,7 +11,7 @@ from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import _fmt_credits, detect_format
 
-app = typer.Typer(help="Discover available resources, fields, filters, and credit costs")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Discover available resources, fields, filters, and credit costs")
 console = Console()
 
 

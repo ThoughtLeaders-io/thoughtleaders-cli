@@ -4,6 +4,7 @@ import json
 import time
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.panel import Panel
@@ -13,7 +14,7 @@ from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Saved reports (list, run, create, update)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Saved reports (list, run, create, update)")
 err = Console(stderr=True)
 
 # Report type labels matching Django's ReportType enum

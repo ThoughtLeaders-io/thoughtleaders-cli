@@ -4,6 +4,7 @@ import sys
 import time
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 from rich.prompt import Prompt
 
@@ -11,7 +12,7 @@ from tl_cli.auth.finalize import finalize_signup
 from tl_cli.auth.login import login_browser, login_device_code
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
 
-app = typer.Typer(help="Authentication commands")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Authentication commands")
 console = Console(stderr=True)
 
 

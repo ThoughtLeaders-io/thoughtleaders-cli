@@ -3,11 +3,12 @@
 from typing import Optional
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from tl_cli.commands.sponsorships import do_create, do_list, do_show
 from tl_cli.output.formatter import detect_format
 
-app = typer.Typer(help="Deals — agreed-upon sponsorships (shortcut for sponsorships status:deal)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Deals — agreed-upon sponsorships (shortcut for sponsorships status:deal)")
 
 
 @app.callback(invoke_without_command=True)

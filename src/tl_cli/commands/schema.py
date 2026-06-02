@@ -4,6 +4,7 @@ import json
 import re
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 import yaml
 from pytoon import encode as toon_encode
 from rich.console import Console
@@ -14,7 +15,7 @@ from rich.tree import Tree
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 
-app = typer.Typer(help="Show schema documentation for raw db queries (`tl db pg|fb|es`)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Show schema documentation for raw db queries (`tl db pg|fb|es`)")
 console = Console()
 
 # Pulls the YAML body out of the server's ```yaml … ``` fenced block. Any

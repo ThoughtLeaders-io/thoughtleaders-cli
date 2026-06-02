@@ -3,6 +3,7 @@
 import json
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.panel import Panel
@@ -13,7 +14,7 @@ from tl_cli.client.errors import handle_api_error, ApiError
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format
 
-app = typer.Typer(help="Show current user, profile, org, and brands (free)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Show current user, profile, org, and brands (free)")
 
 
 def _render_whoami(data: dict) -> None:

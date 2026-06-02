@@ -1,12 +1,13 @@
 """tl snapshots — Firebolt time-series metrics for channels and videos."""
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format, output
 
-app = typer.Typer(help="Historical metrics snapshots (Firebolt time-series)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Historical metrics snapshots (Firebolt time-series)")
 
 
 @app.command("channel")

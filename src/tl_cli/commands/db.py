@@ -4,12 +4,13 @@ import json
 import sys
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format, output, output_pricing_estimate
 
-app = typer.Typer(help="Raw read-only queries against PostgreSQL, Firebolt, or Elasticsearch (full-access only)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Raw read-only queries against PostgreSQL, Firebolt, or Elasticsearch (full-access only)")
 
 
 def _read_query(query: str | None) -> str:

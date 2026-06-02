@@ -13,12 +13,13 @@ import subprocess
 from pathlib import Path
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from pytoon import encode as toon_encode
 from rich.console import Console
 
 from tl_cli import __version__
 
-app = typer.Typer(help="Set up integrations (Claude Code, OpenCode, Gemini, Codex)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Set up integrations (Claude Code, OpenCode, Gemini, Codex)")
 console = Console(stderr=True)
 
 MARKETPLACE_SOURCE = "ThoughtLeaders-io/thoughtleaders-cli"

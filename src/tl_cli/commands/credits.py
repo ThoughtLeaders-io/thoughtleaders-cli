@@ -18,6 +18,7 @@ import webbrowser
 from decimal import Decimal, InvalidOperation
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from pytoon import encode as toon_encode
 from rich.console import Console
 from rich.prompt import Prompt
@@ -27,7 +28,7 @@ from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format
 
-app = typer.Typer(help="Buy credits and view top-up history (free)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Buy credits and view top-up history (free)")
 console = Console()
 err = Console(stderr=True)
 

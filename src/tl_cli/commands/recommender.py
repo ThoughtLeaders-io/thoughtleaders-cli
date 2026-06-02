@@ -13,6 +13,7 @@ For 1:1 similarity use `tl channels similar` and `tl brands similar`.
 import urllib.parse
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 
 from tl_cli.client.errors import ApiError, handle_api_error
@@ -20,7 +21,7 @@ from tl_cli.client.http import get_client
 from tl_cli.filters import parse_filters
 from tl_cli.output.formatter import detect_format, output, output_single
 
-app = typer.Typer(help="Recommender (similarity tags, top-channels/profiles/brands, similarity-profile inspection, profile→channel and channel→brand similarity)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Recommender (similarity tags, top-channels/profiles/brands, similarity-profile inspection, profile→channel and channel→brand similarity)")
 
 
 TOP_CHANNEL_COLUMNS = ["value", "channel_id", "channel_name", "slug"]

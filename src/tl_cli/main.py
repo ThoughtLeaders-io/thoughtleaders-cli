@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from tl_cli import __version__
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli import config as tl_config
 from tl_cli.auth.commands import app as auth_app
 from tl_cli.commands.balance import app as balance_app
@@ -38,6 +39,7 @@ app = typer.Typer(
     help=f"ThoughtLeaders CLI v{__version__} — query sponsorship data, channels, brands, and intelligence.",
     no_args_is_help=True,
     rich_markup_mode="rich",
+    cls=AlphaSortedTyperGroup,
 )
 
 

@@ -6,6 +6,7 @@ import statistics
 import time
 
 import typer
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 from rich.table import Table
 
@@ -77,7 +78,7 @@ _RECOMMENDED_TOOLS: tuple[tuple[str, str, dict[str, str]], ...] = (
     ),
 )
 
-app = typer.Typer(help="Health check (auth, connectivity, version)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Health check (auth, connectivity, version)")
 console = Console()
 
 
