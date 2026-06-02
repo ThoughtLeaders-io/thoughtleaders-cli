@@ -252,6 +252,7 @@ The plugin ships several focused skills (installed by all the `tl setup *` comma
 - **`tl-report-builder`** — builds TL reports (channels / brands / sponsorships / videos) from natural-language requests. Produces an in-chat preview by default; saves a real campaign when the user is explicit ("save", "create the report").
 - **`tl-import`** / **`bulk-import`** — superuser-only; bulk-add or exclude lists of channels, brands, videos, or sponsorships against a report.
 - **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
+- **`tl-top-partnerships`** — brand-user performance report. Ranks a brand's sold sponsorships by live eCPM vs the sold-date projection, aggregates per channel, and delivers a two-tab Google Sheet ("By Deal" / "By Channel") via `gws`. Uses only public CLI commands (`tl whoami`, `tl sponsorships list`).
 
 ## Output Formats
 

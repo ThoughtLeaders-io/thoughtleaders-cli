@@ -53,7 +53,7 @@ This repo is also a Claude Code plugin, and can directly be installed as one.
 
 - **`tl`** — the main skill for querying ThoughtLeaders data. Default for any sponsorship / channel / brand / upload / report question.
 - **`tl-keyword-research`** — invoke whenever the user wants to find videos or channels by **content keywords** (topics, concepts, niches) that aren't covered by a curated recommender tag, OR to validate that a candidate channel's content actually touches a given topic. Returns `{operator, keywords:[{keyword,count}]}` from a ranked ES probe over `title` / `summary` / `transcript`; the caller then runs the actual content search with the surviving high-count terms. **Do not compose keyword sets by hand for `tl db es` content searches — delegate to this skill first.** See `skills/tl/SKILL.md` → *Channel & video discovery* for the four-path decision tree and when to use this vs the recommender / raw SQL.
-- **`tl-import`**, **`tl-save-report`**, **`adapt-tl-data`**, **`tl-views-guarantee`** — narrower workflows; the skill files document their own triggers.
+- **`tl-import`**, **`tl-save-report`**, **`adapt-tl-data`**, **`tl-views-guarantee`**, **`tl-top-partnerships`** — narrower workflows; the skill files document their own triggers. `tl-top-partnerships` is brand-user-facing: ranks a brand's sold sponsorships by live eCPM vs the sold-date projection and delivers a two-tab Google Sheet via `gws`.
 
 ### Skill content boundaries
 
