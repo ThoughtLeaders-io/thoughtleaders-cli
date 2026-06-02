@@ -164,3 +164,4 @@ Each probe is `size:0` + `track_total_hits:true` with no aggregations — no row
 5. `keywords` array is sorted descending by `count`.
 6. Each entry has exactly `keyword` (string) and `count` (integer).
 7. The seed keyword(s) appear in the output.
+8. If the user requests a chart, create it as a SVG graphic

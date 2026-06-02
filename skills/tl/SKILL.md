@@ -434,6 +434,8 @@ If unsure about what information to find where, read the [references/postgresql-
 
 If a user asks for one of the **Unavailable** items, say so explicitly and propose the closest `tl`-based approximation rather than silently degrading.
 
+If the user requests a chart, create it as a SVG graphic.
+
 ### Discovery & system
 ```bash
 tl describe                            # List all resources with credit costs (free)

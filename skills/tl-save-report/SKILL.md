@@ -503,6 +503,8 @@ Echo the saved URL + ID, plus a follow-up offer for refinement:
 
 The follow-up offer matters because **FilterSet changes (keywords, demographics, M2M lists) can't be patched in place** via `tl reports update` — they require saving a new variant. Surface that limitation only if the user actually asks to change FilterSet fields.
 
+If the user requests a chart, create it as a SVG graphic.
+
 ### On failure
 
 If the command exits non-zero, the CLI prints the error on stderr (shape: `Error (NNN): <detail>` for most codes; specific lines for 401/402/403). **Surface the error verbatim** — do NOT silently report success.
