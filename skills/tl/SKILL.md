@@ -765,7 +765,7 @@ tl channels similar 29834 msn:no --limit 30                  # non-MSN channels 
 tl channels similar 29834 tpp:yes --limit 30                 # TPP (TL-managed) channels only
 tl channels similar 29834 min-subs:1000000 exclude:477487 --limit 15  # client-side filters
 ```
-**Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology.
+**Both `tl channels show` and `tl channels similar` accept either a numeric channel ID or a channel name.** Name arguments are case-insensitive partial matches; if more than one active channel matches, the command prints a candidates table (channel_id, subscribers, name) and exits 1 so you can retry with a specific ID. The `msn` filter on `similar` is tri-state: `yes` (only MSN channels — the default), `no` (only non-MSN channels), `both` (no MSN filter). `tl channels look-alike` is a hidden alias for `similar` that matches the internal "look-alike channels" terminology. `tl channels show` returns a `tl_url` field — the canonical ThoughtLeaders web-app analysis page for the channel; use it verbatim when linking a user to the channel instead of constructing a URL by hand.
 
 ### "Browse the recommender" (categories, demographics, formats):
 ```bash

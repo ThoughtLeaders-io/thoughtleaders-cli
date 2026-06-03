@@ -65,14 +65,6 @@ def show_cmd(
     client = get_client()
     try:
         data = client.get(f"/channels/{encoded_ref}")
-        for i, r in enumerate(data.get("results", []) if isinstance(data.get("results"), list) else []):
-            renamed = {}
-            for k, v in r.items():
-                if k == "id":
-                    renamed["channel_id"] = v
-                else:
-                    renamed[k] = v
-            data["results"][i] = renamed
         output_single(data, fmt)
         if fmt == "table" and data.get("show_cta"):
             record = data.get("results", data)
