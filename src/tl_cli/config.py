@@ -38,17 +38,6 @@ class Config:
     def cli_api_base(self) -> str:
         return f"{self.api_url.rstrip('/')}/api/cli/v1"
 
-    def app_url(self, path: str) -> str:
-        """Build a TL web-app URL (not the CLI API) from a relative path.
-
-        Same host as ``api_url``, used for user-facing deep links into the web
-        app (e.g. a channel's analysis page). These pages live at the site
-        root, not under ``/api/cli/v1``, so they don't go through
-        ``cli_api_base``. Honoring ``TL_API_URL`` keeps links pointing at
-        whichever environment the CLI is talking to.
-        """
-        return f"{self.api_url.rstrip('/')}/{path.lstrip('/')}"
-
 
 # Global flags, set by options on the root command
 debug: bool = False

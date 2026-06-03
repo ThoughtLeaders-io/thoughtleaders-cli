@@ -10,7 +10,6 @@ from rich.console import Console
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.commands._comments_common import register_comment_commands
-from tl_cli.config import get_config
 from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
@@ -29,22 +28,6 @@ _HISTORY_DEPRECATION = (
 def _warn_deprecated(message: str) -> None:
     Console(stderr=True).print(f"[yellow]{message}[/yellow]")
 
-
-def _inject_tl_url(record: dict) -> dict:
-    """Add the canonical TL analysis-page deep link to a channel detail record.
-
-    Surfaced as ``tl_url`` so a request like "send me the link to this
-    channel's page" can be answered with an authoritative URL instead of an
-    improvised one. Uses the ID-addressable ``/channelid/<id>`` route, which
-    resolves a channel by its numeric ID — so it works straight from the
-    ``channel_id`` already in the payload, with no slug lookup (and unlike a
-    ``/youtube/<slug>`` path, it can't silently fall through to a blank page
-    when the slug is unknown).
-    """
-    channel_id = record.get("channel_id", record.get("id"))
-    if channel_id is not None:
-        record["tl_url"] = get_config().app_url(f"channelid/{channel_id}")
-    return record
 
 # Columns for the `similar` endpoint result table. The server enriches every
 # row so the user can size up each suggestion without follow-up queries.
@@ -89,7 +72,7 @@ def show_cmd(
                     renamed["channel_id"] = v
                 else:
                     renamed[k] = v
-            data["results"][i] = _inject_tl_url(renamed)
+            data["results"][i] = renamed
         output_single(data, fmt)
         if fmt == "table" and data.get("show_cta"):
             record = data.get("results", data)
