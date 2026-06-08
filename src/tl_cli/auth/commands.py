@@ -8,7 +8,6 @@ from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 from rich.prompt import Prompt
 
-from tl_cli.auth.finalize import finalize_signup
 from tl_cli.auth.login import login_browser, login_device_code, revoke_refresh_token
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
 from tl_cli.config import get_config
@@ -106,8 +105,6 @@ def login_cmd() -> None:
         login_device_code()
     else:
         login_browser()
-
-    finalize_signup()
 
 
 def _login_api_key() -> None:
