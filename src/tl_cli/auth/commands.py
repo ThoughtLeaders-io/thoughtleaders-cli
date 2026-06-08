@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from tl_cli.auth.finalize import finalize_signup
-from tl_cli.auth.login import login_browser, login_device_code
+from tl_cli.auth.login import login_browser, login_device_code, revoke_refresh_token
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
 
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Authentication commands")
@@ -171,7 +171,20 @@ def _login_api_key() -> None:
 
 @app.command("logout")
 def logout_cmd() -> None:
-    """Clear stored authentication tokens."""
+    """Log out: revoke the refresh token at Auth0, then clear stored tokens."""
+    tokens = load_tokens()
+    # Revoke the long-lived credential server-side so a leaked/synced copy of
+    # the local token store can't keep minting access tokens. Best-effort —
+    # API-key auth has no refresh token, and an offline revoke must not block
+    # clearing local credentials.
+    if tokens and not tokens.is_api_key and tokens.refresh_token:
+        if revoke_refresh_token(tokens.refresh_token):
+            console.print("[dim]Refresh token revoked at Auth0.[/dim]")
+        else:
+            console.print(
+                "[yellow]Could not reach Auth0 to revoke the refresh token; "
+                "clearing local credentials anyway.[/yellow]"
+            )
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
 

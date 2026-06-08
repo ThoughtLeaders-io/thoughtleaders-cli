@@ -1,7 +1,16 @@
 """Tests for PKCE and token storage."""
 
+import httpx
+from typer.testing import CliRunner
+
+from tl_cli.auth import commands as auth_commands
+from tl_cli.auth import login as auth_login
+from tl_cli.auth.commands import app as auth_app
+from tl_cli.auth.login import revoke_refresh_token
 from tl_cli.auth.pkce import generate_pkce_pair
 from tl_cli.auth.token_store import KIND_API_KEY, KIND_BEARER, StoredTokens
+
+runner = CliRunner()
 
 
 class TestPKCE:
@@ -76,3 +85,57 @@ class TestStoredTokensKind:
         restored = StoredTokens.from_json(legacy)
         assert restored.kind == KIND_BEARER
         assert not restored.is_api_key
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class TestRevokeRefreshToken:
+    def test_returns_true_on_200(self, monkeypatch) -> None:
+        monkeypatch.setattr(auth_login.httpx, "post", lambda *a, **k: _FakeResponse(200))
+        assert revoke_refresh_token("rt") is True
+
+    def test_returns_false_on_non_200(self, monkeypatch) -> None:
+        monkeypatch.setattr(auth_login.httpx, "post", lambda *a, **k: _FakeResponse(400))
+        assert revoke_refresh_token("rt") is False
+
+    def test_swallows_network_error(self, monkeypatch) -> None:
+        def boom(*a, **k):
+            raise httpx.ConnectError("offline")
+        monkeypatch.setattr(auth_login.httpx, "post", boom)
+        # Must not raise — logout has to proceed offline.
+        assert revoke_refresh_token("rt") is False
+
+
+class TestLogoutCommand:
+    def _patch(self, monkeypatch, tokens):
+        calls = {"revoked": None, "cleared": False}
+        monkeypatch.setattr(auth_commands, "load_tokens", lambda: tokens)
+        monkeypatch.setattr(auth_commands, "clear_tokens", lambda: calls.__setitem__("cleared", True))
+        monkeypatch.setattr(auth_commands, "revoke_refresh_token", lambda rt: calls.__setitem__("revoked", rt) or True)
+        return calls
+
+    def test_bearer_logout_revokes_then_clears(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens)
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["revoked"] == "rt"   # revoked with the stored refresh token
+        assert calls["cleared"] is True   # local tokens still cleared
+
+    def test_api_key_logout_skips_revoke(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="k", refresh_token=None, expires_at=None, email=None, kind=KIND_API_KEY)
+        calls = self._patch(monkeypatch, tokens)
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["revoked"] is None   # no refresh token → no Auth0 call
+        assert calls["cleared"] is True
+
+    def test_logged_out_already_just_clears(self, monkeypatch) -> None:
+        calls = self._patch(monkeypatch, None)
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["revoked"] is None
+        assert calls["cleared"] is True

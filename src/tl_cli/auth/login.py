@@ -212,6 +212,29 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
     return tokens
 
 
+def revoke_refresh_token(refresh_token: str) -> bool:
+    """Best-effort revocation of a refresh token at Auth0 (RFC 7009).
+
+    Invalidates the long-lived credential server-side so it can no longer mint
+    new access tokens. Public-client call — `client_id` only, no secret. Returns
+    True on success; never raises — network / Auth0 errors are swallowed so
+    `tl auth logout` can still clear the local credentials when offline.
+    """
+    config = get_config()
+    try:
+        response = httpx.post(
+            f"https://{config.auth0_domain}/oauth/revoke",
+            json={
+                "client_id": config.auth0_client_id,
+                "token": refresh_token,
+            },
+            timeout=10,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
+
+
 def _exchange_code(
     code: str,
     code_verifier: str,
