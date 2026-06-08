@@ -124,6 +124,9 @@ class TestLogoutCommand:
         assert result.exit_code == 0
         assert calls["revoked"] == "rt"   # revoked with the stored refresh token
         assert calls["cleared"] is True   # local tokens still cleared
+        # Points the user at Auth0's session-logout URL built from auth0_domain.
+        assert "/logout" in result.output
+        assert auth_commands.get_config().auth0_domain in result.output
 
     def test_api_key_logout_skips_revoke(self, monkeypatch) -> None:
         tokens = StoredTokens(access_token="k", refresh_token=None, expires_at=None, email=None, kind=KIND_API_KEY)
@@ -132,6 +135,7 @@ class TestLogoutCommand:
         assert result.exit_code == 0
         assert calls["revoked"] is None   # no refresh token → no Auth0 call
         assert calls["cleared"] is True
+        assert "/logout" not in result.output  # no browser session for API-key auth
 
     def test_logged_out_already_just_clears(self, monkeypatch) -> None:
         calls = self._patch(monkeypatch, None)

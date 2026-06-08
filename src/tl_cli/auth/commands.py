@@ -11,6 +11,7 @@ from rich.prompt import Prompt
 from tl_cli.auth.finalize import finalize_signup
 from tl_cli.auth.login import login_browser, login_device_code, revoke_refresh_token
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
+from tl_cli.config import get_config
 
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Authentication commands")
 console = Console(stderr=True)
@@ -185,6 +186,13 @@ def logout_cmd() -> None:
                 "[yellow]Could not reach Auth0 to revoke the refresh token; "
                 "clearing local credentials anyway.[/yellow]"
             )
+        # Revoking the refresh token doesn't end the browser SSO session that
+        # the interactive login established. Point the user at Auth0's logout
+        # URL so the next `tl auth login` doesn't silently SSO straight back in.
+        logout_url = f"https://{get_config().auth0_domain}/logout"
+        console.print(
+            f"To end your Auth0 browser session, visit: [cyan]{logout_url}[/cyan]"
+        )
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
 
