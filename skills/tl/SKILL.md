@@ -50,6 +50,13 @@ The pattern is always: server-side narrowing first (usually by filters in the `t
 
 Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is present in the output of `whoami`.
 
+**Counts, totals, and breakdowns: aggregate in the query engine — never page through records to count them.** A "how many / total / average / per-X" question is ONE aggregation query, not N pages of rows summed in your head:
+- `tl db pg` — `SELECT COUNT(*) …`, or `SELECT col, COUNT(*) AS n … GROUP BY col ORDER BY n DESC`. Also `SUM`/`AVG`/`MIN`/`MAX`/`date_trunc`. Returns one/few rows regardless of table size. (`LIMIT`/`OFFSET` still required — an aggregate is one row, so `LIMIT 1 OFFSET 0` is fine.)
+- `tl db es` — aggregation body with `"size": 0` (returns zero hits, only the agg result): `value_count`/`cardinality` for counts, `terms` for per-group, `sum`/`avg` for metrics, `date_histogram` for time series. Add `"track_total_hits": true` to get an exact match count. One aggregation block per body (see ES reference) — run multiple calls for a multi-metric dashboard.
+- Structured list commands and list endpoints already return the full match count as `total` in the response envelope — request `--limit 1` and read `total` instead of fetching every row.
+
+Fetching all rows to count/sum/group them is wrong: it is slow, costs credits per row returned, and silently undercounts once you hit the page cap.
+
 Retry after 5 seconds if the server returns a "connection denied" or a "server error" on any request.
 
 Where possible reference sponsorships, brands, channel by numeric IDs.
@@ -359,6 +366,13 @@ cat query.json | tl db es -
 ```
 
 See [references/elasticsearch-schema.md](references/elasticsearch-schema.md) for accepted top-level keys, query types, size/depth limits, scripting/aggregation rules, and the field catalogue.
+
+**Article docs in ES carry only `channel.id` — not a usable channel name. Resolve names from PG, in a two-step script.** Whenever you query article/upload docs and the output needs channel names, do NOT hand-map ids in context and do NOT `ILIKE` on names — write a script that:
+1. runs `tl db es … --json` with `channel.id` in `_source`, then collects the **distinct** channel ids;
+2. runs `tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE id IN (<ids>)" --json` to build an `{id: channel_name}` map;
+3. merges the map onto the ES rows by `channel.id` and emits the enriched result.
+
+Prefer Python for the script (write it to `/tmp`); a `jq`+`xargs` one-liner is fine for a single page (worked example under *Brand sponsorship history*). Always go ES→PG in this order (PG `IN (...)` on the ids ES returned) — one PG round-trip for the whole page, never one query per article.
 
 #### `tl db fb` — Firebolt
 
