@@ -192,6 +192,7 @@ def logout_cmd() -> None:
         )
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
+    console.print("To end your Auth0 browser session, visit: [cyan]https://dev-mq73b7zhdhwvgae1.us.auth0.com/v2/logout[/cyan]")
 
 
 @app.command("status")
