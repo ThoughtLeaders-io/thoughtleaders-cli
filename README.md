@@ -249,8 +249,11 @@ Each agent discovers the skill automatically and uses it when you ask about spon
 The plugin ships several focused skills (installed by all the `tl setup *` commands):
 
 - **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` commands for single-record lookups and similarity / ID-resolution special cases. Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
-- **`tl-report-builder`** — builds TL reports (channels / brands / sponsorships / videos) from natural-language requests. Produces an in-chat preview by default; saves a real campaign when the user is explicit ("save", "create the report").
+- **`tl-keyword-research`** — broadens and ranks content-search keywords by Elasticsearch document count before a `tl db es` content search, so finding videos or channels by topic isn't bottlenecked on hand-guessed terms.
+- **`tl-save-report`** — persists the result set from an in-chat exploration session as a saved TL report ("save this as a report", "turn this into a campaign").
+- **`tl-report-builder`** — builds a brand-new TL report config from scratch (channels / brands / sponsorships / videos) through a guided multi-phase flow. Manual-invocation-only: reach it via `/tl-report-builder` or by naming it explicitly — natural-language report requests route to `tl`, `tl-save-report`, or `tl-import` instead.
 - **`tl-import`** / **`bulk-import`** — superuser-only; bulk-add or exclude lists of channels, brands, videos, or sponsorships against a report.
+- **`tl-channel-authenticity`** — vets a YouTube channel for non-organic views and bot/spam comments before booking (or after delivering) a sponsorship.
 - **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
 - **`tl-top-partnerships`** — brand-user performance report. Ranks a brand's sold sponsorships by live eCPM vs the sold-date projection, aggregates per channel, and delivers a two-tab Google Sheet ("By Deal" / "By Channel") via `gws`. Uses only public CLI commands (`tl whoami`, `tl sponsorships list`).
 
