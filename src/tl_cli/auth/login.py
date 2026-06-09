@@ -129,7 +129,7 @@ def login_device_code() -> StoredTokens:
     console.print()
     console.print(f"[bold]And enter the code:[/bold]  [cyan bold]{user_code}[/cyan bold]")
     console.print()
-    console.print(f"[dim]The code expires in {expires_in // 60} minutes.[/dim]")
+    console.print(f"[dim]The code expires in {expires_in // 60} minutes. After you have logged in successfully, please wait until the system is notified.[/dim]")
 
     # Poll for token
     deadline = time.time() + expires_in
