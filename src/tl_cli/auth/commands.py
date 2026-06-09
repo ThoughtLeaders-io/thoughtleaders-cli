@@ -187,12 +187,9 @@ def logout_cmd() -> None:
         # the interactive login established. Point the user at Auth0's logout
         # URL so the next `tl auth login` doesn't silently SSO straight back in.
         logout_url = f"https://{get_config().auth0_domain}/logout"
-        console.print(
-            f"To end your Auth0 browser session, visit: [cyan]{logout_url}[/cyan]"
-        )
+        console.print(f"To end your Auth0 browser session, visit: [cyan]{logout_url}[/cyan]")
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
-    console.print("To end your Auth0 browser session, visit: [cyan]https://dev-mq73b7zhdhwvgae1.us.auth0.com/v2/logout[/cyan]")
 
 
 @app.command("status")
