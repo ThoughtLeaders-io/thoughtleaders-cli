@@ -124,11 +124,11 @@ def _summarise_modes(credits: dict) -> tuple[str, str, bool]:
       - 'free'                           → "free"
       - 'flat'                           → "<rate> per call"
       - 'linear-per-result' (one mode)   → "<rate> × n  (per result)"
-      - 'curve' (one mode, mult=R)       → "curve (×R)"
+      - 'per-row' (one mode, rate=R)     → "R/row"
       - mixed (e.g. channels has detail / history / similar at different rates)
                                          → per-mode "<mode> R" joined with commas
 
-    The typical-cost column uses the n=100 example for curve/per-result and
+    The typical-cost column uses the n=100 example for per-row/per-result and
     the flat rate for flat. Free shows '-'.
     """
     modes = _modes_block(credits)
@@ -163,8 +163,8 @@ def _format_single_mode_label(mode_name: str, payload: dict, *, terse: bool = Fa
         return f"{_fmt_credits(rate)}/call" if terse else f"{_fmt_credits(rate)} per call"
     if model == "linear-per-result":
         return f"{_fmt_credits(rate)}×n" if terse else f"{_fmt_credits(rate)} × n  (per result)"
-    if model == "curve":
-        return f"curve ×{rate}"
+    if model == "per-row":
+        return f"{_fmt_credits(rate)}/row"
     return f"{model} ({_fmt_credits(rate)})"
 
 
@@ -256,25 +256,25 @@ def _print_pricing_section(credits: dict) -> None:
             "Estimate using the examples above before running with a large limit."
         )
 
-    # Surface live PG expensive-items pricing when the server included it
-    # (db resource only).
-    _print_pg_expensive_section(credits.get("pg_expensive"))
+    # Surface live PG per-table / per-column pricing when the server included
+    # it (db resource only).
+    _print_pg_pricing_section(credits.get("pg_pricing"))
 
 
-def _print_pg_expensive_section(expensive: object) -> None:
-    """Render the `credits.pg_expensive` block as a flat dotted-path table.
+def _print_pg_pricing_section(pricing: object) -> None:
+    """Render the `credits.pg_pricing` block as a flat dotted-path table.
 
     The server emits a three-level nested structure
     ``{base: {pg: float}, tables: {name: float}, columns: {"t.c": float}}``;
-    flattening each leaf to ``<section>.<key>`` keeps the live extras
-    visible in one sorted scan, with the base rate clearly distinguished
-    from the per-table and per-column extras a query may or may not
-    incur.
+    flattening each leaf to ``<section>.<key>`` keeps the live rates visible
+    in one sorted scan, with the default per-row rate (``default.pg``)
+    distinguished from the per-table rates and per-column extras a query
+    may or may not incur.
     """
-    if not isinstance(expensive, dict) or not expensive:
+    if not isinstance(pricing, dict) or not pricing:
         return
     rows: list[tuple[str, float]] = []
-    for section, body in expensive.items():
+    for section, body in pricing.items():
         if not isinstance(body, dict):
             # Forward-compat: an unexpected leaf type — surface as-is
             # under the section name rather than dropping it silently.
@@ -284,15 +284,16 @@ def _print_pg_expensive_section(expensive: object) -> None:
             rows.append((f"{section}.{key}", val))
     if not rows:
         return
-    sub = Table(title="PG expensive items (live)")
+    sub = Table(title="PG per-row pricing (live)")
     sub.add_column("Path", style="bold")
-    sub.add_column("Extra", justify="right")
+    sub.add_column("Rate", justify="right")
     for path, val in sorted(rows):
         sub.add_row(path, _fmt_credits(val))
     console.print(sub)
     console.print(
-        "[dim]These are the rates, not a per-query total. For the actual cost "
-        "of a specific query (before running it), use[/dim] "
+        "[dim]These are the per-table / per-column rates, not a per-query total. "
+        "A query's per-row rate is the sum of the rates of the tables it touches. "
+        "For the actual cost of a specific query (before running it), use[/dim] "
         "[cyan]tl db pg \"SELECT ...\" --pricing[/cyan][dim].[/dim]"
     )
 

@@ -540,7 +540,7 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
 
     Firebolt and Elasticsearch have no per-column extras — their estimate
     carries `per_row_extra=0` and empty expensive-item maps, so the
-    breakdown table is skipped and only the volume-curve cost shows.
+    breakdown table is skipped and only the per-row cost shows.
     A `limit`/cost of `None` (e.g. a Firebolt query with no `LIMIT`) means
     the row count is unbounded and the cost can't be pinned ahead of time.
     """
@@ -567,24 +567,30 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
     else:
         console.print(
             "  Estimated cost: [yellow]depends on rows returned[/yellow] "
-            "(no row limit set — cost scales with the volume curve)"
+            "(no row limit set — cost is linear in rows returned)"
         )
-    console.print(f"  Multiplier (base + expensive tables): {multiplier}")
+    console.print(f"  Per-row rate (sum of table rates):    {multiplier}")
     console.print(f"  Per-row extra (expensive columns):    {per_row}")
+    agg_surcharge = est.get("agg_surcharge")
+    if agg_surcharge:
+        console.print(
+            f"  Aggregate surcharge (flat):           {agg_surcharge} "
+            f"[dim](≈{est.get('aggregated_rows', 0):,} rows aggregated)[/dim]"
+        )
     if planner_rows is not None:
         console.print(
             f"  [dim]Planner row estimate (pre-LIMIT): {planner_rows:,}[/dim]"
         )
 
-    tables = est.get("expensive_tables") or {}
+    tables = est.get("table_rates") or {}
     columns = est.get("expensive_columns") or {}
     if tables or columns:
-        sub = Table(title="Expensive items this query touches")
+        sub = Table(title="Per-row rates this query touches")
         sub.add_column("Item", style="bold")
         sub.add_column("Kind")
-        sub.add_column("Extra", justify="right")
+        sub.add_column("Rate", justify="right")
         for name, val in sorted(tables.items()):
-            sub.add_row(name, "table (multiplier)", _fmt_credits(val))
+            sub.add_row(name, "table (per row)", f"{_fmt_credits(val)}/row")
         for path, val in sorted(columns.items()):
             sub.add_row(path, "column (per row)", f"{_fmt_credits(val)}/row")
         console.print(sub)

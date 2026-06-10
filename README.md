@@ -183,9 +183,9 @@ tl describe show sponsorships --filters    # Available filters for sponsorships
 tl balance                                 # Your credit balance
 ```
 
-`tl db pg` is priced **per-query**: a base rate plus a multiplier extra for every expensive table referenced, plus a flat per-row charge for every expensive column read. Sensitive fields (demographics, channel outreach emails) are expensive. Run `tl describe show db --json` to see the live `pg_expensive` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
+`tl db pg` is priced **per-row**: the per-row rate is the **sum of the rates of the tables the query touches** (default 1.0/row; some tables are cheaper or dearer), plus a flat per-row charge for every expensive column read (demographics, channel outreach emails), all times the rows returned. Aggregate queries (`count`/`GROUP BY`) add a surcharge proportional to the rows they aggregate. Run `tl describe show db --json` to see the live `pg_pricing` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
-To preview a query's cost **before** running it, add `--pricing`: `tl db pg "SELECT … LIMIT 100" --pricing` runs only the planner's `EXPLAIN`, prints the cost breakdown and an upper-bound estimate (at the query's `LIMIT`), and costs a flat **1 credit** — the query itself never executes. Works with `--json` too. `--pricing` is also available on `tl db fb` and `tl db es`; those backends are flat-rate (no per-column charges), so the estimate is the volume curve at the query's row ceiling (`LIMIT` for Firebolt, `size` — or the aggregation doc cap — for Elasticsearch).
+To preview a query's cost **before** running it, add `--pricing`: `tl db pg "SELECT … LIMIT 100" --pricing` runs only the planner's `EXPLAIN`, prints the cost breakdown and an upper-bound estimate (at the query's `LIMIT`), and costs a flat **1 credit** — the query itself never executes. Works with `--json` too. `--pricing` is also available on `tl db fb` and `tl db es`; those backends have no per-table or per-column charges, so the estimate is the flat per-row rate at the query's row ceiling (`LIMIT` for Firebolt, `size` — or the aggregation doc cap — for Elasticsearch).
 
 # Terminology
 

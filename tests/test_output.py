@@ -377,10 +377,10 @@ class TestPgPricingEstimate:
 
     _SAMPLE = {
         "pricing_estimate": {
-            "base": 1.4,
+            "default": 1.4,
             "multiplier": 4.4,
             "per_row_extra": 280.0,
-            "expensive_tables": {"thoughtleaders_channel": 3.0},
+            "table_rates": {"thoughtleaders_channel": 3.0},
             "expensive_columns": {
                 "thoughtleaders_channel.outreach_email": 80.0,
                 "thoughtleaders_channel.demographic_male_share": 50.0,
@@ -404,7 +404,7 @@ class TestPgPricingEstimate:
         assert "280" in out          # per-row extra
         assert "thoughtleaders_channel.outreach_email" in out
         assert "80/row" in out
-        assert "table (multiplier)" in out
+        assert "table (per row)" in out
 
     def test_json_mode_dumps_full_envelope(self, capsys):
         import json
@@ -430,8 +430,8 @@ class TestPgPricingEstimate:
         from tl_cli.output.formatter import output_pricing_estimate
         data = {
             "pricing_estimate": {
-                "base": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
-                "expensive_tables": {}, "expensive_columns": {},
+                "default": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
+                "table_rates": {}, "expensive_columns": {},
                 "limit": 10, "planner_estimated_rows": 3,
                 "estimated_cost_at_limit": 3.8,
             },
@@ -447,8 +447,8 @@ class TestPgPricingEstimate:
         from tl_cli.output.formatter import output_pricing_estimate
         data = {
             "pricing_estimate": {
-                "base": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
-                "expensive_tables": {}, "expensive_columns": {},
+                "default": 1.4, "multiplier": 1.4, "per_row_extra": 0.0,
+                "table_rates": {}, "expensive_columns": {},
                 "limit": None, "planner_estimated_rows": None,
                 "estimated_cost_at_limit": None,
             },
