@@ -210,6 +210,54 @@ def top_brands_cmd(
     _do_top("brands", tag, args or [], fmt, limit, TOP_BRAND_COLUMNS, f"Top brands: {tag}")
 
 
+@app.command("channels-with-tag")
+def channels_with_tag_cmd(
+    tag: str = typer.Argument(..., help='Similarity tag name (e.g. "Cooking", "Age 18-24"). Run `tl recommender tags` to discover valid names.'),
+    min_value: float = typer.Option(0.00001, "--min", help="Inclusive minimum tag value; only channels scoring at or above this are returned. Defaults to 0.00001, which excludes channels with no loading on the tag."),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Max results per page (1-1000)"),
+    offset: int = typer.Option(0, "--offset", help="Pagination offset"),
+) -> None:
+    """Every channel whose value for a similarity tag is at or above a threshold.
+
+    Unlike `top-channels` (which ranks the strongest few), this walks the
+    *entire* match set in pages of up to 1000 — including sets larger than
+    the search index's 10k window — so you can enumerate every channel above
+    a cutoff. Returns channel IDs only; expand them with `tl channels show`
+    or `tl recommender inspect-channel`.
+
+    `--min` defaults to 0.00001 — just above zero — so a bare call returns
+    every channel with any loading on the tag and drops the zero-fill rest.
+    Raise it for a stricter cutoff.
+
+    Costs 1 credit per channel ID returned. Intelligence plan required.
+
+    Examples:
+        tl recommender channels-with-tag "Cooking"
+        tl recommender channels-with-tag "Age 18-24" --min 0.3 --limit 1000
+        tl recommender channels-with-tag "Cooking" --min 0.5 --offset 1000 --json
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    tag = _strip_quotes(tag)
+    params = {"tag": tag, "min": str(min_value), "limit": str(limit), "offset": str(offset)}
+    client = get_client()
+    try:
+        data = client.get("/recommender/channels-with-tag", params=params)
+        output(
+            data,
+            fmt,
+            columns=["channel_id"],
+            title=f"Channels with {tag} >= {min_value}",
+        )
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
 @app.command("inspect-channel")
 def inspect_channel_cmd(
     channel_ref: str = typer.Argument(..., help="Channel ID (numeric) or name (partial match, must be unique)"),

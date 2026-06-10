@@ -135,6 +135,7 @@ tl recommender tags cooking                      # Search tag names by substring
 tl recommender top-channels "Cooking" msn:yes --limit 50   # Top channels for a tag
 tl recommender top-profiles "Cooking" mbn:yes --limit 30   # Top brand profiles (one brand → potentially multiple profiles)
 tl recommender top-brands "Cooking" --limit 30             # Top brands (deduped from profiles)
+tl recommender channels-with-tag "Cooking"                 # ALL channel IDs loaded on a tag (--min defaults to 0.00001; paged; 1 credit/result)
 tl recommender inspect-channel 12345             # Per-tag breakdown of a channel's vector
 tl recommender inspect-brand Nike                # Per-tag breakdown of a brand's ideal profile
 tl recommender channels-for-profile 842          # Channels closest to a specific brand profile

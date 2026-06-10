@@ -204,6 +204,7 @@ tl recommender tags [query]            # List similarity tag names — categorie
 tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (Intelligence)
 tl recommender top-profiles "<tag>"    # Top brand profiles loaded on a similarity tag
 tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag
+tl recommender channels-with-tag "<tag>" [--min <v>] # ALL channel IDs scoring >= v on a tag (--min default 0.00001 drops zero-loading channels; paged, enumerates the full set; 1 credit/result; Intelligence)
 tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (Intelligence)
 tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (Intelligence)
 tl recommender channels-for-profile <id> # Find channels closest to a brand profile's ideal profile (Intelligence)
