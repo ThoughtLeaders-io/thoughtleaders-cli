@@ -404,8 +404,8 @@ def create_report(
 
     With --config '<json>' or --config-file <path>, skips the orchestration
     pipeline and saves the provided config directly. Useful when an external
-    agent (e.g. the tl-report-builder Claude Code skill) has already produced a
-    validated config and you just want to persist it. Prefer --config-file when
+    agent has already produced a validated config and you just want to persist
+    it. Prefer --config-file when
     the config might contain apostrophes, dollar signs, or backticks — file
     transport sidesteps shell quoting entirely.
 
@@ -518,8 +518,7 @@ ENTITY_TO_REPORT_TYPE = {
 
 # FilterSet M2M field per entity is identical to the entity name, except
 # article IDs are composite strings (`<channel_id>:<youtube_id>`) and the
-# others are integers. See the FilterSet schema references in
-# skills/tl-report-builder/references/ for the catalogue.
+# others are integers.
 
 
 def _read_ids(path: str, entity: str) -> list:

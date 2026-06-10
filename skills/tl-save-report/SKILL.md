@@ -56,7 +56,7 @@ The entity being saved must be one of: **channels**, **brands**, **videos / uplo
 
 **Skip when**:
 
-- The user wants to **add to an existing report** (`"add these channels to report 1234"`) → hand off to `tl-import`.
+- The user wants to **add to an existing report** (`"add these channels to report 1234"`) → use the `tl bulk-import` command, not this skill.
 - The user only wants the data **shown / counted / analysed in chat** without saving → stay in `tl`; don't invoke this skill.
 - The user wants to build a report **from scratch** with no prior session exploration to capture — that's a different shape of request (the user has a goal, not a result set). Run the appropriate `tl db pg|fb|es` queries to produce a result set first; then this skill takes over for the save.
 
@@ -524,4 +524,4 @@ The above maps the visible CLI output to the underlying cause — match on a sub
 
 - **No discovery-side work** — no keyword research, no live-data sample validation, no result-set re-evaluation. The session already produced the data; re-running discovery would be wasted effort. Name resolution (`tl brands find` / `tl channels find` to turn names into IDs before they land in the FilterSet) is the one exception — it's required by the FilterSet schema, not discovery. If the user comes in with no prior session, run the relevant `tl db pg|fb|es` queries first to produce a result set, then invoke this skill on the result.
 - **No editing of existing reports.** If the user wants to refine an already-saved report's columns, widgets, title, or description, run `tl reports update <id>` directly. For FilterSet refinements, the platform requires saving a new variant.
-- **No bulk-importing into an existing report.** That's `tl-import`'s role. Save-report only creates new reports.
+- **No bulk-importing into an existing report.** Use the `tl bulk-import` command for that. Save-report only creates new reports.
