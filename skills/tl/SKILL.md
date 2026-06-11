@@ -486,7 +486,7 @@ tl channels find "MrBeast"
 tl brands find "NordVPN"
 ```
 
-`tl channels find` falls back to fuzzy similarity matching when the literal string finds nothing, so spacing/typo variants ("Deco Destiny" → "DecoDestiny") resolve or return ranked candidates on their own — no need to retry with hand-made name variations. A "Not found" from the resolver usually means the channel isn't in the index.
+`tl channels find` resolves spacing/typo variants on its own ("Deco Destiny" → "DecoDestiny") via YouTube lookups and fuzzy similarity matching — no need to retry with hand-made name variations. A real channel that isn't in the index yet gets queued for analysis automatically (the response says to check back in ~24 hours). A plain "Not found" means even YouTube couldn't find it — treat that as the answer.
 
 **Path 2. Curated tag / category / demographic** — user named a topic that maps cleanly to a recommender tag (`"Cooking"`, `"Tech"`, `"USA share"`, content categories, format hints). Use the recommender — it ranks channels by how strongly they load on a tag, returning ranked similarity scores instead of forcing exact equality. It also returns matching brand profiles alongside the channels — useful when the user wants to know "who buys this kind of inventory."
 

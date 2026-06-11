@@ -310,8 +310,9 @@ def find_cmd(
     `{"id": ..., "name": ...}`).
 
     Ambiguous matches return an error with candidate IDs and names.
-    If the input is a YouTube URL and no channel matches, the URL is
-    queued for scraping; retry the command later.
+    If the input is a YouTube URL — or a name that YouTube resolves to
+    a channel not yet in the index — it is queued for analysis; check
+    back in about 24 hours.
 
     Examples:
         tl channels find "MrBeast"
