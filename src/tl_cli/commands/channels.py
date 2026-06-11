@@ -296,7 +296,9 @@ def find_cmd(
     """Resolve a string to a single channel.
 
     Accepts:
-      - A partial channel name or slug (ILIKE match)
+      - A partial channel name or slug (substring match, falling back to
+        fuzzy similarity — spacing/typo variants like "Deco Destiny" still
+        resolve a channel named "DecoDestiny")
       - A YouTube channel URL (https://youtube.com/channel/UC...,
         https://youtube.com/@handle, /c/<name>, /user/<name>)
       - A raw YouTube channel ID (UC...) or @handle
