@@ -64,6 +64,16 @@ class TestTreesIdentical:
             (d / "f.md").write_text(body, encoding="utf-8")
         assert not _trees_identical(tmp_path / "a", tmp_path / "b")
 
+    def test_ignores_pycache_artifacts(self, tmp_path):
+        for root in ("a", "b"):
+            d = tmp_path / root / "scripts"
+            d.mkdir(parents=True)
+            (d / "run.py").write_text("print()", encoding="utf-8")
+        cache = tmp_path / "b" / "scripts" / "__pycache__"
+        cache.mkdir()
+        (cache / "run.cpython-313.pyc").write_text("bytecode", encoding="utf-8")
+        assert _trees_identical(tmp_path / "a", tmp_path / "b")
+
     def test_extra_file(self, tmp_path):
         for root in ("a", "b"):
             d = tmp_path / root
@@ -128,11 +138,44 @@ class TestInstallCommandShim:
 
 
 class TestFindClaudeBinary:
-    def test_prefers_path(self, monkeypatch):
+    def test_prefers_execpath_env(self, tmp_path, monkeypatch):
+        exe = tmp_path / "claude.exe"
+        exe.write_text("", encoding="utf-8")
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", str(exe))
+        assert _find_claude_binary() == str(exe)
+
+    def test_ignores_stale_execpath_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_EXECPATH", str(tmp_path / "gone.exe"))
         monkeypatch.setattr(setup.shutil, "which", lambda _: "/somewhere/claude")
         assert _find_claude_binary() == "/somewhere/claude"
 
+    def test_prefers_path(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
+        monkeypatch.setattr(setup.shutil, "which", lambda _: "/somewhere/claude")
+        assert _find_claude_binary() == "/somewhere/claude"
+
+    def test_finds_newest_desktop_app_binary(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
+        monkeypatch.setattr(setup.shutil, "which", lambda _: None)
+        monkeypatch.setattr(setup.Path, "home", staticmethod(lambda: tmp_path))
+        if sys.platform == "win32":
+            base = tmp_path / "AppData" / "Roaming" / "Claude" / "claude-code"
+            monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+            exe = "claude.exe"
+        elif sys.platform == "darwin":
+            base = tmp_path / "Library" / "Application Support" / "Claude" / "claude-code"
+            exe = "claude"
+        else:
+            base = tmp_path / ".config" / "Claude" / "claude-code"
+            exe = "claude"
+        for version in ("2.1.165", "2.1.170"):
+            d = base / version
+            d.mkdir(parents=True)
+            (d / exe).write_text("", encoding="utf-8")
+        assert _find_claude_binary() == str(base / "2.1.170" / exe)
+
     def test_falls_back_to_local_bin(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
         monkeypatch.setattr(setup.shutil, "which", lambda _: None)
         monkeypatch.setattr(setup.Path, "home", staticmethod(lambda: tmp_path))
         exe = "claude.exe" if sys.platform == "win32" else "claude"
@@ -142,6 +185,7 @@ class TestFindClaudeBinary:
         assert _find_claude_binary() == str(target)
 
     def test_not_found_anywhere(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_EXECPATH", raising=False)
         monkeypatch.setattr(setup.shutil, "which", lambda _: None)
         monkeypatch.setattr(setup.Path, "home", staticmethod(lambda: tmp_path))
         if sys.platform == "win32":

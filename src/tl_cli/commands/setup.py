@@ -76,30 +76,66 @@ def _find_plugin_root() -> Path | None:
     return None
 
 
+def _newest_desktop_claude(base: Path, exe: str) -> Path | None:
+    """Pick the highest-version claude binary bundled by the Claude desktop app.
+
+    The desktop app keeps versioned copies under `<base>/<version>/<exe>`
+    (e.g. `%APPDATA%/Claude/claude-code/2.1.170/claude.exe`).
+    """
+    if not base.is_dir():
+        return None
+
+    def _version_key(d: Path) -> tuple[int, ...]:
+        try:
+            return tuple(int(part) for part in d.name.split("."))
+        except ValueError:
+            return (0,)
+
+    for version_dir in sorted(base.iterdir(), key=_version_key, reverse=True):
+        candidate = version_dir / exe
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _find_claude_binary() -> str | None:
     """Find the claude binary on PATH, falling back to known install locations.
 
     On Windows the Claude Code installers often don't end up on the PATH of
     the shell running `tl` (stale PATH, PowerShell-only profile changes), so
     after `shutil.which` we probe the documented install targets directly:
-    the native installer (`~/.local/bin`) and the npm global prefix.
+    the native installer (`~/.local/bin`), the npm global prefix, and the
+    binaries bundled with the Claude desktop app. When `tl` itself runs
+    inside a Claude Code session, `CLAUDE_CODE_EXECPATH` points straight at
+    the running binary and wins.
     """
+    env_exec = os.environ.get("CLAUDE_CODE_EXECPATH")
+    if env_exec and Path(env_exec).is_file():
+        return env_exec
     found = shutil.which("claude")
     if found:
         return found
     home = Path.home()
     if sys.platform == "win32":
+        appdata = Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming")))
         candidates = [
             home / ".local" / "bin" / "claude.exe",
-            Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming"))) / "npm" / "claude.cmd",
+            appdata / "npm" / "claude.cmd",
+            _newest_desktop_claude(appdata / "Claude" / "claude-code", "claude.exe"),
         ]
     else:
+        desktop_base = (
+            home / "Library" / "Application Support" / "Claude" / "claude-code"
+            if sys.platform == "darwin"
+            else home / ".config" / "Claude" / "claude-code"
+        )
         candidates = [
             home / ".local" / "bin" / "claude",
             home / ".claude" / "local" / "claude",
+            _newest_desktop_claude(desktop_base, "claude"),
         ]
     for candidate in candidates:
-        if candidate.is_file():
+        if candidate is not None and candidate.is_file():
             return str(candidate)
     return None
 
@@ -204,10 +240,22 @@ def _install_command_shim() -> Path:
 
 
 def _trees_identical(a: Path, b: Path) -> bool:
-    """True if two directory trees contain the same files with the same contents."""
-    a_files = sorted(p.relative_to(a) for p in a.rglob("*") if p.is_file())
-    b_files = sorted(p.relative_to(b) for p in b.rglob("*") if p.is_file())
-    if a_files != b_files:
+    """True if two directory trees contain the same files with the same contents.
+
+    Python runtime artifacts (`__pycache__/`, `*.pyc`) are ignored — skills
+    that ship scripts grow them when the scripts run, and they shouldn't make
+    an otherwise-pristine copy look user-modified.
+    """
+
+    def _files(root: Path) -> list[Path]:
+        return sorted(
+            p.relative_to(root)
+            for p in root.rglob("*")
+            if p.is_file() and p.suffix != ".pyc" and "__pycache__" not in p.parts
+        )
+
+    a_files = _files(a)
+    if a_files != _files(b):
         return False
     return all(filecmp.cmp(a / rel, b / rel, shallow=False) for rel in a_files)
 
