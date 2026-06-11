@@ -7,9 +7,12 @@ whenever either `gemini` or `codex` is on PATH. Behaviour follows the
 OpenCode pattern (full per-skill tree copy, .tl-version stamp).
 """
 
+import filecmp
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -41,6 +44,19 @@ OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
 AGENTS_SKILLS_DIR = Path.home() / ".agents" / "skills"
 AGENTS_SKILLS_BINARIES = ("gemini", "codex")
 
+# Personal-command shim that keeps the short `/tl` invocation working when the
+# skills are provided (namespaced) by the installed plugin. Plugin skills and
+# commands are always invoked as `/tl-cli:<name>`; this one-file pointer in
+# ~/.claude/commands/ restores plain `/tl` without duplicating any skill
+# content, so plugin updates flow through automatically.
+TL_COMMAND_SHIM = """\
+---
+description: ThoughtLeaders data analyst — shortcut for the tl-cli plugin's tl skill
+---
+
+Invoke the `tl-cli:tl` skill with this request: $ARGUMENTS
+"""
+
 
 def _find_plugin_root() -> Path | None:
     """Locate the plugin assets directory.
@@ -61,8 +77,31 @@ def _find_plugin_root() -> Path | None:
 
 
 def _find_claude_binary() -> str | None:
-    """Find the claude binary on PATH."""
-    return shutil.which("claude")
+    """Find the claude binary on PATH, falling back to known install locations.
+
+    On Windows the Claude Code installers often don't end up on the PATH of
+    the shell running `tl` (stale PATH, PowerShell-only profile changes), so
+    after `shutil.which` we probe the documented install targets directly:
+    the native installer (`~/.local/bin`) and the npm global prefix.
+    """
+    found = shutil.which("claude")
+    if found:
+        return found
+    home = Path.home()
+    if sys.platform == "win32":
+        candidates = [
+            home / ".local" / "bin" / "claude.exe",
+            Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming"))) / "npm" / "claude.cmd",
+        ]
+    else:
+        candidates = [
+            home / ".local" / "bin" / "claude",
+            home / ".claude" / "local" / "claude",
+        ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _run_claude(args: list[str], claude_bin: str) -> tuple[bool, str]:
@@ -156,6 +195,50 @@ def _install_standalone_skills(plugin_root: Path) -> int:
     return count
 
 
+def _install_command_shim() -> Path:
+    """Write the `/tl` shim command to ~/.claude/commands/tl.md."""
+    CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
+    dst = CLAUDE_COMMANDS_DIR / "tl.md"
+    dst.write_text(TL_COMMAND_SHIM, encoding="utf-8")
+    return dst
+
+
+def _trees_identical(a: Path, b: Path) -> bool:
+    """True if two directory trees contain the same files with the same contents."""
+    a_files = sorted(p.relative_to(a) for p in a.rglob("*") if p.is_file())
+    b_files = sorted(p.relative_to(b) for p in b.rglob("*") if p.is_file())
+    if a_files != b_files:
+        return False
+    return all(filecmp.cmp(a / rel, b / rel, shallow=False) for rel in a_files)
+
+
+def _remove_matching_standalone_skills(plugin_root: Path) -> tuple[int, int]:
+    """Remove standalone copies in ~/.claude/skills/ that match the plugin's skills.
+
+    Earlier versions of `tl setup claude` copied every bundled skill into
+    ~/.claude/skills/. Now that the plugin provides them, those copies are
+    redundant — but a copy is only deleted when its tree is byte-identical
+    to the bundled skill, so user-modified copies are never touched.
+    Returns (removed, kept_modified).
+    """
+    removed = kept = 0
+    skills_src = plugin_root / "skills"
+    if not skills_src.is_dir():
+        return removed, kept
+    for skill_dir in skills_src.iterdir():
+        if not (skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file()):
+            continue
+        standalone = CLAUDE_SKILLS_DIR / skill_dir.name
+        if not standalone.is_dir():
+            continue
+        if _trees_identical(skill_dir, standalone):
+            shutil.rmtree(standalone)
+            removed += 1
+        else:
+            kept += 1
+    return removed, kept
+
+
 def _bundled_skill_blurbs(plugin_root: Path) -> list[tuple[str, str]]:
     """Read (name, tl-blurb) for each bundled skill, for the setup summary.
 
@@ -192,18 +275,19 @@ def _bundled_skill_blurbs(plugin_root: Path) -> list[tuple[str, str]]:
 
 
 def _print_manual_instructions() -> None:
-    """Print manual install instructions when claude binary is not found."""
+    """Print manual install instructions when the plugin couldn't be installed."""
     console.print()
-    console.print("[yellow]Claude Code binary not found on PATH.[/yellow]")
+    console.print("[yellow]The Claude Code plugin could not be installed automatically.[/yellow]")
     console.print()
-    console.print("Install Claude Code first, then run these commands inside Claude Code:")
+    console.print(f"The skills were installed to {CLAUDE_SKILLS_DIR} instead — restart")
+    console.print("Claude Code and they will be available (e.g. [cyan]/tl[/cyan]).")
+    console.print()
+    console.print("To install the full plugin, run these commands inside Claude Code:")
     console.print()
     console.print(f"  [cyan]/plugin marketplace add {MARKETPLACE_SOURCE}[/cyan]")
     console.print(f"  [cyan]/plugin install {PLUGIN_KEY}[/cyan]")
     console.print()
-    console.print("Or start Claude Code with the plugin loaded directly:")
-    console.print()
-    console.print(f"  [cyan]claude --plugin-dir /path/to/tl-cli[/cyan]")
+    console.print("then re-run [cyan]tl setup claude[/cyan] to clean up the standalone copies.")
 
 
 @app.command("claude")
@@ -214,8 +298,10 @@ def setup_claude(
     """Install the TL CLI plugin for Claude Code.
 
     Registers the ThoughtLeaders marketplace, installs the tl-cli plugin,
-    and copies skills/commands to ~/.claude/ for short /tl invocation.
-    If the claude binary is not on PATH, prints manual instructions.
+    and adds a /tl shim command so the plugin's tl skill can be invoked
+    without the plugin namespace. Standalone skill copies in ~/.claude/skills
+    are only installed as a fallback when the plugin can't be installed;
+    unmodified copies left by earlier versions are removed.
 
     Examples:
         tl setup claude
@@ -249,10 +335,9 @@ def setup_claude(
     # Check claude binary
     claude_bin = _find_claude_binary()
     if not claude_bin:
-        # Still install standalone skills even without claude binary
-        console.print("  [yellow]![/yellow] claude binary not found on PATH")
+        # Fall back to standalone skill copies when the plugin can't be installed
+        console.print("  [yellow]![/yellow] claude binary not found")
         _install_standalone_skills_step(plugin_root)
-        console.print()
         _print_manual_instructions()
         raise SystemExit(1)
 
@@ -271,6 +356,7 @@ def setup_claude(
             _run_claude(["plugin", "marketplace", "update", MARKETPLACE_NAME], claude_bin)
         else:
             console.print(f"  [red]✗[/red] Marketplace registration failed: {output}")
+            _install_standalone_skills_step(plugin_root)
             _print_manual_instructions()
             raise SystemExit(1)
 
@@ -284,12 +370,20 @@ def setup_claude(
             console.print(f"  [green]✓[/green] Plugin already installed: {PLUGIN_KEY}")
         else:
             console.print(f"  [red]✗[/red] Plugin installation failed: {output}")
-            console.print("    Try running inside Claude Code:")
-            console.print(f"    [cyan]/plugin install {PLUGIN_KEY}[/cyan]")
+            _install_standalone_skills_step(plugin_root)
+            _print_manual_instructions()
             raise SystemExit(1)
 
-    # Step 3: Install standalone skills for short /tl invocation
-    _install_standalone_skills_step(plugin_root)
+    # Step 3: /tl shim command + cleanup of standalone copies from older versions
+    console.print("[bold]Installing /tl shortcut...[/bold]")
+    shim = _install_command_shim()
+    console.print(f"  [green]✓[/green] /tl command installed: {shim}")
+    removed, kept = _remove_matching_standalone_skills(plugin_root)
+    if removed:
+        console.print(f"  [green]✓[/green] Removed {removed} standalone skill(s) now provided by the plugin")
+    if kept:
+        console.print(f"  [yellow]![/yellow] Kept {kept} modified standalone skill(s) in {CLAUDE_SKILLS_DIR}")
+        console.print("    These differ from the plugin's versions and shadow nothing — remove manually if unwanted.")
 
     # Write version stamp
     version_dir = CLAUDE_PLUGINS_DIR / "tl-cli"
@@ -303,20 +397,20 @@ def setup_claude(
     blurbs = _bundled_skill_blurbs(plugin_root)
     width = max((len(name) for name, _ in blurbs), default=0)
     for name, blurb in blurbs:
-        console.print(f"  [cyan]/{name}[/cyan]{' ' * (width - len(name))}  — {blurb}")
+        console.print(f"  [cyan]/{PLUGIN_NAME}:{name}[/cyan]{' ' * (width - len(name))}  — {blurb}")
     console.print()
-    console.print("Try it:")
+    console.print("Try it (restart Claude Code first):")
     console.print("  [cyan]/tl Which channels did we sponsor in Q1?[/cyan]")
     console.print()
     console.print("[dim]To update, run: tl setup claude[/dim]")
 
 
 def _install_standalone_skills_step(plugin_root: Path) -> None:
-    """Install standalone skills and print status."""
-    console.print("[bold]Installing skills for /tl shortcut...[/bold]")
+    """Install standalone skills (plugin-less fallback) and print status."""
+    console.print("[bold]Installing standalone skills (plugin fallback)...[/bold]")
     count = _install_standalone_skills(plugin_root)
     if count > 0:
-        console.print(f"  [green]✓[/green] Installed {count} skills/commands to ~/.claude/")
+        console.print(f"  [green]✓[/green] Installed {count} skills/commands to {CLAUDE_HOME}")
     else:
         console.print("  [yellow]![/yellow] No skills found to install")
 
@@ -362,9 +456,19 @@ def _setup_noninteractive(fmt: str = "json") -> None:
         result["marketplace_registered"] = False
         result["plugin_installed"] = False
 
-    # Always install standalone skills
-    count = _install_standalone_skills(plugin_root)
-    result["standalone_skills_installed"] = count
+    if result["plugin_installed"]:
+        # Plugin provides the skills; install the /tl shim and clean up
+        # unmodified standalone copies left by earlier versions.
+        _install_command_shim()
+        removed, kept = _remove_matching_standalone_skills(plugin_root)
+        result["command_shim_installed"] = True
+        result["standalone_skills_installed"] = 0
+        result["standalone_skills_removed"] = removed
+        result["standalone_skills_kept_modified"] = kept
+    else:
+        # Fallback: standalone skill copies so Claude Code still gets /tl
+        result["command_shim_installed"] = False
+        result["standalone_skills_installed"] = _install_standalone_skills(plugin_root)
 
     # Write version stamp
     version_dir = CLAUDE_PLUGINS_DIR / "tl-cli"

@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 
 from tl_cli import __version__
+from tl_cli.commands.setup import _find_claude_binary
 
 CACHE_DIR = Path.home() / ".cache" / "tl-cli"
 CACHE_PATH = CACHE_DIR / "version-check.json"
@@ -210,8 +211,12 @@ def _spawn_detached_windows_upgrade(cmd: list[str], latest: str) -> bool:
         "set RC=%ERRORLEVEL%\r\n"
         f'echo [tl-cli upgrader] exit code %RC% >> "{log_path}"\r\n'
         "if not %RC%==0 goto end\r\n"
+        "set CLAUDE_FOUND=0\r\n"
         "where claude >NUL 2>&1\r\n"
-        "if not errorlevel 1 (\r\n"
+        "if not errorlevel 1 set CLAUDE_FOUND=1\r\n"
+        'if exist "%USERPROFILE%\\.local\\bin\\claude.exe" set CLAUDE_FOUND=1\r\n'
+        'if exist "%APPDATA%\\npm\\claude.cmd" set CLAUDE_FOUND=1\r\n'
+        "if %CLAUDE_FOUND%==1 (\r\n"
         f'    echo [tl-cli upgrader] re-syncing claude skills >> "{log_path}"\r\n'
         f'    tl setup claude --json >> "{log_path}" 2>&1\r\n'
         ")\r\n"
@@ -411,7 +416,10 @@ def _resync_integrations() -> None:
         ("gemini", "gemini"),
         ("codex", "codex"),
     ):
-        if not shutil.which(binary):
+        # claude is often installed off-PATH (native installer, npm prefix);
+        # use the same probing the setup command uses.
+        found = _find_claude_binary() if binary == "claude" else shutil.which(binary)
+        if not found:
             continue
         print(f"[tl-cli] re-syncing {tool} skills…", file=sys.stderr)
         try:
