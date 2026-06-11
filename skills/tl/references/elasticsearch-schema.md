@@ -29,11 +29,11 @@ See the output of `tl db es`" for the object schema. Highlights:
 
 ### ElasticSearch document structure ("articles")
 
-The `doc_type.name` field in ES objects determins between records for video uploads and for channel data.
+The `doc_type` join field distinguishes video uploads ("articles") from channel data — channel docs are parents, article docs are their children. Filter with `{"term": {"doc_type": "article"}}` or `{"term": {"doc_type": "channel"}}`. ⚠️ Term-querying `doc_type.name` matches nothing — even though article docs' `_source` shows `doc_type` as an object with a `name` key, that's join-field syntax, not a queryable subfield.
 
 #### Upload/video Fields (selected — 73 total)
 
-Distinguished by `doc_type.name="article"`.
+Filter with `{"term": {"doc_type": "article"}}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -80,7 +80,7 @@ Distinguished by `doc_type.name="article"`.
 
 #### Channel Fields
 
-Distinguished by `doc_type.name="channel"`.
+Filter with `{"term": {"doc_type": "channel"}}`.
 
 Contains a denormalized subset of the PostgreSQL channel data.
 
