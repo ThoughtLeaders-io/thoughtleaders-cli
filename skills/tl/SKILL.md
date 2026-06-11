@@ -9,7 +9,7 @@ description: |
 
 ## Core Principles
 
-Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc. Use raw database queries via `tl db pg|fb|es` for everything.
+Run the `tl` CLI to query ThoughtLeaders' sponsorship platform data. Use it to answer questions about deals, channels, brands, uploads, metrics, etc. Use raw database queries via `tl db pg|fb|es` for everything. One exception: resolving a named channel or brand (name, YouTube URL, @handle, video URL) to an ID is always `tl channels find` / `tl brands find` — never `ILIKE` on names.
 
 If doing a database query, follow this recipe:
 
@@ -148,7 +148,7 @@ Unless the user specifically asks for running a specific report or showing the r
 
 1. **Discover first**: Use `tl schema pg`, `tl schema es`, and `tl schema fb` to find information about the main database (pg), the articles / uploads database (es), and the channel metrics database (fb).
 2. **Check credits**: Run `tl balance --json` before expensive queries. Warn the user if a query will cost many credits.
-3. **Decide the method of discovery**: If the user want to explore certain topics, use the recommender commands. If it's more about filtering, construct a query for PG or ES.
+3. **Decide the method of discovery**: If the user named a specific channel, brand, or creator (a name, YouTube URL, @handle, or video URL), resolve it to an ID with `tl channels find` / `tl brands find` before anything else. If the user wants to explore certain topics, use the recommender commands. If it's more about filtering, construct a query for PG or ES.
 4. **Always use --json**: Parse JSON output for multi-step analysis.
 5. **Chain commands**: For complex questions, chain multiple `tl` commands, shell commands, and other tools.
 6. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers. Sort the result by relevant criteria - if the user asked for "top performers", order by the performance metric; if the user asked for "most recent", sort by the pertinent date desc.
@@ -560,7 +560,7 @@ For per-country share beyond the recommender's "USA share" tag, use the `demogra
 
 **MSN status (`media_selling_network_join_date`) is scrubbed from the advertiser sandbox view.** Raw SQL can't filter on it from an advertiser context. For MSN-only / non-MSN lookups, run the same raw SQL with `media_selling_network_join_date IS [NOT] NULL` from a context that has access to it (full-access role), or rely on the recommender's MSN-aware filters: `tl recommender top-channels "<tag>" msn:yes|no|all`.
 
-**Anti-pattern: defaulting to `ILIKE` on `channel_name` for off-tag topic queries.** If the question is "channels about X" where X is a topic / concept / niche (not a literal substring you expect in channel names), reach for path 3 (`tl-keyword-research`), not `WHERE channel_name ILIKE '%X%'`. Channel-name `ILIKE` misses channels whose name doesn't literally contain X but whose content does; the keyword-research skill catches them via `title` / `summary` / `transcript`. Use `channel_name ILIKE` only when you actually expect the channel's name to contain the term (e.g. `"Crypto"` in `"My Happy Crypto"`) as a supplementary signal alongside path 3, not as a replacement for it.
+**Anti-pattern: defaulting to `ILIKE` on `channel_name` for off-tag topic queries.** If the question is "channels about X" where X is a topic / concept / niche (not a literal substring you expect in channel names), reach for path 3 (`tl-keyword-research`), not `WHERE channel_name ILIKE '%X%'`. Channel-name `ILIKE` misses channels whose name doesn't literally contain X but whose content does; the keyword-research skill catches them via `title` / `summary` / `transcript`. Use `channel_name ILIKE` only when you actually expect the channel's name to contain the term (e.g. `"Crypto"` in `"My Happy Crypto"`) as a supplementary signal alongside path 3, not as a replacement for it. And for a *named entity* — a specific creator or channel — don't start with `ILIKE` at all: run `tl channels find "<name>"` first (path 1). Fall back to `ILIKE` name variations only if the resolver finds nothing, and treat a clean "Not found" from the resolver as the likely answer (the channel probably isn't in the index) rather than a cue for ever-broader scans.
 
 ### Output flags
 - `--json` — structured JSON output format (use this for parsing)
