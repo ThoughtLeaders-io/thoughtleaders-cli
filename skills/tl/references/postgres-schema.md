@@ -315,7 +315,7 @@ FROM thoughtleaders_adlink
 WHERE publish_status = 3
   AND purchase_date >= date_trunc('month', CURRENT_DATE)
 ORDER BY purchase_date DESC
-LIMIT 500 OFFSET 0
+LIMIT 10000 OFFSET 0
 ```
 
 **MSN channel joins this month:**
@@ -324,7 +324,7 @@ SELECT id, channel_name, media_selling_network_join_date
 FROM thoughtleaders_channel
 WHERE media_selling_network_join_date >= date_trunc('month', CURRENT_DATE)
 ORDER BY media_selling_network_join_date DESC
-LIMIT 500 OFFSET 0
+LIMIT 10000 OFFSET 0
 ```
 
 **A specific sponsorship info with brand and channel name:**

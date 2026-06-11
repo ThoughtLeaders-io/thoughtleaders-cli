@@ -25,13 +25,13 @@ If doing a database query, follow this recipe:
   ```bash
   tl db pg "SELECT id, weighted_price FROM thoughtleaders_adlink
             WHERE publish_status = 3 AND price > 5000
-            LIMIT 500 OFFSET 0" --json \
+            LIMIT 10000 OFFSET 0" --json \
     | jq '.results[] | {id, price: .weighted_price}'
   ```
 - **`yq`** — same idea for YAML/TOML, useful when reading config files or `--md` blocks.
 - **`rg`** — fast text search across CLI output, transcripts, and the codebase. Better than `grep` for searching large `--csv` exports or transcript dumps from ES.
   ```bash
-  tl db es '{"size":500,"query":{"term":{"channel.id":5607}},"_source":["id","transcript"]}' --json | rg -o "NordVPN[^.]*"
+  tl db es '{"size":10000,"query":{"term":{"channel.id":5607}},"_source":["id","transcript"]}' --json | rg -o "NordVPN[^.]*"
   ```
 - **`duckdb`** — embedded analytical SQL over CSV/JSON files. Use when you need joins, aggregations, or window functions across multiple `tl` exports without spinning up a database.
   ```bash
@@ -42,13 +42,13 @@ If doing a database query, follow this recipe:
             JOIN thoughtleaders_brand b ON b.id = pb.brand_id
             WHERE al.publish_status = 3
               AND al.purchase_date >= '2026-01-01'
-            LIMIT 500 OFFSET 0" --csv > deals.csv
+            LIMIT 10000 OFFSET 0" --csv > deals.csv
   duckdb -c "SELECT brand, SUM(price) AS revenue FROM 'deals.csv' GROUP BY brand ORDER BY revenue DESC LIMIT 10"
   ```
 
 The pattern is always: server-side narrowing first (usually by filters in the `tl db` query, but could be from similarity / recommender searches), then shell tool to shape the result, then read only the final summary into context. If `tl doctor` reports any of these as missing, ask the user to install them.
 
-Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. The maximum number of rows per page is present in the output of `whoami`.
+Always assume there will be more than 1 page of results. You MUST always pass `LIMIT` and `OFFSET` to every `tl db pg|fb|es` query (and use the response envelope's `next_offset` / breadcrumbs to walk forward) so the entire data set is retrieved. Prefer large pages (up to the engine's cap) to minimize round-trips; the per-engine page-size caps are documented in each engine's schema reference under `references/`.
 
 **Counts, totals, and breakdowns: aggregate in the query engine — never page through records to count them.** A "how many / total / average / per-X" question is ONE aggregation query, not N pages of rows summed in your head:
 - `tl db pg` — `SELECT COUNT(*) …`, or `SELECT col, COUNT(*) AS n … GROUP BY col ORDER BY n DESC`. Also `SUM`/`AVG`/`MIN`/`MAX`/`date_trunc`. Returns one/few rows regardless of table size. (`LIMIT`/`OFFSET` still required — an aggregate is one row, so `LIMIT 1 OFFSET 0` is fine.)
@@ -446,7 +446,7 @@ If unsure about what information to find where, read the [references/postgresql-
 | Pre-insert validation queries (joining `adspot ↔ channel ↔ profile ↔ org` to confirm MSN, integration=1, persona, plan) | **Available** via `tl db pg`. | One SELECT joining the four tables. Use `thoughtleaders_channel.media_selling_network_join_date IS NOT NULL` for MSN, `thoughtleaders_adspot.integration = 1` for mention adspots, `thoughtleaders_profile.persona` for the persona code (see persona constants in `references/postgres-schema.md`). |
 | Firebolt cross-table or join queries; filtering on non-indexed columns in WHERE | **Unavailable** — not accepted. | Fetch a wider slice keyed on `channel_id` (and optionally `id`), filter the rest in `jq`/Python. |
 | ES `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, parent/child joins; any `script_*`; multiple aggregations in one body | **Unavailable** — not accepted. | Rewrite using `term`/`terms`/`match`/`bool`/`nested`. For multi-agg dashboards, run multiple `tl db es` calls and combine client-side. For "similar"-style queries, try `tl channels similar` / `tl brands similar` (server-implemented similarity search). |
-| ES deep pagination beyond `from+size = 10,000` | **Unavailable** via raw — `scroll` and `pit` aren't allowlisted; `search_after` is allowed but `from` is still capped. | Use `search_after` with `sort` to walk past 10k. For huge sweeps, narrow with `publication_date` ranges. |
+| ES deep pagination beyond `from+size = 10,000` | **Unavailable** — `scroll`, `pit`, and `search_after` aren't allowlisted; hits past the first 10,000 of a query are unreachable. | A single `size: 10000` page covers everything reachable. For bigger sweeps, slice into `publication_date` range windows of <10k hits each. |
 | ES index introspection (`_cat/indices`, mappings) | **Unavailable** — only `_search` is wired. | Read [references/elasticsearch-schema.md](references/elasticsearch-schema.md). It's manually maintained — update it when you discover new fields. |
 | Schema introspection on Postgres (`information_schema.columns`, `pg_class`, …) | **Partial** — catalog-resolving casts and many `pg_*` helpers are blocked. | Use `tl schema pg` for the live table/column listing, or read [references/postgres-schema.md](references/postgres-schema.md). |
 
@@ -618,7 +618,7 @@ tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
           WHERE al.publish_status = 3
             AND al.purchase_date >= '2026-01-01'
           ORDER BY al.purchase_date DESC
-          LIMIT 500 OFFSET 0" --json
+          LIMIT 10000 OFFSET 0" --json
 ```
 
 ### Brand sponsorship history — what channels does Nike sponsor?
@@ -770,7 +770,7 @@ tl db pg "SELECT al.id, c.channel_name, c.demographic_device_primary, c.demograp
           WHERE al.publish_status = 3
             AND c.demographic_device_primary = 'mobile'
             AND c.demographic_usa_share >= 60
-          LIMIT 500 OFFSET 0" --json
+          LIMIT 10000 OFFSET 0" --json
 ```
 
 ### "Find channels similar to one I know" (similarity recommender):

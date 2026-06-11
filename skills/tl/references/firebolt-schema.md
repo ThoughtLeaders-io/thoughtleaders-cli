@@ -130,7 +130,7 @@ tl db pg "SELECT al.id, al.article_id, s.channel_id
           WHERE al.publish_status = 3
             AND b.name = 'Nike'
             AND al.article_id IS NOT NULL
-          LIMIT 500 OFFSET 0" --json \
+          LIMIT 10000 OFFSET 0" --json \
   | jq -r '.results[] | "\(.channel_id):\(.article_id)"'
 
 # Or videos via Elasticsearch content search
