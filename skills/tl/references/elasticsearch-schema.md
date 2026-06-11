@@ -21,8 +21,9 @@ Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into ro
 
 See the output of `tl db es`" for the object schema. Highlights:
 
-- **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `search_after`, `runtime_mappings`, `knn`) is not accepted.
-- `size` ≤ 10,000. `from + size` ≤ 10,000 — hits beyond the first 10,000 of a query are unreachable; narrow the query (e.g. `publication_date` ranges) instead of paging deeper.
+- **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `search_after`, `track_total_hits`, `highlight`, `fields`, `min_score`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
+- `size` ≤ 10,000. `from + size` ≤ 10,000 — to page past 10,000 hits use `search_after` (see *Deep pagination* below), not `from`.
+- `search_after` must be a non-empty array of ≤ 10 scalar sort values, requires an explicit `sort`, and `from` must be 0 or omitted.
 - **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`. `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
 - **No scripts** — any key whose name contains `script` is not accepted.
 - **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
@@ -215,24 +216,29 @@ tl db es '{
 
 For more dimensions, run multiple `tl db es` calls and join client-side.
 
-### Deep sweeps — window by date, don't page past 10k
+### Deep pagination — `search_after`
 
-`from + size` is capped at 10,000 and cursor keys (`search_after`, `scroll`, `pit`) are not accepted, so hits beyond the first 10,000 of any one query are unreachable. For result sets bigger than that, slice the query into non-overlapping `publication_date` (or other range-field) windows, each under 10,000 hits, and sweep window by window:
+`from + size` is capped at 10,000, and the stateful cursors (`scroll`, `pit`) are not accepted. To page past 10,000 hits, use the stateless `search_after` cursor: sort deterministically with a unique tiebreaker (the `id` field — not `_id`), then pass each response's `next_search_after` envelope value back as `search_after` in the next request, keeping the same `query` and `sort`:
 
 ```bash
-# One window — repeat with shifted date ranges until the full period is covered
+# First page
 tl db es '{
   "size": 10000,
-  "track_total_hits": true,
-  "query": {"bool": {"filter": [
-    {"term": {"channel.id": 12345}},
-    {"range": {"publication_date": {"gte": "2025-01-01", "lt": "2025-04-01"}}}
-  ]}},
-  "sort": [{"publication_date": "asc"}]
+  "query": {"term": {"channel.id": 12345}},
+  "sort": [{"publication_date": "asc"}, {"id": "asc"}]
+}'
+# → envelope includes "next_search_after": ["2025-09-14", "12345:abc123"]
+
+# Next page — identical query & sort, plus the cursor
+tl db es '{
+  "size": 10000,
+  "query": {"term": {"channel.id": 12345}},
+  "sort": [{"publication_date": "asc"}, {"id": "asc"}],
+  "search_after": ["2025-09-14", "12345:abc123"]
 }'
 ```
 
-Check `total` per window — if a window exceeds 10,000, split it further.
+Repeat until a page comes back short (`next_search_after` is absent on an empty page). Pages are not a consistent snapshot — concurrent indexing can occasionally duplicate or skip a boundary row, which is fine for analytics sweeps. Date-range windowing (filtering by `publication_date` ranges) remains a good alternative when you want resumable, idempotent slices.
 
 ## Text analyzer behavior
 
