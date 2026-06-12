@@ -65,6 +65,7 @@ Maps business terms to database concepts.
 | `owner_sales_id` | `adlink` | **Most important.** Person responsible for closing the deal and for the revenue. Final accountability. |
 | `owner_advertiser_id` | `adlink` | Brand-side owner for this specific deal |
 | `owner_publisher_id` | `adlink` | Channel-side owner for this specific deal |
+| `creator_id` | `adlink` | The brand-side user account that *created the record*. ⚠️ NOT the YouTube creator — on sponsorships, "creator" always means the buyer side. Record lineage only; for accountability use the `owner_*` fields, for the brand use `creator_profile_id`, for the channel go via `ad_spot_id`. |
 | `owner_advertiser_id` | `profile` | **Account owner.** Who owns the brand relationship overall. Often same person as owner_sales on adlinks, but not always. |
 | `owner_publisher_id` | `profile` | Channel relationship owner on the profile level |
 | `owner_sales_id` | `profile` | Sales owner at profile level |

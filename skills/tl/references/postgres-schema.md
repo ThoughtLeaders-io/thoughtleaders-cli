@@ -21,7 +21,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 > 🚨 **Columns that DO NOT exist on `thoughtleaders_adlink` — common hallucinations:**
 > - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `creator_profile_id → profile → profile_brands → brand`.
 > - ❌ `organization_id` — there is NO direct org FK. Org is reached via `creator_profile_id → profile.organization_id → organization`.
-> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`.
+> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`. Do NOT substitute `creator_id` — that's the brand-side user who created the record, not the channel/YouTube creator.
 > - ❌ `youtube_id` (on channel) — use `external_channel_id`.
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
@@ -36,6 +36,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `publish_status` | int | Deal status (see constants below) |
 | `ad_spot_id` | int FK | → `thoughtleaders_adspot.id` |
 | `creator_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `creator_profile` — the "creator_" prefix lives on the FK column, not the table. |
+| `creator_id` | int FK | → `auth_user.id` — the brand-side user account that created the sponsorship record. ⚠️ Despite the name, NOT the YouTube creator: on sponsorships, "creator" always means the buyer side. Record lineage only — for the channel use `ad_spot_id → adspot.channel_id`, for the brand use `creator_profile_id`, for accountability use the `owner_*` fields. |
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
 | `owner_publisher_id` | int FK | → `auth_user.id` (channel-side owner) |
 | `owner_sales_id` | int FK | → `auth_user.id` (sales rep) |

@@ -87,7 +87,7 @@ Other key concepts:
 - **Comments** — notes attached to sponsorships, channels, or brands
 - **Adspots** — types of ads a channel is willing to publish (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
 - **Profiles** — actors that own sponsorship records on behalf of either side of a deal. A profile is either buyer-side or seller-side:
-  - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `creator_profile` is the buyer-side profile.
+  - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `creator_profile` is the buyer-side profile, and `creator_id` is the buyer-side user who created the record — on sponsorships, "creator" always means the buyer side, never the YouTube creator (the channel hangs off `ad_spot_id`).
   - *Seller-side (publisher) profiles* — attached to a `Publication`, which in turn owns one or more `Channel` records. A channel's adspots therefore inherit ownership through `channel.publication.profile`.
   - **How to tell them apart** — three signals on the `thoughtleaders_profile` row, used in this order:
     1. **`persona`** (canonical) — `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
