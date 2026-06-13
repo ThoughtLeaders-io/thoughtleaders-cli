@@ -24,7 +24,7 @@ See the output of `tl db es`" for the object schema. Highlights:
 - **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
 - `size` ≤ 500. `from + size` ≤ 10,000. Use `search_after` to page deeper.
 - **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`. `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
-- **No scripts** — any key whose name contains `script` is not accepted.
+- **No scripts** — keys that start with `script` (e.g. `script_fields`, `script_score`, `scripted_metric`) or end with `_script` (e.g. `bucket_script`) are not accepted. A field whose name merely contains `script` as a substring (e.g. `transcript`) is fine.
 - **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
 
 ### ElasticSearch document structure ("articles")
