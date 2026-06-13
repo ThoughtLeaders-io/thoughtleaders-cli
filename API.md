@@ -285,7 +285,7 @@ The server forwards bodies built from `term`, `terms`, `match`, `bool`, `nested`
 
 - `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`
 - parent/child joins
-- any `script_*`
+- scripting keys — anything starting with `script` or ending with `_script` (a field name that merely contains `script`, e.g. `transcript`, is fine)
 - multiple aggregations in one body (run multiple calls and combine client-side)
 
 Deep pagination via `scroll` / `pit` is unavailable — use `search_after` with `sort` to walk past 10 000.
