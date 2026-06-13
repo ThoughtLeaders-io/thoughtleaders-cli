@@ -288,7 +288,7 @@ The server forwards bodies built from `term`, `terms`, `match`, `bool`, `nested`
 - scripting keys — anything starting with `script` or ending with `_script` (a field name that merely contains `script`, e.g. `transcript`, is fine)
 - multiple aggregations in one body (run multiple calls and combine client-side)
 
-Deep pagination via `scroll` / `pit` is unavailable — use `search_after` with `sort` to walk past 10 000.
+Deep pagination is unavailable — `scroll`, `pit`, and `search_after` are all rejected, so the first 10,000 rows (by `sort`) are the hard ceiling. To reach beyond that, narrow the query (date ranges, channel/brand scoping) so the matching set fits under 10,000.
 
 ---
 

@@ -21,8 +21,8 @@ Output flags: `--json`, `--csv`, `--md`, `--toon`. The CLI flattens hits into ro
 
 See the output of `tl db es`" for the object schema. Highlights:
 
-- **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `search_after`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
-- `size` ≤ 500. `from + size` ≤ 10,000. Use `search_after` to page deeper.
+- **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `track_total_hits`, `highlight`, `fields`, `min_score`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `search_after`, `slice`, `runtime_mappings`, `knn`) is not accepted.
+- `size` ≤ 500. `from + size` ≤ 10,000 — a hard ceiling. There is no deep-pagination escape (`scroll`, `pit`, `search_after` are all rejected); to reach rows beyond the first 10,000, narrow the query (e.g. a `publication_date` range, channel/brand scoping) until the matching set fits.
 - **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`. `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
 - **No scripts** — keys that start with `script` (e.g. `script_fields`, `script_score`, `scripted_metric`) or end with `_script` (e.g. `bucket_script`) are not accepted. A field whose name merely contains `script` as a substring (e.g. `transcript`) is fine.
 - **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
@@ -215,22 +215,17 @@ tl db es '{
 
 For more dimensions, run multiple `tl db es` calls and join client-side.
 
-### Deep pagination via `search_after`
+### Paging & the 10,000-row ceiling
+
+`from + size` ≤ 10,000 is a hard cap with no escape hatch — `scroll`, `pit`, and `search_after` are all rejected, so only the first 10,000 rows (by `sort`) are ever reachable. To get at rows beyond that, **narrow the query** instead of paginating: add a `publication_date` range, scope to a `channel.id` / brand, or tighten filters until the matching set fits under 10,000, then walk it with `from`/`size`.
 
 ```bash
-# First page — sort must include a tiebreaker on _id for stability
+# Reachable: first 10k by sort, 500 per page (add a tiebreaker on _id for stable ordering)
 tl db es '{
   "size": 500,
+  "from": 0,
   "query": {"term": {"channel.id": 12345}},
   "sort": [{"publication_date": "desc"}, {"_id": "asc"}]
-}'
-
-# Subsequent pages — pass the last hit's sort values as search_after
-tl db es '{
-  "size": 500,
-  "query": {"term": {"channel.id": 12345}},
-  "sort": [{"publication_date": "desc"}, {"_id": "asc"}],
-  "search_after": ["2025-09-14", "12345:abc123"]
 }'
 ```
 
