@@ -5,17 +5,16 @@ queries run against `tl db es` (`sponsored_brand_mentions`) joined to
 `tl db pg` for channel/brand names.
 """
 
-import json as _json
 import urllib.parse
 
 import typer
-from tl_cli._typer_utils import AlphaSortedTyperGroup
-
 from rich.console import Console
 
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.commands._comments_common import register_comment_commands
+from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
@@ -82,7 +81,7 @@ def show_cmd(
     client = get_client()
     try:
         data = client.get(f"/brands/{encoded_query}")
-        for r in (data.get("results", []) if isinstance(data.get("results"), list) else []):
+        for r in data.get("results", []) if isinstance(data.get("results"), list) else []:
             r["brand_id"] = r.pop("id", None)
         output_single(data, fmt)
         if fmt == "table" and data.get("show_cta"):
@@ -301,6 +300,79 @@ def similar_cmd(
             columns=SIMILAR_COLUMNS,
             title=f"Brands similar to {brand_name}",
             column_config=SIMILAR_COLUMN_CONFIG,
+        )
+    except ApiError as e:
+        _handle_brand_api_error(e)
+    finally:
+        client.close()
+
+
+WINNER_COLUMNS = [
+    "sponsorships",
+    "channel_id",
+    "name",
+    "msn",
+    "tpp",
+    "subscribers",
+    "projected_views",
+    "cpm",
+    "sponsorship_score",
+]
+WINNER_COLUMN_CONFIG = {
+    "sponsorships": {"justify": "right"},
+    "subscribers": {"justify": "right"},
+    "projected_views": {"justify": "right"},
+    "cpm": {"justify": "right"},
+    "sponsorship_score": {"justify": "right"},
+}
+
+
+@app.command("winner-channels")
+def winner_channels_cmd(
+    query: str = typer.Argument(..., help="Brand name, ID, slug, or domain"),
+    args: list[str] = typer.Argument(None, help="Filters (key:value): tpp, msn, since, created-since"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output"),
+    md_output: bool = typer.Option(False, "--md", help="Markdown output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max winner channels (1-200)"),
+) -> None:
+    """Channels a brand has repeatedly sponsored — the methodology's TRUE-renewal signal.
+
+    Returns channels this brand sponsored at least 5 times within the lookback
+    window (default 2 years), reach ≥ 10k, ranked by renewal count. These winners
+    seed the look-alike expansion (`tl channels look-alike <id>`). Costs 5 credits
+    per result. Intelligence plan required.
+
+    Filters:
+        tpp:<yes|no|both>       TL Partner Program (default: both)
+        msn:<yes|no|both|DATE>  Media Selling Network; a YYYY-MM-DD lower-bounds the join date
+        since:<date>            Count sponsorships on/after YYYY[-MM[-DD]] (default: 2 years ago)
+        created-since:<date>    Only channels created on/after YYYY[-MM[-DD]]
+
+    Examples:
+        tl brands winner-channels Nike
+        tl brands winner-channels 6037 msn:yes --limit 30
+        tl brands winner-channels "Magic Spoon" since:2023-01-01
+    """
+    fmt = detect_format(json_output, csv_output, md_output, toon_output)
+    filters = parse_filters(args or [])
+    params: dict[str, str] = {k: filters[k] for k in ("tpp", "msn", "since", "created-since") if k in filters}
+    params["limit"] = str(limit)
+
+    encoded_query = urllib.parse.quote(query, safe="")
+    client = get_client()
+    try:
+        data = client.get(f"/brands/{encoded_query}/winner-channels", params=params)
+        brand_name = data.get("brand", {}).get("name", query)
+        for r in data.get("results", []):
+            r["channel_id"] = r.pop("id", None)
+        output(
+            data,
+            fmt,
+            columns=WINNER_COLUMNS,
+            title=f"Winner channels for {brand_name}",
+            column_config=WINNER_COLUMN_CONFIG,
         )
     except ApiError as e:
         _handle_brand_api_error(e)
