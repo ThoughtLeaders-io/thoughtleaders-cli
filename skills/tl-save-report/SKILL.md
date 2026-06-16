@@ -254,10 +254,10 @@ Date upper bounds: `start_date` / `end_date` are date-typed and use `< next_day`
 
 ### `publish_status` (type 8 only) — numeric IDs, not strings
 
-Sponsorship `publish_status` values are numeric IDs (0–9), **never string labels**. Don't emit `["sold"]` or `["live"]`. The canonical user-phrase → ID mapping is in [`references/report_glossary.md`](references/report_glossary.md) under "Deal-stage jargon". Quick anchors:
+Sponsorship `publish_status` values are numeric IDs from the set `{3, 4, 5, 7, 9, 10}`, **never string labels**. Don't emit `["sold"]` or `["live"]`. The canonical user-phrase → ID mapping is in [`references/report_glossary.md`](references/report_glossary.md) under "Deal-stage jargon". Quick anchors:
 
 - `[3]` = sold
-- `[0, 2, 6, 7, 8]` = pipeline / pre-sale (proposed / pending / matched / outreach / proposal-approved)
+- `[7, 10]` = pipeline / pre-sale (matched / open)
 - `[3]` + `filters_json.ad_publish_status: "0"` = sold + currently live on the channel
 
 The `publish_status` field lives inside `filters_json`, not as a top-level FilterSet field.
@@ -408,7 +408,7 @@ For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_send_da
 
 | `filters_json.publish_status` includes | Use axis | Aggregator names |
 | --- | --- | --- |
-| Pre-sale (0, 2, 6, 7, 8) | `send_date` (pipeline view) | `count_sponsorships_over_send_date`, `sum_price_over_send_date` |
+| Pre-sale (7, 10) — matched / open | `send_date` (pipeline view) | `count_sponsorships_over_send_date`, `sum_price_over_send_date` |
 | Sold only (3) | `purchase_date` (won-deals view) | `count_sponsorships_over_purchase_date`, `sum_price_over_purchase_date` |
 | Mix of pre-sale + sold | `send_date` (pipeline view dominates) | as pipeline |
 | Performance grades (winners/losers) | `purchase_date` | as won-deals |

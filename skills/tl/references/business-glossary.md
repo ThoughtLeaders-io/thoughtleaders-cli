@@ -12,10 +12,10 @@ Maps business terms to database concepts.
 | **Cost** | `adlink.cost` | What the channel earns |
 | **Price** | `adlink.price` | What the advertiser pays |
 | **Closed-lost** | `publish_status IN (4, 5, 9)` | All three rejection statuses |
-| **Open opportunity** | `publish_status IN (0, 2, 6, 7, 8)` | Pipeline — not revenue, not lost |
-| **Proposal Approved** | `publish_status = 6` | AM approved to show to brand — NOT brand approval. Internal gate only. |
-| **Pending** | `publish_status = 2` | Brand has agreed — this is the real high-intent signal |
-| **Weighted pipeline** | `SUM(weighted_price)` for open opps | Pre-calculated on save |
+| **Open opportunity** | `publish_status IN (7, 10)` | Pipeline (MATCHED, OPEN) — not revenue, not lost. Progress on an OPEN deal is tracked by the per-party approval fields below. |
+| **Per-party approval** | `brand_approval_status` / `channel_approval_status` / `agency_approval_status` on an OPEN deal | Each is NULL or 1=PENDING / 2=APPROVED / 3=FINISHED — approval to proceed is tracked per party on the OPEN deal. `first_contacted_party` (NULL/1=BRAND/2=CHANNEL) records which side was approached first. |
+| **Committed / bought** | `publish_status = 3` (SOLD), OR `publish_status = 10` AND `brand_approval_status IN (APPROVED, FINISHED)` | Brand has agreed — the real high-intent signal. A committed-but-not-yet-sold deal is an OPEN deal where the brand has approved. |
+| **Weighted pipeline** | `SUM(weighted_price)` for open opps | `weighted_price` is derived from the brand/channel approval combination on OPEN deals. |
 | **Ad is live** | `publish_date IS NOT NULL` | Until publish_date is set, ad is not on YouTube |
 | **Cancellation risk** | Sold but `publish_date IS NULL` | Sold deals without publish_date can still be canceled |
 | **Immediately bookable** | `is_tl_channel = true` | TPP channels — TL's closest partners. Fastest to respond, easiest to close, prefer when booking. |
