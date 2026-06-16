@@ -37,10 +37,16 @@ jobs:
         run: uv sync --frozen
       - name: Run read-only CLI tests against the live API
         env:
-          # Repository secret. Without it the suite skips (never fails).
+          # Repository secret holding a read-only CLI API key.
           TL_API_KEY: ${{ secrets.TL_API_KEY }}
           # Optional repository variable to target staging; defaults to prod.
           TL_API_URL: ${{ vars.TL_API_URL || 'https://app.thoughtleaders.io' }}
+          # This workflow exists to verify the live backend, so an unreachable
+          # or unauthenticated API (down server, expired/removed TL_API_KEY,
+          # bad deploy) must FAIL here — not skip. Without this, the suite's
+          # default skip-when-no-backend behaviour would hide a real outage
+          # behind a green "all skipped" run.
+          TL_CLI_REQUIRE_LIVE: "1"
           # Headless runners have no OS keyring — force the null backend so
           # keyring never blocks. Auth comes from TL_API_KEY regardless.
           PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
