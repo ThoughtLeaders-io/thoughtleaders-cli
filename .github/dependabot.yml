@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keep the GitHub Actions in .github/workflows/ current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Python dependencies, resolved from uv.lock / pyproject.toml.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"

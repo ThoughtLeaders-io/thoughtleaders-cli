@@ -1,0 +1,47 @@
+name: CLI integration (live, read-only)
+
+# Runs the read-only integration suite under tests_cli/ — every test shells
+# out to the real `tl` binary and talks to a live, authenticated API. This is
+# the only layer that proves the CLI and the API still work together over the
+# wire (envelope shapes, auth, pagination, pricing). READ-ONLY by design
+# (see tests_cli/AGENTS.md); each run spends a handful of credits.
+#
+# The suite skips itself when TL_API_KEY is absent or the API is
+# unreachable/unauthenticated, so a fork PR or an unconfigured repo gets a
+# green "all skipped" run, never a red one.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 6 * * *" # daily 06:30 UTC — catches CLI/API contract drift
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-integration
+  cancel-in-progress: false
+
+jobs:
+  live-cli-tests:
+    name: Live read-only CLI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies (installs the `tl` CLI)
+        run: uv sync --frozen
+      - name: Run read-only CLI tests against the live API
+        env:
+          # Repository secret. Without it the suite skips (never fails).
+          TL_API_KEY: ${{ secrets.TL_API_KEY }}
+          # Optional repository variable to target staging; defaults to prod.
+          TL_API_URL: ${{ vars.TL_API_URL || 'https://app.thoughtleaders.io' }}
+          # Headless runners have no OS keyring — force the null backend so
+          # keyring never blocks. Auth comes from TL_API_KEY regardless.
+          PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+        run: uv run --with pytest pytest tests_cli/ -v -rs

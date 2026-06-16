@@ -1,0 +1,38 @@
+name: CI
+
+# Fast, hermetic checks on every push to main and every PR. These run the
+# mocked unit suite under tests/ — no live API, no credits, fully
+# deterministic. The live CLI tests live in cli-integration.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit tests (mocked) · py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches `requires-python = ">=3.12"`.
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --frozen --python ${{ matrix.python-version }}
+      - name: Run unit tests
+        # tests/ mock the HTTP client (CliRunner + fake get_client), so there
+        # is no network, no API key, and no credit spend.
+        run: uv run --python ${{ matrix.python-version }} --with pytest pytest tests/ -v
