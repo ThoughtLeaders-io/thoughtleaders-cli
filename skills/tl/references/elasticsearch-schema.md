@@ -41,8 +41,8 @@ Filter with `{"term": {"doc_type": "article"}}`.
 | `id` | keyword | Video/article ID. Compound form `<channel_id>:<youtube_id>` (matches PG `adlink.article_id` and ES `_id`). |
 | `title` | text | Video title |
 | `description` | text | Video description |
-| `content` | text | Full content/transcript text |
-| `transcript` | text | Raw transcript |
+| `content` | text | Full content/transcript text (plain text; not always populated) |
+| `transcript` | text | Raw transcript — stored as YouTube timed-text **XML**, not plain text (see note below) |
 | `transcript_language` | keyword | Transcript language code |
 | `summary` | text | AI-generated summary |
 | `publication_date` | date | When video was published |
@@ -243,6 +243,18 @@ Repeat until a page comes back short (`next_search_after` is absent on an empty 
 ## Text analyzer behavior
 
 `text` fields on article docs (`title`, `summary`, `transcript`) appear to use the `standard` analyzer (tokenize + lowercase, no stemmer, no English-possessive filter), so inflections, plurals, and possessives are each indexed as distinct terms. For example: `bitcoin` (4,466,300) vs `bitcoins` (489,262). For stemming-style recall, expand the query side with a `bool.should` over the variants.
+
+## Transcript field format
+
+The `transcript` field's `_source` is **YouTube timed-text caption XML**, not plain prose. Each caption cue is a `<text start="…" dur="…">` element wrapped in `<transcript>`, and the inner text is **double HTML-entity-encoded** (an apostrophe is `&amp;#39;`, i.e. an escaped `&#39;`):
+
+```xml
+<?xml version="1.0" encoding="utf-8" ?>
+<transcript><text start="0.05" dur="4.33">I&amp;#39;m going to</text>...</transcript>
+```
+
+- **Searching is unaffected** — the field is analyzed as `text`, so `match` / `match_phrase` queries hit the words directly regardless of the markup. The XML only matters when you retrieve and read the raw `_source`.
+- **For plain prose**, either use the `content` field (plain text, but not always populated) or strip the markup yourself, e.g. `jq -r '.results[0].transcript' | sed -E 's/<[^>]+>/ /g'` and then unescape entities twice (the encoding is doubled).
 
 ## Notes & gotchas
 
