@@ -111,7 +111,7 @@
   "_tl_axis_branching": {
     "description": "Both histograms in a single type-8 report MUST use the SAME axis. Pick by filters_json.publish_status content.",
     "rules": [
-      { "publish_status_includes": [0, 2, 6, 7, 8], "axis": "send_date",     "use_aggregators": ["count_sponsorships_over_send_date", "sum_price_over_send_date"], "label": "pipeline view" },
+      { "publish_status_includes": [7, 10], "axis": "send_date",     "use_aggregators": ["count_sponsorships_over_send_date", "sum_price_over_send_date"], "label": "pipeline view" },
       { "publish_status_only":     [3],             "axis": "purchase_date", "use_aggregators": ["count_sponsorships_over_purchase_date", "sum_price_over_purchase_date"], "label": "won-deals view" },
       { "publish_status_includes_pre_sale_and_sold": true, "axis": "send_date", "label": "mixed pipeline (send_date dominates)" },
       { "performance_grades_present": true, "axis": "purchase_date", "label": "performance view" }

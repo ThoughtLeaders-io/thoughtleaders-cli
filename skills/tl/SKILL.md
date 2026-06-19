@@ -72,9 +72,9 @@ ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers /
 The centre of the data model are **Sponsorships** — business relationships between brands and channels. Sponsorships statuses form a sales funnel, from broad to narrow:
 
 - **Sponsorships** — the broadest category, encompassing all stages, stored in the `thoughtleaders_adlink` table.
-  - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work
-  - **Proposals** — matches that have been proposed to both sides to consider
-  - **Deals** — contractually agreed-upon sponsorships (sold), either in production or published
+  - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work (`publish_status=7`)
+  - **Proposals** — open sponsorships actively in negotiation between the two sides (`publish_status=10`, `open`)
+  - **Deals** — contractually agreed-upon sponsorships (sold; `publish_status=3`), either in production or published
 
 Sponsorships are sometimes called "Ads" or "Ad campaigns". **"AdLink"** is another name for the same thing — it's the term the database uses (`thoughtleaders_adlink`) and shows up across internal code, schema docs, and AM Slack threads. Treat "sponsorship" and "adlink" as interchangeable; the user-facing word is "sponsorship," the engineering/DB word is "adlink."
 
@@ -181,20 +181,20 @@ Filter-to-SQL examples (deals/matches/proposals all live on `thoughtleaders_adli
 | All sponsorships matching filters | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE …"` |
 | Sold deals (`publish_status=3`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 3"` |
 | Matched (`publish_status=7`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 7"` |
-| Proposed (`publish_status=0`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 0"` |
+| Open / in negotiation (`publish_status=10`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 10"` |
 | Video uploads from ElasticSearch | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
 
 Single-record / mutation commands:
 
 ```bash
 tl sponsorships show <id>              # Sponsorship detail
-tl sponsorships create --channel <id> --brand <id>  # Create proposal
+tl sponsorships create --channel <id> --brand <id>  # Create sponsorship (matched)
 tl sponsorships update <id> '<json>'   # Update a sponsorship
 tl deals show <id>                     # Deal detail
 tl matches show <id>                   # Match detail
 tl matches create --channel <id> --brand <id>  # Create match
 tl proposals show <id>                 # Proposal detail
-tl proposals create --channel <id> --brand <id>  # Create proposal
+tl proposals create --channel <id> --brand <id>  # Create sponsorship (matched)
 tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
@@ -246,10 +246,10 @@ This is the end-to-end workflow for proposing a sponsorship, then moving it thro
 
 #### Creating a sponsorship
 
-`tl sponsorships create` always creates the adlink in **proposed** status. Use the `tl matches create` or `tl proposals create` shortcuts when you specifically want a `matched` adlink or want a clearer log of intent — they share the same backend and accept the same flags.
+`tl sponsorships create` creates the adlink in **matched** status by default. Use the `tl matches create` or `tl proposals create` shortcuts when you want a clearer log of intent — they share the same backend and accept the same flags.
 
 ```bash
-# Minimum: channel ID + brand ID. Creates a proposal (publish_status=PREVIEW=0).
+# Minimum: channel ID + brand ID. Creates a match (publish_status=MATCHED=7).
 tl sponsorships create --channel 5607 --brand 11459
 
 # Optional price (USD):
@@ -267,10 +267,10 @@ tl sponsorships create -c 5607 -b 11459 --json | jq -r '.results[0].sponsorship_
 
 # Shortcuts (delegated to the same server endpoint with a preset status):
 tl matches create -c 5607 -b 11459      # creates with publish_status=matched (7)
-tl proposals create -c 5607 -b 11459    # creates with publish_status=proposed (0)
+tl proposals create -c 5607 -b 11459    # creates with publish_status=matched (7)
 ```
 
-Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "proposed"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
+Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "matched"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
 
 The adlink is owned by the **brand's** advertiser profile (not the calling user's profile) and its `list` FK is set to the requested brand — so the new sponsorship appears under the brand's pipeline, not the AM's.
 
@@ -278,9 +278,13 @@ The adlink is owned by the **brand's** advertiser profile (not the calling user'
 
 After a sponsorship exists, `tl sponsorships update <id> '<json>'` is the single CLI lever for moving it through the funnel. The interesting transitions for vetting are below — pass `publish_status` as a string label (the integer code also works but the label is clearer for both humans and the audit log).
 
+An `open` sponsorship in negotiation progresses through three independent per-party **approval** fields: `brand_approval_status`, `channel_approval_status`, and `agency_approval_status`, each accepting `pending` / `approved` / `finished` (or `null`). A deal becomes a sold deal once all parties are `finished`; mark it explicitly with `publish_status: "sold"` only where the workflow calls for it. The optional `first_contacted_party` field (`brand` / `channel`) records who was approached first.
+
 | Action | Command | What it means |
 |---|---|---|
-| **Accept** (either side, in negotiation) | `tl sponsorships update <id> '{"publish_status": "pending"}'` | Moves the adlink to `PENDING` — both sides are working it but it's not yet sold. |
+| **Open for negotiation** | `tl sponsorships update <id> '{"publish_status": "open"}'` | Moves a matched adlink to `open` — it's now actively being worked by both sides. |
+| **Brand agrees** | `tl sponsorships update <id> '{"brand_approval_status": "approved"}'` | Records brand-side approval on an open deal (this is what makes a deal *committed*). |
+| **Channel agrees** | `tl sponsorships update <id> '{"channel_approval_status": "approved"}'` | Records channel-side approval on an open deal. |
 | **Mark sold** (deal finalised) | `tl sponsorships update <id> '{"publish_status": "sold"}'` | Final commercial step. Sets purchase semantics server-side. |
 | **Reject — Advertiser side** | `tl sponsorships update <id> '{"publish_status": "advertiser_reject"}'` | Maps to `DENY` ("Rejected by Advertiser"). Use when the *brand* turns the offer down. |
 | **Reject — Publisher side** | `tl sponsorships update <id> '{"publish_status": "publisher_reject"}'` | Maps to `REJECT` ("Rejected by Publisher"). Use when the *channel* turns the offer down. |
@@ -302,7 +306,7 @@ tl sponsorships update 98765 '{
 }'
 ```
 
-Full set of `publish_status` labels the CLI accepts: `proposed`, `unavailable`, `pending`, `sold`, `advertiser_reject`, `publisher_reject`, `proposal_approved`, `matched`, `outreach`, `agency_reject`. Numeric codes (0–9) are also accepted but labels are preferred.
+Full set of `publish_status` labels the CLI accepts: `sold`, `advertiser_reject`, `publisher_reject`, `matched`, `agency_reject`, `open`. Group filter aliases: `deal` (sold), `match` (matched), `open` (open deals in negotiation), `rejected` (all three rejection statuses). Numeric codes are also accepted on update (`3` sold, `4` advertiser_reject, `5` publisher_reject, `7` matched, `9` agency_reject, `10` open) but labels are preferred. Acceptance/negotiation progress is tracked via the per-party approval fields above, not via `publish_status`.
 
 #### Worked example: propose → reject
 

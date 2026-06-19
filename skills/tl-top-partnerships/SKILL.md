@@ -26,7 +26,7 @@ For every sold sponsorship the brand has where the video has actually gone live 
 - **Delta** = `live_eCPM - sold_date_eCPM`
   - Negative delta = the deal got *cheaper* per view than promised (good for the brand). Positive delta = the deal underdelivered.
 
-It also pulls **future bookings** — any sponsorship with status sold / proposal_approved / pending and a send date strictly after today — and tags each deal and each channel with the earliest future send date, or "Re-book - no future spot" if none exists. This turns the report into an actionable list, not just a backward look.
+It also pulls **future bookings** — any sponsorship that is sold, or open with the brand having reviewed it (`brand_approval` pending or approved), with a send date strictly after today — and tags each deal and each channel with the earliest future send date, or "Re-book - no future spot" if none exists. This turns the report into an actionable list, not just a backward look.
 
 ## Output
 

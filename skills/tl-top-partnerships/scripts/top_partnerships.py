@@ -78,16 +78,26 @@ def tl_list(*args) -> list[dict]:
 
 def fetch_future_bookings(brand: str) -> dict[str, dict]:
     """Return channel -> {send_date, status} for the earliest future booking per channel.
-    Future = send_date strictly after today, status in {sold, proposal_approved, pending}.
+    Future = send_date strictly after today, status sold, or open with the brand
+    having reviewed it (brand_approval pending or approved).
     """
     today = date.today()
     cutoff = (today + timedelta(days=1)).isoformat()
     end = (today + timedelta(days=365 * 2)).isoformat()
     rows: list[dict] = []
-    for status in ("sold", "proposal_approved", "pending"):
+    # sold deals: a plain status filter.
+    # open deals only count when the brand has reviewed them — narrow the OPEN
+    # arm with brand_approval (pending or approved); a bare status:open would
+    # over-count cold/un-reviewed open deals.
+    queries = (
+        ("sold", []),
+        ("open", ["brand_approval:PENDING,APPROVED"]),
+    )
+    for status, extra in queries:
         rows.extend(tl_list(
             f"brand:{brand}",
             f"status:{status}",
+            *extra,
             f"send-date-start:{cutoff}",
             f"send-date-end:{end}",
         ))

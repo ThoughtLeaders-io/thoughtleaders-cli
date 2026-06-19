@@ -56,7 +56,7 @@ def do_list(
     _EQUIVALENT_STATUSES = {
         "deal": {"deal", "sold"},
         "match": {"match", "matched"},
-        "proposal": {"proposal", "proposed", "pending", "outreach"},
+        "open": {"open", "proposal"},
     }
 
     if default_status and "status" in filters:
@@ -197,7 +197,10 @@ def create_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Create a new sponsorship proposal (free, no credits charged).
+    """Create a new sponsorship (free, no credits charged).
+
+    Creates the sponsorship in `matched` status by default; pass a different
+    `status` in the JSON body to override.
 
     Either pass --channel and --brand (with optional --price) as flags, or
     pass a JSON body as the positional argument — never both.
@@ -230,7 +233,7 @@ def create_cmd(
                 "[red]Error:[/red] JSON body must include channel_id and brand_id."
             )
             raise typer.Exit(1)
-        body.setdefault("status", "proposed")
+        body.setdefault("status", "matched")
         do_create_body(body, fmt)
         return
 
@@ -239,7 +242,7 @@ def create_cmd(
             "[red]Error:[/red] --channel and --brand are required (or pass a JSON body)."
         )
         raise typer.Exit(1)
-    do_create(channel, brand, price, fmt, status="proposed")
+    do_create(channel, brand, price, fmt, status="matched")
 
 
 @app.command("update")

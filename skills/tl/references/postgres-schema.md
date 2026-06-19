@@ -61,18 +61,18 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 
 #### `publish_status` Constants
 
-| Value | Constant | Label | Pipeline Weight |
-|-------|----------|-------|----------------|
-| 0 | PREVIEW | Proposed | 10% |
-| 1 | UNAVAILABLE | Unavailable | — |
-| 2 | PENDING | Pending | 70% |
-| 3 | SOLD | Sold | — |
-| 4 | DENY | Rejected by Advertiser | 0% |
-| 5 | REJECT | Rejected by Publisher | 0% |
-| 6 | PROPOSAL_APPROVED | Proposal Approved | 25% |
-| 7 | MATCHED | Matched (default) | 1% |
-| 8 | OUTREACH | Reached Out | 5% |
-| 9 | REJECTED_AGENCY | Rejected by Agency | 0% |
+| Value | Constant | Label | Notes |
+|-------|----------|-------|-------|
+| 3 | SOLD | Sold | Realized revenue / concluded deal |
+| 4 | DENY | Rejected by Advertiser | Closed-lost |
+| 5 | REJECT | Rejected by Publisher | Closed-lost |
+| 7 | MATCHED | Matched (default) | Pre-negotiation initial stage |
+| 9 | REJECTED_AGENCY | Rejected by Agency | Closed-lost |
+| 10 | OPEN | Open | Active/in-negotiation deal; progress tracked via per-party approval fields |
+
+Live open deals are a single `OPEN` (10) status driven by three independent per-party approval fields: `brand_approval_status`, `channel_approval_status`, `agency_approval_status` (each `1 PENDING` / `2 APPROVED` / `3 FINISHED`, or NULL), plus `first_contacted_party` (`1 BRAND` / `2 CHANNEL`, or NULL).
+
+A deal is **committed** when it is SOLD, or OPEN with `brand_approval_status` in (APPROVED, FINISHED). `weighted_price` is derived from the brand/channel approval combination on OPEN deals.
 
 #### `rejection_reason` Constants
 
@@ -315,7 +315,7 @@ Note: separate from the adspot publisher relationship. Not always in sync.
 ```sql
 SELECT owner_sales_id, SUM(weighted_price) AS pipeline
 FROM thoughtleaders_adlink
-WHERE publish_status IN (0, 2, 6, 7, 8)
+WHERE publish_status IN (7, 10)
 GROUP BY owner_sales_id
 ORDER BY pipeline DESC
 LIMIT 100 OFFSET 0

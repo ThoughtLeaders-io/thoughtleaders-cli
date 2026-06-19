@@ -196,7 +196,7 @@ ThoughtLeaders has its internal terminology that's exposed throughout this tool.
 * **Sponsorships** — Either possible or realised business relationships between brands and channels, stored in `thoughtleaders_adlink`. There are several specific sub-types differentiated by the row's `publish_status`:
     * *Deals* — Contractually agreed-upon sponsorships (sold; `publish_status = 3`). They can be in a production pipeline or already published.
     * *Matches* — Possible brand-channel pairings (`publish_status = 7`); ThoughtLeaders thinks they could work.
-    * *Proposals* — Matches that have been proposed to both sides (`publish_status = 0`).
+    * *Proposals* — Open sponsorships actively in negotiation between the two sides (`publish_status = 10`).
 * **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and a computed CPM.
 * **AdLink** — engineering / DB name for the row that backs a sponsorship. Treat as interchangeable with "sponsorship"; the table is `thoughtleaders_adlink`.
 * **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channel is in MSN if `channel.media_selling_network_join_date IS NOT NULL`.

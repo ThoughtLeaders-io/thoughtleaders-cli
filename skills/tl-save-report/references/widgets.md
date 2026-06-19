@@ -164,7 +164,7 @@ Two date axes — `send_date` (scheduled) and `purchase_date` (won). Histograms 
 
 | `filters_json.publish_status` includes | Use axis |
 |---|---|
-| Pre-sale (0, 2, 6, 7, 8) | `send_date` (pipeline view) |
+| Pre-sale (7, 10) — matched / open | `send_date` (pipeline view) |
 | Sold (3) only | `purchase_date` (won-deals view) |
 | Mix of pre-sale + sold | `send_date` (pipeline view dominates) |
 | Performance grades (winners/losers) | `purchase_date` |

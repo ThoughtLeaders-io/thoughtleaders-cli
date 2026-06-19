@@ -52,7 +52,7 @@
     {"name": "Scheduled Date", "backend_code": "send_date", "sortability": "both", "description": ""},
     {"name": "Price", "backend_code": "price", "sortability": "both", "description": ""},
     {"name": "Cost", "backend_code": "cost", "sortability": "both", "description": ""},
-    {"name": "Weighted price", "backend_code": "weighted_price", "sortability": "both", "description": "Price * (publish_status weight/100)."},
+    {"name": "Weighted price", "backend_code": "weighted_price", "sortability": "both", "description": "Price weighted by the brand/channel approval combination on open deals."},
     {"name": "Projected Views", "backend_code": "ad_spot__channel__impression", "sortability": "both", "description": ""},
     {"name": "Status", "backend_code": "publish_status", "sortability": "both", "description": "Status of the deal."},
     {"name": "Created", "backend_code": "created_at", "sortability": "both", "description": "Creation date of the sponsorship."},

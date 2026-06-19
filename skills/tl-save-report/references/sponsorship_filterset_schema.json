@@ -149,6 +149,19 @@
       "description": "Restrict to sponsorships TL sourced/managed (vs. organic/external sponsorship signals)."
     },
 
+    "brand_approval": {
+      "type": ["string", "null"],
+      "description": "Narrows OPEN (publish_status 10) rows by the advertiser's per-party approval state. Comma list of PENDING/APPROVED/FINISHED or ints 1/2/3, plus 0/null/none for unset. Has no effect unless publish_status includes 10."
+    },
+    "channel_approval": {
+      "type": ["string", "null"],
+      "description": "Narrows OPEN (publish_status 10) rows by the creator's per-party approval state. Same value forms as brand_approval. Has no effect unless publish_status includes 10."
+    },
+    "agency_approval": {
+      "type": ["string", "null"],
+      "description": "Narrows OPEN (publish_status 10) rows by the agency's per-party approval state. Same value forms as brand_approval. Has no effect unless publish_status includes 10."
+    },
+
     "msn_start_date": { "type": ["string", "null"], "format": "date" },
     "msn_end_date":   { "type": ["string", "null"], "format": "date" },
     "msn_channels_only": {
@@ -166,9 +179,10 @@
       "type": ["object", "null"],
       "description": "Catch-all JSONField the platform interprets directly. For type 8 this is the primary place to encode publish_status, deal_status, price ranges, and any sponsorship-specific signals that don't have a first-class column on FilterSet.",
       "_tl_intent_hints": [
-        "publish_status: encode the user's intent ('live', 'pending', 'sold', 'proposed') here; the platform reads it.",
+        "publish_status: encode the user's intent ('matched', 'open', 'sold', 'live') here; the platform reads it.",
         "ad_publish_status: live/currently-running intent uses string value '0' together with publish_status [3] — the platform interprets that combination as 'sold deals that are currently live' (filters to base-table publish_date IS NOT NULL).",
-        "Deal-stage filtering (matches → proposals → deals) goes through filters_json — there is no first-class status field on FilterSet."
+        "Deal-stage filtering (matches → proposals → deals) goes through filters_json — there is no first-class status field on FilterSet.",
+        "committed: set committed '1' here to select committed deals (SOLD ∪ brand-approved OPEN); use it rather than AND-ing publish_status with brand_approval, which drops sold rows whose approval fields are unset."
       ]
     }
   },
@@ -181,7 +195,7 @@
   "_tl_rules": [
     "Type 8 ALWAYS needs a date scope. If the user gave no date hint at all, surface a follow-up question rather than silently defaulting — an unscoped type-8 report returns the entire AdLink table and is almost never what the user wanted. For vague-but-nonzero date language ('recent', 'lately', 'this year'), the `default_date_scope` intent override below applies the 365-day default with judgment.",
     "Do NOT invent fields. Sponsorship status / publish_status / deal stage all live inside `filters_json` — encode them there, not as new top-level keys.",
-    "publish_status values are NUMERIC IDs (0–9), not string labels. See `report_glossary.md`'s 'Deal-stage jargon' table for the canonical user-phrase → ID mapping. The intent overrides below already use numeric IDs; never emit `publish_status: ['live']` or `['sold']` — those strings are not in the platform's enum.",
+    "publish_status values are NUMERIC IDs from the set {3, 4, 5, 7, 9, 10}, not string labels. See `report_glossary.md`'s 'Deal-stage jargon' table for the canonical user-phrase → ID mapping. The intent overrides below already use numeric IDs; never emit `publish_status: ['live']` or `['sold']` — those strings are not in the platform's enum.",
     "Resolve brand/channel names → IDs via `tl brands find <name>` / `tl channels find <name>` BEFORE emitting `brands` / `channels` arrays. Type 8 with unresolved names is a hard failure mode — the saved report returns zero rows.",
     "Keyword fields (`keywords`, `keyword_operator`, `content_fields`, `keyword_content_fields_map`, `keyword_exclude_map`) exist on the model but are inert for type 8 — sponsorships are filtered by relations, not content text. Do not emit them.",
     "Topic fields (`topics`) are inert for type 8 — same reason. Do not emit.",
@@ -201,8 +215,8 @@
     },
     "active_pipeline_intent": {
       "trigger_phrases": ["pipeline", "active sponsorships", "in progress"],
-      "_describes": "All non-rejected, non-sold deals in motion (proposed → reached out → matched → pending → proposal approved).",
-      "set_in_filters_json": { "publish_status": [0, 2, 6, 7, 8] }
+      "_describes": "Matched + open deals in motion (non-rejected, non-sold).",
+      "set_in_filters_json": { "publish_status": [7, 10] }
     },
     "tl_book_intent": {
       "trigger_phrases": ["our deals", "tl book of business", "deals we managed"],
