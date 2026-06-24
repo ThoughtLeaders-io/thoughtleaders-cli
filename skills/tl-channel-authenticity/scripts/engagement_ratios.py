@@ -76,7 +76,7 @@ def analyze(channel: dict, longform: list[dict], shorts: list[dict]) -> dict:
         )
 
     # 3. avg views / subscribers
-    subs = channel.get("reach") or 0
+    subs = channel.get("subscribers") or 0
     if subs and lf_n:
         ratio = (lf_v / lf_n) / subs
         metrics["views_to_subs_ratio"] = ratio

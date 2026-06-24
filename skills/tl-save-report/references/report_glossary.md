@@ -31,11 +31,11 @@ Quick **FilterSet-mapping reference** (where these business terms land in a save
 | Term | FilterSet / `filters_json` mapping in this skill |
 |---|---|
 | **MSN** | `msn_channels_only: true` |
-| **TPP** | resolve-and-pin pattern — `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels` |
+| **TPP** | resolve-and-pin pattern — `SELECT id FROM thoughtleaders_channel WHERE is_tpp = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels` |
 | **MBN** | `cross_references` type `include_sponsored_by_mbn` |
 | **AM** / Account Manager | `owner_advertiser_name` (in `filters_json` for type 8) |
 | **TM** / Talent Manager | `owner_publisher_name` (in `filters_json` for type 8) |
-| **Reach** | `reach_from` / `reach_to` (narrate as "subscribers" per business-glossary) |
+| **Reach** | `subscribers_from` / `subscribers_to` (narrate as "subscribers" per business-glossary) |
 | **Projected Views (PV)** | `projected_views_from` / `projected_views_to`; column `Projected Views` |
 | **View Guarantee (VG)** | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
 | **Net revenue** | Type 8 column: `Revenue` |
@@ -103,11 +103,11 @@ The `publish_status` set is `{3, 4, 5, 7, 9, 10}` (3 Sold, 4 Rejected by Brand, 
 
 ### Channel-size signals
 
-> SQL/internal term = `reach`; user-facing term = **subscribers** (see business-glossary canonical mapping). Emit `reach_from` / `reach_to` in FilterSet; narrate as "subscribers" everywhere user-facing (sample headers, takeaways, summaries).
+> SQL/internal term = `subscribers`; user-facing term = **subscribers** (see business-glossary canonical mapping). Emit `subscribers_from` / `subscribers_to` in FilterSet; narrate as "subscribers" everywhere user-facing (sample headers, takeaways, summaries).
 
 | User intent | Field | Narrate as |
 |---|---|---|
-| "100K+ subscribers" / size floor | `reach_from` (+ `reach_to`) | "subscribers" / "channel size" |
+| "100K+ subscribers" / size floor | `subscribers_from` (+ `subscribers_to`) | "subscribers" / "channel size" |
 | "Channels expecting >X projected views" | `projected_views_from` (+ `projected_views_to`) | "projected views" — forward-looking pricing estimate |
 | Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | "views per video" — per-upload, type 1 only |
 

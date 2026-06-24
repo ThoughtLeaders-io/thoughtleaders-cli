@@ -69,10 +69,10 @@ Defaults: metrics-boxes → `width: 2`; histograms → `width: 3`. `height` is a
 - `duration_median_metric` (metrics-box) — median video duration
 
 ### Subscribers (channel-level)
-- `channel_reach_at_scrape_metric` (metrics-box) — total subscribers across channels
-- `channel_reach_at_scrape_histogram` (histogram) — subscriber growth over time
-- `channel_reach_at_scrape_difference_histogram` (histogram) — subscriber gains over time
-- `channel_reach_last_28_days` (metrics-box) — subscriber change last 28 days
+- `channel_subscribers_at_scrape_metric` (metrics-box) — total subscribers across channels
+- `channel_subscribers_at_scrape_histogram` (histogram) — subscriber growth over time
+- `channel_subscribers_at_scrape_difference_histogram` (histogram) — subscriber gains over time
+- `channel_subscribers_last_28_days` (metrics-box) — subscriber change last 28 days
 
 ### Channel total views
 - `channel_total_views_at_scrape_metric` (metrics-box) — total channel views
@@ -139,7 +139,7 @@ Per-widget `type`/`width`/`height` follow the global defaults above (metrics-box
 
 **Type 2 (BRANDS)** — 1. `brands_count_metric` (M), 2. `total` (M), 3. `views_sum_metric` (M), 4. `brands_count_histogram` (H), 5. `views_sum_histogram` (H)
 
-**Type 3 (CHANNELS)** — 1. `channels_count_metric` (M), 2. `channel_reach_at_scrape_metric` (M), 3. `views_avg_metric` (M), 4. `channel_reach_at_scrape_histogram` (H), 5. `uploads_histogram` (H)
+**Type 3 (CHANNELS)** — 1. `channels_count_metric` (M), 2. `channel_subscribers_at_scrape_metric` (M), 3. `views_avg_metric` (M), 4. `channel_subscribers_at_scrape_histogram` (H), 5. `uploads_histogram` (H)
 
 **Type 8 (SPONSORSHIPS)** — 1. `count_sponsorships` (M), 2. `sum_price` (M), 3. `count_channels` (M), 4. `count_sponsorships_over_<axis>` (H), 5. `sum_price_over_<axis>` (H). `<axis>` per branching table below.
 
@@ -149,7 +149,7 @@ Per-widget `type`/`width`/`height` follow the global defaults above (metrics-box
 
 | Report type | Intent | Adjustment |
 |---|---|---|
-| Type 3 | outreach / product placements | Add `sponsored_brands_count_metric`; consider swapping a histogram for `channel_reach_at_scrape_difference_histogram` |
+| Type 3 | outreach / product placements | Add `sponsored_brands_count_metric`; consider swapping a histogram for `channel_subscribers_at_scrape_difference_histogram` |
 | Type 1 | engagement focus | Replace `views_avg_metric` with `likes_sum_metric` or `comments_avg_metric`; consider `views_30_avg_histogram` |
 | Type 1 | sponsor-surfacing | Add `sponsored_brands_count_metric`; keep `total` + `views_sum_metric` for context |
 | Type 2 | recency / momentum | Add `publication_date_max_metric` (surfaces "last mention") |

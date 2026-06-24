@@ -40,7 +40,7 @@ def channel_snapshots(
         output(
             data,
             fmt,
-            columns=["scrape_date", "reach", "total_views"],
+            columns=["scrape_date", "subscribers", "total_views"],
             title=f"Channel {channel_id} Metrics",
         )
     except ApiError as e:

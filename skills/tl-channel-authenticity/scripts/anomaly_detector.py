@@ -130,14 +130,14 @@ def _analyze_video(channel_id: int, video: dict) -> dict:
 
 def _subs_vs_views(channel_id: int) -> dict | None:
     rows = tl_cli.db_fb(
-        "SELECT scrape_date, total_views, reach FROM channel_metrics "
+        "SELECT scrape_date, total_views, subscribers FROM channel_metrics "
         f"WHERE id = {int(channel_id)} ORDER BY scrape_date"
     )
     if len(rows) < 8:
         return None
     first, last = rows[0], rows[-1]
     dv = (last.get("total_views") or 0) - (first.get("total_views") or 0)
-    ds = (last.get("reach") or 0) - (first.get("reach") or 0)
+    ds = (last.get("subscribers") or 0) - (first.get("subscribers") or 0)
     if dv <= 0:
         return None
     subs_per_100k = ds / (dv / 100_000) if dv else 0

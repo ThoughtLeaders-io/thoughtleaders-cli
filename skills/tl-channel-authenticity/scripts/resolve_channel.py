@@ -127,7 +127,7 @@ if __name__ == "__main__":
     data = resolve(sys.argv[1])
     ch = data["channel"]
     print(
-        f"{ch['channel_name']} (id={ch['id']}, subs={ch.get('reach')}, "
+        f"{ch['channel_name']} (id={ch['id']}, subs={ch.get('subscribers')}, "
         f"cat={ch.get('content_category')}, lang={ch.get('language')})"
     )
     print(f"longform={len(data['longform'])} shorts={len(data['shorts'])}")

@@ -200,7 +200,7 @@
       "_tl_default_by_report_type": {
         "1": "-publish_date",
         "2": "-mentions_count",
-        "3": "-reach"
+        "3": "-subscribers"
       }
     },
 
@@ -266,15 +266,15 @@
     "evergreenness_from": { "type": ["number", "null"], "minimum": 0 },
     "evergreenness_to":   { "type": ["number", "null"], "minimum": 0 },
 
-    "reach_from": {
+    "subscribers_from": {
       "type": ["number", "null"],
       "minimum": 0,
-      "description": "Channel reach lower bound. Reach is TL's rolling audience-size metric (not raw subs).",
+      "description": "Channel subscribers lower bound. Subscribers is TL's rolling audience-size metric (not raw subs).",
       "_tl_intent_hints": [
         "Set when user gives a size signal ('mid-size channels', 'big channels', '50k–500k reach')."
       ]
     },
-    "reach_to": { "type": ["number", "null"], "minimum": 0 },
+    "subscribers_to": { "type": ["number", "null"], "minimum": 0 },
 
     "trend_from": { "type": ["number", "null"] },
     "trend_to":   { "type": ["number", "null"] },
@@ -401,7 +401,7 @@
     },
     "size_floor_intent": {
       "trigger_phrases": ["mid-size or bigger", "decent reach", "not tiny"],
-      "set_with_judgment": { "reach_from": 50000 }
+      "set_with_judgment": { "subscribers_from": 50000 }
     }
   }
 }

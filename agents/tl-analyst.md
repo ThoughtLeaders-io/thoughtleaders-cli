@@ -38,7 +38,7 @@ If estimated cost > 200 credits, ask the user to confirm before proceeding.
 ```sql
 tl db pg "SELECT b.name, SUM(a.weighted_price) AS pipeline, COUNT(*) AS deals
           FROM thoughtleaders_adlink a
-          JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+          JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
           JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
           JOIN thoughtleaders_brand b ON pb.brand_id = b.id
           WHERE a.publish_status = 3
@@ -56,7 +56,7 @@ tl db pg "SELECT a.id, a.send_date, a.publish_status, b.name AS brand, ch.channe
           FROM thoughtleaders_adlink a
           JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id
           JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
-          JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+          JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
           JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
           JOIN thoughtleaders_brand b ON pb.brand_id = b.id
           WHERE a.publish_status = 10
