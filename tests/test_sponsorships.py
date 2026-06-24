@@ -36,6 +36,6 @@ class TestFormatResults:
         assert out["cost"] == "678"
         assert out["views_guarantee"] == "100000"
 
-    def test_send_date_truncated(self):
-        results = [{"send_date": "2026-04-26T12:34:56Z"}]
-        assert _format_results(results)[0]["send_date"] == "2026-04-26"
+    def test_scheduled_date_truncated(self):
+        results = [{"scheduled_date": "2026-04-26T12:34:56Z"}]
+        assert _format_results(results)[0]["scheduled_date"] == "2026-04-26"

@@ -49,7 +49,7 @@
   "8": [
     {"name": "Advertiser", "backend_code": "creator", "sortability": "both", "description": ""},
     {"name": "Channel", "backend_code": "ad_spot__channel__channel_name", "sortability": "both", "description": ""},
-    {"name": "Scheduled Date", "backend_code": "send_date", "sortability": "both", "description": ""},
+    {"name": "Scheduled Date", "backend_code": "scheduled_date", "sortability": "both", "description": ""},
     {"name": "Price", "backend_code": "price", "sortability": "both", "description": ""},
     {"name": "Cost", "backend_code": "cost", "sortability": "both", "description": ""},
     {"name": "Weighted price", "backend_code": "weighted_price", "sortability": "both", "description": "Price weighted by the brand/channel approval combination on open deals."},

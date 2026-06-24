@@ -222,7 +222,7 @@ Talk naturally in Claude Code:
 ```
 /tl Which channels did we sponsor in Q1?
 /tl sold sponsorships for Nike in Q1
-/tl show me pending proposals with send dates in April
+/tl show me pending proposals with scheduled dates in April
 /tl what channels does Nike sponsor?
 /tl find me Cooking creators in the US with mobile-heavy audiences
 /tl check my balance
@@ -230,7 +230,7 @@ Talk naturally in Claude Code:
 
 Resource-specific slash commands:
 ```
-/tl-sponsorships pending with send dates in April
+/tl-sponsorships pending with scheduled dates in April
 /tl-reports run my Q1 pipeline
 /tl-balance
 ```

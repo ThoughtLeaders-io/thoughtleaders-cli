@@ -109,7 +109,7 @@ Other key concepts:
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
-  - **`send_date`** — the date the video is/was expected to be published (scheduled)
+  - **`scheduled_date`** — the date the video is/was expected to be published (scheduled)
   - **`publish_date`** — the date the video was actually published; These make up live ads.
 - **Credits** — every data query costs credits; use `tl describe` to see rates. Top up with `tl credits buy --amount-usd N` (free; opens a browser checkout). New accounts get a starter balance on first `tl auth login`; the rate is shown by `tl credits pricing`.
 

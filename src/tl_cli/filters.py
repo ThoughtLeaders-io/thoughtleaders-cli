@@ -21,7 +21,7 @@ DATE_FILTER_KEYS = {
     "created-at", "created-at-start", "created-at-end",
     "publish-date", "publish-date-start", "publish-date-end",
     "purchase-date", "purchase-date-start", "purchase-date-end",
-    "send-date", "send-date-start", "send-date-end",
+    "scheduled-date", "scheduled-date-start", "scheduled-date-end",
 }
 
 DATE_KEYWORDS = {

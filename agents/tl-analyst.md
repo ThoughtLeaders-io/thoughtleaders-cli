@@ -52,7 +52,7 @@ One query → ranked list. No client-side aggregation, no paginated walk.
 ### Cross-resource analysis (raw PG)
 "Show me deal slippage this month"
 ```sql
-tl db pg "SELECT a.id, a.send_date, a.publish_status, b.name AS brand, ch.channel_name
+tl db pg "SELECT a.id, a.scheduled_date, a.publish_status, b.name AS brand, ch.channel_name
           FROM thoughtleaders_adlink a
           JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id
           JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
@@ -60,8 +60,8 @@ tl db pg "SELECT a.id, a.send_date, a.publish_status, b.name AS brand, ch.channe
           JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
           JOIN thoughtleaders_brand b ON pb.brand_id = b.id
           WHERE a.publish_status = 10
-            AND a.send_date < CURRENT_DATE
-          ORDER BY a.send_date
+            AND a.scheduled_date < CURRENT_DATE
+          ORDER BY a.scheduled_date
           LIMIT 100 OFFSET 0"
 ```
 Then suggest `tl sponsorships comment-add <id> "..."` for each.
@@ -83,7 +83,7 @@ Then suggest `tl sponsorships comment-add <id> "..."` for each.
 "Give me a full picture of channel 12345"
 1. `tl channels show 12345 --json` → profile, scores, demographics (structured — wraps several joins already)
 2. `tl snapshots channel 12345 --json` → growth over time (snapshots wrap interpolation logic)
-3. `tl db pg "SELECT id, send_date, publish_status, price FROM thoughtleaders_adlink WHERE ad_spot_id IN (SELECT id FROM thoughtleaders_adspot WHERE channel_id = 12345) ORDER BY send_date DESC LIMIT 100 OFFSET 0"` — deal history with the columns you actually want, no over-fetch.
+3. `tl db pg "SELECT id, scheduled_date, publish_status, price FROM thoughtleaders_adlink WHERE ad_spot_id IN (SELECT id FROM thoughtleaders_adspot WHERE channel_id = 12345) ORDER BY scheduled_date DESC LIMIT 100 OFFSET 0"` — deal history with the columns you actually want, no over-fetch.
 4. `tl uploads list channel:12345 --json` → recent content
 
 ### Transcript / brand-mention search (raw ES)

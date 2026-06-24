@@ -27,9 +27,9 @@ COLUMN_CONFIG = {
 def _format_results(results: list[dict]) -> list[dict]:
     """Clean up sponsorship results for display."""
     for row in results:
-        sd = row.get("send_date")
+        sd = row.get("scheduled_date")
         if sd and isinstance(sd, str) and "T" in sd:
-            row["send_date"] = sd[:10]
+            row["scheduled_date"] = sd[:10]
         for field in ("price", "cost", "views_guarantee"):
             val = row.get(field)
             if val is not None:

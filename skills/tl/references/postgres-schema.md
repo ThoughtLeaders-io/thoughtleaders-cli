@@ -40,7 +40,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
 | `owner_publisher_id` | int FK | → `auth_user.id` (channel-side owner) |
 | `owner_sales_id` | int FK | → `auth_user.id` (sales rep) |
-| `send_date` | timestamptz | Scheduled send/publish date |
+| `scheduled_date` | timestamptz | Scheduled send/publish date |
 | `publish_date` | timestamptz | Actual publish date |
 | `outreach_date` | timestamptz | When outreach was sent |
 | `purchase_date` | timestamptz | When deal was purchased/sold |

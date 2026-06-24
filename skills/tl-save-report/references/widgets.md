@@ -97,11 +97,11 @@ Defaults: metrics-boxes → `width: 2`; histograms → `width: 3`. `height` is a
 
 ### Core sponsorships
 - `count_sponsorships` (metrics-box) — total sponsorship count
-- `count_sponsorships_over_send_date` (histogram) — sponsorships scheduled over time
+- `count_sponsorships_over_scheduled_date` (histogram) — sponsorships scheduled over time
 - `count_sponsorships_over_purchase_date` (histogram) — sponsorships purchased over time
 - `sum_cost` (metrics-box) — total cost
 - `sum_price` (metrics-box) — total price
-- `sum_price_over_send_date` (histogram) — price scheduled over time
+- `sum_price_over_scheduled_date` (histogram) — price scheduled over time
 - `sum_price_over_purchase_date` (histogram) — price purchased over time
 - `sum_profit` (metrics-box) — net profit (`price - cost`)
 - `sum_impression` (metrics-box) — total projected views
@@ -153,20 +153,20 @@ Per-widget `type`/`width`/`height` follow the global defaults above (metrics-box
 | Type 1 | engagement focus | Replace `views_avg_metric` with `likes_sum_metric` or `comments_avg_metric`; consider `views_30_avg_histogram` |
 | Type 1 | sponsor-surfacing | Add `sponsored_brands_count_metric`; keep `total` + `views_sum_metric` for context |
 | Type 2 | recency / momentum | Add `publication_date_max_metric` (surfaces "last mention") |
-| Type 8 | pipeline / forecasting | Axis: `send_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_impression` |
+| Type 8 | pipeline / forecasting | Axis: `scheduled_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_impression` |
 | Type 8 | won deals review | Axis: `purchase_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_revenue`, `sum_profit` |
 | Type 8 | performance / ROI | Replace one histogram with `count_sponsorships_over_performance_grade` (`histogram-category`). Metrics emphasize `roas`, `avg_cpv`, `sum_revenue` |
 | Type 8 | assets / drafts QA | Replace value metrics with `count_sponsorships_where_published`, `_where_unpublished`, `_where_assets_are_incomplete`, `_where_draft_is_missing`. Drop or keep one histogram |
 
 ## Type-8 axis branching
 
-Two date axes — `send_date` (scheduled) and `purchase_date` (won). Histograms branch on deal stage:
+Two date axes — `scheduled_date` (scheduled) and `purchase_date` (won). Histograms branch on deal stage:
 
 | `filters_json.publish_status` includes | Use axis |
 |---|---|
-| Pre-sale (7, 10) — matched / open | `send_date` (pipeline view) |
+| Pre-sale (7, 10) — matched / open | `scheduled_date` (pipeline view) |
 | Sold (3) only | `purchase_date` (won-deals view) |
-| Mix of pre-sale + sold | `send_date` (pipeline view dominates) |
+| Mix of pre-sale + sold | `scheduled_date` (pipeline view dominates) |
 | Performance grades (winners/losers) | `purchase_date` |
 
 Both `_over_<axis>` histograms in the same report use the SAME axis — don't mix within one report.

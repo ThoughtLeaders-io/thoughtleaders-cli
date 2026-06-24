@@ -292,7 +292,7 @@ These compose with the rest of the FilterSet rather than replacing it:
 | TPP-only | resolve `SELECT id FROM thoughtleaders_channel WHERE is_tpp = TRUE AND is_active = TRUE` and pin into `channels: [...]` (no first-class TPP boolean on FilterSet) |
 | Demographics (age / gender / geo / device) | `demographic_male_share`, `demographic_usa_share`, `demographic_geo`, `demographic_device`, `demographic_age_median_value`, etc. — see schema |
 | Publication date range (types 1 / 2 / 3) | `start_date`, `end_date`, or `days_ago` / `days_ago_to` |
-| Sponsorship send-date range (type 8) | `start_date` / `end_date` / `days_ago` / `days_ago_to` |
+| Sponsorship scheduled-date range (type 8) | `start_date` / `end_date` / `days_ago` / `days_ago_to` |
 | Sponsorship created-date range (type 8) | `createdat_from` / `createdat_to` |
 | Deal stage (type 8) | `filters_json.publish_status: [<int>, …]` (numeric IDs) |
 | Currently-live deals (type 8) | `filters_json.publish_status: [3]` + `filters_json.ad_publish_status: "0"` |
@@ -335,9 +335,9 @@ Pick **5–10 columns** for most reports; the platform allows up to 13 if intent
 | Intent | Sort | Applies to |
 | --- | --- | --- |
 | User said "top X by [metric]" | the metric, `-` prefix for desc | any type |
-| User said "most recent" / "latest" | `-publication_date` (1/2/3) or `-purchase_date` (8 sold) or `-send_date` (8 pipeline) | by report type |
+| User said "most recent" / "latest" | `-publication_date` (1/2/3) or `-purchase_date` (8 sold) or `-scheduled_date` (8 pipeline) | by report type |
 | Outreach intent on channels | `-publication_date_max` (channels with recent uploads bubble up) | type 3 |
-| **No explicit intent** — fall back to type default | `-subscribers` (type 3), `-views` (type 1), `-doc_count` (type 2), `-purchase_date` for sold + `-send_date` for pipeline (type 8) | by report type |
+| **No explicit intent** — fall back to type default | `-subscribers` (type 3), `-views` (type 1), `-doc_count` (type 2), `-purchase_date` for sold + `-scheduled_date` for pipeline (type 8) | by report type |
 
 **Two hard requirements on the sort value:**
 
@@ -402,18 +402,18 @@ One top-level value per report, applies to every histogram in it:
 
 Match the FilterSet's date scope. If the FilterSet has no date scope (rare for types 1 / 2 / 3, never legal for type 8), default to `"month"`.
 
-### Type-8 axis branching (send_date vs purchase_date)
+### Type-8 axis branching (scheduled_date vs purchase_date)
 
-For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_send_date` vs `count_sponsorships_over_purchase_date`, and same for `sum_price`) branch on deal stage:
+For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_scheduled_date` vs `count_sponsorships_over_purchase_date`, and same for `sum_price`) branch on deal stage:
 
 | `filters_json.publish_status` includes | Use axis | Aggregator names |
 | --- | --- | --- |
-| Pre-sale (7, 10) — matched / open | `send_date` (pipeline view) | `count_sponsorships_over_send_date`, `sum_price_over_send_date` |
+| Pre-sale (7, 10) — matched / open | `scheduled_date` (pipeline view) | `count_sponsorships_over_scheduled_date`, `sum_price_over_scheduled_date` |
 | Sold only (3) | `purchase_date` (won-deals view) | `count_sponsorships_over_purchase_date`, `sum_price_over_purchase_date` |
-| Mix of pre-sale + sold | `send_date` (pipeline view dominates) | as pipeline |
+| Mix of pre-sale + sold | `scheduled_date` (pipeline view dominates) | as pipeline |
 | Performance grades (winners/losers) | `purchase_date` | as won-deals |
 
-**Both `_over_<axis>` histograms in the same report must share the same axis.** Don't mix `send_date` and `purchase_date` within one report — the dashboard renders confusingly when the two axes disagree.
+**Both `_over_<axis>` histograms in the same report must share the same axis.** Don't mix `scheduled_date` and `purchase_date` within one report — the dashboard renders confusingly when the two axes disagree.
 
 ## B5. Assemble the config
 

@@ -99,7 +99,7 @@ The `publish_status` set is `{3, 4, 5, 7, 9, 10}` (3 Sold, 4 Rejected by Brand, 
 | "Last 90 days" / rolling | `days_ago` (+ optionally `days_ago_to`) | Rolling = relative to now |
 | "Between Jan 1 and Mar 31" | `start_date` + `end_date` | Absolute window |
 | "Channels created on TL since X" | `createdat_from` (+ `createdat_to`) | TL-side record creation, not YouTube publish |
-| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses for send_date) | Type 8 semantics shift — see schema |
+| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses for scheduled_date) | Type 8 semantics shift — see schema |
 
 ### Channel-size signals
 
