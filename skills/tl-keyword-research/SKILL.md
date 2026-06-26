@@ -2,20 +2,26 @@
 name: tl-keyword-research
 tl-blurb: find & validate channels by topic
 description: |
-  Find YouTube channels that *reliably* cover a topic — discovered by content keywords (topics, concepts, niches), then validated by the CONTEXT in which those keywords appear in the channel's videos. Invoke when the user wants channels for a topic ("find investing channels", "channels that cover tiktok shops"), not by channel ID/name. Default output: a ranked, context-validated set of channels with sponsorability flags (JSON), plus an offer to save as a TL report. The keyword-distribution mode (counts per keyword) is OPT-IN — only when the user explicitly asks for "keyword counts / distribution / how common is X".
+  Find YouTube channels that *reliably* cover a topic — discovered by content keywords (topics, concepts, niches), then validated by the CONTEXT in which those keywords appear in the channel's videos. Invoke when the user wants channels for a topic ("find investing channels", "channels that cover tiktok shops"), not by channel ID/name. Default output: a ranked, context-validated set of channels with sponsorability flags (JSON), plus an offer to save as a TL report. The keyword-distribution mode (counts per keyword) is OPT-IN — only when the user explicitly asks for "keyword counts / distribution / how common is X". By default it runs ≥3 refinement rounds and checks in with you before finalizing — say "run autonomously" (or pass `autonomous` / `--auto`) to skip the pauses and let it finish on its own.
 ---
 
 # tl-keyword-research — topic → validated channels
 
-Given a topic (seed keyword(s) or an NL phrase), return a ranked set of channels that
-reliably cover it. The flow: widen the topic into keywords, find candidate channels by
-**field-weighted** relevance (`title` > `summary` > `transcript`), spot-check the
-**context** of the keyword in each candidate with cheap agents to drop channels that
-only use the word in an unrelated sense, flag each survivor for sponsorability, and
-(autonomously, within a bounded loop) narrow or expand the search based on what the
-context check reveals.
+Given a topic (seed keyword(s) or an NL phrase), arrive at **a CNF (Conjunctive Normal
+Form) keyword expression** that reliably selects channels covering it — *and* the ranked,
+validated set of channels that expression selects. The flow: widen the topic into
+keywords, find candidate channels by **field-weighted** relevance (`title` > `summary` >
+`transcript`), spot-check the **context** of the keyword in each candidate with cheap
+agents to drop channels that only use the word in an unrelated sense, flag each survivor
+for sponsorability, and over **≥3 refinement rounds** compose/recompose the boolean query
+— narrowing and expanding — based on what the context check reveals.
 
-**Default output = validated channels.** The old keyword-distribution output
+**The final result is the CNF expression** — an AND of OR-clauses with negated exclusions,
+e.g. `(investing OR "stock market") AND (stocks OR etf) AND (NOT sermon) AND (NOT betting)`
+— together with the validated channels it selects. The CNF is the distilled, reusable
+artifact: it re-runs verbatim via `search_channels.py --any/--not` and saves with the report.
+
+**Default output = the CNF + validated channels.** The old keyword-distribution output
 (`{keyword, count}`) is now an **opt-in mode** — produce it only when the user
 explicitly asks for keyword counts / distribution / "how common is X". See
 [Opt-in: keyword distribution](#opt-in-keyword-distribution).
@@ -38,7 +44,19 @@ Skip when:
 2. **Search channels** — `search_channels.py` → field-weighted candidate channels (the default result shape).
 3. **Fetch context** — `fetch_context.py` → keyword-in-context evidence per candidate.
 4. **Validate** — spawn cheap (Haiku) agents to judge each channel's keyword sense and surface adjacent terms.
-5. **Assess & refine** — you read the verdicts, then narrow or expand and re-run 2–4. Bounded, autonomous (≈3 rounds).
+5. **Refine** — compose AND/OR/NOT to narrow & expand, probe fitness, backtrack; **≥3 rounds**, then checkpoint with the user (and interview them if they want more).
+
+## Pacing & autonomy
+
+**Default is interactive.** At the **start** of a run, tell the user in one line how this
+will go — e.g. *"I'll refine over at least 3 rounds, then check in before finalizing. Say
+'run autonomously' if you'd rather I not pause."* That lets them opt out **before** the
+first interview, not just after round 3.
+
+**Opt-out triggers — any of these → run autonomously** (full behavior in Stage 5): the
+user says run autonomously / without pausing / "don't stop to ask", **or** invokes the
+skill with an `autonomous` / `--auto` argument. The preference holds for the rest of the
+session unless the user revokes it.
 
 ---
 
@@ -61,8 +79,17 @@ are distinct terms), and reasonable abbreviations. Hard rules:
 ## Stage 2 — Search channels (default output)
 
 ```bash
+# Flat OR (broad first pass)
 python3 <SKILL_DIR>/scripts/search_channels.py --operator OR --size 200 \
   investing "index funds" "stock market" "personal finance"
+
+# Composed boolean — the lever for narrowing/expanding (see Stage 5):
+#   (investing OR "stock market" OR "index funds") AND (stocks OR portfolio OR etf)
+#   AND NOT (sermon OR gospel OR "sports investing" OR betting)
+python3 <SKILL_DIR>/scripts/search_channels.py --size 200 \
+  --any "investing,stock market,index funds" \
+  --any "stocks,portfolio,etf" \
+  --not "sermon,gospel,sports investing,betting"
 # JSON array / newline list on stdin also accepted; --since/--until scope publication_date.
 ```
 
@@ -70,8 +97,11 @@ Runs ONE collapsed ES search (`collapse` on `channel.id`, sorted by `_score`) so
 channel surfaces its single best-matching video, then enriches with name +
 sponsorability. **Field weighting is the priority you asked for:** title hits outscore
 summary, which outscore transcript (default boosts `title^4,summary^2,transcript^1`,
-tunable via `--fields`). Output per channel: `channel_id, name, score, top_video_id,
-top_video_title, sponsorability{…}`. This is the candidate set for validation.
+tunable via `--fields`). **Boolean composition:** each `--any "a,b"` is one required
+OR-group (a dimension); repeating `--any` ANDs the groups; `--not` excludes a sense.
+So adding a group narrows, adding terms to a group widens, `--not` prunes — this is the
+machinery Stage 5 drives. Output: `query` (the boolean it ran), `total_matching_videos`,
+and per channel `channel_id, name, score, top_video_id, top_video_title, sponsorability{…}`.
 
 ## Stage 3 — Fetch context
 
@@ -119,21 +149,70 @@ evidence fits easily), so two guards:
    emitted prose / invalid JSON), re-send just the missing channels to a fresh agent and
    merge. Never assume a batch came back whole. Smaller batches make this fire less often.
 
-## Stage 5 — Assess & refine (autonomous, bounded ≈3 rounds)
+## Stage 5 — Iterative compositional refinement (≥3 rounds, then ask the user)
 
-Read the verdicts + adjacent terms and decide, then re-run Stages 2–4. Cap at **~3
-refinement rounds**; stop earlier when the validated set is stable. Each round, briefly
-report what you changed and why.
+This is the heart of the skill. You **research the topic by composing and recomposing a
+boolean keyword query** — combining `--any` OR-groups (AND'd together) and `--not`
+exclusions — to narrow and expand the channel set, examining the results each round,
+probing their fitness, and **backtracking** when a move makes things worse. This is not
+a single pass with a flat operator; it is a search through query-space. Each composed
+query **is** a CNF expression — an AND of OR-clauses plus negated literals — so refinement
+is the incremental construction of the final CNF, the skill's end-product.
 
-- **Narrow** when off-topic verdicts cluster around a confusable sense: add the wrong
-  sense to the agents' `NOT:` line; drop transcript-only matches by tightening
-  `--fields` to `title^4,summary^2`; or require co-occurrence (switch to `--operator AND`
-  with a disambiguating term, e.g. `investing` + `stocks`).
-- **Expand** when adjacent terms reveal a productive direction: add the discovered term
-  as a new keyword and re-search. Example: investigating **"tiktok shop"**, the context
-  check repeatedly surfaces **"Amazon"** and **"affiliate"** → conclude these are common
-  affiliate providers for that niche and add them (OR) to widen reach.
-- Keep a running set of validated channels across rounds (dedupe by `channel_id`).
+**Run at least 3 rounds.** Three is the floor, not a cap — do not stop before three even
+if round 1 looks good.
+
+### Each round
+
+1. **Compose / recompose** the boolean query. Round 1 is usually broad: one OR-group of
+   the Stage-1 expansion. Later rounds add structure (below).
+2. **Search** — `search_channels.py` with the `--any` / `--not` you composed → candidates.
+3. **Probe for fitness** — run Stages 3–4 (fetch context + Haiku validation) on the top
+   candidates. Read the verdicts and `adjacent_terms`.
+4. **Score the round's fitness** from what you see, e.g.: the share of `on_topic` vs
+   `off_topic`/`mixed`; whether off-topic verdicts cluster on one confusable sense;
+   how many **sponsorable, high-reach** channels are `on_topic`; and how much the set
+   changed. Write this down.
+5. **Decide the next move** and **record** (query, fitness, decision) so you can backtrack:
+   - **Narrow** when off-topic clusters on a sense, or the set is too broad/noisy: add a
+     required dimension (`--any "stocks,portfolio,etf"`), and/or exclude the bad sense
+     (`--not "sermon,sports investing"`).
+   - **Expand** when fitness is high but reach is thin, or `adjacent_terms` reveal a
+     productive direction: widen a group, or add a discovered term. Example: under
+     **"tiktok shop"** the context check repeatedly surfaces **"Amazon"** / **"affiliate"**
+     → add them (`--any "tiktok shop,amazon,affiliate"`) as common affiliate providers.
+   - **Backtrack** when a move *reduced* fitness (fewer good channels, more noise, lost a
+     strong channel): discard it, return to the previous recorded query, and try a
+     **different** axis. Backtracking is expected, not failure.
+6. Keep a **running validated set** across rounds (dedupe by `channel_id`); carry forward
+   confirmed `on_topic`/`mixed` channels even as the query shifts.
+
+Each round, briefly report: the boolean query you ran, the fitness read, and the move
+(narrow / expand / backtrack) with the reason.
+
+### After round 3 (and every round thereafter) — checkpoint with the user
+
+**Default (interactive):** do **not** finalize autonomously. Present the current validated
+set with a short summary (the CNF expression, fitness, what changed across rounds), then
+**ask the user to validate the results and choose**: accept as-is · run more refinement
+rounds · adjust direction.
+
+**Autonomy override — honor a stated preference.** If the user has told you to run
+autonomously / without pausing / "don't stop to ask" — **or** invoked the skill with an
+`autonomous` / `--auto` argument — (in this message or earlier in the session),
+**skip this checkpoint and the intent interview**: keep refining on your own
+judgement, still run **≥3 rounds**, stop when fitness stops improving (or at a sane cap,
+~6 rounds), and return the CNF + channels directly. Honor that preference for the rest of
+the session unless the user revokes it, and note in the result that you ran autonomously.
+
+**If the user chooses more rounds, interview them about the *intent* behind the keywords
+first** — so the next rounds are steered, not guessed. Ask what would sharpen the
+composition, e.g.: which sense of the topic they actually mean (and which to exclude);
+the audience / intent / format they care about (beginner vs advanced, reviews vs news);
+must-have vs nice-to-have sub-topics; brands/products that should count or must not; and
+any reach / language / recency constraints. Fold the answers into the `--any` groups,
+`--not` exclusions, and the validator's `TOPIC:` / `NOT:` lines, then run the next rounds
+and checkpoint again.
 
 ## Sponsorability — rank all, flag (don't filter)
 
@@ -151,14 +230,17 @@ sense). Surface the count of dropped channels so the exclusion is visible.
 
 ## Output (default)
 
-A single JSON object — validated channels ranked by relevance:
+A single JSON object. The **CNF expression is the headline result**; the channels are the
+set it selects. `cnf` comes straight from the final `search_channels.py` run.
 
 ```json
 {
   "topic": "financial investing",
-  "operator": "OR",
-  "keywords": ["investing", "index funds", "stock market"],
-  "rounds": 2,
+  "cnf": {
+    "expression": "(investing OR \"stock market\" OR \"index funds\") AND (stocks OR portfolio OR etf) AND (NOT sermon) AND (NOT \"sports investing\")",
+    "clauses": [["investing", "stock market", "index funds"], ["stocks", "portfolio", "etf"], ["NOT sermon"], ["NOT sports investing"]]
+  },
+  "rounds": 3,
   "channels": [
     {
       "channel_id": 2105, "name": "Financial Education",
@@ -174,8 +256,8 @@ A single JSON object — validated channels ranked by relevance:
 }
 ```
 
-Then **offer to save** the validated set: `tl-import` / `tl-save-report` (channels report).
-Don't save unprompted — offer.
+Then **offer to save** the validated set: `tl-import` / `tl-save-report` (channels report);
+record the CNF `expression` alongside so the report is reproducible. 
 
 ## Opt-in: keyword distribution
 
@@ -212,8 +294,16 @@ old default; it now serves the explicit "how common is X" question.
 3. Every channel sent for validation has a verdict — batch returns were diffed by
    `channel_id` and any missing were re-sent, not silently dropped; only clearly
    `off_topic` channels were excluded, and the dropped set is surfaced.
-4. `operator` is `AND` only for composite-noun / explicit-conjunction phrasing.
-5. Each channel carries its `sponsorability` flags (all ranked, none filtered out for being unbookable).
-6. Refinement stayed within ~3 rounds, and changes per round were reported.
-7. Offered to save the result as a TL report (did not save unprompted).
-8. If the user requested a chart, render it as an SVG.
+4. Refinement composed `--any` / `--not` (not just a flat operator) to narrow & expand,
+   probed fitness each round, and backtracked when a move hurt fitness.
+5. **At least 3 rounds** were run; each round reported its query, fitness, and move.
+6. The final result includes the **CNF expression** (AND of OR-clauses + negated literals)
+   as the headline artifact, alongside the channels it selects.
+7. Checkpoint honored: by default, after round 3 you **asked the user to validate and
+   choose**, and **interviewed them about keyword intent** before any further rounds —
+   **unless** the user asked to run autonomously, in which case you ran ≥3 rounds and
+   returned directly, noting the skipped checkpoint. Nothing was saved without confirmation
+   (or per the user's autonomy preference).
+8. Each channel carries its `sponsorability` flags (all ranked, none filtered out for being unbookable).
+9. Offered to save the result (CNF + channels) as a TL report (did not save unprompted).
+10. If the user requested a chart, render it as an SVG.

@@ -57,21 +57,19 @@ def keyword_clauses(keywords, fields):
     ]
 
 
-def build_search(keywords, fields, operator, since, until, size):
-    clauses = keyword_clauses(keywords, fields)
-    bool_q = {"filter": [{"term": {"doc_type": "article"}}]}
-    if operator == "AND":
-        bool_q["must"] = clauses
-    else:
-        bool_q["should"] = clauses
-        bool_q["minimum_should_match"] = 1
+def _filters(since, until):
+    filt = [{"term": {"doc_type": "article"}}]
     if since or until:
         rng = {}
         if since:
             rng["gte"] = since
         if until:
             rng["lte"] = until
-        bool_q["filter"].append({"range": {"publication_date": rng}})
+        filt.append({"range": {"publication_date": rng}})
+    return filt
+
+
+def _envelope(bool_q, size):
     return {
         "size": size,
         "track_total_hits": True,
@@ -80,6 +78,57 @@ def build_search(keywords, fields, operator, since, until, size):
         "sort": [{"_score": "desc"}],
         "_source": ["channel.id", "title", "publication_date"],
     }
+
+
+def build_search(keywords, fields, operator, since, until, size, not_terms=None):
+    """Flat mode: a single OR/AND list of keywords (+ optional exclusions)."""
+    clauses = keyword_clauses(keywords, fields)
+    bool_q = {"filter": _filters(since, until)}
+    if operator == "AND":
+        bool_q["must"] = clauses
+    else:
+        bool_q["should"] = clauses
+        bool_q["minimum_should_match"] = 1
+    if not_terms:
+        bool_q["must_not"] = keyword_clauses(not_terms, fields)
+    return _envelope(bool_q, size)
+
+
+def build_composed(any_groups, not_terms, fields, since, until, size):
+    """Composed mode — AND of OR-groups, minus exclusions:
+        (g1a OR g1b …) AND (g2a OR g2b …) AND NOT (n1 OR n2 …)
+    Each `--any` group is one required dimension (internally OR); adding a group
+    NARROWS, adding terms to a group WIDENS it, `--not` excludes a sense."""
+    must = [
+        {"bool": {"should": keyword_clauses(group, fields), "minimum_should_match": 1}}
+        for group in any_groups
+    ]
+    bool_q = {"must": must, "filter": _filters(since, until)}
+    if not_terms:
+        bool_q["must_not"] = keyword_clauses(not_terms, fields)
+    return _envelope(bool_q, size)
+
+
+def _q(lit):
+    """Quote a multi-word literal for the readable CNF string."""
+    return f'"{lit}"' if " " in lit else lit
+
+
+def render_cnf(pos_clauses, not_terms):
+    """Render the boolean query as Conjunctive Normal Form — an AND of clauses,
+    each clause an OR of literals. Positive OR-groups are disjunctive clauses;
+    each excluded term becomes a negated unit clause (NOT t). This CNF expression
+    is the skill's distilled, reusable artifact."""
+    clauses = [list(c) for c in pos_clauses if c]
+    clauses += [["NOT " + t] for t in not_terms]
+
+    def lit(token):
+        return "NOT " + _q(token[4:]) if token.startswith("NOT ") else _q(token)
+
+    expression = " AND ".join(
+        "(" + " OR ".join(lit(t) for t in clause) + ")" for clause in clauses
+    )
+    return {"expression": expression, "clauses": clauses}
 
 
 def build_enrich(channel_ids):
@@ -140,7 +189,13 @@ def dedupe(items):
 def main():
     ap = argparse.ArgumentParser(description="Rank channels by field-weighted topic relevance.")
     ap.add_argument("keywords", nargs="*", help="Keywords (or pipe a JSON array on stdin)")
-    ap.add_argument("--operator", choices=["AND", "OR"], default="OR")
+    ap.add_argument("--operator", choices=["AND", "OR"], default="OR",
+                    help="How to combine flat keywords (default OR). Ignored when --any is used.")
+    ap.add_argument("--any", action="append", default=[], metavar="TERMS",
+                    help="A comma-separated OR-group. Repeat to AND groups: "
+                         "--any 'a,b' --any 'c,d' → (a OR b) AND (c OR d). Enables composed mode.")
+    ap.add_argument("--not", dest="exclude", action="append", default=[], metavar="TERMS",
+                    help="Comma-separated terms to EXCLUDE (must_not); repeatable. Narrows away a confusable sense.")
     ap.add_argument("--fields", default=DEFAULT_FIELDS,
                     help=f"Comma list of ES fields with optional ^boost (default: {DEFAULT_FIELDS})")
     ap.add_argument("--size", type=int, default=25, help="Number of channels to return (default 25)")
@@ -152,11 +207,27 @@ def main():
     fields = [f.strip() for f in args.fields.split(",") if f.strip()]
     if not fields:
         sys.exit("--fields must list at least one ES field")
-    keywords = dedupe(collect_keywords(args.keywords))
-    if not keywords:
-        sys.exit("provide at least one keyword (positional args or JSON array on stdin)")
 
-    env = run_es(build_search(keywords, fields, args.operator, args.since, args.until, args.size))
+    def parse_group(raw):
+        return [t.strip() for t in raw.split(",") if t.strip()]
+
+    keywords = dedupe(collect_keywords(args.keywords))
+    any_groups = [g for g in (parse_group(r) for r in args.any) if g]
+    not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
+
+    if any_groups:
+        if keywords:  # positional/stdin keywords become a leading required OR-group
+            any_groups = [keywords] + any_groups
+        env = run_es(build_composed(any_groups, not_terms, fields, args.since, args.until, args.size))
+        query_desc = {"mode": "composed", "any_groups": any_groups, "not": not_terms}
+        pos_clauses = any_groups
+    else:
+        if not keywords:
+            sys.exit("provide keywords (positional args / JSON array on stdin) or --any groups")
+        env = run_es(build_search(keywords, fields, args.operator, args.since, args.until, args.size, not_terms))
+        query_desc = {"mode": "flat", "operator": args.operator, "keywords": keywords, "not": not_terms}
+        pos_clauses = [keywords] if args.operator == "OR" else [[k] for k in keywords]
+
     channels = []
     for row in env.get("results", []):
         ch = row.get("channel") or {}
@@ -178,7 +249,8 @@ def main():
             c["sponsorability"] = sponsorability(doc)
 
     print(json.dumps({
-        "operator": args.operator,
+        "query": query_desc,
+        "cnf": render_cnf(pos_clauses, not_terms),
         "fields": args.fields,
         "total_matching_videos": env.get("total", 0),
         "channels": channels,
@@ -186,7 +258,9 @@ def main():
 
 
 # OUTPUT_SHAPE:
-# {"operator","fields","total_matching_videos",
+# {"query":{"mode":"flat","operator","keywords","not"} | {"mode":"composed","any_groups":[[...]],"not"},
+#  "cnf":{"expression":"(a OR b) AND (c) AND (NOT x)","clauses":[["a","b"],["c"],["NOT x"]]},
+#  "fields","total_matching_videos",
 #  "channels":[{"channel_id","name","score","top_video_id","top_video_title",
 #               "sponsorability":{"is_active","is_tpp","is_msn","msn_join_date",
 #                                 "has_outreach_email","sponsorship_price","reach"}}, ...]}
