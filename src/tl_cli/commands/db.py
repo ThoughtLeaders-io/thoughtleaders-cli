@@ -108,6 +108,10 @@ def es_cmd(
         False, "--pricing",
         help="Estimate the query's credit cost without running it (flat 1 credit).",
     ),
+    highlight: bool = typer.Option(
+        False, "--highlight",
+        help="Keep ES highlight fragments in each result row. Only meaningful when the query body includes a `highlight` clause; otherwise no-op.",
+    ),
 ) -> None:
     """Run a raw Elasticsearch search query.
 
@@ -116,6 +120,7 @@ def es_cmd(
     Examples:
         tl db es '{"size": 5, "query": {"term": {"channel.id": 5607}}}'
         tl db es '{"size": 0, "aggs": {"by_channel": {"terms": {"field": "channel.id"}}}}'
+        tl db es '{"query": {"match": {"transcript": "vpn"}}, "highlight": {"fields": {"transcript": {}}}}' --highlight
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     raw = _read_query(query)
@@ -127,4 +132,6 @@ def es_cmd(
     body: dict = {"query": body_query}
     if pricing:
         body["pricing"] = True
+    if highlight:
+        body["include_highlight"] = True
     _run("/raw/es", body, fmt, "Elasticsearch results", pricing=pricing)
