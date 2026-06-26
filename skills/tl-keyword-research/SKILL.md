@@ -1,167 +1,219 @@
 ---
 name: tl-keyword-research
-tl-blurb: rank content-search keywords
+tl-blurb: find & validate channels by topic
 description: |
-  Broaden and rank a set of content-search keywords. Invoke when the user wants to find videos or channels by content keywords (topics, concepts, niches) — not by ID or exact name. Takes one or more seed keywords (or an NL phrase), proposes related candidates, probes Elasticsearch for each one against the `title` / `summary` / `transcript` fields, and returns a strict JSON object `{"keywords":[{"keyword","count"},...]}` sorted descending by document count. The output is meant to feed the next step (typically a `tl db es` content search with the surviving high-count keywords).
+  Find YouTube channels that *reliably* cover a topic — discovered by content keywords (topics, concepts, niches), then validated by the CONTEXT in which those keywords appear in the channel's videos. Invoke when the user wants channels for a topic ("find investing channels", "channels that cover tiktok shops"), not by channel ID/name. Default output: a ranked, context-validated set of channels with sponsorability flags (JSON), plus an offer to save as a TL report. The keyword-distribution mode (counts per keyword) is OPT-IN — only when the user explicitly asks for "keyword counts / distribution / how common is X".
 ---
 
-# tl-keyword-research
+# tl-keyword-research — topic → validated channels
 
-Widen and rank content-search keywords before running the actual ES content search. Two phases: the agent expands the seed keyword(s) into a broader candidate set; the bundled script probes ES for each candidate and returns the ranked counts.
+Given a topic (seed keyword(s) or an NL phrase), return a ranked set of channels that
+reliably cover it. The flow: widen the topic into keywords, find candidate channels by
+**field-weighted** relevance (`title` > `summary` > `transcript`), spot-check the
+**context** of the keyword in each candidate with cheap agents to drop channels that
+only use the word in an unrelated sense, flag each survivor for sponsorability, and
+(autonomously, within a bounded loop) narrow or expand the search based on what the
+context check reveals.
 
-## When to invoke
+**Default output = validated channels.** The old keyword-distribution output
+(`{keyword, count}`) is now an **opt-in mode** — produce it only when the user
+explicitly asks for keyword counts / distribution / "how common is X". See
+[Opt-in: keyword distribution](#opt-in-keyword-distribution).
 
-Invoke this skill — directly, or as a delegated step from another skill / agent — when:
+`<SKILL_DIR>` below is this skill's directory (the one holding `SKILL.md`).
 
-- The user wants to find **videos or channels by content keywords** (topics, concepts, niches), not by ID or by exact name.
-- The user supplies at least one seed keyword, or an NL phrase from which seeds can be derived.
-- The goal is to **widen** the keyword set the user came in with before running the actual content search.
+## When to invoke / skip
+
+Invoke when the user wants **channels for a topic** (concepts, niches), not a specific
+channel/brand by ID or name.
 
 Skip when:
+- The user has explicit channel / brand IDs or names → `tl channels find` / `tl brands find`.
+- The intent maps cleanly to a curated recommender tag (e.g. "Cooking channels") →
+  `tl recommender top-channels "<tag>"`. Don't re-discover curated tags by text match.
 
-- The user has explicit channel / brand IDs or names → use `tl channels find` / `tl brands find` instead.
-- The user's intent maps cleanly to an existing recommender tag (e.g. "Cooking channels") → use `tl recommender top-channels "<tag>"` instead. Recommender tags are curated; don't re-discover them through keyword text matching.
+## The pipeline (you orchestrate; scripts + cheap agents do the work)
 
-## Inputs
+1. **Expand** — you widen the seeds into keywords and pick AND/OR.
+2. **Search channels** — `search_channels.py` → field-weighted candidate channels (the default result shape).
+3. **Fetch context** — `fetch_context.py` → keyword-in-context evidence per candidate.
+4. **Validate** — spawn cheap (Haiku) agents to judge each channel's keyword sense and surface adjacent terms.
+5. **Assess & refine** — you read the verdicts, then narrow or expand and re-run 2–4. Bounded, autonomous (≈3 rounds).
 
-- **Seed keywords** — one or more strings supplied by the caller (or extracted from an NL phrase).
-- **Optional time window** — `--since YYYY-MM-DD` and / or `--until YYYY-MM-DD`. Scopes the probes to `publication_date` within that range. Default: all-time.
+---
 
-## Two phases
+## Stage 1 — Expand (you)
 
-### Phase 1 — Expand (you, the agent)
+Broaden the seed(s) into **5–15** candidates: synonyms, sub-areas, specific multi-word
+phrases, inflectional variants (ES text fields are **not stemmed** — `invest`/`investing`/`investments`
+are distinct terms), and reasonable abbreviations. Hard rules:
 
-Take the seed keyword(s) and broaden them with:
+- Generic topic/concept terms only. **No brand names** unless the seeds already contain
+  one (then adjacent brands in the same category are fine). **No channel names.**
+- No random-letter padding.
 
-- **Synonyms** — `"crypto"` → `"cryptocurrency"`, `"digital currency"`.
-- **Sub-areas / adjacent concepts** — `"crypto"` → `"bitcoin"`, `"ethereum"`, `"DeFi"`, `"NFT"`, `"blockchain"`, `"Web3"`.
-- **Specific multi-word phrases** — `"crypto"` → `"how to buy bitcoin"`, `"smart contract"`.
-- **Inflectional variants** — ES text fields aren't stemmed (see the [ES schema reference](../tl/references/elasticsearch-schema.md#text-analyzer-behavior)), so each surface form is counted independently. Propose singular, plural, base verb, `-ing` form, and irregular past tense as needed; skip possessives — they rarely add reach. For example: `"review"` / `"reviews"`, `"invest"` / `"investing"`, `"swim"` / `"swam"`.
-- **Reasonable alternate spellings / abbreviations** — `"ethereum"` → `"ETH"`.
+**AND vs OR** (pass to the scripts via `--operator`):
+- Default **OR** (union: "crypto channels" = crypto / bitcoin / Web3 / …).
+- **AND** only for composite-noun phrases ("AI cooking", "Roman naval warfare") or
+  explicit "both X and Y". Under AND, keep candidates *inside the intersection* — don't
+  broaden each component independently.
 
-Produce **5–15** candidates including the seed(s). Cap at ~20 — every candidate costs one ES probe.
-
-Hard rules:
-
-- DO propose generic topic / concept terms.
-- **Brand names — only mirror the seeds.** If the seed set is purely topic-shaped (`"crypto"`, `"productivity"`, `"home renovation"`), do NOT introduce brand names; brands should be resolved by `tl brands find` to integer IDs and queried through `sponsored_brand_mentions` / `organic_brand_mentions`, not by free-text match. Only if the seeds **already contain at least one brand name** (e.g. the caller is hunting for competitor coverage or adjacent sponsorship mentions in transcripts) is it appropriate to expand with adjacent brand names in the same category — e.g. seed `"NordVPN"` → `"Surfshark"`, `"ExpressVPN"`, `"Mullvad"` is fine; seed `"crypto"` → adding `"Coinbase"` is not.
-- DON'T propose specific channel names (e.g. `"MrBeast"`). Same path: `tl channels find`.
-- DON'T propose random-letter junk to pad the list.
-
-#### Determine AND vs OR semantics
-
-Decide upfront how the caller will combine the keywords downstream, and pass the result to the script with `--operator AND|OR`. The decision shapes both the expansion (next bullet) and the output envelope:
-
-- **Default `OR`.** Most off-taxonomy queries are union-style ("crypto channels" matches any of crypto / bitcoin / Web3 / …).
-- **`AND` only when the user's phrasing carries clear intersection semantics:**
-  - **Composite noun phrases** — `"AI cooking"`, `"Roman naval warfare"`, `"vegan keto"`.
-  - **Explicit conjunctions** — `"both X and Y"`, `"covering both X and Y"`.
-- When in doubt, OR.
-
-**Expansion shape under `AND`:** keep candidates **inside the intersection** — don't broaden across each component independently. For `"Roman naval warfare"`, expand within Roman-naval territory (`Punic Wars`, `Roman navy`, `trireme`, `Battle of Actium`); do NOT add generic Roman-empire or generic naval-warfare terms, because the downstream AND combine would then over-match unrelated channels.
-
-### Phase 2 — Rank (mechanical, via the bundled script)
-
-Run the bundled script. It takes the candidate list, sends one `size:0` + `track_total_hits` phrase probe per keyword to `tl db es` against `["title", "summary", "transcript"]`, and prints the ranked JSON on stdout.
-
-Three invocations cover almost every case. **Pick by the question shape** (channel vs video vs AND-composite):
+## Stage 2 — Search channels (default output)
 
 ```bash
-# (a) Channel search by topic — default fields (title, summary, transcript)
-python3 skills/tl-keyword-research/scripts/probe.py crypto bitcoin DeFi Web3 blockchain "smart contract"
-
-# (b) Video search by topic — REQUIRED: pass --fields title,summary
-#     The default field set includes `transcript`, which inflates counts via
-#     incidental mentions inside long videos. For video-level discovery the
-#     downstream ES query also uses title+summary, so the probe MUST match.
-python3 skills/tl-keyword-research/scripts/probe.py --fields title,summary \
-  "budget meal prep" "cheap meal prep" "meal prep on a budget" "frugal recipes"
-
-# (c) Composite noun ("both X and Y") — pass --operator AND so candidates stay
-#     inside the intersection (don't broaden each component independently)
-python3 skills/tl-keyword-research/scripts/probe.py --operator AND \
-  "3d printing" "miniature painting" "tabletop miniatures" "resin printing minis"
+python3 <SKILL_DIR>/scripts/search_channels.py --operator OR --size 200 \
+  investing "index funds" "stock market" "personal finance"
+# JSON array / newline list on stdin also accepted; --since/--until scope publication_date.
 ```
 
+Runs ONE collapsed ES search (`collapse` on `channel.id`, sorted by `_score`) so each
+channel surfaces its single best-matching video, then enriches with name +
+sponsorability. **Field weighting is the priority you asked for:** title hits outscore
+summary, which outscore transcript (default boosts `title^4,summary^2,transcript^1`,
+tunable via `--fields`). Output per channel: `channel_id, name, score, top_video_id,
+top_video_title, sponsorability{…}`. This is the candidate set for validation.
 
-**Pick the invocation shape by what the user is searching for:**
+## Stage 3 — Fetch context
 
 ```bash
-# (a) Channel search by topic — default fields (title, summary, transcript)
-python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi
-
-# (b) Video search by topic — REQUIRED: pass --fields title,summary
-#     Without it, the probe includes transcript matches (noise from passing
-#     mentions inside long videos), and the count won't match the field set
-#     the downstream ES query uses for video-level discovery.
-python3 <SKILL_DIR>/scripts/probe.py --fields title,summary \
-  "budget meal prep" "cheap meal prep" "meal prep on a budget"
-
-# (c) Composite-noun phrase ("both X and Y" / "X-themed Y") — pass --operator AND
-#     to keep candidates inside the intersection
-python3 <SKILL_DIR>/scripts/probe.py --operator AND \
-  "Roman naval warfare" "Punic Wars" trireme "Roman navy"
+python3 <SKILL_DIR>/scripts/fetch_context.py --channels 466311,2105,199308 \
+  --samples 4 --window 160 investing
 ```
 
-Other input / scoping forms:
+For each candidate, pulls its top-scoring matching videos and extracts the text window
+around each keyword occurrence. **`transcript` is YouTube caption XML** — the script
+strips tags + unescapes entities + windows client-side (ES highlight can't be used: the
+CLI API strips highlight, and transcript fragments would be full of `<text …>` tags
+anyway). Returns per channel: `{channel_id, match_count, sampled, snippets:[{video_id,
+title, field, keyword, text}]}`. `match_count` (how many of the channel's videos match)
+is a useful breadth signal alongside the score.
 
-```bash
-# JSON array on stdin
-echo '["crypto","bitcoin","DeFi"]' | python3 <SKILL_DIR>/scripts/probe.py
+## Stage 4 — Validate context (cheap / Haiku agents)
 
-# Newline-separated on stdin
-printf 'crypto\nbitcoin\nDeFi\n' | python3 <SKILL_DIR>/scripts/probe.py
+This is the core of "too weak → validated". Keyword matches are noisy: a search for
+**investing** surfaces *"sports investing"* (betting) and church-sermon channels
+("invest in your faith") right next to real finance channels. Spot-check the sense.
 
-# Time window (optional, applies to publication_date)
-python3 <SKILL_DIR>/scripts/probe.py --since 2025-01-01 --until 2026-01-01 crypto bitcoin
-```
+Spawn cheap agents (Agent tool, **`model: haiku`** or a similarly cheap one) using the prompt in
+[`references/context-classifier.md`](references/context-classifier.md). Give each agent
+a `TOPIC:` line (the intended sense) and usually a `NOT:` line (senses to exclude), plus
+a batch of the Stage-3 evidence. Batch ≈50–100 channels per agent and run batches in
+**parallel**. Each agent returns, per channel:
 
-The script:
+`{i, channel_id, verdict: on_topic|mixed|off_topic, confidence, evidence_quote, adjacent_terms[], notes}`
 
-1. Reads keywords from argv (preferred) or stdin (JSON array or newline-separated). Deduplicates case-insensitively; the first spelling wins.
-2. For each keyword, sends a `multi_match` phrase query against `["title", "summary", "transcript"]` with `size:0` and `track_total_hits:true`. Optionally scopes by `publication_date`.
-3. Reads `total` from the response envelope (falls back to `hits.total.value` if absent).
-4. Sorts descending by count.
-5. Prints the canonical JSON object on stdout.
+- **`adjacent_terms`** is the discovery signal — co-occurring topics/brands worth
+  considering for expansion (e.g. "Amazon"/"affiliate" under "tiktok shop").
+- Surface the interesting verdicts and adjacent terms back to yourself for Stage 5.
 
-If a single probe fails (auth, transport, server error), the script exits non-zero and writes the error to stderr — partial output is not produced.
+**Steer for completeness, then verify it — cheap models silently drop the tail of a
+long list.** This is an output-generation behavior, not an input-context limit (the
+evidence fits easily), so two guards:
 
-## Output (strict)
+1. **Anchor the count in the prompt.** Index the evidence (`i: 0…N-1`) and open the
+   user message with the exact target, e.g. *"There are exactly 50 channels (indices
+   0–49). Return exactly 50 objects. The last channel_id is 778812."* Keep per-item
+   output terse (the classifier caps `evidence_quote` at ≤8 words) so the full list fits.
+2. **Completeness check + re-send (the guarantee).** After each agent returns, diff the
+   returned `channel_id`s against the batch you sent. If any are missing (or the agent
+   emitted prose / invalid JSON), re-send just the missing channels to a fresh agent and
+   merge. Never assume a batch came back whole. Smaller batches make this fire less often.
 
-A **single JSON object** on stdout — no prose, no markdown fences:
+## Stage 5 — Assess & refine (autonomous, bounded ≈3 rounds)
+
+Read the verdicts + adjacent terms and decide, then re-run Stages 2–4. Cap at **~3
+refinement rounds**; stop earlier when the validated set is stable. Each round, briefly
+report what you changed and why.
+
+- **Narrow** when off-topic verdicts cluster around a confusable sense: add the wrong
+  sense to the agents' `NOT:` line; drop transcript-only matches by tightening
+  `--fields` to `title^4,summary^2`; or require co-occurrence (switch to `--operator AND`
+  with a disambiguating term, e.g. `investing` + `stocks`).
+- **Expand** when adjacent terms reveal a productive direction: add the discovered term
+  as a new keyword and re-search. Example: investigating **"tiktok shop"**, the context
+  check repeatedly surfaces **"Amazon"** and **"affiliate"** → conclude these are common
+  affiliate providers for that niche and add them (OR) to widen reach.
+- Keep a running set of validated channels across rounds (dedupe by `channel_id`).
+
+## Sponsorability — rank all, flag (don't filter)
+
+Return **all** topically-validated channels ranked by relevance; do not drop a channel
+for being unbookable. Annotate each with the `sponsorability` block from Stage 2:
+`is_active`, `is_tpp` (TPP partner), `is_msn` (Media Selling Network member — has a join
+date), `has_outreach_email`, `sponsorship_price`, `reach` (subscribers). The user
+decides what to do with non-sponsorable matches.
+
+## Mixed-context channels — label all, drop only off-topic
+
+Keep `on_topic` **and** `mixed` channels in the output, each carrying its verdict +
+confidence. Exclude only channels the agents judged **clearly `off_topic`** (wrong
+sense). Surface the count of dropped channels so the exclusion is visible.
+
+## Output (default)
+
+A single JSON object — validated channels ranked by relevance:
 
 ```json
 {
+  "topic": "financial investing",
   "operator": "OR",
-  "keywords": [
-    {"keyword": "crypto",  "count": 18742},
-    {"keyword": "bitcoin", "count": 15103},
-    {"keyword": "DeFi",    "count": 4221},
-    {"keyword": "rugpull", "count": 0}
-  ]
+  "keywords": ["investing", "index funds", "stock market"],
+  "rounds": 2,
+  "channels": [
+    {
+      "channel_id": 2105, "name": "Financial Education",
+      "score": 55.37, "match_count": 312,
+      "verdict": "on_topic", "confidence": "high",
+      "evidence_quote": "how to build a stock portfolio",
+      "adjacent_terms": ["index funds", "roth ira"],
+      "sponsorability": {"is_active": true, "is_tpp": false, "is_msn": false,
+                          "has_outreach_email": true, "sponsorship_price": 4710.0, "reach": 938000}
+    }
+  ],
+  "excluded_off_topic": [{"channel_id": 199308, "name": "Cornerstone Church Sermons", "evidence_quote": "invest in your relationship with God"}]
 }
 ```
 
-- `operator` is always present and is one of `"OR"` (default) or `"AND"`. It echoes whatever was passed via `--operator` and tells the caller how to combine the surviving keywords downstream (`bool.should` for OR, `bool.must` for AND, or the FilterSet equivalent).
-- `keywords` sorted **descending** by `count`.
-- **Zero-count entries are kept** — they signal that the agent's suggestion didn't match anything in the corpus, which is informative to the caller.
-- **Deduplicated case-insensitively** — `"Crypto"` and `"crypto"` collapse to one entry; the first spelling wins.
-- Each entry has exactly two keys: `keyword` (string) and `count` (integer).
-- The seed keyword(s) are always included in the output, ranked alongside the suggestions.
+Then **offer to save** the validated set: `tl-import` / `tl-save-report` (channels report).
+Don't save unprompted — offer.
 
-The skill's responsibility ends at the ranked JSON. The caller decides what to do with it — typically running `tl db es` with a `multi_match` over the surviving high-count keywords against the same `title` / `summary` / `transcript` fields.
+## Opt-in: keyword distribution
+
+Only when the user explicitly asks for keyword counts / distribution, run the ranking
+probe instead of (or before) the channel search:
+
+```bash
+# Channel-topic counts — default fields (title, summary, transcript)
+python3 <SKILL_DIR>/scripts/probe.py crypto bitcoin DeFi Web3 "smart contract"
+# Video-level counts — pass --fields title,summary (drop transcript noise)
+python3 <SKILL_DIR>/scripts/probe.py --fields title,summary "budget meal prep" "cheap meal prep"
+# Composite noun — --operator AND keeps candidates inside the intersection
+python3 <SKILL_DIR>/scripts/probe.py --operator AND "3d printing" "resin printing minis"
+```
+
+Emits `{"operator", "keywords":[{"keyword","count"}, …]}` sorted descending. This is the
+old default; it now serves the explicit "how common is X" question.
 
 ## Cost
 
-Each probe is `size:0` + `track_total_hits:true` with no aggregations — no rows are returned. At raw-DB pricing, expect roughly 1–2 credits per probe. For 10 keywords, expect ~10–20 credits total. Run `tl describe show db` to see the current rate.
+- `search_channels.py`: 2 ES calls (collapse search + enrichment), ~`size` billed rows
+  each, no expensive fields → cheap.
+- `fetch_context.py`: 1 ES call per channel; it returns `transcript`/`summary` (priced
+  fields), so cost ≈ channels × `--samples` × field-rate. Keep `--samples` small (default 4)
+  and validate the top candidates, not the whole tail.
+- Haiku validation: cheap by design; batch + parallelize.
+- Use `tl db es … --pricing` to preview; `tl describe show db` for live rates.
 
 ## Self-check before emitting
 
-1. Output is a single valid JSON object on stdout — no prose, no fences.
-2. `operator` is `"AND"` only when the user phrasing carries clear intersection semantics (composite-noun phrase or explicit "both X and Y"); otherwise `"OR"`.
-3. Under `operator: "AND"`, candidates stay inside the intersection — no broadening across components independently.
-4. Every keyword is a generic term (no specific brand or channel names).
-5. `keywords` array is sorted descending by `count`.
-6. Each entry has exactly `keyword` (string) and `count` (integer).
-7. The seed keyword(s) appear in the output.
-8. If the user requests a chart, create it as a SVG graphic
+1. Default output is the validated-channel JSON object (not keyword counts) unless the
+   user explicitly asked for distribution.
+2. Field weighting applied: title > summary > transcript.
+3. Every channel sent for validation has a verdict — batch returns were diffed by
+   `channel_id` and any missing were re-sent, not silently dropped; only clearly
+   `off_topic` channels were excluded, and the dropped set is surfaced.
+4. `operator` is `AND` only for composite-noun / explicit-conjunction phrasing.
+5. Each channel carries its `sponsorability` flags (all ranked, none filtered out for being unbookable).
+6. Refinement stayed within ~3 rounds, and changes per round were reported.
+7. Offered to save the result as a TL report (did not save unprompted).
+8. If the user requested a chart, render it as an SVG.
