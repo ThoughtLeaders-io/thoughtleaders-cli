@@ -91,11 +91,11 @@ Contains a denormalized subset of the PostgreSQL channel data.
 |-------|------|-------------|
 | `name` | text | Channel name |
 | `channel` | object | Channel metadata (nested on article docs) |
-| `subscribers` | long | Subscriber count. |
-| `projected_views` | long | Projected views per longform video — forward-looking estimate. ⚠️ NOT actual views; for actual views see `total_views` / the video docs. |
-| `projected_views_live` | long | Projected views per live stream (forward-looking estimate) |
-| `projected_views_shorts` | long | Projected views per short (forward-looking estimate) |
-| `is_tpp` | boolean | TPP partner channel |
+| `reach` | long | Subscriber count. ⚠️ NOT ad-industry "reach" (unique audience exposed) — this is the channel's subscriber count. |
+| `impression` | long | Projected views per longform video — forward-looking estimate. ⚠️ NOT actual views and NOT ad-industry "impressions"; for actual views see `total_views` / the video docs. |
+| `impression_live` | long | Projected views per live stream (forward-looking estimate) |
+| `impression_shorts` | long | Projected views per short (forward-looking estimate) |
+| `is_tl_channel` | boolean | TPP partner channel |
 | `is_active` | boolean | Channel is active |
 | `media_selling_network_join_date` | date | MSN join date |
 | `has_outreach_email` | boolean | Has outreach email |
