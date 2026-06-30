@@ -41,7 +41,7 @@ def _reach_bucket(reach: int) -> str:
 def _cache_key(channel: dict) -> str:
     return (
         f"{channel.get('content_category')}|{channel.get('language')}|"
-        f"{_reach_bucket(channel.get('reach') or 0)}"
+        f"{_reach_bucket(channel.get('subscribers') or 0)}"
     )
 
 
@@ -73,17 +73,17 @@ def _peer_ids_via_cli(channel_id: int) -> list[int]:
 
 
 def _peer_ids_via_pg(channel: dict) -> list[int]:
-    reach = channel.get("reach") or 0
+    reach = channel.get("subscribers") or 0
     lo, hi = int(reach * 0.5), int(reach * 1.5) or 10_000
     rows = tl_cli.db_pg(
         "SELECT id FROM thoughtleaders_channel "
         f"WHERE content_category = {int(channel['content_category'])} "
         f"AND language = '{channel.get('language', 'en')}' "
         "AND is_active = true "
-        f"AND reach BETWEEN {lo} AND {hi} "
+        f"AND subscribers BETWEEN {lo} AND {hi} "
         "AND last_published > (CURRENT_DATE - INTERVAL '60 days') "
         f"AND id != {int(channel['id'])} "
-        "ORDER BY reach DESC LIMIT 25"
+        "ORDER BY subscribers DESC LIMIT 25"
     )
     return [int(r["id"]) for r in rows]
 

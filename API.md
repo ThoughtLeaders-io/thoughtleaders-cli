@@ -182,16 +182,16 @@ curl -sS "$TL_API_BASE/raw/pg" \
   -H 'X-TL-Auth: API-KEY' \
   -H 'Content-Type: application/json' \
   -d '{
-        "query": "SELECT id, channel_name, reach FROM thoughtleaders_channel WHERE is_tl_channel = TRUE ORDER BY reach DESC LIMIT 5 OFFSET 0"
+        "query": "SELECT id, channel_name, subscribers FROM thoughtleaders_channel WHERE is_tpp = TRUE ORDER BY subscribers DESC LIMIT 5 OFFSET 0"
       }' | jq
 ```
 
 ```python
 sql = """
-SELECT id, channel_name, reach
+SELECT id, channel_name, subscribers
 FROM thoughtleaders_channel
-WHERE is_tl_channel = TRUE
-ORDER BY reach DESC
+WHERE is_tpp = TRUE
+ORDER BY subscribers DESC
 LIMIT 5 OFFSET 0
 """
 print(post('/raw/pg', {'query': sql}))
@@ -200,7 +200,7 @@ print(post('/raw/pg', {'query': sql}))
 ```json
 {
   "results": [
-    {"id": 12345, "channel_name": "MrBeast", "reach": 320000000},
+    {"id": 12345, "channel_name": "MrBeast", "subscribers": 320000000},
     ...
   ],
   "total": 5,

@@ -83,7 +83,7 @@
     "days_ago": {
       "type": ["integer", "null"],
       "minimum": 0,
-      "description": "Rolling lower bound: only sponsorships with send_date in the last N days."
+      "description": "Rolling lower bound: only sponsorships with scheduled_date in the last N days."
     },
     "days_ago_to": {
       "type": ["integer", "null"],
@@ -172,7 +172,7 @@
     "sort": {
       "type": ["string", "null"],
       "description": "Sortable column key from references/sortable_columns.json. Format: 'field' (asc) or '-field' (desc).",
-      "_tl_default_when_unset": "-send_date"
+      "_tl_default_when_unset": "-scheduled_date"
     },
 
     "filters_json": {

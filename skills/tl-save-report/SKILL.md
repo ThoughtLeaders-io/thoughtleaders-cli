@@ -103,7 +103,7 @@ This branch determines everything downstream. **Style is decided by intent, not 
 | Style | Populates | Re-evaluates? | When it's the right answer |
 | --- | --- | --- | --- |
 | **List-style** | M2M field (`channels` / `brands` / `articles` / `sponsorships`) | No — frozen list | Curated set, manual review, custom-SQL filters that don't map to FilterSet fields |
-| **Filter-style** | Predicate fields (`keywords`, `reach_from`, dates, demographics, etc.) | Yes — every run | Criteria-driven discovery the user wants to keep refreshing |
+| **Filter-style** | Predicate fields (`keywords`, `subscribers_from`, dates, demographics, etc.) | Yes — every run | Criteria-driven discovery the user wants to keep refreshing |
 
 ### Pick without asking when intent is clear
 
@@ -284,15 +284,15 @@ These compose with the rest of the FilterSet rather than replacing it:
 | --- | --- |
 | Topic keywords (`"crypto"`, `"biohacking"`) | `keywords[]` + `keyword_operator` + `content_fields[]` |
 | Curated topic the user named by ID or exact name | `topics: [<id>]` (still expand the topic's curated `keywords[]` per the schema's `_tl_intent_hints`) |
-| Subscriber floor | `reach_from` (or `min_reach` — check schema) |
-| Views / impression floor | `views_from`, `impression_from`, etc. |
+| Subscriber floor | `subscribers_from` (or `min_subscribers` — check schema) |
+| Views / impression floor | `views_from`, `projected_views_from`, etc. |
 | Content category (when user explicitly named a TL category) | `content_categories: [<id>]` |
 | Country / language | `creator_countries: [...]`, `languages: [...]` |
 | MSN-only | `msn_channels_only: true` |
-| TPP-only | resolve `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE` and pin into `channels: [...]` (no first-class TPP boolean on FilterSet) |
+| TPP-only | resolve `SELECT id FROM thoughtleaders_channel WHERE is_tpp = TRUE AND is_active = TRUE` and pin into `channels: [...]` (no first-class TPP boolean on FilterSet) |
 | Demographics (age / gender / geo / device) | `demographic_male_share`, `demographic_usa_share`, `demographic_geo`, `demographic_device`, `demographic_age_median_value`, etc. — see schema |
 | Publication date range (types 1 / 2 / 3) | `start_date`, `end_date`, or `days_ago` / `days_ago_to` |
-| Sponsorship send-date range (type 8) | `start_date` / `end_date` / `days_ago` / `days_ago_to` |
+| Sponsorship scheduled-date range (type 8) | `start_date` / `end_date` / `days_ago` / `days_ago_to` |
 | Sponsorship created-date range (type 8) | `createdat_from` / `createdat_to` |
 | Deal stage (type 8) | `filters_json.publish_status: [<int>, …]` (numeric IDs) |
 | Currently-live deals (type 8) | `filters_json.publish_status: [3]` + `filters_json.ad_publish_status: "0"` |
@@ -330,14 +330,14 @@ Pick **5–10 columns** for most reports; the platform allows up to 13 if intent
 
 ### Sort
 
-`sort` is a FilterSet field referenced by string like `"-reach"` (descending) or `"publication_date"` (ascending). Pick by intent first, then fall back to the type's default:
+`sort` is a FilterSet field referenced by string like `"-subscribers"` (descending) or `"publication_date"` (ascending). Pick by intent first, then fall back to the type's default:
 
 | Intent | Sort | Applies to |
 | --- | --- | --- |
 | User said "top X by [metric]" | the metric, `-` prefix for desc | any type |
-| User said "most recent" / "latest" | `-publication_date` (1/2/3) or `-purchase_date` (8 sold) or `-send_date` (8 pipeline) | by report type |
+| User said "most recent" / "latest" | `-publication_date` (1/2/3) or `-purchase_date` (8 sold) or `-scheduled_date` (8 pipeline) | by report type |
 | Outreach intent on channels | `-publication_date_max` (channels with recent uploads bubble up) | type 3 |
-| **No explicit intent** — fall back to type default | `-reach` (type 3), `-views` (type 1), `-doc_count` (type 2), `-purchase_date` for sold + `-send_date` for pipeline (type 8) | by report type |
+| **No explicit intent** — fall back to type default | `-subscribers` (type 3), `-views` (type 1), `-doc_count` (type 2), `-purchase_date` for sold + `-scheduled_date` for pipeline (type 8) | by report type |
 
 **Two hard requirements on the sort value:**
 
@@ -378,7 +378,7 @@ Each `aggregator` value below is from the matching schema's catalogue. The two c
 | --- | --- |
 | 1 (CONTENT) | `total` (M), `views_sum_metric` (M), `views_avg_metric` (M), `uploads_histogram` (H), `views_sum_histogram` (H) |
 | 2 (BRANDS) | `brands_count_metric` (M), `total` (M), `views_sum_metric` (M), `brands_count_histogram` (H), `views_sum_histogram` (H) |
-| 3 (CHANNELS) | `channels_count_metric` (M), `channel_reach_at_scrape_metric` (M), `views_avg_metric` (M), `channel_reach_at_scrape_histogram` (H), `uploads_histogram` (H) |
+| 3 (CHANNELS) | `channels_count_metric` (M), `channel_subscribers_at_scrape_metric` (M), `views_avg_metric` (M), `channel_subscribers_at_scrape_histogram` (H), `uploads_histogram` (H) |
 | 8 (SPONSORSHIPS) | `count_sponsorships` (M), `sum_price` (M), `count_channels` (M), `count_sponsorships_over_<axis>` (H), `sum_price_over_<axis>` (H) — `<axis>` per branching rule below |
 
 M = metrics-box (`width: 2`), H = histogram (`width: 3`). `height: 1` always. Grid is 6 columns. Widget shape:
@@ -402,18 +402,18 @@ One top-level value per report, applies to every histogram in it:
 
 Match the FilterSet's date scope. If the FilterSet has no date scope (rare for types 1 / 2 / 3, never legal for type 8), default to `"month"`.
 
-### Type-8 axis branching (send_date vs purchase_date)
+### Type-8 axis branching (scheduled_date vs purchase_date)
 
-For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_send_date` vs `count_sponsorships_over_purchase_date`, and same for `sum_price`) branch on deal stage:
+For type 8 only, the `_over_<axis>` histograms (`count_sponsorships_over_scheduled_date` vs `count_sponsorships_over_purchase_date`, and same for `sum_price`) branch on deal stage:
 
 | `filters_json.publish_status` includes | Use axis | Aggregator names |
 | --- | --- | --- |
-| Pre-sale (7, 10) — matched / open | `send_date` (pipeline view) | `count_sponsorships_over_send_date`, `sum_price_over_send_date` |
+| Pre-sale (7, 10) — matched / open | `scheduled_date` (pipeline view) | `count_sponsorships_over_scheduled_date`, `sum_price_over_scheduled_date` |
 | Sold only (3) | `purchase_date` (won-deals view) | `count_sponsorships_over_purchase_date`, `sum_price_over_purchase_date` |
-| Mix of pre-sale + sold | `send_date` (pipeline view dominates) | as pipeline |
+| Mix of pre-sale + sold | `scheduled_date` (pipeline view dominates) | as pipeline |
 | Performance grades (winners/losers) | `purchase_date` | as won-deals |
 
-**Both `_over_<axis>` histograms in the same report must share the same axis.** Don't mix `send_date` and `purchase_date` within one report — the dashboard renders confusingly when the two axes disagree.
+**Both `_over_<axis>` histograms in the same report must share the same axis.** Don't mix `scheduled_date` and `purchase_date` within one report — the dashboard renders confusingly when the two axes disagree.
 
 ## B5. Assemble the config
 
@@ -429,7 +429,7 @@ Final config shape (`Campaign` + `FilterSet` + columns + widgets):
   "columns": { ... },
   "widgets": [ ... ],
   "histogram_bucket_size": "month",
-  "sort": "-reach"
+  "sort": "-subscribers"
 }
 ```
 

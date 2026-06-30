@@ -219,7 +219,7 @@ and checkpoint again.
 Return **all** topically-validated channels ranked by relevance; do not drop a channel
 for being unbookable. Annotate each with the `sponsorability` block from Stage 2:
 `is_active`, `is_tpp` (TPP partner), `is_msn` (Media Selling Network member — has a join
-date), `has_outreach_email`, `sponsorship_price`, `reach` (subscribers). The user
+date), `has_outreach_email`, `sponsorship_price`, `subscribers`. The user
 decides what to do with non-sponsorable matches.
 
 ## Mixed-context channels — label all, drop only off-topic
@@ -249,7 +249,7 @@ set it selects. `cnf` comes straight from the final `search_channels.py` run.
       "evidence_quote": "how to build a stock portfolio",
       "adjacent_terms": ["index funds", "roth ira"],
       "sponsorability": {"is_active": true, "is_tpp": false, "is_msn": false,
-                          "has_outreach_email": true, "sponsorship_price": 4710.0, "reach": 938000}
+                          "has_outreach_email": true, "sponsorship_price": 4710.0, "subscribers": 938000}
     }
   ],
   "excluded_off_topic": [{"channel_id": 199308, "name": "Cornerstone Church Sermons", "evidence_quote": "invest in your relationship with God"}]

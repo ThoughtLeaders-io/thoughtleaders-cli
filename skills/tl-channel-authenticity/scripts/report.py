@@ -46,10 +46,10 @@ def render(state: dict) -> str:
         )
     L.append("")
     L.append(
-        f"Channel `{ch.get('id')}` · {ch.get('reach') or 0:,} subs · "
+        f"Channel `{ch.get('id')}` · {ch.get('subscribers') or 0:,} subs · "
         f"cat {ch.get('content_category')} · lang `{ch.get('language')}` · "
         f"country `{ch.get('country')}` · "
-        f"{'TPP' if ch.get('is_tl_channel') else 'non-TPP'} · "
+        f"{'TPP' if ch.get('is_tpp') else 'non-TPP'} · "
         f"MSN join {ch.get('media_selling_network_join_date') or '—'}"
     )
     if state.get("focus_adlink"):

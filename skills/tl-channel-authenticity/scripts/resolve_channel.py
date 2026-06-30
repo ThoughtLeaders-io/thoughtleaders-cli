@@ -75,7 +75,7 @@ def _es_recent(channel_id: int, content_type: str, size: int) -> list[dict]:
 
 def _resolve_adlink(adlink_id: int) -> tuple[dict, dict]:
     rows = tl_cli.db_pg(
-        "SELECT a.id, a.publish_status, a.publish_date, a.send_date, "
+        "SELECT a.id, a.publish_status, a.publish_date, a.scheduled_date, "
         "a.price, a.cost, a.article_id, a.url, s.channel_id "
         "FROM thoughtleaders_adlink a "
         "JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id "
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     data = resolve(sys.argv[1])
     ch = data["channel"]
     print(
-        f"{ch['channel_name']} (id={ch['id']}, subs={ch.get('reach')}, "
+        f"{ch['channel_name']} (id={ch['id']}, subs={ch.get('subscribers')}, "
         f"cat={ch.get('content_category')}, lang={ch.get('language')})"
     )
     print(f"longform={len(data['longform'])} shorts={len(data['shorts'])}")

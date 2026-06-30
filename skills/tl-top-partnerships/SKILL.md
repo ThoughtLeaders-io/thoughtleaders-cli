@@ -26,13 +26,13 @@ For every sold sponsorship the brand has where the video has actually gone live 
 - **Delta** = `live_eCPM - sold_date_eCPM`
   - Negative delta = the deal got *cheaper* per view than promised (good for the brand). Positive delta = the deal underdelivered.
 
-It also pulls **future bookings** — any sponsorship that is sold, or open with the brand having reviewed it (`brand_approval` pending or approved), with a send date strictly after today — and tags each deal and each channel with the earliest future send date, or "Re-book - no future spot" if none exists. This turns the report into an actionable list, not just a backward look.
+It also pulls **future bookings** — any sponsorship that is sold, or open with the brand having reviewed it (`brand_approval` pending or approved), with a scheduled date strictly after today — and tags each deal and each channel with the earliest future scheduled date, or "Re-book - no future spot" if none exists. This turns the report into an actionable list, not just a backward look.
 
 ## Output
 
 A Google Sheet with two tabs, owned by the caller's Google account:
 
-- **By Deal** — one row per sponsorship, ranked by live eCPM (best first). Columns: rank, channel, title, video_url, send_date, publish_date, price, promised_views, live_views, view_ratio, sold_date_ecpm, live_ecpm, delta_ecpm, measurable, next_booking.
+- **By Deal** — one row per sponsorship, ranked by live eCPM (best first). Columns: rank, channel, title, video_url, scheduled_date, publish_date, price, promised_views, live_views, view_ratio, sold_date_ecpm, live_ecpm, delta_ecpm, measurable, next_booking.
 - **By Channel** — one row per channel, aggregated across all that channel's deals in range. Combined live eCPM is `sum(price) / sum(live_views) * 1000` (volume-weighted, not an average of CPMs). Sorted by combined live eCPM. Columns: channel, deals, measurable_deals, total_price_usd, total_promised_views, total_live_views, view_ratio, sold_date_ecpm, live_ecpm, delta_ecpm, next_booking.
 
 In chat: a short summary + top-10 channels table + the sheet URL.
@@ -59,15 +59,15 @@ Accept these forms in the user's input:
 - `"YTD"` → explicit current YTD
 - Anything else → ask the user to clarify, don't silently pick
 
-Convert to a `send-date-start` / `send-date-end` pair (YYYY-MM-DD strings). Use `send_date` as the time anchor because that is when the sponsorship actually ran for the brand — purchase_date can be months earlier.
+Convert to a `scheduled-date-start` / `scheduled-date-end` pair (YYYY-MM-DD strings). Use `scheduled_date` as the time anchor because that is when the sponsorship actually ran for the brand — purchase_date can be months earlier.
 
 ### Step 3 — Run the script
 
 ```bash
 python3 <SKILL_DIR>/scripts/top_partnerships.py \
   --brand "<BRAND_NAME>" \
-  --send-date-start <YYYY-MM-DD> \
-  --send-date-end <YYYY-MM-DD>
+  --scheduled-date-start <YYYY-MM-DD> \
+  --scheduled-date-end <YYYY-MM-DD>
 ```
 
 `<SKILL_DIR>` resolves to this skill's directory at invocation time (same convention as `tl-views-guarantee`, `tl-keyword-research`).
@@ -97,5 +97,5 @@ Keep the writeup tight. No em dashes, no "just wanted to", no hedging. The data 
 
 ## Edge cases worth mentioning to the user (only if they apply)
 
-- A deal that ran very recently (last 14-28 days) may show a misleadingly high Live eCPM because views are still accumulating. Mention this only if more than half the top-10 deals have a send date inside the last 28 days.
+- A deal that ran very recently (last 14-28 days) may show a misleadingly high Live eCPM because views are still accumulating. Mention this only if more than half the top-10 deals have a scheduled date inside the last 28 days.
 - If the brand has zero measurable deals in the range, say so plainly and suggest broadening the range (e.g., last 12 months).

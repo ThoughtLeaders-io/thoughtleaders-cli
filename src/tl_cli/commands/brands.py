@@ -340,7 +340,7 @@ def winner_channels_cmd(
     """Channels a brand has repeatedly sponsored — the methodology's TRUE-renewal signal.
 
     Returns channels this brand sponsored at least 5 times within the lookback
-    window (default 2 years), reach ≥ 10k, ranked by renewal count. These winners
+    window (default 2 years), subscribers ≥ 10k, ranked by renewal count. These winners
     seed the look-alike expansion (`tl channels look-alike <id>`). Costs 5 credits
     per result. Intelligence plan required.
 

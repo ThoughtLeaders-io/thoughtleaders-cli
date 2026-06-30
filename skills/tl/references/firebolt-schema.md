@@ -71,7 +71,7 @@ Tracks YouTube video metrics over time. Each row = one scrape of one video on on
 |--------|------|-------------|
 | `id` | INT | TL channel ID |
 | `total_views` | INT | Channel total views at time of scrape |
-| `reach` | INT | Subscriber count at time of scrape |
+| `subscribers` | INT | Subscriber count at time of scrape |
 | `scrape_date` | DATE | When this data point was captured |
 
 **Primary Index: `(id)`**
@@ -124,7 +124,7 @@ tl recommender top-channels "Tech" msn:yes --limit 50 --json \
 tl db pg "SELECT al.id, al.article_id, s.channel_id
           FROM thoughtleaders_adlink al
           JOIN thoughtleaders_adspot s            ON s.id  = al.ad_spot_id
-          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile p           ON p.id  = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
           JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
           WHERE al.publish_status = 3
@@ -182,7 +182,7 @@ tl db fb "SELECT id, age, view_count, like_count, comment_count, duration, publi
 ### Channel subscriber/view growth over time
 
 ```bash
-tl db fb "SELECT scrape_date, total_views, reach
+tl db fb "SELECT scrape_date, total_views, subscribers
           FROM channel_metrics
           WHERE id = 12345
           ORDER BY scrape_date"
@@ -191,7 +191,7 @@ tl db fb "SELECT scrape_date, total_views, reach
 ### Compare multiple channels' growth
 
 ```bash
-tl db fb "SELECT id, scrape_date, total_views, reach
+tl db fb "SELECT id, scrape_date, total_views, subscribers
           FROM channel_metrics
           WHERE id IN (123, 456, 789)
           ORDER BY id, scrape_date"

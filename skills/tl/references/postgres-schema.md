@@ -19,9 +19,9 @@ The main sponsorships table. Each row = one sponsorship between a brand and a Yo
 The profile table is tightly coupled with the brand table for media buyers, so many reports that operate on the brand levels must access the profile data first.
 
 > 🚨 **Columns that DO NOT exist on `thoughtleaders_adlink` — common hallucinations:**
-> - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `creator_profile_id → profile → profile_brands → brand`.
-> - ❌ `organization_id` — there is NO direct org FK. Org is reached via `creator_profile_id → profile.organization_id → organization`.
-> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`. Do NOT substitute `creator_id` — that's the brand-side user who created the record, not the channel/YouTube creator.
+> - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `advertiser_profile_id → profile → profile_brands → brand`.
+> - ❌ `organization_id` — there is NO direct org FK. Org is reached via `advertiser_profile_id → profile.organization_id → organization`.
+> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`. Do NOT substitute `advertiser_id` — that's the brand-side user who created the record, not the channel.
 > - ❌ `youtube_id` (on channel) — use `external_channel_id`.
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
@@ -35,12 +35,12 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `updated_at` | timestamptz | Last modification |
 | `publish_status` | int | Deal status (see constants below) |
 | `ad_spot_id` | int FK | → `thoughtleaders_adspot.id` |
-| `creator_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `creator_profile` — the "creator_" prefix lives on the FK column, not the table. |
-| `creator_id` | int FK | → `auth_user.id` — the brand-side user account that created the sponsorship record. ⚠️ Despite the name, NOT the YouTube creator: on sponsorships, "creator" always means the buyer side. Record lineage only — for the channel use `ad_spot_id → adspot.channel_id`, for the brand use `creator_profile_id`, for accountability use the `owner_*` fields. |
+| `advertiser_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `advertiser_profile`. |
+| `advertiser_id` | int FK | → `auth_user.id` — the brand-side user account that created the sponsorship record (the advertiser/buyer side). Record lineage only — for the channel use `ad_spot_id → adspot.channel_id`, for the brand use `advertiser_profile_id`, for accountability use the `owner_*` fields. |
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
 | `owner_publisher_id` | int FK | → `auth_user.id` (channel-side owner) |
 | `owner_sales_id` | int FK | → `auth_user.id` (sales rep) |
-| `send_date` | timestamptz | Scheduled send/publish date |
+| `scheduled_date` | timestamptz | Scheduled send/publish date |
 | `publish_date` | timestamptz | Actual publish date |
 | `outreach_date` | timestamptz | When outreach was sent |
 | `purchase_date` | timestamptz | When deal was purchased/sold |
@@ -166,9 +166,9 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `url` | varchar | Channel URL (external — usually the YouTube URL). |
 | `slug` | varchar | TL-platform-specific slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any user-facing surface (reports, samples, Slack posts). Fall back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
 | `total_views` | int | Total views for the entire channel |
-| `reach` | bigint | Subscriber count. ⚠️ There is NO `subscribers` column — `reach` is the subscriber count. Many internal docs and outputs use the word "subscribers"; in SQL, always query `reach`. |
+| `subscribers` | bigint | Subscriber count. |
 | `media_selling_network_join_date` | date/timestamptz | When the channel joined the MSN. **MSN membership = this column IS NOT NULL.** |
-| `is_tl_channel` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ reach), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **This is not the MSN flag.** For MSN, use `media_selling_network_join_date IS NOT NULL`. |
+| `is_tpp` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ subscribers), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **This is not the MSN flag.** For MSN, use `media_selling_network_join_date IS NOT NULL`. |
 | `content_category` | int | Content category code (1–22), as assigned by YouTube. This assignment is too unreliable, do not use it for discovering channels. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` |
 | `is_active` | boolean | Whether the channel is active. ⚠️ **Always include `is_active = true` in channel queries** unless explicitly looking for archived rows. |
 | `country` | varchar | Channel's primary country (ISO 3166-1 alpha-2 code, e.g. `US`, `GB`, `BR`). This is often the cleanest answer to "geography" questions on sponsorships. May be NULL or blank. |
@@ -193,8 +193,8 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 
 When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the output of `tl schema pg thoughtleaders_channel` or the column table above. The `tl schema` command is authoritative. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring problems:
 
-- Subscriber count is in the field named `reach`
-- Projected views is in the field named `impression`
+- Subscriber count is in the field named `subscribers`
+- Projected views is in the field named `projected_views`
 - ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns  use bare names.
 - ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
 - ❌ **Bare-noun forms without the table-prefix** (e.g. `name` instead of `channel_name`). This table prefixes its display fields with `channel_` to avoid SQL keyword collisions and ambiguity in joins.
@@ -237,7 +237,7 @@ thoughtleaders_adlink
   ├── owner_advertiser_id → auth_user.id
   ├── owner_publisher_id → auth_user.id
   ├── owner_sales_id → auth_user.id
-  └── creator_profile_id → thoughtleaders_profile.id
+  └── advertiser_profile_id → thoughtleaders_profile.id
                               ├── organization_id → thoughtleaders_organization.id
                               └── profile_brands.profile_id → brand.id
 
@@ -270,15 +270,15 @@ JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
 
 **Adlink → Brand name:**
 ```sql
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
 JOIN thoughtleaders_brand b ON pb.brand_id = b.id
--- NEVER: JOIN brand b ON b.id = a.creator_profile_id (different ID spaces, returns wrong data)
+-- NEVER: JOIN brand b ON b.id = a.advertiser_profile_id (different ID spaces, returns wrong data)
 ```
 
 **Adlink → Organization:**
 ```sql
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_organization o ON p.organization_id = o.id
 ```
 
@@ -323,7 +323,7 @@ LIMIT 100 OFFSET 0
 
 **Sold deals this month:**
 ```sql
-SELECT id, price, purchase_date, ad_spot_id, creator_profile_id
+SELECT id, price, purchase_date, ad_spot_id, advertiser_profile_id
 FROM thoughtleaders_adlink
 WHERE publish_status = 3
   AND purchase_date >= date_trunc('month', CURRENT_DATE)
@@ -346,7 +346,7 @@ SELECT a.id, a.price, a.publish_status, b.name AS brand, ch.channel_name
 FROM thoughtleaders_adlink a
 JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id
 JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
 JOIN thoughtleaders_brand b ON pb.brand_id = b.id
 WHERE a.id = 12345

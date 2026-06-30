@@ -11,7 +11,7 @@ being inflated.
 1. **Preferred:** `tl channels similar <id> --limit 24` (the recommender).
    Best niche match.
 2. **Fallback** (recommender empty): PG cohort —
-   same `content_category` + `language`, `is_active`, `reach` within ±50%,
+   same `content_category` + `language`, `is_active`, `subscribers` within ±50%,
    `last_published` within 60 days, excluding the subject channel.
 3. For up to 12 peers, pull each peer's last 10 longforms via `tl db es`,
    require ≥5,000 aggregate views and ≥3 videos (skip dead peers).
@@ -36,7 +36,7 @@ deleting the cache file or calling `get_baseline(ch, refresh=True)`.
 If no usable peers at all (rare — niche too small / all peers dead), a generic
 English-tech floor is used (`like 2%, comment 0.25%`) and `source` is recorded
 as `fallback-generic` in the metrics so the report consumer knows the
-baseline was weak. Prefer widening the reach band over trusting this.
+baseline was weak. Prefer widening the subscribers band over trusting this.
 
 ## Caveats
 

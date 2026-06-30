@@ -155,7 +155,7 @@ def sponsorability(doc):
         "msn_join_date": doc.get("media_selling_network_join_date"),
         "has_outreach_email": doc.get("has_outreach_email"),
         "sponsorship_price": doc.get("sponsorship_price"),
-        "reach": doc.get("reach"),
+        "subscribers": doc.get("reach"),
     }
 
 
@@ -263,6 +263,6 @@ def main():
 #  "fields","total_matching_videos",
 #  "channels":[{"channel_id","name","score","top_video_id","top_video_title",
 #               "sponsorability":{"is_active","is_tpp","is_msn","msn_join_date",
-#                                 "has_outreach_email","sponsorship_price","reach"}}, ...]}
+#                                 "has_outreach_email","sponsorship_price","subscribers"}}, ...]}
 if __name__ == "__main__":
     main()

@@ -93,7 +93,7 @@ tl whoami
 # profile → profile_brands → brand chain.
 tl db pg "SELECT al.id, al.weighted_price, al.purchase_date
           FROM thoughtleaders_adlink al
-          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile p           ON p.id  = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
           JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
           WHERE al.publish_status = 3
@@ -200,7 +200,7 @@ ThoughtLeaders has its internal terminology that's exposed throughout this tool.
 * **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and a computed CPM.
 * **AdLink** — engineering / DB name for the row that backs a sponsorship. Treat as interchangeable with "sponsorship"; the table is `thoughtleaders_adlink`.
 * **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channel is in MSN if `channel.media_selling_network_join_date IS NOT NULL`.
-* **TPP** (ThoughtLeaders Partner Program) — TL's closest-partner channels, a strict subset of MSN. A channel is TPP if `channel.is_tl_channel = TRUE`. Prefer TPP channels when booking — fastest response, easiest to close.
+* **TPP** (ThoughtLeaders Partner Program) — TL's closest-partner channels, a strict subset of MSN. A channel is TPP if `channel.is_tpp = TRUE`. Prefer TPP channels when booking — fastest response, easiest to close.
 * **MBN** (Media Buying Network) — the brand-side counterpart to MSN: profiles that have opted in to receive proposed sponsorships (`profile.media_buying_network_join_date IS NOT NULL`).
 
 Sponsorships are the centre of attention in ThoughtLeaders — all other analytics and operations serve to produce or optimise sponsorships. Note that the term "Sponsorship" is wide and encompasses pre-deal stages. The funnel is large at the Sponsorship end and narrowest at the Deal end.
@@ -222,7 +222,7 @@ Talk naturally in Claude Code:
 ```
 /tl Which channels did we sponsor in Q1?
 /tl sold sponsorships for Nike in Q1
-/tl show me pending proposals with send dates in April
+/tl show me pending proposals with scheduled dates in April
 /tl what channels does Nike sponsor?
 /tl find me Cooking creators in the US with mobile-heavy audiences
 /tl check my balance
@@ -230,7 +230,7 @@ Talk naturally in Claude Code:
 
 Resource-specific slash commands:
 ```
-/tl-sponsorships pending with send dates in April
+/tl-sponsorships pending with scheduled dates in April
 /tl-reports run my Q1 pipeline
 /tl-balance
 ```
@@ -262,7 +262,7 @@ By default, output is a styled table in the terminal and JSON when piped.
 
 ```bash
 tl sponsorships show 12345 --json | jq '.results'
-tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE is_tl_channel = TRUE
+tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE is_tpp = TRUE
           LIMIT 200 OFFSET 0" --csv > tpp.csv
 tl channels show "MrBeast" --md      # markdown table for Slack / docs
 tl channels show "MrBeast" --toon    # token-efficient encoding for LLMs
