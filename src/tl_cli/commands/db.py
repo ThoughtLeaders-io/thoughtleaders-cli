@@ -56,8 +56,13 @@ def pg_cmd(
 ) -> None:
     """Run a raw PostgreSQL SELECT query.
 
+    Column names follow the current schema (e.g. subscribers, projected_views,
+    scheduled_date — not the older reach / impression / send_date). Run
+    `tl schema pg <table>` to see the exact columns your role can query.
+
     Examples:
-        tl db pg "SELECT id, name FROM thoughtleaders_brand LIMIT 10 OFFSET 0"
+        tl db pg "SELECT channel_name, subscribers, projected_views FROM thoughtleaders_channel ORDER BY subscribers DESC LIMIT 10"
+        tl db pg "SELECT id, scheduled_date, publish_status FROM thoughtleaders_adlink LIMIT 20"
         cat query.sql | tl db pg -
         tl db pg "SELECT * FROM thoughtleaders_channel LIMIT 100" --pricing
     """
