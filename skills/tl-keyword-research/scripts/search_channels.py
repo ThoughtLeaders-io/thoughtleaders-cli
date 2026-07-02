@@ -13,6 +13,9 @@ Usage:
     echo '["investing","index funds"]' | search_channels.py
     search_channels.py --operator AND "tiktok shop" affiliate
     search_channels.py --since 2025-01-01 --size 40 investing
+    # boolean-group mode: each --group is one self-contained simple_query_string
+    # (the final keyword_groups filter re-runs verbatim; groups OR-combine)
+    search_channels.py --group '("fable 5" | fable5)' --group '("mythos 5" | mythos5) -keto'
 
 Output (stdout): a single JSON object — see OUTPUT_SHAPE at the bottom.
 """
@@ -22,12 +25,19 @@ import subprocess
 import sys
 
 DEFAULT_FIELDS = "title^4,summary^2,transcript^1"  # title > summary > transcript
+# ES channel docs keep the LEGACY field names (reach / is_tl_channel …) — the
+# index was not migrated in the big rename. Query with legacy names; emit the
+# new vocabulary (subscribers / is_tpp) in the output. See sponsorability().
 ENRICH_SOURCE = [
     "id", "name", "is_active", "is_tl_channel",
     "media_selling_network_join_date", "has_outreach_email",
     "sponsorship_price", "reach",
 ]
 ES_TIMEOUT = 90
+# Always scope to YouTube uploads (channel.format 4 — our inventory); at video
+# level also default to longform (best sponsorable-content signal).
+YOUTUBE_FORMAT = 4
+CONTENT_TYPES = ("longform", "short", "live", "all")
 
 
 def run_es(body):
@@ -57,8 +67,13 @@ def keyword_clauses(keywords, fields):
     ]
 
 
-def _filters(since, until):
-    filt = [{"term": {"doc_type": "article"}}]
+def _filters(since, until, content_type="longform"):
+    filt = [
+        {"term": {"doc_type": "article"}},
+        {"term": {"channel.format": YOUTUBE_FORMAT}},
+    ]
+    if content_type and content_type != "all":
+        filt.append({"term": {"content_type": content_type}})
     if since or until:
         rng = {}
         if since:
@@ -80,10 +95,11 @@ def _envelope(bool_q, size):
     }
 
 
-def build_search(keywords, fields, operator, since, until, size, not_terms=None):
+def build_search(keywords, fields, operator, since, until, size, not_terms=None,
+                 content_type="longform"):
     """Flat mode: a single OR/AND list of keywords (+ optional exclusions)."""
     clauses = keyword_clauses(keywords, fields)
-    bool_q = {"filter": _filters(since, until)}
+    bool_q = {"filter": _filters(since, until, content_type)}
     if operator == "AND":
         bool_q["must"] = clauses
     else:
@@ -94,7 +110,8 @@ def build_search(keywords, fields, operator, since, until, size, not_terms=None)
     return _envelope(bool_q, size)
 
 
-def build_composed(any_groups, not_terms, fields, since, until, size):
+def build_composed(any_groups, not_terms, fields, since, until, size,
+                   content_type="longform"):
     """Composed mode — AND of OR-groups, minus exclusions:
         (g1a OR g1b …) AND (g2a OR g2b …) AND NOT (n1 OR n2 …)
     Each `--any` group is one required dimension (internally OR); adding a group
@@ -103,7 +120,29 @@ def build_composed(any_groups, not_terms, fields, since, until, size):
         {"bool": {"should": keyword_clauses(group, fields), "minimum_should_match": 1}}
         for group in any_groups
     ]
-    bool_q = {"must": must, "filter": _filters(since, until)}
+    bool_q = {"must": must, "filter": _filters(since, until, content_type)}
+    if not_terms:
+        bool_q["must_not"] = keyword_clauses(not_terms, fields)
+    return _envelope(bool_q, size)
+
+
+def build_groups(groups, not_terms, fields, since, until, size, operator="OR",
+                 content_type="longform"):
+    """Boolean-group mode — each group is a self-contained simple_query_string
+    (`("fable 5" | fable5) -keto` scopes its exclusion to its own arm), exactly
+    the shape the delivered keyword_groups filter stores. Groups combine per
+    `operator` (default OR — a filter's groups union); `--not` still excludes
+    across the whole query. `default_operator: "and"` keeps in-group `-` safe."""
+    clauses = [
+        {"simple_query_string": {"query": g, "fields": fields, "default_operator": "and"}}
+        for g in groups
+    ]
+    bool_q = {"filter": _filters(since, until, content_type)}
+    if operator == "AND":
+        bool_q["must"] = clauses
+    else:
+        bool_q["should"] = clauses
+        bool_q["minimum_should_match"] = 1
     if not_terms:
         bool_q["must_not"] = keyword_clauses(not_terms, fields)
     return _envelope(bool_q, size)
@@ -129,6 +168,16 @@ def render_cnf(pos_clauses, not_terms):
         "(" + " OR ".join(lit(t) for t in clause) + ")" for clause in clauses
     )
     return {"expression": expression, "clauses": clauses}
+
+
+def render_groups(groups, not_terms, operator):
+    """Readable expression for boolean-group mode: groups joined by the filter
+    operator, whole-query excludes appended as AND NOT. Not CNF — in-group
+    exclusions are scoped to their own arm, which CNF cannot express."""
+    expression = f" {operator} ".join(f"({g})" for g in groups)
+    for t in not_terms:
+        expression += f" AND NOT {_q(t)}"
+    return {"expression": expression, "clauses": None, "groups": list(groups)}
 
 
 def build_enrich(channel_ids):
@@ -194,11 +243,20 @@ def main():
     ap.add_argument("--any", action="append", default=[], metavar="TERMS",
                     help="A comma-separated OR-group. Repeat to AND groups: "
                          "--any 'a,b' --any 'c,d' → (a OR b) AND (c OR d). Enables composed mode.")
+    ap.add_argument("--group", action="append", default=[], metavar="SQS",
+                    help="A self-contained simple_query_string boolean group, e.g. "
+                         "'(\"fable 5\" | fable5) -keto'. Repeatable; groups combine per "
+                         "--operator (default OR). This is the delivered keyword_groups "
+                         "shape, so the final filter re-runs verbatim.")
     ap.add_argument("--not", dest="exclude", action="append", default=[], metavar="TERMS",
                     help="Comma-separated terms to EXCLUDE (must_not); repeatable. Narrows away a confusable sense.")
     ap.add_argument("--fields", default=DEFAULT_FIELDS,
                     help=f"Comma list of ES fields with optional ^boost (default: {DEFAULT_FIELDS})")
     ap.add_argument("--size", type=int, default=25, help="Number of channels to return (default 25)")
+    ap.add_argument("--content-type", choices=list(CONTENT_TYPES), default="longform",
+                    help="Video content type filter (default longform — best sponsorable "
+                         "signal). 'all' drops the filter (include shorts + live). "
+                         "YouTube-only (channel.format 4) is always enforced.")
     ap.add_argument("--since", help="publication_date >= YYYY-MM-DD")
     ap.add_argument("--until", help="publication_date <= YYYY-MM-DD")
     ap.add_argument("--no-enrich", action="store_true", help="Skip name + sponsorability enrichment")
@@ -213,20 +271,35 @@ def main():
 
     keywords = dedupe(collect_keywords(args.keywords))
     any_groups = [g for g in (parse_group(r) for r in args.any) if g]
+    sqs_groups = [g.strip() for g in args.group if g.strip()]
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
 
-    if any_groups:
+    if sqs_groups and any_groups:
+        sys.exit("--group and --any are different composition modes; use one or the other")
+
+    if sqs_groups:
+        if keywords:  # positional/stdin keywords become plain-phrase groups
+            sqs_groups = [f'"{k}"' if " " in k else k for k in keywords] + sqs_groups
+        env = run_es(build_groups(sqs_groups, not_terms, fields, args.since, args.until,
+                                  args.size, args.operator, args.content_type))
+        query_desc = {"mode": "groups", "operator": args.operator,
+                      "groups": sqs_groups, "not": not_terms}
+        expression = render_groups(sqs_groups, not_terms, args.operator)
+    elif any_groups:
         if keywords:  # positional/stdin keywords become a leading required OR-group
             any_groups = [keywords] + any_groups
-        env = run_es(build_composed(any_groups, not_terms, fields, args.since, args.until, args.size))
+        env = run_es(build_composed(any_groups, not_terms, fields, args.since, args.until,
+                                    args.size, args.content_type))
         query_desc = {"mode": "composed", "any_groups": any_groups, "not": not_terms}
-        pos_clauses = any_groups
+        expression = render_cnf(any_groups, not_terms)
     else:
         if not keywords:
-            sys.exit("provide keywords (positional args / JSON array on stdin) or --any groups")
-        env = run_es(build_search(keywords, fields, args.operator, args.since, args.until, args.size, not_terms))
+            sys.exit("provide keywords (positional args / JSON array on stdin), --any groups, or --group")
+        env = run_es(build_search(keywords, fields, args.operator, args.since, args.until,
+                                  args.size, not_terms, args.content_type))
         query_desc = {"mode": "flat", "operator": args.operator, "keywords": keywords, "not": not_terms}
         pos_clauses = [keywords] if args.operator == "OR" else [[k] for k in keywords]
+        expression = render_cnf(pos_clauses, not_terms)
 
     channels = []
     for row in env.get("results", []):
@@ -248,21 +321,30 @@ def main():
             c["name"] = doc.get("name")
             c["sponsorability"] = sponsorability(doc)
 
+    scope = {"format": "youtube", "content_type": args.content_type}
     print(json.dumps({
         "query": query_desc,
-        "cnf": render_cnf(pos_clauses, not_terms),
+        "cnf": expression,          # kept name for back-compat; see OUTPUT_SHAPE
+        "expression": expression,
         "fields": args.fields,
+        "scope": scope,
         "total_matching_videos": env.get("total", 0),
         "channels": channels,
     }, ensure_ascii=False))
 
 
 # OUTPUT_SHAPE:
-# {"query":{"mode":"flat","operator","keywords","not"} | {"mode":"composed","any_groups":[[...]],"not"},
-#  "cnf":{"expression":"(a OR b) AND (c) AND (NOT x)","clauses":[["a","b"],["c"],["NOT x"]]},
-#  "fields","total_matching_videos",
+# {"query":{"mode":"flat","operator","keywords","not"} | {"mode":"composed","any_groups":[[...]],"not"}
+#          | {"mode":"groups","operator","groups":[...],"not"},
+#  "cnf"/"expression": {"expression":"(a OR b) AND (c) AND (NOT x)","clauses":[["a","b"],["c"],["NOT x"]]}
+#          — flat/composed render true CNF; groups mode renders the OR-joined
+#            boolean groups instead ("clauses": null, "groups": [...]) since
+#            in-group scoped exclusions cannot be expressed in CNF.
+#  "fields", "scope":{"format":"youtube","content_type":...}, "total_matching_videos",
 #  "channels":[{"channel_id","name","score","top_video_id","top_video_title",
 #               "sponsorability":{"is_active","is_tpp","is_msn","msn_join_date",
 #                                 "has_outreach_email","sponsorship_price","subscribers"}}, ...]}
+# sponsorability reads LEGACY ES channel-doc fields (reach, is_tl_channel) and
+# emits the renamed vocabulary (subscribers, is_tpp) — ES was not migrated.
 if __name__ == "__main__":
     main()

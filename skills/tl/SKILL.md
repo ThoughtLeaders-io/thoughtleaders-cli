@@ -555,13 +555,7 @@ Use `tl recommender top` for category/topic discovery (it's ranked) and `tl chan
 - **Channel–brand fit check** — does this candidate channel's content actually touch the brand's category? (Use with `channel.id` filter on the downstream ES query.)
 - **Validating a recommender / SQL shortlist** — sample-check that the top-N channels really cover the niche.
 
-**Do NOT compose keyword sets by hand for `tl db es`.** Always run the skill's script first. It broadens the user input, probes each candidate via `multi_match phrase`, and returns ranked counts:
-
-```json
-{"operator": "OR", "keywords": [{"keyword": "crypto", "count": 18742}, {"keyword": "bitcoin", "count": 15103}, {"keyword": "rugpull", "count": 0}]}
-```
-
-Then run the actual content search via `tl db es` (`multi_match` on the `title`, `summary`, `transcript` fields) with the surviving high-count keywords. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in the `tl-keyword-research` skill file.
+**Do NOT compose keyword sets by hand for `tl db es`.** Always invoke the whole skill. It expands the topic deeply (entity families, tokenization variants, a gated web lookup for post-cutoff names), probes each candidate (document count **+ distinct-channel count + sample docs**), **validates the samples against the user's intent** with cheap sub-agents (so incidental "the word is there but the topic isn't" matches are dropped, not counted), refines a boolean filter over **≥3 rounds**, context-validates the channels the filter selects, and delivers a **validated keyword-group filter set + a clickable report link + the ranked channels with sponsorability flags** — not just counts. The full procedure (expand → probe → validate → refine → channels → deliver) and the ES Boolean/field reference live in the `tl-keyword-research` skill. Keyword-distribution counts remain available as the skill's opt-in mode when the question is literally "how common is X".
 
 **Path 4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tpp`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
 
