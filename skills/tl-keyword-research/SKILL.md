@@ -33,15 +33,17 @@ The deliverable is always both halves:
 
 1. **A filter set of keyword groups** + a **clickable report link** that opens
    the platform with the filter applied (+ a persist config) — `build_report.py`.
-2. **The validated channels/videos** the filter selects, ranked and flagged for
-   sponsorability — `search_channels.py` → `fetch_context.py` → context
-   classification.
+2. **The validated results the filter selects** — channels ranked and flagged
+   for sponsorability (`search_channels.py` → `fetch_context.py` → context
+   classification) for channel-level intent, or the matching **videos/uploads**
+   (`search_videos.py`, sortable by date/views for trend reports) for
+   topic-level intent.
 
 The **canonical artifact is the keyword-group filter set**: each group is a
 self-contained boolean query (an exclusion can be scoped to its own arm —
 `("mythos 5" | mythos5) -keto` — which a flat CNF cannot express). The rendered
 boolean **expression** is recorded alongside for provenance and re-runs
-verbatim via `search_channels.py --group`.
+verbatim via `search_channels.py --group` / `search_videos.py --group`.
 
 > Read `references/elasticsearch-content-search.md` before writing queries — it
 > covers the article-vs-channel doc types, the content fields (and ES's
@@ -89,8 +91,8 @@ list. State that a full refined run is available.
 | 2 Probe | counts + samples per candidate | `probe.py` |
 | 3 Validate keywords | on-intent check per keyword; scope calls to the user | inline / `select_keywords.py` + `keyword-relevance-validator` agent |
 | 4 Refine | ≥3 rounds of boolean composition, fitness, backtracking | `probe.py --mode sqs`, `search_channels.py` |
-| 5 Channels | materialize + context-validate the channel set | `search_channels.py --group` → `fetch_context.py` → `keyword-context-classifier` agent |
-| 6 Deliver | filter set + report link + channels; offer to save | `build_report.py`, `tl-save-report` |
+| 5 Materialize | channels (sponsorship) or videos (trend reports), validated | `search_channels.py --group` → `fetch_context.py` → `keyword-context-classifier` agent · `search_videos.py --group` |
+| 6 Deliver | filter set + report link + channels/videos; offer to save | `build_report.py`, `tl-save-report` |
 
 ### Stage 0 — Set up: intent, level, operator, breadth, scope
 
@@ -99,10 +101,12 @@ every validation judges against. Then state your assumptions so the user can
 correct them:
 
 - **Level.** *topic* (default) — which videos are about this? A creator who
-  covered it once counts (trends, content discovery). *channel* — which
+  covered it once counts; the deliverable is the matching **uploads** (trend
+  reports, content discovery — Stage 5's video lane). *channel* — which
   channels are reliably about this? For buying a creator's *next* video, a
-  one-off mention doesn't help. Nail topic level first; channel level is a
-  short follow-up. Pass `--level topic|channel` to the scripts.
+  one-off mention doesn't help; the deliverable is the validated **channel
+  set**. Nail topic level first; channel level is a short follow-up. Pass
+  `--level topic|channel` to the scripts.
 - **Operator.** Default `OR` (union of a niche's facets); `AND` only for a true
   intersection ("both X and Y", composite nouns). Under AND, keep candidates
   *inside* the intersection — don't broaden each component independently.
@@ -368,13 +372,37 @@ then fold the answers into the groups and the validators' TOPIC/NOT lines.
 stop when fitness stops improving (sane cap ~6 rounds), note that you ran
 autonomously.
 
-### Stage 5 — Materialize & context-validate the channels
+### Stage 5 — Materialize & validate the results (channels or videos)
 
-Mandatory for channel-level intent; for topic-level runs the validated
-`candidate_videos`/`candidate_channels` from Stage 3 usually suffice — offer
-full materialization.
+Two lanes, keyed off the Stage 0 level — both take the final filter verbatim
+via `--group`, so what you deliver is exactly what the filter selects:
 
-1. **Search** with the final filter, verbatim:
+**Channel lane (channel-level intent — sponsorship prospecting).** Mandatory
+for channel-level runs.
+
+**Video lane (topic-level intent — trend reports, "who's talking about X
+right now", upload-level questions).** For topic-level runs, materialize the
+videos with `search_videos.py`; the Stage 3 `candidate_videos` are just its
+preview:
+
+```bash
+# trend feed: newest matching uploads in the window
+python3 <SKILL_DIR>/scripts/search_videos.py --sort date --since 2026-06-01 \
+  --size 50 --group '("fable 5" | fable5 | "fable five")'
+# biggest matching videos; --distinct-channels for one row per channel
+python3 <SKILL_DIR>/scripts/search_videos.py --sort views --distinct-channels \
+  --group '("mythos 5" | mythos5) -keto'
+```
+
+Videos come back with title, url, publication date, views/likes/duration,
+and the channel's name + subscribers. Sense-check a sample of the top videos
+(titles/summaries against the intent — the Stage 3 machinery) before
+delivering; by default every matching video is a row, so tell the user when
+one channel dominates and offer `--distinct-channels`. For date-sorted trend
+feeds prefer `--fields title,summary` — under a non-relevance sort, incidental
+transcript mentions surface as prominently as genuinely on-topic uploads.
+
+1. **Search channels** with the final filter, verbatim:
    ```bash
    python3 <SKILL_DIR>/scripts/search_channels.py --size 200 \
      --group '("fable 5" | fable5 | "fable five")' \
@@ -468,9 +496,9 @@ operator mirroring in `tl-save-report`) keep working.
 ## Cost
 
 One `tl db es` query per candidate probe (~1–2 credits each); ~10 candidates ≈
-10–20 credits. `search_channels.py` is 2 calls; `fetch_context.py` is 1 call
-per channel with priced fields — keep `--samples` small (default 4) and
-validate the top candidates, not the tail. Haiku validation is cheap by design;
+10–20 credits. `search_channels.py` and `search_videos.py` are 2 calls each;
+`fetch_context.py` is 1 call per channel with priced fields — keep `--samples`
+small (default 4) and validate the top candidates, not the tail. Haiku validation is cheap by design;
 batch and parallelize. `build_report.py` and `expand_entities.py` are free (no
 ES). The gated web step adds no credits — a few WebSearch/WebFetch calls inside
 the resolver's own context; it fires only on post-cutoff / renamed / trend /
@@ -504,8 +532,9 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
    batch diffed by `channel_id`, missing items re-sent; only clear `off_topic`
    channels excluded, and the exclusion surfaced. Channels carry verdicts +
    sponsorability flags (all ranked, none filtered for being unbookable).
-   For topic-level runs you delivered the validated candidates and offered
-   full materialization.
+   For topic-level runs you materialized the matching videos
+   (`search_videos.py`, sort/window matched to the ask) and sense-checked a
+   sample of the top results.
 7. Redundant terms pruned and reported; **stale** terms flagged (excluded or
    visibly tagged), `thin` niches surfaced — nothing dropped silently.
 8. The deliverable includes the filter set **and** a working `report_link`

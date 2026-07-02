@@ -24,9 +24,10 @@ See the output of `tl db es`" for the object schema. Highlights:
 - **Top-level keys** accepted: `query`, `aggs`/`aggregations`, `sort`, `_source`, `size`, `from`, `search_after`, `track_total_hits`, `highlight`, `fields`, `min_score`, `timeout`, `collapse`, `post_filter`. Anything else (incl. `scroll`, `pit`, `runtime_mappings`, `knn`) is not accepted.
 - `size` ≤ 10,000. `from + size` ≤ 10,000 — to page past 10,000 hits use `search_after` (see *Deep pagination* below), not `from`.
 - `search_after` must be a non-empty array of ≤ 10 scalar sort values, requires an explicit `sort`, and `from` must be 0 or omitted.
-- **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`. `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
+- **Accepted query types** include `term`/`terms`/`match`/`bool`/`nested`/`range`/`exists`/`match_phrase`/`simple_query_string` (the sanctioned rich-Boolean text surface — `+` required, `|` OR, `-` NOT, `"phrase"`, `"phrase"~N` slop, trailing-`*` prefix, `~N` fuzzy, `(...)` grouping, per-field `^boosts`; always set `default_operator: "and"` and an explicit `fields` list or counts balloon). `query_string`, `regexp`, `wildcard`, `fuzzy`, `more_like_this`, `has_child`, `has_parent`, `parent_id` are not accepted.
 - **No scripts** — keys that start with `script` (e.g. `script_fields`, `script_score`, `scripted_metric`) or end with `_script` (e.g. `bucket_script`) are not accepted. A field whose name merely contains `script` as a substring (e.g. `transcript`, `description`) is fine.
-- **At most one aggregation total** counted recursively (top-level + sub-agg = 2 = not accepted). Run multiple calls for multi-metric work.
+- **Aggregations are bounded, not forbidden**: up to ~50 agg nodes per body, bucket nesting ≤ 3 levels deep (single-bucket framing aggs like `filter`/`nested`/`missing` count toward depth), terms-like bucket `size` ≤ 10,000, and a worst-case total bucket count cap — so a `filter` agg wrapping a `cardinality` (the common counts-plus-recency shape) is fine in one call. Heavy/experimental agg types (e.g. `significant_terms`, script-based pipeline aggs) are not accepted.
+- **`highlight` is accepted in the body but highlight fragments are not returned** — result rows carry only `_id`, `_score`, and the `_source` fields. Request the `_source` fields you need for validation samples instead.
 
 ### ElasticSearch document structure ("articles")
 

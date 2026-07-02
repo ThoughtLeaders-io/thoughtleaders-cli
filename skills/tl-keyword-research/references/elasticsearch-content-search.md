@@ -190,12 +190,13 @@ floats free and balloons (see the footgun below).
 
 ## Boolean queries
 
-**Accepted** query types: `term`, `terms`, `match`, `match_phrase`, `bool`,
-`nested`, `range`, `exists`, and **`simple_query_string`**.
-
-**Blocked** (return `400`): `query_string`, `regexp`, `wildcard`, `fuzzy`,
-`more_like_this`, `has_child`/`has_parent`/`parent_id`. Also no `scroll`, `pit`,
-`runtime_mappings`, `knn`.
+The accepted/blocked query types, top-level body keys, size caps, and
+aggregation bounds are catalogued in the canonical schema reference —
+`../../tl/references/elasticsearch-schema.md` → *Accepted query bodies*. The
+short version that matters here: `simple_query_string` and `bool` are in;
+`query_string`/`wildcard`/`fuzzy`/`regexp` and the parent-child joins are
+out; a `filter` agg wrapping a `cardinality` (the probe's counts-plus-recency
+shape) is fine in one call.
 
 ### `simple_query_string` — the compact Boolean surface (preferred)
 
@@ -417,6 +418,15 @@ id and read `ai.topic_descriptions` / `ai.description`:
 ```
 
 Or run the probe with `--level channel` to search channel docs directly.
+
+**Channel-field probes approximate the delivered filter, they don't equal it.**
+A delivered filter keyword targeting a channel ContentField
+(`channel_topic_description`, `channel_description`, …) matches **articles**
+whose channel matches — its result counts are videos. Raw probes can't run
+that parent-child join (the join query types are not accepted), so you probe
+the channel docs directly and count **channels**. Same signal, different
+units: validate the keyword's sense on channel-doc samples, but don't expect
+the probe count to match the report's row count on channel-field keywords.
 
 ## Cost
 
