@@ -10,35 +10,48 @@ description: |
   hand-compose a `tl db es` content search. It expands the topic into candidate
   keywords (with a gated web lookup for post-cutoff entities), probes
   Elasticsearch for each (counts + samples), validates matches against the
-  user's stated intent, refines a boolean filter over ≥3 rounds, context-validates
-  the resulting channels with cheap agents, and delivers a keyword-group filter
-  set + a clickable report link + the ranked validated channels with
-  sponsorability flags. Keyword-distribution output (counts per keyword) is
-  OPT-IN — only when the user explicitly asks for "keyword counts /
-  distribution / how common is X". Two run modes — a quick single pass or a
-  deep ≥3-round refinement: honor whichever the request names, and ASK the
-  user which they want when it names neither (never silently default);
-  `autonomous` / `--auto` means the deep path with every pause skipped.
+  user's stated intent, refines a boolean filter over ≥3 rounds, and delivers
+  a keyword-group filter set + a clickable report link + the results the user
+  chose: trend data at the video level (matching uploads + prevalence), or
+  channel targets classified by topic intensity (core / recurring / one-off)
+  and context-validated with cheap agents, or both. It ASKS which deliverable
+  and which run mode (quick single pass vs deep ≥3-round refinement) the user
+  wants whenever the request doesn't say — never a silent default;
+  `autonomous` / `--auto` means deep + both deliverables with every pause
+  skipped. Keyword-distribution output (counts per keyword) is OPT-IN — only
+  when the user explicitly asks for "keyword counts / distribution / how
+  common is X".
 ---
 
-# tl-keyword-research — topic → validated filter set + channels
+# tl-keyword-research — topic → validated filter set + the results you choose
 
 Turn a fuzzy topic into a **precise, validated content filter** over our data —
-*and* the ranked, context-validated channels that filter selects. The value is
-not brainstorming synonyms (anyone can do that, and a free YouTube search does
-it too) — it's writing real **Boolean queries over the right fields**, then
-**validating that the matches are actually on-topic** against our corpus. That
-combination is what our data makes possible and a plain keyword list does not.
+and whichever results the user actually wants from it: the trend picture at
+the video level, channel targets classified by how much they cover the topic,
+or both. The value is not brainstorming synonyms (anyone can do that, and a
+free YouTube search does it too) — it's writing real **Boolean queries over
+the right fields**, then **validating that the matches are actually on-topic**
+against our corpus. That combination is what our data makes possible and a
+plain keyword list does not.
 
-The deliverable is always both halves:
+The deliverable has one mandatory layer and two optional layers **the user
+chooses between** (never assume — see *Choosing the path & deliverable*):
 
-1. **A filter set of keyword groups** + a **clickable report link** that opens
-   the platform with the filter applied (+ a persist config) — `build_report.py`.
-2. **The validated results the filter selects** — channels ranked and flagged
-   for sponsorability (`search_channels.py` → `fetch_context.py` → context
-   classification) for channel-level intent, or the matching **videos/uploads**
-   (`search_videos.py`, sortable by date/views for trend reports) for
-   topic-level intent.
+1. **The topic itself (always).** A filter set of keyword groups + a
+   **clickable report link** that opens the platform with the filter applied
+   (+ a persist config) — `build_report.py`. The topic and its prevalence
+   (matching videos, distinct channels) is a complete deliverable on its own —
+   a trend journalist writing "how big is this on YouTube" needs exactly this
+   and may not want a channel list at all.
+2. **Trend data (video level).** The matching uploads — sortable by
+   date/views, windowed — via `search_videos.py`. A creator who covered the
+   topic once counts here.
+3. **Channel targets.** Channels classified by their **relationship to the
+   topic** — core / recurring / occasional / one-off (`search_channels.py
+   --intensity`) — then ranked, sense-checked, and flagged for sponsorability.
+   Never assume "channels about the topic" means only channels *entirely*
+   about it: for niche topics there may be almost none, and the real
+   sponsorship market is channels that return to the topic repeatedly.
 
 The **canonical artifact is the keyword-group filter set**: each group is a
 self-contained boolean query (an exclusion can be scoped to its own arm —
@@ -65,32 +78,42 @@ Skip when:
 - Intent maps cleanly to a curated recommender tag (e.g. "Cooking channels") →
   `tl recommender top-channels "<tag>"`. Don't re-discover curated tags by text match.
 
-## Choosing the path — the user picks, never a silent default
+## Choosing the path & deliverable — the user picks, never a silent default
 
-Two run modes:
+Two choices shape the run, and both belong to the USER:
 
-- **Quick path** — one expand → probe → validate → deliver pass, no refinement
-  rounds. Even here, tokenization variants, entity-family expansion, and
-  sample validation are mandatory — speed never excuses a shallow synonym
-  list.
-- **Deep path** — the full pipeline: ≥3 refinement rounds (Stage 4) plus
-  channel/video materialization (Stage 5).
+**Path** (how hard to refine):
+- **Quick** — one expand → probe → validate → deliver pass, no refinement
+  rounds (≈ 10–20 credits). Even here, tokenization variants, entity-family
+  expansion, and sample validation are mandatory — speed never excuses a
+  shallow synonym list.
+- **Deep** — the full pipeline: ≥3 refinement rounds (Stage 4) plus
+  materialization (Stage 5) (≈ 60–120 credits depending on how much gets
+  materialized and validated).
+
+**Deliverable** (what comes back besides the filter + link, which are always
+included):
+- **Trend data** — the matching videos + prevalence numbers (video level).
+- **Channel targets** — channels tiered by topic intensity, sense-checked,
+  sponsorability-flagged.
+- **Both.**
 
 How to pick:
 
-1. **The request names a path → run it, no questions.** "quick", "fast",
-   "just a starting set" → quick; "deep", "thorough", "full refinement",
-   "take your time" → deep.
-2. **Otherwise, ask before starting** — one question, with the trade stated
-   in a line each: *quick* ≈ a validated starter filter in one pass; *deep* ≈
-   ≥3 refinement rounds + materialized channels/videos, noticeably more time
-   and credits, with a check-in after round 3. Don't silently default either
-   way: guessing quick hides what the skill can do, guessing deep spends time
-   and credits the user never asked for.
+1. **The request names it → run it, no questions.** "quick"/"fast"/"just a
+   starting set" → quick; "deep"/"thorough"/"take your time" → deep. "trend",
+   "prevalence", "how big is this", "who's talking about it right now" →
+   trend data; "channels to sponsor", "targets", "channels for [client]" →
+   channel targets.
+2. **Otherwise, ask before starting — ONE combined question** covering
+   whichever of the two is unstated, with the trade in a line each (include
+   the rough credit costs above). Don't silently default: guessing quick
+   hides what the skill can do; guessing deep spends credits the user never
+   asked for; and assuming the user wants a channel list when they wanted
+   trend data (or vice versa) answers a question they didn't ask.
 3. **Exception:** `autonomous` / `--auto` / "don't stop to ask" with no named
-   path means the **deep path with every pause skipped** — the user has asked
-   for zero questions, and autonomy exists so the full pipeline can run
-   unattended (Stage 4 rules).
+   path/deliverable means the **deep path, both deliverables, every pause
+   skipped** — the user has asked for zero questions.
 
 **Autonomy within the deep path:** at any point the user can say run
 autonomously / without pausing (or invoke with `autonomous` / `--auto`) —
@@ -101,27 +124,51 @@ rest of the session unless revoked.
 
 | Stage | What happens | Tooling |
 |---|---|---|
-| 0 Set up | intent, level, operator, breadth judgment, scope; gated web entity resolution | `keyword-entity-resolver` agent + `expand_entities.py` |
+| 0 Set up | intent, deliverable, operator, breadth judgment, scope; gated web entity resolution | `keyword-entity-resolver` agent + `expand_entities.py` |
 | 1 Expand | deep, creative candidate generation | you |
 | 2 Probe | counts + samples per candidate | `probe.py` |
 | 3 Validate keywords | on-intent check per keyword; scope calls to the user | inline / `select_keywords.py` + `keyword-relevance-validator` agent |
 | 4 Refine | ≥3 rounds of boolean composition, fitness, backtracking | `probe.py --mode sqs`, `search_channels.py` |
-| 5 Materialize | channels (sponsorship) or videos (trend reports), validated | `search_channels.py --group` → `fetch_context.py` → `keyword-context-classifier` agent · `search_videos.py --group` |
-| 6 Deliver | filter set + report link + channels/videos; offer to save | `build_report.py`, `tl-save-report` |
+| 5 Materialize | intensity triage, then trend data and/or channel targets, validated | `search_channels.py --intensity` · `search_videos.py --group` · `search_channels.py --group` → `fetch_context.py` → `keyword-context-classifier` agent |
+| 6 Deliver | filter set + report link + the chosen deliverables; offer to save | `build_report.py`, `tl-save-report` |
 
-### Stage 0 — Set up: intent, level, operator, breadth, scope
+**Narrate the run.** The user must always know what's happening: one line at
+every stage transition — what you're doing, why, and the approximate credits
+spent so far (*"Stage 2 — probing 18 candidates, one query each (≈25 credits
+so far)"*). Never run a silent stage, and surface every drop/prune/failure as
+it happens, not just at the end.
+
+**Spend tokens as carefully as credits.** Deterministic work belongs in the
+scripts (zero model tokens — tokenization variants, tier math, pruning, link
+building are all scripted). Judgment calls go to the **cheapest capable
+model** via the bundled agents: `keyword-relevance-validator` and
+`keyword-context-classifier` run on Haiku; only the web-reading
+`keyword-entity-resolver` runs on Sonnet. Don't do in your own context what a
+script or a Haiku batch can do.
+
+### Stage 0 — Set up: intent, deliverable, operator, breadth, scope
 
 Keep the user's own sentence **verbatim as the intent** — it's the yardstick
 every validation judges against. Then state your assumptions so the user can
 correct them:
 
-- **Level.** *topic* (default) — which videos are about this? A creator who
-  covered it once counts; the deliverable is the matching **uploads** (trend
-  reports, content discovery — Stage 5's video lane). *channel* — which
-  channels are reliably about this? For buying a creator's *next* video, a
-  one-off mention doesn't help; the deliverable is the validated **channel
-  set**. Nail topic level first; channel level is a short follow-up. Pass
-  `--level topic|channel` to the scripts.
+- **Deliverable** — trend data (videos), channel targets, or both: the user's
+  choice from *Choosing the path & deliverable*. Either way, the research
+  runs at **topic level** (probe `--level topic` — videos are where the
+  keywords live); channel-doc probes (`--level channel`) remain a tool for
+  channel-fit checks and the existence probe below. Two calibration facts to
+  establish early:
+  - **Does a channel-identity version of this topic even exist?** One cheap
+    channel-doc probe on the core term (`probe.py --level channel --samples 3
+    "<core>"`) answers it: a tiny distinct-channel count means essentially no
+    channel is *about* this topic — say so, and set expectations that the
+    channel deliverable will be built from **recurring-coverage** channels
+    (Stage 5's intensity tiers), not identity matches. Never return a
+    near-empty "core" list as if it were the whole answer, and never pad it.
+  - **A one-off mention is not a target.** For trend math every matching
+    upload counts; for sponsorship targeting a channel that mentioned the
+    topic once usually doesn't. The intensity tiers keep these apart —
+    don't collapse them.
 - **Operator.** Default `OR` (union of a niche's facets); `AND` only for a true
   intersection ("both X and Y", composite nouns). Under AND, keep candidates
   *inside* the intersection — don't broaden each component independently.
@@ -387,18 +434,44 @@ then fold the answers into the groups and the validators' TOPIC/NOT lines.
 run ≥3 rounds, stop when fitness stops improving (sane cap ~6 rounds), note
 that you ran autonomously.
 
-### Stage 5 — Materialize & validate the results (channels or videos)
+### Stage 5 — Materialize the chosen deliverables
 
-Two lanes, keyed off the Stage 0 level — both take the final filter verbatim
-via `--group`, so what you deliver is exactly what the filter selects:
+Everything here takes the final filter verbatim via `--group`, so what you
+deliver is exactly what the filter selects.
 
-**Channel lane (channel-level intent — sponsorship prospecting).** Mandatory
-for channel-level runs.
+**Budget reserve — decide it before Stage 4, not after.** Materialization and
+its validation must not be starved by refinement: reserve roughly one query
+per channel you intend to context-validate (plus ~5 for the searches and
+triage) before you start spending on refinement rounds. If the budget runs
+out anyway, degrade EXPLICITLY, never silently: intensity triage (below) is
+nearly free, and a title-level sense-check of the top results costs zero
+extra queries — deliver that, clearly labeled **"not context-validated"**,
+with the full validation offered as a follow-up.
 
-**Video lane (topic-level intent — trend reports, "who's talking about X
-right now", upload-level questions).** For topic-level runs, materialize the
-videos with `search_videos.py`; the Stage 3 `candidate_videos` are just its
-preview:
+**Step 1 — Intensity triage (always, both deliverables): 2–3 ES calls total.**
+
+```bash
+python3 <SKILL_DIR>/scripts/search_channels.py --intensity \
+  --group '("cannes lions" | canneslions)' \
+  --group 'cannes +lions +(advertising | agency | "young lions") -"film festival"'
+```
+
+One aggregation call measures every channel's **relationship to the topic**
+— matching uploads (all-time + recent window) per channel — a second computes
+each channel's topic share, and enrichment adds names + sponsorability. Tiers:
+
+- **core** — the topic is the channel's identity (recurring + share ≥ 50%)
+- **recurring** — ≥3 matching uploads (tunable `--recurring-min`): channels
+  that keep returning to the topic. **For niche topics this tier IS the
+  sponsorship market** — say so plainly: *"only N channels are about this
+  topic; the real market is these M recurring-coverage channels."*
+- **occasional** / **one_off** — count for trend math; usually wrong targets.
+
+Present the tier summary to the user before spending anything further —
+it's the cheapest honest picture of the topic's channel landscape, and it
+prioritizes every later per-channel spend.
+
+**Step 2a — Trend data (if chosen): the videos + prevalence.**
 
 ```bash
 # trend feed: newest matching uploads in the window
@@ -409,47 +482,45 @@ python3 <SKILL_DIR>/scripts/search_videos.py --sort views --distinct-channels \
   --group '("mythos 5" | mythos5) -keto'
 ```
 
-Videos come back with title, url, publication date, views/likes/duration,
-and the channel's name + subscribers. Sense-check a sample of the top videos
-(titles/summaries against the intent — the Stage 3 machinery) before
-delivering; by default every matching video is a row, so tell the user when
-one channel dominates and offer `--distinct-channels`. For date-sorted trend
-feeds prefer `--fields title,summary` — under a non-relevance sort, incidental
-transcript mentions surface as prominently as genuinely on-topic uploads.
+Videos come back with title, url, publication date, views/likes/duration, and
+the channel's name + subscribers. Headline prevalence numbers come free from
+what you already ran: total matching videos + true distinct channels (the
+intensity call's `distinct_channels`). Sense-check a sample of top videos
+(titles/summaries — Stage 3 machinery); one-off channels COUNT here. For
+date-sorted feeds prefer `--fields title,summary` — under a non-relevance
+sort, incidental transcript mentions surface as prominently as genuinely
+on-topic uploads. Tell the user when one channel dominates and offer
+`--distinct-channels`.
 
-1. **Search channels** with the final filter, verbatim:
-   ```bash
-   python3 <SKILL_DIR>/scripts/search_channels.py --size 200 \
-     --group '("fable 5" | fable5 | "fable five")' \
-     --group '("mythos 5" | mythos5) -keto'
-   ```
-   One collapsed ES call ranks channels by their best-matching video
-   (`title^4,summary^2,transcript^1`), then enriches with name +
-   `sponsorability` (`is_active`, `is_tpp`, `is_msn`, `has_outreach_email`,
-   `sponsorship_price`, `subscribers`). During refinement rounds the coarser
-   `--any "a,b" --any "c,d" --not "x"` composition is a quick narrowing lever;
-   the `--group` form is what re-runs the delivered filter exactly.
-2. **Fetch context** for the candidates:
+**Step 2b — Channel targets (if chosen): rank, then context-validate by tier.**
+
+1. **Rank** with the final filter (`search_channels.py --size 200 --group …`):
+   one collapsed ES call ranks channels by their best-matching video
+   (`title^4,summary^2,transcript^1`) with sponsorability flags. During
+   refinement rounds the coarser `--any/--not` composition is a quick
+   narrowing lever; the `--group` form re-runs the delivered filter exactly.
+2. **Fetch context** for candidates, prioritized by intensity tier — core and
+   recurring first, occasional only if budget remains, one-offs not at all
+   (unless the user asks):
    ```bash
    python3 <SKILL_DIR>/scripts/fetch_context.py --channels 466311,2105 \
      --samples 4 --window 160 investing
    ```
-   Extracts the text window around each keyword occurrence per channel
-   (transcript is caption XML — the script strips/unescapes it client-side;
-   ES highlight is unusable here). `match_count` = how many of the channel's
-   videos match — a breadth signal alongside score.
+   Extracts the text window around each keyword occurrence (transcript is
+   caption XML — the script strips/unescapes it client-side).
 3. **Classify** with the **`keyword-context-classifier`** agent (Agent tool,
    `subagent_type: keyword-context-classifier` — Haiku-cheap). Give each batch
-   a `TOPIC:` line (intended sense), usually a `NOT:` line (senses to exclude),
-   and the indexed evidence. Batch ≈50–100 channels, run batches in parallel.
-   Returns per channel: `verdict on_topic|mixed|off_topic`, `confidence`,
-   `evidence_quote`, `adjacent_terms` (feed those back to Stage 4).
+   a `TOPIC:` line, usually a `NOT:` line, and the indexed evidence. Batch
+   ≈50–100 channels, run batches in parallel. Returns per channel:
+   `verdict on_topic|mixed|off_topic`, `confidence`, `evidence_quote`,
+   `adjacent_terms` (feed those back to Stage 4).
    **Completeness ritual, non-negotiable:** anchor the count in the prompt
    (*"There are exactly 50 channels (indices 0–49). Return exactly 50 objects.
    The last channel_id is 778812."*), and after each batch **diff the returned
    `channel_id`s against what you sent; re-send missing ones to a fresh agent
    and merge.** Never assume a batch came back whole.
-4. **Disposition:** keep `on_topic` AND `mixed` (labelled, with confidence);
+4. **Disposition:** the final channel table carries **tier × verdict ×
+   sponsorability**. Keep `on_topic` AND `mixed` (labelled, with confidence);
    exclude only clear `off_topic` — and surface the excluded list. Rank all,
    **flag don't filter** on sponsorability: the user decides what to do with
    unbookable matches.
@@ -512,6 +583,8 @@ operator mirroring in `tl-save-report`) keep working.
 
 One `tl db es` query per candidate probe (~1–2 credits each); ~10 candidates ≈
 10–20 credits. `search_channels.py` and `search_videos.py` are 2 calls each;
+`--intensity` is 2–3 calls TOTAL for the whole tier table regardless of
+channel count (aggregations) — always run it before spending per-channel.
 `fetch_context.py` is 1 call per channel with priced fields — keep `--samples`
 small (default 4) and validate the top candidates, not the tail. Haiku validation is cheap by design;
 batch and parallelize. `build_report.py` and `expand_entities.py` are free (no
@@ -522,9 +595,12 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
 
 ## Self-check before you finish
 
-1. You stated level, operator, **scope** (YouTube + longform default), and your
-   **breadth judgment**, and they match the intent; the **same level** ran
-   through probe → validate → deliver.
+1. You stated the deliverable, operator, **scope** (YouTube + longform
+   default), and your **breadth judgment**, and they match the intent. Both
+   the **path** (quick/deep) and the **deliverable** (trend data / channel
+   targets / both) were the user's explicit choice — named in the request or
+   answered when you asked in ONE combined question with rough credit costs;
+   never a silent default or an assumed channel list.
 2. You expanded **deeply** — facets, every entity's full family (company →
    product → model → codename → **sibling**), **tokenization variants**
    (`fable5` *and* `fable 5`) — and mined probe samples for terms you missed.
@@ -535,23 +611,27 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
 3. Every surviving keyword was validated against the verbatim intent — you read
    the **`channels`** count and distinct-channel samples, not the inflated doc
    total. Genuine **scope** calls went to the user with sample snippets.
-4. The path was the **user's explicit choice** — named in the request or
-   answered when you asked; never a silent default. On the deep path, **≥3
-   refinement rounds** ran, each reporting its query, fitness, and move
-   (narrow / expand / backtrack); broad terms were judged on their
-   **residual**; rescues (NOT scoped in-group, AND-anchor, field-narrow) were
-   tried before dropping a real term; exclusions were verified not to
-   over-cut the core. On the quick path, you said so in the result.
+4. On the deep path, **≥3 refinement rounds** ran, each reporting its query,
+   fitness, and move (narrow / expand / backtrack); broad terms were judged
+   on their **residual**; rescues (NOT scoped in-group, AND-anchor,
+   field-narrow) were tried before dropping a real term; exclusions were
+   verified not to over-cut the core. On the quick path, you said so in the
+   result. You **narrated every stage** with its running credit spend, and
+   the Stage 5 budget reserve was set aside before refinement began.
 5. Coverage was measured on the union and matches the intended breadth; any
    scope-widening was user-confirmed (never silent drift).
-6. For channel-level intent (or when full materialization was requested), the
-   channel set was context-validated with the completeness ritual — every
-   batch diffed by `channel_id`, missing items re-sent; only clear `off_topic`
-   channels excluded, and the exclusion surfaced. Channels carry verdicts +
-   sponsorability flags (all ranked, none filtered for being unbookable).
-   For topic-level runs you materialized the matching videos
-   (`search_videos.py`, sort/window matched to the ask) and sense-checked a
-   sample of the top results.
+6. Intensity triage ran before any per-channel spend, and its tier summary
+   was shown to the user. For the channel-targets deliverable, the final
+   table carries **tier × verdict × sponsorability**: context validation ran
+   with the completeness ritual (every batch diffed by `channel_id`, missing
+   items re-sent), prioritized core + recurring; only clear `off_topic`
+   channels excluded, and the exclusion surfaced; all ranked, none filtered
+   for being unbookable. If the topic has few/no core channels you said so
+   and framed the recurring tier as the market — no padding, no near-empty
+   list passed off as the answer. If budget forced a degraded validation you
+   labeled it "not context-validated" explicitly. For the trend deliverable
+   you materialized the matching videos (`search_videos.py`, sort/window
+   matched to the ask) with prevalence numbers and sense-checked a sample.
 7. Redundant terms pruned and reported; **stale** terms flagged (excluded or
    visibly tagged), `thin` niches surfaced — nothing dropped silently.
 8. The deliverable includes the filter set **and** a working `report_link`
