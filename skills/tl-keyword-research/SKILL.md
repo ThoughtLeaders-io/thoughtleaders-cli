@@ -15,9 +15,10 @@ description: |
   set + a clickable report link + the ranked validated channels with
   sponsorability flags. Keyword-distribution output (counts per keyword) is
   OPT-IN — only when the user explicitly asks for "keyword counts /
-  distribution / how common is X". Interactive by default (checkpoint after
-  round 3); say "run autonomously" (or pass `autonomous` / `--auto`) to skip
-  the pauses.
+  distribution / how common is X". Two run modes — a quick single pass or a
+  deep ≥3-round refinement: honor whichever the request names, and ASK the
+  user which they want when it names neither (never silently default);
+  `autonomous` / `--auto` means the deep path with every pause skipped.
 ---
 
 # tl-keyword-research — topic → validated filter set + channels
@@ -64,23 +65,37 @@ Skip when:
 - Intent maps cleanly to a curated recommender tag (e.g. "Cooking channels") →
   `tl recommender top-channels "<tag>"`. Don't re-discover curated tags by text match.
 
-## Pacing & autonomy
+## Choosing the path — the user picks, never a silent default
 
-**Default is interactive.** At the start of a run, tell the user in one line how
-this will go — e.g. *"I'll refine over at least 3 rounds, then check in before
-finalizing. Say 'run autonomously' if you'd rather I not pause."* That lets them
-opt out **before** the first pause, not just after round 3.
+Two run modes:
 
-**Opt-out triggers — any of these → run autonomously** (full behavior in Stage 4):
-the user says run autonomously / without pausing / "don't stop to ask", **or**
-invokes the skill with an `autonomous` / `--auto` argument. The preference holds
-for the rest of the session unless revoked.
+- **Quick path** — one expand → probe → validate → deliver pass, no refinement
+  rounds. Even here, tokenization variants, entity-family expansion, and
+  sample validation are mandatory — speed never excuses a shallow synonym
+  list.
+- **Deep path** — the full pipeline: ≥3 refinement rounds (Stage 4) plus
+  channel/video materialization (Stage 5).
 
-**Quick path** — only when the user explicitly signals speed ("quick", "just
-give me a starting set"): one expand → probe → validate → deliver pass, no
-refinement rounds. Even then, tokenization variants, entity-family expansion,
-and sample validation are mandatory — speed never excuses a shallow synonym
-list. State that a full refined run is available.
+How to pick:
+
+1. **The request names a path → run it, no questions.** "quick", "fast",
+   "just a starting set" → quick; "deep", "thorough", "full refinement",
+   "take your time" → deep.
+2. **Otherwise, ask before starting** — one question, with the trade stated
+   in a line each: *quick* ≈ a validated starter filter in one pass; *deep* ≈
+   ≥3 refinement rounds + materialized channels/videos, noticeably more time
+   and credits, with a check-in after round 3. Don't silently default either
+   way: guessing quick hides what the skill can do, guessing deep spends time
+   and credits the user never asked for.
+3. **Exception:** `autonomous` / `--auto` / "don't stop to ask" with no named
+   path means the **deep path with every pause skipped** — the user has asked
+   for zero questions, and autonomy exists so the full pipeline can run
+   unattended (Stage 4 rules).
+
+**Autonomy within the deep path:** at any point the user can say run
+autonomously / without pausing (or invoke with `autonomous` / `--auto`) —
+keep refining without checkpoints per Stage 4. The preference holds for the
+rest of the session unless revoked.
 
 ## The pipeline (you orchestrate; scripts + cheap agents do the work)
 
@@ -361,16 +376,16 @@ good). Each round:
   exclude them from the suggested filter or keep with a visible STALE tag,
   never drop silently; `thin` niches are surfaced, not hidden.
 
-**After round 3 (and every round thereafter) — checkpoint.** Interactive
-default: present the current validated set (the rendered expression, fitness,
-what changed), and ask: accept · more rounds · adjust direction. If the user
-chooses more rounds, **interview them about the intent behind the keywords**
-first — which sense to include/exclude, audience/format, must-have sub-topics,
+**After round 3 (and every round thereafter) — checkpoint.** Present the
+current validated set (the rendered expression, fitness, what changed), and
+ask: accept · more rounds · adjust direction. If the user chooses more
+rounds, **interview them about the intent behind the keywords** first —
+which sense to include/exclude, audience/format, must-have sub-topics,
 brands that should or must not count, reach/language/recency constraints —
 then fold the answers into the groups and the validators' TOPIC/NOT lines.
-**Autonomous mode** (user opted out): skip checkpoints, still run ≥3 rounds,
-stop when fitness stops improving (sane cap ~6 rounds), note that you ran
-autonomously.
+**Autonomous mode** (the user opted out of pauses): skip checkpoints, still
+run ≥3 rounds, stop when fitness stops improving (sane cap ~6 rounds), note
+that you ran autonomously.
 
 ### Stage 5 — Materialize & validate the results (channels or videos)
 
@@ -520,11 +535,13 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
 3. Every surviving keyword was validated against the verbatim intent — you read
    the **`channels`** count and distinct-channel samples, not the inflated doc
    total. Genuine **scope** calls went to the user with sample snippets.
-4. **≥3 refinement rounds** ran — unless the user invoked the quick path (say
-   so in the result) — each reporting its query, fitness, and move (narrow /
-   expand / backtrack); broad terms were judged on their **residual**; rescues
-   (NOT scoped in-group, AND-anchor, field-narrow) were tried before dropping
-   a real term; exclusions were verified not to over-cut the core.
+4. The path was the **user's explicit choice** — named in the request or
+   answered when you asked; never a silent default. On the deep path, **≥3
+   refinement rounds** ran, each reporting its query, fitness, and move
+   (narrow / expand / backtrack); broad terms were judged on their
+   **residual**; rescues (NOT scoped in-group, AND-anchor, field-narrow) were
+   tried before dropping a real term; exclusions were verified not to
+   over-cut the core. On the quick path, you said so in the result.
 5. Coverage was measured on the union and matches the intended breadth; any
    scope-widening was user-confirmed (never silent drift).
 6. For channel-level intent (or when full materialization was requested), the
@@ -540,7 +557,7 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
 8. The deliverable includes the filter set **and** a working `report_link`
    (group text in app grammar — no raw `|`/`+`/`-`/`*`/`~`) **and** the
    validated channels/videos **and** the recorded `expression`.
-9. Checkpoint honored: interactive default paused after round 3 with the
-   intent interview on request — or the user's autonomy preference (or quick
-   path) was honored and noted. Nothing was saved without confirmation.
+9. Checkpoint honored per the chosen path: the deep path paused after round 3
+   with the intent interview on request — or the user's autonomy preference
+   was honored and noted. Nothing was saved without confirmation.
 10. If the user requests a chart, create it as an SVG graphic.
