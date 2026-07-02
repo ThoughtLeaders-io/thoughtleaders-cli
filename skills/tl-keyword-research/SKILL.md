@@ -20,7 +20,9 @@ description: |
   `autonomous` / `--auto` means deep + both deliverables with every pause
   skipped. Keyword-distribution output (counts per keyword) is OPT-IN — only
   when the user explicitly asks for "keyword counts / distribution / how
-  common is X".
+  common is X". Also invoke for HELP asks about this skill — "help", "how
+  does keyword research work", "what are my options", "describe this skill" —
+  answered free from the built-in guide, no queries run.
 ---
 
 # tl-keyword-research — topic → validated filter set + the results you choose
@@ -77,6 +79,18 @@ Skip when:
 - The user has explicit channel/brand IDs or names → `tl channels find` / `tl brands find`.
 - Intent maps cleanly to a curated recommender tag (e.g. "Cooking channels") →
   `tl recommender top-channels "<tag>"`. Don't re-discover curated tags by text match.
+
+## Help mode — explain yourself on request, for free
+
+When the user asks for help, what this skill does, how it works, what the
+options/parameters are, or to "describe the skill" ("help", "how does this
+work", "what can you do here", "what are my options", "explain the flow"):
+**run nothing** — no queries, no scripts, zero credits. Read
+`references/help.md` and present it clearly, sized to what they asked (the
+full guide for "explain how this works"; just the relevant slice for "what
+sorting options are there?"). Close by offering to start a run. Mid-run
+option questions ("what does deep mean?", "what's the recurring tier?") get
+the same treatment — answer from the guide, then continue where you paused.
 
 ## Choosing the path & deliverable — the user picks, never a silent default
 
