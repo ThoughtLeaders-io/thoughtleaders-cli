@@ -86,6 +86,34 @@ class TestPrune:
         assert [g["text"] for g in kept] == ["retirement"]
         assert pruned == [{"text": "retirement planning", "redundant_with": "retirement"}]
 
+    def test_field_scoped_group_not_pruned_by_narrower_fields(self):
+        # "foo" scoped to title does NOT cover "foo bar" scoped to transcript:
+        # a transcript-only match of "foo bar" is invisible to the title-scoped
+        # broader group, so pruning would drop validated results.
+        groups = [{"text": "foo", "content_fields": ["title"]},
+                  {"text": "foo bar", "content_fields": ["transcript"]}]
+        kept, pruned = br.prune_redundant(groups, "OR", ["title", "summary", "transcript"])
+        assert pruned == []
+        assert len(kept) == 2
+
+    def test_default_fields_group_not_pruned_by_narrowed_group(self):
+        # G inherits the defaults (title+summary+transcript); H was narrowed to
+        # title only — H no longer covers G's summary/transcript matches.
+        groups = [{"text": "foo", "content_fields": ["title"]},
+                  {"text": "foo bar"}]
+        kept, pruned = br.prune_redundant(groups, "OR", ["title", "summary", "transcript"])
+        assert pruned == []
+        assert len(kept) == 2
+
+    def test_prunes_when_broader_group_covers_all_fields(self):
+        # H searches a superset of G's fields, so token containment does imply
+        # a doc subset again — the prune is safe and must still fire.
+        groups = [{"text": "foo"},
+                  {"text": "foo bar", "content_fields": ["title"]}]
+        kept, pruned = br.prune_redundant(groups, "OR", ["title", "summary", "transcript"])
+        assert [g["text"] for g in kept] == ["foo"]
+        assert pruned == [{"text": "foo bar", "redundant_with": "foo"}]
+
 
 class TestIsBooleanGroup:
     def test_plain_phrases_are_not_boolean(self):
@@ -306,6 +334,34 @@ class TestTranslationSemanticsGuards:
 
     def test_detached_plus_is_infix_and(self):
         assert br.sqs_to_app_syntax("(a | b) + c") == '( "a" OR "b" ) AND "c"'
+
+    def test_bare_detached_plus_translates_without_other_markers(self):
+        # `a + b` carries no |/parens/quotes/sign-prefix, but it is NOT a plain
+        # phrase: the probe's SQS read the detached '+' as infix AND. Shipping
+        # it literally would demote a two-term AND to adjacency phrase text.
+        assert br.sqs_to_app_syntax("a + b") == '"a" AND "b"'
+        assert br.sqs_to_app_syntax("tiktok + shop + affiliate") == \
+            '"tiktok" AND "shop" AND "affiliate"'
+
+    def test_bare_detached_minus_rejected_without_other_markers(self):
+        # Same hole from the plain-phrase side: `crypto - scam` must hit the
+        # detached-minus rejection even with no other structural operator.
+        for text in ["crypto - scam", "a - b", "- scam", "crypto -"]:
+            with pytest.raises(ValueError):
+                br.sqs_to_app_syntax(text)
+
+    def test_boundary_detached_plus_is_noop(self):
+        # SQS drops a '+' with no joinable term on one side; so do we —
+        # never a dangling AND in the shipped expression.
+        assert br.sqs_to_app_syntax("a +") == '"a"'
+        assert br.sqs_to_app_syntax("+ a") == '"a"'
+        assert br.sqs_to_app_syntax("(a | b) +") == '( "a" OR "b" )'
+
+    def test_in_word_signs_still_plain_phrases(self):
+        # Regression guard for the detached-sign detection: in-word signs must
+        # keep taking the plain-phrase passthrough.
+        for text in ["disney+ shows", "e-commerce marketing", "3-day split"]:
+            assert br.sqs_to_app_syntax(text) == text, text
 
     def test_backslash_escape_rejected(self):
         with pytest.raises(ValueError):

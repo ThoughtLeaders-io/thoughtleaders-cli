@@ -124,6 +124,29 @@ class TestApply:
         # i0 majority True, i1 majority False -> tiktok shop 1/2 -> dropped
         assert out["kept"] == []
 
+    def test_disjoint_partial_files_preserve_verdicts(self, monkeypatch, capsys, tmp_path):
+        # The documented truncation recovery: file 1 judged i 0-1 before the
+        # validator truncated, the retry file judged only the missing i 2-3.
+        # A file that didn't judge a sample abstains — it must not vote False,
+        # or every retry-file verdict would lose the "majority" automatically.
+        p1 = tmp_path / "p1.json"
+        p1.write_text(json.dumps([{"i": 0, "relevant": True}, {"i": 1, "relevant": True}]))
+        p2 = tmp_path / "p2.json"
+        p2.write_text(json.dumps([{"i": 2, "relevant": True}, {"i": 3, "relevant": True}]))
+        _stdin(monkeypatch, _probe("topic"))
+        monkeypatch.setattr(sk.sys, "argv", ["select_keywords.py", "--apply", str(p1), str(p2)])
+        sk.main()
+        out = json.loads(capsys.readouterr().out)
+        assert [k["keyword"] for k in out["kept"]] == ["tiktok shop", "tiktok"]
+
+    def test_abstaining_file_leaves_real_votes_deciding(self, tmp_path):
+        # i0: judged True by one file, absent from two others -> relevant
+        # (1-0 among actual votes, not 1-2 against phantom False votes);
+        # i1: a real True/False conflict is still a tie -> not relevant.
+        maps = [{0: True, 1: True}, {1: False}, {}]
+        assert sk.relevant_at(0, maps) is True
+        assert sk.relevant_at(1, maps) is False
+
     def test_unvalidated_when_no_samples(self, monkeypatch, capsys, tmp_path):
         probe = {"operator": "OR", "level": "topic",
                  "keywords": [{"keyword": "crypto", "count": 5, "samples": []}], "dropped": []}

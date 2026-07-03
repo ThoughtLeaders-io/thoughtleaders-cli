@@ -75,6 +75,13 @@ _SQS_TOKEN_RE = re.compile(
 # of separate terms would silently broaden it beyond what was probed.
 _STRUCTURAL_BOOL_RE = re.compile(r'[|()"]|(?:^|(?<=[\s(]))[+-](?=\S)')
 
+# A DETACHED sign — `+` or `-` with whitespace (or a text boundary) on both
+# sides, as in `a + b` or `crypto - scam`. Not caught by _STRUCTURAL_BOOL_RE
+# (which requires the sign to prefix a token), but structural all the same:
+# SQS reads a detached `+` as the infix AND operator and silently drops a
+# detached `-`, so such text is a boolean query, never a plain phrase.
+_DETACHED_SIGN_RE = re.compile(r"(?:^|(?<=\s))[+-](?=\s|$)")
+
 # Uppercase word operators in the report-link keyword grammar. A plain phrase
 # containing one of these as a standalone word (`rock AND roll`) must ship
 # fully quoted, or the word would act as an operator instead of the phrase
@@ -153,8 +160,11 @@ def sqs_to_app_syntax(text):
     a standalone uppercase AND/OR/NOT word is wrapped in quotes so the word
     stays phrase text instead of acting as an operator.
 
+    A DETACHED `+` (`a + b`) is the SQS infix AND operator and translates to
+    `AND`; at a text boundary (`a +`) it is a no-op, like SQS treats it.
+
     Raises ValueError for `*` (prefix), `~` (fuzzy/slop) and `\\` (escape)
-    outside quotes, and for a detached `-`/`+` (`crypto - scam`) — link/filter
+    outside quotes, and for a detached `-` (`crypto - scam`) — link/filter
     text does not support the first three, and a detached minus was a NO-OP in
     the probe (SQS drops it), so shipping it as an exclusion would invert the
     validated semantics. Glue the sign (`-scam`) and re-probe, or enumerate
@@ -173,7 +183,7 @@ def sqs_to_app_syntax(text):
             "rewrite the group without them."
         )
 
-    if not _STRUCTURAL_BOOL_RE.search(text):
+    if not (_STRUCTURAL_BOOL_RE.search(text) or _DETACHED_SIGN_RE.search(unquoted)):
         # Plain phrase — ships as-is (a bare word run is one adjacent phrase,
         # matching the phrase-mode probe). Quote it whole if it carries a
         # standalone uppercase operator word, so the word stays phrase text.
@@ -216,8 +226,11 @@ def sqs_to_app_syntax(text):
         else:
             # bare token; +/- count as operators only when they PREFIX it
             if tok == "+":
-                # detached '+' is the infix AND operator in SQS
-                out.append("AND")
+                # detached '+' is the infix AND operator in SQS; with nothing
+                # joinable on the left (start of text/group, or after another
+                # operator) SQS drops it, so emit nothing.
+                if out and out[-1] not in ("OR", "AND", "NOT", "("):
+                    out.append("AND")
                 continue
             negate = False
             while tok and tok[0] in "+-" and len(tok) > 1:
@@ -235,6 +248,10 @@ def sqs_to_app_syntax(text):
             if not tok:
                 continue
             emit(f'"{tok}"', joinable=not negate)
+    # A trailing detached '+' (`a +`) leaves a dangling AND with no right-hand
+    # side — SQS dropped it, so we drop it too.
+    while out and out[-1] in ("AND", "OR"):
+        out.pop()
     return " ".join(out)
 
 
@@ -253,7 +270,7 @@ def is_boolean_group(text):
     return bool(_SQS_OPERATOR_RE.search(text))
 
 
-def prune_redundant(groups, operator):
+def prune_redundant(groups, operator, default_fields=()):
     """Drop include groups subsumed by a broader kept include group (OR only).
 
     Returns (kept_groups, pruned). A group G is redundant when another kept
@@ -264,12 +281,20 @@ def prune_redundant(groups, operator):
     containment really does imply a document subset. Boolean groups (their text
     uses simple_query_string operators — see is_boolean_group) are opaque: never
     pruned, never used as the broader pruner.
+
+    Field scoping caps the subset argument: token containment only implies a
+    document subset when H searches every field G does (a doc matching G in
+    field f matches H in that same f). So H may prune G only when G's
+    effective field set (its `content_fields`, else `default_fields`) is a
+    subset of H's — e.g. `foo` scoped to title does NOT cover `foo bar`
+    scoped to transcript.
     """
     if operator != "OR":
         return groups, []
     includes = [g for g in groups if not g.get("exclude")]
     excludes = [g for g in groups if g.get("exclude")]
     tok = {id(g): tokens(g["text"]) for g in includes}
+    fields = {id(g): frozenset(g.get("content_fields") or default_fields) for g in includes}
     kept, pruned = [], []
     for g in includes:
         if is_boolean_group(g["text"]):
@@ -279,6 +304,7 @@ def prune_redundant(groups, operator):
             (h for h in includes
              if h is not g
              and not is_boolean_group(h["text"])  # opaque: never prunes another
+             and fields[id(g)] <= fields[id(h)]   # H must search every field G does
              and is_contiguous_sublist(tok[id(h)], tok[id(g)])),
             None,
         )
@@ -406,7 +432,7 @@ def main():
             f"channel_topic_description) — not raw ES paths. Valid: {sorted(VALID_CONTENT_FIELDS)}"
         )
 
-    kept, pruned = prune_redundant(groups, operator)
+    kept, pruned = prune_redundant(groups, operator, default_fields)
 
     # Translate boolean-group SQS text (what the probes ran) into the
     # report-link keyword grammar (uppercase AND/OR/NOT + parens + quoted

@@ -87,8 +87,18 @@ def load_verdicts(paths):
 
 
 def relevant_at(i, verdict_maps):
-    """Majority vote of `relevant` for sample i across passes (missing = False)."""
-    votes = [vm.get(i, False) for vm in verdict_maps]
+    """Majority vote of `relevant` for sample i across the passes that judged it.
+
+    A file with no verdict for i abstains — it does not vote False. The
+    truncation-recovery path merges partial files with disjoint coverage
+    (each sample judged by exactly one file), so counting absences as False
+    votes would turn every retry-file verdict into a loss. A sample with no
+    verdict anywhere (only reachable with --allow-missing) counts as not
+    relevant.
+    """
+    votes = [vm[i] for vm in verdict_maps if i in vm]
+    if not votes:
+        return False
     return sum(1 for v in votes if v) * 2 > len(votes)
 
 
