@@ -434,7 +434,7 @@ wheels = [
 
 [[package]]
 name = "thoughtleaders-cli"
-version = "0.7.12"
+version = "0.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
