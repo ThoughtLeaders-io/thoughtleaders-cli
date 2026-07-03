@@ -118,11 +118,19 @@ def fb_cmd(
 ) -> None:
     """Run a raw Firebolt SELECT query.
 
-    The query must filter the leading index column of the table (channel_id
-    for article_metrics, id for channel_metrics) — see the Firebolt schema.
+    Two tables: article_metrics (per-video daily metrics) and channel_metrics
+    (per-channel history). Single-table SELECTs only (no JOINs), and WHERE
+    must equality- or IN-filter the leading index column — channel_id for
+    article_metrics, id (the channel id) for channel_metrics. Other columns
+    can't be filtered server-side: fetch by the indexed key, then narrow
+    client-side. Column names follow the current schema (subscribers, not
+    the older reach) — run `tl schema fb` to see them.
 
     Examples:
+        tl db fb "SELECT 1"   # connectivity check — the only no-FROM query allowed
         tl db fb "SELECT scrape_date, view_count FROM article_metrics WHERE channel_id = 5607 AND id = 'EjeGzoQI3gQ'"
+        tl db fb "SELECT scrape_date, subscribers, total_views FROM channel_metrics WHERE id = 736006 ORDER BY scrape_date"
+        tl db fb "SELECT publication_date, view_count FROM article_metrics WHERE channel_id IN (5607, 5608)"
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     sql = _read_query(query)

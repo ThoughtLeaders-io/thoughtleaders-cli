@@ -33,10 +33,12 @@ Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (cu
 - **SELECT only.** No DDL/DML/transactions/SET/locks.
 - **Single table.** No JOIN, CTE (`WITH`), subquery, set operation, or `LATERAL`.
 - **Only known tables:** `article_metrics`, `channel_metrics`. Other names return `UNKNOWN_TABLE`.
+- **Constant-only probes are allowed:** `SELECT 1` (no FROM, no column references) works as a connectivity check. Anything naming a column or `*` still needs a FROM.
 - **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE returns `NON_INDEXED_FILTER:<col>`. Apply those constraints client-side after fetching.
 - **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
 - **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
 - **No mandatory LIMIT/OFFSET** — but Firebolt will time out on bad plans, so keep the leading-index filter selective.
+- **Errors carry the real diagnostic.** A query that Firebolt itself rejects (unknown column, syntax error) comes back as a 400 with Firebolt's own error description, plus a rename hint where one is known. Common trap: `channel_metrics` has `subscribers`, not the older `reach`.
 
 ## Tables
 
