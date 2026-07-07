@@ -96,9 +96,19 @@ def pg_cmd(
 ) -> None:
     """Run a raw PostgreSQL SELECT query.
 
-    Column names follow the current schema (e.g. subscribers, projected_views,
-    scheduled_date — not the older reach / impression / send_date). Run
-    `tl schema pg <table>` to see the exact columns your role can query.
+    Common traps — check before writing SQL:
+
+    - Column names follow the current schema: subscribers, projected_views,
+      scheduled_date, is_tpp, advertiser_profile_id, views_guarantee — NOT the
+      older reach / impression / send_date / is_tl_channel / creator_profile_id
+      / impressions_guarantee.
+    - The sponsorship table (thoughtleaders_adlink) hides its relations behind
+      joins: no channel_id/channel_name (join thoughtleaders_adspot via
+      ad_spot_id, then thoughtleaders_channel) and no brand_id (join
+      thoughtleaders_profile via advertiser_profile_id, then
+      thoughtleaders_profile_brands).
+    - Run `tl schema pg <table>` first — it lists the exact columns your role
+      can query plus each table's common traps.
 
     Examples:
         tl db pg "SELECT channel_name, subscribers, projected_views FROM thoughtleaders_channel ORDER BY subscribers DESC LIMIT 10"

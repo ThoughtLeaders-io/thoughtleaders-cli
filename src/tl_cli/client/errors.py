@@ -68,6 +68,17 @@ def handle_api_error(error: ApiError) -> None:
         _print_debug(error)
         sys.exit(3)
     else:
-        err.print(f"[red]Error ({error.status_code}):[/red] {error.detail}")
+        detail = error.detail or ""
+        hint = (error.raw or {}).get("hint") if isinstance(error.raw, dict) else None
+        if isinstance(hint, str) and hint:
+            # The server sends the remediation both concatenated into
+            # `detail` (for older clients) and as a separate `hint` key —
+            # render it on its own line so it can't get lost in the error.
+            if detail.endswith(hint):
+                detail = detail[: -len(hint)].rstrip()
+            err.print(f"[red]Error ({error.status_code}):[/red] {detail}")
+            err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{hint}[/yellow]")
+        else:
+            err.print(f"[red]Error ({error.status_code}):[/red] {detail}")
         _print_debug(error)
         sys.exit(1)

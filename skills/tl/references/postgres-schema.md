@@ -275,6 +275,7 @@ JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
 JOIN thoughtleaders_brand b ON pb.brand_id = b.id
 -- NEVER: JOIN brand b ON b.id = a.advertiser_profile_id (different ID spaces, returns wrong data)
 ```
+This 3-table join is the one brand path that works in every session — use it in anything reusable.
 
 **Adlink → Organization:**
 ```sql

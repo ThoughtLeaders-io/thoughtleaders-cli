@@ -41,7 +41,7 @@ This skill is self-contained. Every reference it needs is in [`references/`](ref
 | **3** | CHANNELS | one YouTube channel (or podcast) | intelligence |
 | **8** | SPONSORSHIPS / Deals | one sponsorship record (AdLink — brand × channel × dates × status × price) | sponsorship |
 
-Types 1 / 2 / 3 share the intelligence FilterSet and widget schemas (different rows, same predicate fields). Type 8 has its own schemas (disjoint fields, different aggregators, different data plane — Postgres against `v_adspot_brand_profiles` rather than Elasticsearch).
+Types 1 / 2 / 3 share the intelligence FilterSet and widget schemas (different rows, same predicate fields). Type 8 has its own schemas (disjoint fields, different aggregators, different data plane — a denormalized sponsorship dataset in Postgres rather than Elasticsearch).
 
 ## When to invoke
 
