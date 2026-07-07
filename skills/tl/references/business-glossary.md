@@ -69,6 +69,7 @@ Maps business terms to database concepts.
 | `owner_advertiser_id` | `profile` | **Account owner.** Who owns the brand relationship overall. Often same person as owner_sales on adlinks, but not always. |
 | `owner_publisher_id` | `profile` | Channel relationship owner on the profile level |
 | `owner_sales_id` | `profile` | Sales owner at profile level |
+| `superuser_notes` | `profile` | Internal free-text account-handling notes on the customer record (max 2500 chars). Team-facing only — never shown to the customer. Superusers can edit it through the CLI (see SKILL.md → "Updating records"). |
 
 **Key insight:** Ownership exists on both `profile` (account-level) and `adlink` (deal-level). For revenue attribution, always use `adlink.owner_sales_id`.
 

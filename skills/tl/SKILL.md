@@ -229,12 +229,15 @@ tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or super
 ```bash
 tl sponsorships update <id> '<json>'   # Edit a sponsorship (adlink)
 tl channels update <id> '<json>'       # Edit a channel
+tl profiles update <id> '<json>'       # Edit a brand/publisher profile (superuser only)
 ```
 
 Examples:
 ```bash
 tl sponsorships update 98765 '{"publish_status": "sold"}'
 tl sponsorships update 98765 '{"publish_status": 3}'
+tl profiles update 8871 '{"superuser_notes": "VIP account — always cc the AM lead"}'
+tl profiles update 8871 '{"superuser_notes": null}'
 tl channels update 12345 '{"demographic_male_share": 62}'
 tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
@@ -259,6 +262,13 @@ contact fields:
 the date the channel joined the Media Selling Network, as a `YYYY-MM-DD` string. This date is
 itself the membership flag: set it to add the channel to MSN (it then reads as `is_msn` and
 appears in MSN-filtered queries), or send `null` to remove the channel from the network.
+
+**Profile notes.** `tl profiles update` (superuser only) edits a brand/publisher profile's
+**`superuser_notes`** — the internal free-text notes field on the customer record
+(`thoughtleaders_profile.superuser_notes`, max 2500 chars). Send a string to set, `null` to
+clear. This is currently the only editable profile field; anything else returns a 400 listing
+the editable surface. Use it for account-handling notes meant for the internal team — it is
+never shown to the customer.
 
 ### Creating and vetting sponsorships
 
