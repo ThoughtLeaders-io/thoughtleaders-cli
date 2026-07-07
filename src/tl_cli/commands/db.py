@@ -5,12 +5,12 @@ import sys
 
 import typer
 from rich.console import Console
-from tl_cli._typer_utils import AlphaSortedTyperGroup
 
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli.client.errors import ApiError, handle_api_error
 from tl_cli.client.http import get_client
 from tl_cli.output.formatter import detect_format, output, output_pricing_estimate
-from tl_cli.query_history import query_hash, record_and_check
+from tl_cli.query_history import note_charge, query_hash, record_and_check
 
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Raw read-only queries against PostgreSQL, Firebolt, or Elasticsearch (full-access only)")
 
@@ -18,7 +18,10 @@ _err = Console(stderr=True)
 
 _NO_REPEAT_WARNING_OPTION = typer.Option(
     False, "--no-repeat-warning",
-    help="Suppress the warning shown when the same query is re-run repeatedly (also: TL_NO_REPEAT_WARNING=1).",
+    help=(
+        "Suppress the warning shown when the same query is re-run repeatedly after "
+        "burning 1000+ credits (also: TL_NO_REPEAT_WARNING=1)."
+    ),
 )
 
 
@@ -30,28 +33,37 @@ def _read_query(query: str | None) -> str:
     return sys.stdin.read()
 
 
-def _warn_if_repeat(engine: str, query: str, pricing: bool, suppressed: bool) -> None:
-    """Nudge (on stderr) when this exact query keeps being re-run.
+def _warn_if_repeat(digest: str, suppressed: bool) -> None:
+    """Nudge (on stderr) when this exact query keeps being re-run AND the
+    repeats have already burned a material amount of credits.
 
-    Detection is local and best-effort; the query always executes.
+    Detection is local and best-effort; the query always executes. Cheap
+    repeats stay silent — the warning only fires once the window's runs
+    have been billed SPEND_THRESHOLD_CREDITS in total.
     """
     if suppressed:
         return
-    count = record_and_check(query_hash(engine, query, pricing))
-    if count is None:
+    due = record_and_check(digest)
+    if due is None:
         return
+    count, spent = due
     _err.print(
         f"[yellow]Repeat query:[/yellow] this exact query has now run {count} times "
-        "in the last 5 minutes. Each run is billed and the results are unlikely to "
-        "differ — reuse the earlier output (e.g. save it with `--json > file.json`). "
-        "Pass --no-repeat-warning if the repeats are deliberate."
+        f"in the last 5 minutes ({spent:g} credits so far). Each run is billed and "
+        "the results are unlikely to differ — reuse the earlier output (e.g. save it "
+        "with `--json > file.json`). Pass --no-repeat-warning if the repeats are "
+        "deliberate."
     )
 
 
-def _run(path: str, body: dict, fmt: str, title: str, pricing: bool = False) -> None:
+def _run(path: str, body: dict, fmt: str, title: str, pricing: bool = False,
+         digest: str | None = None) -> None:
     client = get_client()
     try:
         data = client.post(path, json_body=body)
+        if digest:
+            usage = data.get("usage") or {}
+            note_charge(digest, usage.get("credits_charged"))
         if pricing:
             output_pricing_estimate(data, fmt)
             return
@@ -96,11 +108,12 @@ def pg_cmd(
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     sql = _read_query(query)
-    _warn_if_repeat("pg", sql, pricing, no_repeat_warning)
+    digest = query_hash("pg", sql, pricing)
+    _warn_if_repeat(digest, no_repeat_warning)
     body: dict = {"query": sql}
     if pricing:
         body["pricing"] = True
-    _run("/raw/pg", body, fmt, "Postgres results", pricing=pricing)
+    _run("/raw/pg", body, fmt, "Postgres results", pricing=pricing, digest=digest)
 
 
 @app.command("fb")
@@ -134,11 +147,12 @@ def fb_cmd(
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
     sql = _read_query(query)
-    _warn_if_repeat("fb", sql, pricing, no_repeat_warning)
+    digest = query_hash("fb", sql, pricing)
+    _warn_if_repeat(digest, no_repeat_warning)
     body: dict = {"query": sql}
     if pricing:
         body["pricing"] = True
-    _run("/raw/fb", body, fmt, "Firebolt results", pricing=pricing)
+    _run("/raw/fb", body, fmt, "Firebolt results", pricing=pricing, digest=digest)
 
 
 @app.command("es")
@@ -174,10 +188,11 @@ def es_cmd(
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(f"Query is not valid JSON: {exc}") from exc
 
-    _warn_if_repeat("es", raw, pricing, no_repeat_warning)
+    digest = query_hash("es", raw, pricing)
+    _warn_if_repeat(digest, no_repeat_warning)
     body: dict = {"query": body_query}
     if pricing:
         body["pricing"] = True
     if highlight:
         body["include_highlight"] = True
-    _run("/raw/es", body, fmt, "Elasticsearch results", pricing=pricing)
+    _run("/raw/es", body, fmt, "Elasticsearch results", pricing=pricing, digest=digest)

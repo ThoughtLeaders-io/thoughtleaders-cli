@@ -20,11 +20,9 @@ if ! tl auth status --quiet 2>/dev/null; then
   exit 0  # Don't block, just warn
 fi
 
-# For list commands without explicit limit, suggest adding one
-if [[ "$COMMAND" =~ ^tl[[:space:]]+(deals|uploads|channels|brands)[[:space:]] ]]; then
-  if [[ ! "$COMMAND" =~ limit: ]] && [[ ! "$COMMAND" =~ --limit ]]; then
-    echo "HINT: Consider adding a limit to control credit usage (e.g., limit:50)" >&2
-  fi
-fi
+# NOTE: no "add a limit" hint here. List commands are server-limited by
+# default and typically cost far below the warning-worthy range, so the
+# hint was pure noise for agents (it fired on every unlimited list call
+# regardless of cost).
 
 exit 0
