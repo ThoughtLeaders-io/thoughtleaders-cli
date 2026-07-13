@@ -37,8 +37,16 @@ import subprocess
 import sys
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
+# `summary` holds the video's creator-written description (links, hashtags, promo)
+# — not an AI summary. Article-level `description` is empty and `content` is
+# podcast-only; neither belongs in these lists.
 TOPIC_FIELDS = ["title", "summary", "transcript"]
-CHANNEL_FIELDS = ["name", "description", "ai.description", "ai.topic_descriptions"]
+# `description.domains` alongside plain `description`: the delivered report
+# filter searches `description.domains`, which matches domain-shaped terms
+# (e.g. "patreon.com") that plain `description` undercounts (URLs there
+# tokenize into word pieces) — probing both keeps counts faithful to what
+# the delivered filter will actually match.
+CHANNEL_FIELDS = ["name", "description", "description.domains", "ai.description", "ai.topic_descriptions"]
 
 # The channel-identity field per level — used both to `collapse` samples to
 # distinct channels and to count distinct channels via a cardinality agg.

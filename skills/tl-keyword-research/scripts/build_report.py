@@ -97,17 +97,17 @@ REPORT_TYPES = {
     "channels": ("thoughtleaders", 3),
 }
 
-# Valid ContentField enum values (what the FilterSet / report link accept). Both
+# Valid content field names (what the FilterSet / report link accept). Both
 # article and channel fields are allowed on any report type — cross-field search
 # (a topic in the video AND in the channel description) is intentional. We
-# validate only that fields are real enum values, to catch typos / wrong names.
+# validate only that fields are recognized names, to catch typos / wrong names.
 VALID_CONTENT_FIELDS = {
     "content", "title", "summary", "transcript", "channel.channel_name", "hashtags",
     "channel_description", "channel_description_ai", "channel_topic_description",
     "channel_outreach_email", "channel_social_links",
 }
 
-# Default content fields (ContentField enum values) by report type.
+# Default content fields by report type.
 DEFAULT_FIELDS = {
     "videos": ["title", "summary", "transcript"],
     "content": ["title", "summary", "transcript"],
@@ -419,15 +419,15 @@ def main():
     for g in groups:
         g["text"] = str(g["text"]).strip()
 
-    # Validate every content field is a real ContentField enum value (catches
-    # typos / ES-path names like 'ai.topic_descriptions' used by mistake).
+    # Validate every content field is a recognized name (catches typos /
+    # ES-path names like 'ai.topic_descriptions' used by mistake).
     used_fields = set(default_fields)
     for g in groups:
         used_fields.update(g.get("content_fields") or [])
     unknown = sorted(f for f in used_fields if f not in VALID_CONTENT_FIELDS)
     if unknown:
         sys.exit(
-            f"unknown content_fields {unknown}; use ContentField enum values "
+            f"unknown content_fields {unknown}; use recognized content field names "
             f"(e.g. title, summary, transcript, channel_description, "
             f"channel_topic_description) — not raw ES paths. Valid: {sorted(VALID_CONTENT_FIELDS)}"
         )

@@ -563,8 +563,8 @@ raw `|`/`+`/`-` are literal text in a link; `*`/`~` are rejected, enumerate
 variants first), and emits:
 
 - `filter_set` — platform shape (`keywords`, `keyword_operator`,
-  `content_fields`, per-group field/exclude maps). Fields are **ContentField
-  enum names** (`title`, `summary`, `transcript`, `channel_description`,
+  `content_fields`, per-group field/exclude maps). Fields are **recognized
+  content field names** (`title`, `summary`, `transcript`, `channel_description`,
   `channel_topic_description`, …) — unknown names fail loudly.
 - `report_link` — paste-ready URL that opens the report with the filter applied
   (no saved record, no credits). **The default thing to hand the user.**
