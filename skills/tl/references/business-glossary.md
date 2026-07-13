@@ -107,6 +107,7 @@ AMs use "PV" loosely. There are three different DB fields, each meaning somethin
 |---------|----------|---------------------|
 | **PV (channel baseline)** | `thoughtleaders_channel.projected_views` | Channel-level "typical views per video" used as CPM denominator. ⚠️ Coverage and freshness vary; cross-check Firebolt longform median for hero-tier deals. |
 | **PV (deal-specific)** | `thoughtleaders_adlink.projected_views_at_purchase_date` | Snapshot of projected views at the moment the deal was sold. Use this for historical CPM analysis. |
+| **PV (video, at upload)** — the web app's "video projected views" | `projected_views` on the ES **video** doc | The channel's format-specific PV **frozen when TL first indexed the video** (never updated afterwards). Compare to the channel's current PV to see growth/decline since the upload, or to the video's actual `views` to see over/under-performance vs expectation. See the ES schema reference for the calculation. |
 | **VG (View Guarantee)** | `thoughtleaders_adlink.views_guarantee` | The contractual minimum views the brand is guaranteed. 0/NULL = no guarantee. NOT the same as PV — VG is a contractual floor, PV is an estimate. |
 
 When an AM says "what's the PV on this channel?" — they almost always mean `channel.projected_views`. When they say "what was the PV on this deal?" — they mean `adlink.projected_views_at_purchase_date`. When they say "did we hit the VG?" — they mean `adlink.view_guarantee_hit_date IS NOT NULL`.
@@ -120,7 +121,7 @@ Two derived metrics on the indexed channel doc that AMs use to qualify a channel
 | **Fulfillment rate** | `fulfillment_rate` (channel doc, scaled_float) | The share of a channel's content that is sponsored — `sponsored / all` content over the measurement window, expressed as a fraction. Higher = the channel reliably delivers paid integrations. | Quality signal: a high fulfillment rate means past brands have actually run on this channel, not just been pitched. AMs use it to filter out "looks promising but never closes" channels. |
 | **Renewal rate** | `renewal_rate` (channel doc, scaled_float) | The rate at which a brand-channel sponsorship relationship repeats over time, computed from clusters of sponsorship deals between a single subject (channel or brand) and its linked entities, with date-distribution heuristics (default 365-day max interval). | Loyalty signal: a high renewal rate means brands keep coming back to this channel. AMs use it to identify "sticky" channels worth premium positioning, and to flag low-renewal channels as one-shots. |
 
-Both metrics live on the channel side of the indexed video docs (the `channel.*` nested object). Channel pages in TL's product surface these as quality scores; in AM-facing reports, you can quote them as percentages (`0.45 → "45% renewal rate"`).
+Both metrics live on the **channel docs** in the search index — not on video docs (the embedded `channel.*` object on video docs carries no metrics). Channel pages in TL's product surface these as quality scores; in AM-facing reports, you can quote them as percentages (`0.45 → "45% renewal rate"`).
 
 ## Industry Terms vs TL Vocabulary
 
