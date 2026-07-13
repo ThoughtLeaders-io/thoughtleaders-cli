@@ -100,7 +100,7 @@ stages, nothing dropped without telling you.
 | "one video per channel" | dedupes the trend feed to each channel's best match |
 | "only channels that cover it repeatedly" | focuses the channel table on the recurring tier (default threshold: 3+ matching uploads; say a number to change it) |
 | "last 6 months" (recency) | changes the 12-month window used for "still active" checks |
-| "title matches only" | restricts a keyword to titles — the cleanest field — instead of titles+descriptions+transcripts |
+| "title matches only" | restricts a keyword to titles — the cleanest field — instead of the default titles + video descriptions (the `summary` field) + transcripts |
 | "exclude [sense/word]" | adds an exclusion, scoped so it doesn't over-cut |
 | "broaden it" / "narrow it to X" | changes topic breadth mid-run |
 | "save it as a report" | persists a named, shareable report |

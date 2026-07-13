@@ -238,7 +238,7 @@ When in doubt, OR. Under AND, expand the keyword set conservatively — every ke
 
 | `report_type` | Default `content_fields` | When to expand |
 | --- | --- | --- |
-| 1 (CONTENT) | `["title", "summary", "content"]` (video-level text) | Add `["transcript"]` only if the user explicitly mentioned "transcript" / "spoken-word" / "creators saying". |
+| 1 (CONTENT) | `["title", "summary"]` (video title + the creator-written video description) | Add `["transcript"]` only if the user explicitly mentioned "transcript" / "spoken-word" / "creators saying". Add `["content"]` only for podcast-focused reports — it's the podcast show-notes field, absent on YouTube docs. |
 | 2 (BRANDS) | `["title", "summary"]` (brand-mention surfaces) | Rarely expanded; brand reports aggregate over mentions, not deep text. |
 | 3 (CHANNELS) | **`["channel.channel_name", "channel_description"]` ONLY** on the first save | Add `channel_description_ai` + `channel_topic_description` only if the narrow set obviously misses channels the session matched. The AI-summarised fields catalogue every topic a channel has *ever* touched — they answer *"has this channel ever mentioned X"* (too broad for discovery) rather than *"is this channel ABOUT X"* (what `channel_name` + `channel_description` answer). Field selection is the bigger dial; keyword pruning is the fine-tune. |
 | 8 (SPONSORSHIPS) | n/a — keyword fields are inert for type 8 | Sponsorships filter by relations, not content text. Don't emit `keywords` / `keyword_operator` / `content_fields` at all for type 8. |

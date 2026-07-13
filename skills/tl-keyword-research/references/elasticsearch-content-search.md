@@ -13,7 +13,7 @@ The content alias holds **both** article docs and channel docs, distinguished by
 
 | `doc_type` | ~count | what it is | descriptive text fields |
 |---|---|---|---|
-| `article` | ~670M | one video / upload | `title`, `summary`, `transcript`, `content` |
+| `article` | ~670M | one video / upload | `title`, `summary`, `transcript` (`content` is podcast-only) |
 | `channel` | ~44M | one whole channel | `name`, `description`, `ai.description`, `ai.topic_descriptions` |
 
 **Always scope by `doc_type`** or your counts silently mix videos and channels:
@@ -49,9 +49,9 @@ level filters on `format` 4 alone.
 
 **Article docs** (`doc_type: article`):
 - `title` — video title. Strongest relevance signal (see weighting).
-- `summary` — AI-generated summary of the video.
+- `summary` — **the video's creator-written description** (the text under the video: promo links, hashtags, subscribe blocks). Misleading name — it is NOT an AI summary. ~86% of video docs; the main field for searching video-description text.
 - `transcript` — raw transcript. Stored as timed XML (`<text start="..." dur="...">`), so a transcript hit carries timestamps if you parse it.
-- `content` — full content/transcript text.
+- `content` — ⚠️ podcast episodes' show-notes text only; effectively absent on YouTube docs. (`description` matches 0 video docs.) Don't search either for YouTube content.
 - `content_type` — `longform` | `short` | `live`. The default probe scope is
   `longform` (best sponsorable-content signal).
 - `channel` — object with `id`, `content_category`, `country`, `language`, `format` (NO descriptive text — see channel docs for that). `format` 4 = YouTube.
@@ -60,8 +60,8 @@ level filters on `format` 4 alone.
 **Channel docs** (`doc_type: channel`):
 - `name` — channel name.
 - `description` — the channel's own (YouTube) description.
-- `ai.description` — AI-written channel description.
-- `ai.topic_descriptions` — AI-written description of the channel's topics. **This is the "topic description" field** — prefer it for channel-fit validation; it's a focused, on-topic summary.
+- `ai.description` — AI-written channel description: third-person, always English regardless of the channel's language (~93% of channel docs).
+- `ai.topic_descriptions` — AI-written description of the channel's topics, a **single prose string, not an array**. **This is the "topic description" field** — prefer it for channel-fit validation; it's a focused, on-topic summary. ⚠️ Only ~37% of channel docs have it — a no-match here doesn't prove the channel is off-topic.
 - `ai.brand_safety` — letter grade (A–F).
 - `content_category`, `country`, `language`, `format`, `reach` (subscribers), `total_views`, `sponsorship_price`, `sponsorship_score`, `outreach_email`, `social_links`, `is_tl_channel`.
 
@@ -70,7 +70,8 @@ level filters on `format` 4 alone.
 > `is_tl_channel`→`is_tpp`; the Elasticsearch index **keeps the old names**.
 > Every ES `_source` / `term` / `range` / `sort` on channel docs must use
 > `reach`, `impression`/`impression_live`/`impression_shorts`, `is_tl_channel`.
-> Do not "fix" a probe to the new names — it silently returns nulls. Skill
+> Do not "fix" a probe to the new names — it silently returns nulls (verified
+> live: `subscribers`, `projected_views`, `is_tpp` each match **0** docs). Skill
 > *output* uses the new vocabulary (`subscribers`, `is_tpp`); the translation
 > point is `search_channels.py`'s sponsorability block.
 
@@ -87,7 +88,7 @@ fields — map them:
 | `transcript` | `transcript` | article |
 | `content` | `content` | article |
 | `channel.channel_name` | `name` | channel |
-| `channel_description` | `description` | channel |
+| `channel_description` | `description.domains` | channel |
 | `channel_description_ai` | `ai.description` | channel |
 | `channel_topic_description` | `ai.topic_descriptions` | channel |
 | `hashtags` | `hashtags` | article |
@@ -96,9 +97,16 @@ Use ES paths in `probe.py` / raw queries; use ContentField names in
 `build_report.py` / the report link. `build_report.py` rejects any `content_fields`
 value that isn't a ContentField enum name, so passing a raw ES path (e.g.
 `ai.topic_descriptions`) fails loudly rather than silently mis-filtering.
-(One asymmetry to know: probe counts on the bare `description` field are
-approximate for the `channel_description` ContentField — the delivered filter
-does not match exactly the same text.)
+
+The `channel_description` ContentField targets `description.domains` — the About
+text additionally indexed so **whole domains are single searchable terms**
+(verified live: plain topic words match it identically to `description`, and
+`patreon.com` matches every channel whose About text links to patreon.com,
+including inside full URLs). Practical upshot: probe counts on bare `description`
+match the delivered filter for ordinary words, and the delivered filter is
+*stronger* for domain-shaped terms — a keyword like `substack.com` in a
+`channel_description` group genuinely matches linked domains, which bare
+`description` probes undercount (URLs there tokenize into word pieces).
 
 ### The report link / FilterSet keyword grammar (NOT simple_query_string)
 
@@ -151,6 +159,10 @@ tokens, and a `match_phrase` / SQS phrase on one form **misses** the others:
 Verified live (topic level, all-time): `fable 5` = `fable-5` = **1,215** docs;
 `fable5` = **94**; `fable five` = **118**; `fablefive` = **1**. Four different
 document populations — collapsing them in your head silently drops coverage.
+
+(One exception to the punctuation-split rule: the channel-doc
+`description.domains` subfield keeps whole domains as single terms —
+`patreon.com` is one token there. See the ContentField mapping above.)
 
 **Rule:** for any candidate carrying a number, version, model name, or anything
 that could be written solid vs spaced vs hyphenated, **probe each spelling as its

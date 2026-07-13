@@ -35,107 +35,121 @@ The `doc_type` join field distinguishes video uploads ("articles") from channel 
 
 #### Upload/video Fields (selected — 73 total)
 
-Filter with `{"term": {"doc_type": "article"}}`.
+Filter with `{"term": {"doc_type": "article"}}`. Coverage percentages are live `exists` counts (July 2026, ~676M video docs) — they drift slowly as the index grows.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | keyword | Video/article ID. Compound form `<channel_id>:<youtube_id>` (matches PG `adlink.article_id` and ES `_id`). |
-| `title` | text | Video title |
-| `description` | text | Video description |
-| `content` | text | Full content/transcript text (plain text; not always populated) |
-| `transcript` | text | Raw transcript — stored as YouTube timed-text **XML**, not plain text (see note below) |
-| `transcript_language` | keyword | Transcript language code |
-| `summary` | text | AI-generated summary |
-| `publication_date` | date | When video was published |
-| `discovery_time` | date | When TL discovered/indexed it |
-| `url` | object | Video URL |
-| `image_url` | object | Thumbnail URL |
-| `views` | long | View count |
-| `total_views` | long | Total views |
-| `projected_views` | long | Projected views |
-| `likes` | long | Like count |
-| `comments` | integer | Comment count |
-| `engagement` | long | Engagement metric |
-| `duration` | integer | Duration in seconds |
-| `duration_live` | integer | Live stream duration |
-| `duration_longform` | integer | Long-form duration |
-| `duration_shorts` | integer | Shorts duration |
-| `content_type` | keyword | longform / short / live |
-| `content_category` | keyword | Content category |
-| `content_aspects` | keyword | Content features/aspects |
-| `language` | keyword | Content language |
-| `country` | keyword | Creator country |
-| `format` | keyword | Platform format |
-| `hashtags` | keyword | Hashtags used |
-| `face_on_screen` | boolean | Whether creator shows face |
+| `title` | text | Video title (~100%) |
+| `description` | text | ⚠️ **Does not exist on video docs** — `exists` matches 0 of ~676M (verified). The video's description text lives in `summary`; `description` is a channel-doc field (the channel's About text). |
+| `content` | text | ⚠️ **Podcast episodes only** — the episode's show-notes/body text from the podcast feed (often HTML fragments). ~7% of docs overall; effectively absent on YouTube videos (~256k legacy docs holding flat transcript prose, and 0 YouTube docs since 2025). Never search it for YouTube content — use `summary` / `transcript`. |
+| `transcript` | text | Raw transcript — stored as YouTube timed-text **XML**, not plain text (see note below). ~57% of docs; present on both longform and shorts. |
+| `transcript_language` | keyword | Language code of the caption track the transcript came from (present when `transcript` is) |
+| `summary` | text | ⚠️ **Misleading name — this is the video's creator-written description** (the text under the video: promo links, hashtags, timestamps, subscribe blocks), NOT an AI summary. Verified by sampling old and recent docs. ~86% of docs. This is *the* field for searching video-description text. |
+| `evergreenness` | float | Per-video evergreen score: `(views at age 180d − views at age 30d) / views at age 30d`. ≥ 1 = evergreen (views at day 180 are at least double the day-30 views). Only computed for videos with ≥ 5,000 views published since 2022 (~16% of docs). |
+| `publication_date` | date | When the video was published (~100%) |
+| `discovery_time` | date | When TL first indexed the video. Only ~39% of docs — absent on older docs. |
+| `url` | keyword | Watch/episode URL. **Stored-only: retrievable in `_source` but not searchable** (`exists`/`term` match 0 docs). |
+| `image_url` | keyword | Thumbnail URL on podcast docs; absent on YouTube video docs. Stored-only, not searchable. |
+| `views` | long | View count at the last metrics update (~92%) |
+| `projected_views` | long | **TL's prediction of this video's views at age = 30 days**, stamped when the video is indexed (~45%). Derived from the channel's recent same-format videos' views at day 30 (≥ 4 videos required; median-anchored with outliers trimmed). Format-aware: videos ≤ 60s get the channel's shorts projection, longer videos the longform projection. Forward-looking — not actuals. |
+| `likes` | long | Like count (~87%) |
+| `comments` | integer | Comment count (~67%) |
+| `duration` | integer | Video duration in seconds (~100%) |
+| `content_type` | keyword | `longform` / `short` / `live` — the complete value set. ~71% of docs; older docs have none (missing ≠ longform). Podcast/RSS docs have no `content_type`. |
+| `content_aspects` | keyword | Flags: `podcast`, `paid_promotion`, `unlisted` — the complete value set. Only ~2.6% of docs carry any. |
+| `hashtags` | keyword | Hashtags from the video description, stored **without the leading `#`** and lowercase (e.g. `marchmadness`); non-Latin tags appear percent-encoded (`%D0%B0…`) (~32%) |
+| `channel` | object | Embedded channel subset: `channel.id`, `channel.content_category`, `channel.format`, `channel.publication_id`, `channel.country`, `channel.language` — no text fields, no metrics. This is where a video's language/country/format/category live (top-level `language`, `country`, `format`, `content_category` exist only on channel docs). |
+
+⚠️ **Channel-doc fields that look like video fields but match 0 video docs:** `total_views`, `engagement`, `duration_live`/`duration_longform`/`duration_shorts`, `language`, `country`, `format`, `content_category`, `face_on_screen`. They live on channel docs (see below); on video docs use the embedded `channel.*` subset where available.
 
 #### Brand Mention Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `brand_mentions` | nested | Full brand mention objects |
-| `all_brand_mentions` | keyword | All brand IDs mentioned |
-| `sponsored_brand_mentions` | keyword | Sponsored brand IDs |
-| `organic_brand_mentions` | keyword | Organic brand IDs |
-| `banner_ads` | object | Banner ad data |
-| `not_sponsored_by` | object | Explicitly not sponsored by |
+| `brand_mentions` | nested | Detected brand-mention objects (`id`, `type` organic/sponsored, `field`, `snippet`, `start_ts`/`end_ts`, `position`, `probability`, `detection_tool`) (~12%). Being `nested`, it must be queried with a `nested` query — a plain `{"exists": {"field": "brand_mentions"}}` matches 0 docs. |
+| `all_brand_mentions` | keyword | Brand IDs with any mention — the union of sponsored + organic (~12%) |
+| `sponsored_brand_mentions` | keyword | Brand IDs with a sponsored mention |
+| `organic_brand_mentions` | keyword | Brand IDs with an organic mention |
+| `not_sponsored_by` | object | Brand IDs marked as explicitly *not* sponsoring this video. **Not searchable** (`exists` matches 0 docs). |
 
 #### Channel Fields
 
-Filter with `{"term": {"doc_type": "channel"}}`.
+Filter with `{"term": {"doc_type": "channel"}}`. ~45.5M channel docs (July 2026); coverage percentages below are live `exists` counts against that total.
 
 Contains a denormalized subset of the PostgreSQL channel data.
 
-### Channel fields
+⚠️ **Channel docs are duplicated** — one channel id can appear as several identical docs (a well-known channel showed 8+ copies). Doc counts ≠ channel counts; dedupe with `collapse` on `id` or aggregate with `cardinality`.
+
+⚠️ **Legacy field names** — PostgreSQL and Firebolt renamed these, Elasticsearch did not. Raw ES queries must use the old names; the new names match **0 docs** (verified live, they fail silently):
+
+| ES (use this) | PG `thoughtleaders_channel` | Firebolt `channel_metrics` |
+|---|---|---|
+| `reach` | `subscribers` | `subscribers` |
+| `impression` / `impression_live` / `impression_shorts` | `projected_views*` | `projected_views` |
+| `is_tl_channel` | `is_tpp` | — |
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | text | Channel name |
-| `channel` | object | Channel metadata (nested on article docs) |
-| `reach` | long | Subscriber count. ⚠️ NOT ad-industry "reach" (unique audience exposed) — this is the channel's subscriber count. |
-| `impression` | long | Projected views per longform video — forward-looking estimate. ⚠️ NOT actual views and NOT ad-industry "impressions"; for actual views see `total_views` / the video docs. |
-| `impression_live` | long | Projected views per live stream (forward-looking estimate) |
-| `impression_shorts` | long | Projected views per short (forward-looking estimate) |
-| `is_tl_channel` | boolean | TPP partner channel |
-| `is_active` | boolean | Channel is active |
-| `media_selling_network_join_date` | date | MSN join date |
-| `has_outreach_email` | boolean | Has outreach email |
-| `outreach_email` | text | Contact email |
-| `social_links` | text | Social media links |
-| `male_share` | byte | Male audience % |
-| `usa_share` | byte | US audience % |
-| `sponsorship_price` | scaled_float | Sponsorship price |
-| `sponsorship_score` | scaled_float | Sponsorship quality score |
-| `evergreenness` | float | Evergreen score |
-| `evergreenness_live` | scaled_float | Live evergreen score |
-| `evergreenness_longform` | scaled_float | Longform evergreen score |
-| `evergreenness_shorts` | scaled_float | Shorts evergreen score |
-| `trend` | float | Growth trend |
-| `trend_live` | scaled_float | Live trend |
-| `trend_shorts` | scaled_float | Shorts trend |
-| `posts_per_90_days` | integer | Upload frequency |
-| `posts_per_90_days_live` | integer | Live frequency |
-| `posts_per_90_days_shorts` | integer | Shorts frequency |
-| `fulfillment_rate` | scaled_float | Fulfillment rate |
-| `renewal_rate` | scaled_float | Renewal rate |
-| `metrics_update_period` | byte | How often metrics update |
-| `offline_since` | date | When channel went offline |
+| `name` | text | Channel display name (~100%) |
+| `description` | text | The channel's creator-written YouTube "About" text (~97%): first-person, links, promo. |
+| `description.domains` | text | Same About text, additionally indexed so **website domains are searchable as single terms** — `{"term": {"description.domains": "patreon.com"}}` matches channels whose About text *links to* patreon.com anywhere (including inside full URLs), while plain topic words match identically to `description` (verified: same counts). This is the field the platform's `channel_description` report filter actually searches. |
+| `reach` | long | Subscriber count (~98%). ⚠️ NOT ad-industry "reach" (unique audience exposed) — this is the channel's subscriber count. Same data as PG `thoughtleaders_channel.subscribers` / Firebolt `channel_metrics.subscribers`. |
+| `impression` | long | TL's projected views per longform video at age = 30 days — computed like the per-video `projected_views` (median-anchored over the channel's recent longform videos' day-30 views, ≥ 4 videos required) (~27%). ⚠️ NOT actual views and NOT ad-industry "impressions"; for actual views see `total_views` / the video docs. |
+| `impression_live` | long | Projected views per live stream at age = 30 days (~6%) |
+| `impression_shorts` | long | Projected views per short at age = 30 days (~21%) |
+| `total_views` | long | Lifetime actual views across the channel (~68%) |
+| `engagement` | long | Views-per-comment ratio over the channel's last 30 days of uploads: `sum(views) / sum(comments)`, rounded (~25%). **Lower = more engaged audience** (fewer views per comment). Not an engagement count. |
+| `duration_longform` | integer | Average longform video duration in seconds, over the channel's uploads from the trailing 365 days (~46%) |
+| `duration_shorts` | integer | Average short duration, same window (~32%) |
+| `duration_live` | integer | Average live-stream duration, same window (~11%) |
+| `is_tl_channel` | boolean | TPP partner channel (100%) |
+| `is_active` | boolean | Channel is active (100%) |
+| `media_selling_network_join_date` | date | MSN join date; non-null = MSN member (~1%) |
+| `has_outreach_email` | boolean | Has contact email (100%) |
+| `outreach_email` | text | Contact email (~45%) |
+| `social_links` | text | Flat array of the channel's profile URLs (~47%), e.g. `["https://twitter.com/…", "https://instagram.com/…", "https://discord.gg/…"]`. Source is a per-platform map plus a catch-all `_other` map for unrecognized platforms; in ES all of it is flattened into this one URL array (the `_other` URLs are folded in, the platform names are dropped). Occasional stray entries (bare emails, nested arrays) exist. |
+| `male_share` | byte | Male audience % — only ~1.6% of channel docs have demographic data |
+| `usa_share` | byte | US audience % — same ~1.6% coverage |
+| `device` | object | Audience device demographics where known: `device.primary` (most common device) and `device.share` (per-device % map). Very sparse (~0.2%). |
+| `sponsorship_price` | scaled_float | Estimated price of a sponsored video on this channel, from **TL's sponsorship calculator** (~27%). Inputs: the channel's last-30-day views and comments, fulfillment rate, renewal rate, and longform evergreenness. Recomputed on the channel's regular metrics-update cycle, so it moves as the channel's data changes. |
+| `sponsorship_score` | scaled_float | TL-internal sponsorship track-record score, **range 0–10, higher = better** (~96%). Blends how many distinct brands sponsored the channel in the last 2 years (40%) with how many of them booked repeatedly (60%). The scale is deliberately skewed: raw low scores are compressed below 5, so **< 5 reads as weak/no track record and ≥ 5 as a real one**. Internal-only — don't quote the raw decimal externally (see business glossary). |
+| `evergreenness` | float | ⚠️ **Dead — 0 docs.** Use the per-format fields below. |
+| `evergreenness_longform` | scaled_float | Median per-video evergreenness of the channel's longform uploads from the trailing 365 days (~24%). Per-video evergreenness = `(views@180d − views@30d) / views@30d`; ≥ 1 = evergreen (day-180 views at least double day-30). Recomputed on the metrics-update cycle. |
+| `evergreenness_shorts` | scaled_float | Same, for shorts (~20%) |
+| `evergreenness_live` | scaled_float | Same, for live streams (~4%) |
+| `trend` | float | View-trend angle for longform uploads (~13%). Positive = growing views. |
+| `trend_shorts` | scaled_float | View-trend angle for shorts (~12%) |
+| `trend_live` | scaled_float | View-trend angle for live streams (~3%). There is **no `trend_longform`** — the longform trend is the bare `trend`. |
+| `posts_per_90_days` | integer | Longform uploads per 90 days, normalized from the trailing 365 days (~96%) |
+| `posts_per_90_days_shorts` | integer | Shorts per 90 days (~67%) |
+| `posts_per_90_days_live` | integer | Live streams per 90 days (~67%) |
+| `fulfillment_rate` | scaled_float | Share of the channel's longform uploads (trailing 365 days) that carry a sponsored mention (~40%) |
+| `renewal_rate` | scaled_float | Rate at which the channel's sponsoring brands come back (~96%) |
+| `metrics_update_period` | byte | ⚠️ Vestigial — populated on only ~2,300 docs (~0.005%). |
+| `offline_since` | date | ⚠️ **Dead — 0 docs.** Use `is_active`. |
+| `content_category` | integer | TL's own content-category code, 1–22 (~94%). **Not YouTube's categories** — see the category map in `postgres-schema.md`. |
+| `format` | integer | Platform format code (100%): 1 = Newsletter, 3 = Podcast, **4 = YouTube**, 5 = Blog, 7 = Twitch, 8 = TikTok, 9 = Instagram, 10 = LinkedIn. |
+| `face_on_screen` | boolean | ThoughtLeaders-sourced flag: whether the creator shows their face on screen when doing brand sponsorships (~1% of channel docs). |
 
 #### AI & Enrichment Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `ai` | object | AI-generated metadata |
-| `applied_enrichments` | keyword | Which enrichments have been applied |
-| `article_category` | object | Categorization data |
+| `ai` | object | **Channel docs only** (0 video docs). Holds exactly the three AI-generated fields below (~93% of channel docs). |
+| `ai.description` | text | AI-generated third-person channel profile, always in English regardless of the channel's language (~93%) |
+| `ai.topic_descriptions` | text | AI-generated prose paragraph describing the channel's content topics. A **single string, not an array**. Only ~37% of channel docs — absence means "not yet generated", not "off-topic". |
+| `ai.brand_safety` | keyword | Brand-safety letter grade `A`–`F` (~93%; A ≈ 91% of graded channels) |
+| `applied_enrichments` | keyword | Enrichment names applied to the video (e.g. `brand_extractor`) |
+| `article_category` | object | ⚠️ **Dead — 0 docs.** |
 
 #### System Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `@timestamp` | date | Index timestamp |
+| `@timestamp` | date | Index/update timestamp (~92% of video docs) |
 | `doc_type` | join | Parent-child join (channel→video) |
-| `es_index_tag` | object | Index routing metadata |
+| `es_index_tag` | keyword | Publication-period tag: quarterly from 2019 (`2025-q2`), yearly 2016–2018 (`2017`), `2015-and-before` for older. **Stored-only — not searchable** (`exists`/`term` match 0 docs). |
 
 ## Common Query Patterns
 
@@ -170,7 +184,9 @@ tl db es '{
 }'
 ```
 
-### Full-text search on title/description/summary/content
+### Full-text search on title/summary/transcript
+
+(`summary` = the video's creator-written description. `description` matches 0 video docs and `content` is podcast-only — see the field table.)
 
 ```bash
 tl db es '{
@@ -178,7 +194,7 @@ tl db es '{
   "query": {
     "multi_match": {
       "query": "ergonomic keyboard review",
-      "fields": ["title^3", "description", "summary", "content"]
+      "fields": ["title^3", "summary", "transcript"]
     }
   },
   "_source": ["title", "channel.id", "publication_date"]
@@ -201,7 +217,7 @@ tl db es '{
 }'
 ```
 
-### Single top-level aggregation (only one aggregation per request is accepted)
+### Aggregation example (aggregations are bounded, not single-only — see *Accepted query bodies* above)
 
 ```bash
 tl db es '{
@@ -245,9 +261,11 @@ Repeat until a page comes back short (`next_search_after` is absent on an empty 
 
 `text` fields on article docs (`title`, `summary`, `transcript`) appear to use the `standard` analyzer (tokenize + lowercase, no stemmer, no English-possessive filter), so inflections, plurals, and possessives are each indexed as distinct terms. For example: `bitcoin` (4,466,300) vs `bitcoins` (489,262). For stemming-style recall, expand the query side with a `bool.should` over the variants.
 
+One consequence: URLs in article fields tokenize on punctuation (`substack.com` → `substack`, `com`), so you can't term-match a domain there. The exception is the channel-doc `description.domains` subfield, where whole domains are single searchable terms — use it to find channels by a linked domain (see the channel field table).
+
 ## Transcript field format
 
-The `transcript` field's `_source` is **YouTube timed-text caption XML**, not plain prose. Each caption cue is a `<text start="…" dur="…">` element wrapped in `<transcript>`, and the inner text is **double HTML-entity-encoded** (an apostrophe is `&amp;#39;`, i.e. an escaped `&#39;`):
+The `transcript` field's `_source` is **YouTube timed-text caption XML**, not plain prose. Each caption cue is a `<text start="…" dur="…">` element wrapped in `<transcript>`. The inner text is HTML-entity-encoded — on older docs **double-encoded** (an apostrophe is `&amp;#39;`, i.e. an escaped `&#39;`), on recent docs single-encoded (`&apos;`):
 
 ```xml
 <?xml version="1.0" encoding="utf-8" ?>
@@ -255,7 +273,7 @@ The `transcript` field's `_source` is **YouTube timed-text caption XML**, not pl
 ```
 
 - **Searching is unaffected** — the field is analyzed as `text`, so `match` / `match_phrase` queries hit the words directly regardless of the markup. The XML only matters when you retrieve and read the raw `_source`.
-- **For plain prose**, either use the `content` field (plain text, but not always populated) or strip the markup yourself, e.g. `jq -r '.results[0].transcript' | sed -E 's/<[^>]+>/ /g'` and then unescape entities twice (the encoding is doubled).
+- **For plain prose**, strip the markup yourself, e.g. `jq -r '.results[0].transcript' | sed -E 's/<[^>]+>/ /g'`, then unescape entities (twice on older docs). Don't reach for the `content` field — it's podcast-only and absent on YouTube docs.
 
 ## Notes & gotchas
 
@@ -263,5 +281,6 @@ The `transcript` field's `_source` is **YouTube timed-text caption XML**, not pl
 - **Add a `publication_date` range filter** whenever the question is time-bounded — the alias is fixed, so this is the only way to narrow the search.
 - `sponsored_brand_mentions` and `organic_brand_mentions` are keyword arrays — use `term` queries.
 - For brand mention details (position, snippet, detection_tool), the data is in the `brand_mentions` nested field.
+- **Stored-only fields** — retrievable in `_source` but invisible to `exists`/`term`/`match` (queries on them silently match 0 docs): `url`, `image_url`, `es_index_tag`, `not_sponsored_by`.
 - **`publication_id` is deprecated** — don't use for joins.
 - No write access. The CLI only exposes `_search` against `tl-platform-*`.

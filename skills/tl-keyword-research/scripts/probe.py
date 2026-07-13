@@ -37,6 +37,9 @@ import subprocess
 import sys
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
+# `summary` holds the video's creator-written description (links, hashtags, promo)
+# — not an AI summary. Article-level `description` is empty and `content` is
+# podcast-only; neither belongs in these lists.
 TOPIC_FIELDS = ["title", "summary", "transcript"]
 CHANNEL_FIELDS = ["name", "description", "ai.description", "ai.topic_descriptions"]
 
