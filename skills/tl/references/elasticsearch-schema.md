@@ -41,7 +41,7 @@ Filter with `{"term": {"doc_type": "article"}}`. Coverage percentages are live `
 |-------|------|-------------|
 | `id` | keyword | Video/article ID. Compound form `<channel_id>:<youtube_id>` (matches PG `adlink.article_id` and ES `_id`). |
 | `title` | text | Video title (~100%) |
-| `description` | text | ⚠️ **Does not exist on video docs** — `exists` matches 0 of ~676M (verified). The video's description text lives in `summary`; `description` is a channel-doc field (the channel's About text). |
+| `description` | text | ⚠️ **Does not exist on video docs** — `exists` matches 0 of ~676M (verified). The video's description text lives in `summary`; `description` is a channel-doc field (the channel's "About this channel" text). |
 | `content` | text | ⚠️ **Podcast episodes only** — the episode's show-notes/body text from the podcast feed (often HTML fragments). ~7% of docs overall; effectively absent on YouTube videos (~256k legacy docs holding flat transcript prose, and 0 YouTube docs since 2025). Never search it for YouTube content — use `summary` / `transcript`. |
 | `transcript` | text | Raw transcript — stored as YouTube timed-text **XML**, not plain text (see note below). ~57% of docs; present on both longform and shorts. |
 | `transcript_language` | keyword | Language code of the caption track the transcript came from (present when `transcript` is) |
@@ -92,8 +92,8 @@ Contains a denormalized subset of the PostgreSQL channel data.
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | text | Channel display name (~100%) |
-| `description` | text | The channel's creator-written YouTube "About" text (~97%): first-person, links, promo. |
-| `description.domains` | text | Same About text, additionally indexed so **website domains are searchable as single terms** — `{"term": {"description.domains": "patreon.com"}}` matches channels whose About text *links to* patreon.com anywhere (including inside full URLs), while plain topic words match identically to `description` (verified: same counts). This is the field the platform's `channel_description` report filter actually searches. |
+| `description` | text | The channel's creator-written YouTube "About this channel" text (~97%): usually first-person, links, promo. Especially worth investigating if it contains creator contact information. |
+| `description.domains` | text | Same "About this channel" text, additionally indexed so **website domains are searchable as single terms** — `{"term": {"description.domains": "patreon.com"}}` matches channels whose About text *links to* patreon.com anywhere (including inside full URLs), while plain topic words match identically to `description` (verified: same counts). This is the field the platform's `channel_description` report filter actually searches. |
 | `reach` | long | Subscriber count (~98%). ⚠️ NOT ad-industry "reach" (unique audience exposed) — this is the channel's subscriber count. Same data as PG `thoughtleaders_channel.subscribers` / Firebolt `channel_metrics.subscribers`. |
 | `impression` | long | TL's projected views per longform video at age = 30 days — computed only from the channel's recent **longform** videos' day-30 views (≥ 4 required; median-anchored, outliers trimmed) (~27%). This is the channel's *current* projection; a video doc's `projected_views` is the same quantity frozen when that video was first indexed — diff them to see channel growth/decline since the upload. ⚠️ NOT actual views and NOT ad-industry "impressions"; for actual views see `total_views` / the video docs. |
 | `impression_live` | long | Projected views per live stream at age = 30 days, from the channel's live streams only (~6%) |
@@ -186,7 +186,7 @@ tl db es '{
 
 ### Full-text search on title/summary/transcript
 
-(`summary` = the video's creator-written description. `description` matches 0 video docs and `content` is podcast-only — see the field table.)
+(`summary` = the video's creator-written description. `description` field is not pupulated for articles, and `content` is podcast-only — see the field table.)
 
 ```bash
 tl db es '{
@@ -217,7 +217,7 @@ tl db es '{
 }'
 ```
 
-### Aggregation example (aggregations are bounded, not single-only — see *Accepted query bodies* above)
+### Aggregation example (aggregations are bounded — see *Accepted query bodies* above)
 
 ```bash
 tl db es '{

@@ -13,7 +13,7 @@ The content alias holds **both** article docs and channel docs, distinguished by
 
 | `doc_type` | ~count | what it is | descriptive text fields |
 |---|---|---|---|
-| `article` | ~670M | one video / upload | `title`, `summary`, `transcript` (`content` is podcast-only) |
+| `article` | ~670M | one video / upload | `title`, `summary`, `transcript` (or in case of podcast records, `content`) |
 | `channel` | ~44M | one whole channel | `name`, `description`, `ai.description`, `ai.topic_descriptions` |
 
 **Always scope by `doc_type`** or your counts silently mix videos and channels:
@@ -49,9 +49,9 @@ level filters on `format` 4 alone.
 
 **Article docs** (`doc_type: article`):
 - `title` — video title. Strongest relevance signal (see weighting).
-- `summary` — **the video's creator-written description** (the text under the video: promo links, hashtags, subscribe blocks). Misleading name — it is NOT an AI summary. ~86% of video docs; the main field for searching video-description text.
+- `summary` — **the video's creator-written description** (the text under the video: promo links, hashtags, subscribe blocks). Misleading name — it is NOT an AI summary. This is the main field for searching video description text.
 - `transcript` — raw transcript. Stored as timed XML (`<text start="..." dur="...">`), so a transcript hit carries timestamps if you parse it.
-- `content` — ⚠️ podcast episodes' show-notes text only; effectively absent on YouTube docs. (`description` matches 0 video docs.) Don't search either for YouTube content.
+- `content` — ⚠️ podcast episodes' only;  usually show notes text or rarely transcripts; effectively absent on YouTube docs. Don't search for YouTube content.
 - `content_type` — `longform` | `short` | `live`. The default probe scope is
   `longform` (best sponsorable-content signal).
 - `channel` — object with `id`, `content_category`, `country`, `language`, `format` (NO descriptive text — see channel docs for that). `format` 4 = YouTube.
@@ -75,13 +75,13 @@ level filters on `format` 4 alone.
 > *output* uses the new vocabulary (`subscribers`, `is_tpp`); the translation
 > point is `search_channels.py`'s sponsorability block.
 
-### ContentField names for the deliverable vs ES field names for probes
+### Content field names for the deliverable vs ES field names for probes
 
-The platform FilterSet / report link uses **ContentField enum** names; raw
+The platform FilterSet / report link uses its own **content field** names; raw
 `tl db es` probes use the **actual ES field paths**. They differ for channel
 fields — map them:
 
-| ContentField (filter set / report link) | ES field path (probe query) | doc_type |
+| Content field (filter set / report link) | ES field path (probe query) | doc_type |
 |---|---|---|
 | `title` | `title` | article |
 | `summary` | `summary` | article |
@@ -93,20 +93,19 @@ fields — map them:
 | `channel_topic_description` | `ai.topic_descriptions` | channel |
 | `hashtags` | `hashtags` | article |
 
-Use ES paths in `probe.py` / raw queries; use ContentField names in
+Use ES paths in `probe.py` / raw queries; use content field names in
 `build_report.py` / the report link. `build_report.py` rejects any `content_fields`
-value that isn't a ContentField enum name, so passing a raw ES path (e.g.
+value that isn't a recognized content field name, so passing a raw ES path (e.g.
 `ai.topic_descriptions`) fails loudly rather than silently mis-filtering.
 
-The `channel_description` ContentField targets `description.domains` — the About
-text additionally indexed so **whole domains are single searchable terms**
-(verified live: plain topic words match it identically to `description`, and
-`patreon.com` matches every channel whose About text links to patreon.com,
-including inside full URLs). Practical upshot: probe counts on bare `description`
-match the delivered filter for ordinary words, and the delivered filter is
-*stronger* for domain-shaped terms — a keyword like `substack.com` in a
-`channel_description` group genuinely matches linked domains, which bare
-`description` probes undercount (URLs there tokenize into word pieces).
+The `channel_description` content field targets `description.domains` — the
+"About this channel" text additionally indexed so **whole domains are single
+searchable terms** (verified live: `patreon.com` matches every channel whose
+About-this-channel text links to patreon.com, including inside full URLs,
+which bare `description` probes
+undercount since URLs there tokenize into word pieces). For domain-shaped
+keywords (e.g. `substack.com`), probe against `description.domains`, not bare
+`description`.
 
 ### The report link / FilterSet keyword grammar (NOT simple_query_string)
 
@@ -162,7 +161,7 @@ document populations — collapsing them in your head silently drops coverage.
 
 (One exception to the punctuation-split rule: the channel-doc
 `description.domains` subfield keeps whole domains as single terms —
-`patreon.com` is one token there. See the ContentField mapping above.)
+`patreon.com` is one token there. See the content field mapping above.)
 
 **Rule:** for any candidate carrying a number, version, model name, or anything
 that could be written solid vs spaced vs hyphenated, **probe each spelling as its
@@ -432,7 +431,7 @@ id and read `ai.topic_descriptions` / `ai.description`:
 Or run the probe with `--level channel` to search channel docs directly.
 
 **Channel-field probes approximate the delivered filter, they don't equal it.**
-A delivered filter keyword targeting a channel ContentField
+A delivered filter keyword targeting a channel content field
 (`channel_topic_description`, `channel_description`, …) matches **articles**
 whose channel matches — its result counts are videos. Raw probes can't run
 that parent-child join (the join query types are not accepted), so you probe
