@@ -126,11 +126,22 @@ A deal is **committed** when it is SOLD, or OPEN with `brand_approval_status` in
 
 ### `thoughtleaders_brand`
 
+> 🚨 **Columns that DO NOT exist on `thoughtleaders_brand` — common hallucinations:**
+> - ❌ `domain` / `url` — the website column is `website`.
+> - ❌ `brand_name` — it's plain `name` here (unlike channel, which prefixes its display fields).
+> - ❌ `is_active` — brands have no active/inactive flag; every row is live.
+> - ❌ `sponsored_topics` (or similar topic columns) — the closest fields are `keywords` and `ai_description`.
+> - ❌ `organization_id` — org lives on profile, not brand (see Key Relationships below).
+
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | int | Primary key |
-| `name` | varchar | Brand name |
+| `name` | varchar | Brand name. ⚠️ Plain `name`, not `brand_name`. |
 | `description` | text | Brand description |
+| `website` | varchar | Brand website URL. ⚠️ The column is `website`, NOT `domain`. |
+| `slug` | varchar | TL-platform slug |
+| `keywords` | varchar | Topic/detection keywords for the brand |
+| `ai_description` | JSONB | AI-generated descriptive info about the brand |
 | `creator_id` | int FK | User who created it |
 
 #### Junction Tables
@@ -290,7 +301,42 @@ JOIN thoughtleaders_profile p ON p.user_id = adspot.publisher_id
 ```
 Joining `adspot.publisher_id → profile.id` directly mixes ID spaces and returns garbage.
 
-## `thoughtleaders_profile` persona constants
+## Key columns for the `thoughtleaders_profile` table
+
+The profile is the account record for a person/company on the platform. Every brand-side query hops through it (`adlink.advertiser_profile_id → profile → profile_brands → brand`), which makes it the most-joined table after the sponsorships themselves.
+
+> 🚨 **Columns that DO NOT exist on `thoughtleaders_profile` — common hallucinations:**
+> - ❌ `name` / `email` — the person's name and email live on `auth_user` (join via `user_id`: `first_name`, `last_name`, `email`). The company name is `organization_name`, denormalized onto the profile.
+> - ❌ `auth_user_id` — the FK column is `user_id`.
+> - ❌ `brand_id` — a profile can have several brands; join `thoughtleaders_profile_brands` on `profile_id`.
+> - ❌ `is_tpp` — that's a channel attribute; a profile's channels come via `thoughtleaders_profile_channels`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | int | Primary key. ⚠️ NOT the same ID space as `auth_user.id` — never join a `*_id` pointing at users to `profile.id` directly. |
+| `user_id` | int FK | → `auth_user.id` (the person's name and email live there) |
+| `organization_id` | int FK | → `thoughtleaders_organization.id` |
+| `organization_name` | varchar | Denormalized company/organization display name |
+| `persona` | int | Account persona (see constants below) |
+| `is_advertiser` | boolean | Buyer (brand) side capability flag |
+| `is_publisher` | boolean | Seller (channel) side capability flag |
+| `owner_sales_id` | int FK | → `auth_user.id` — TL-side sales owner for this profile |
+| `owner_advertiser_id` | int FK | → `auth_user.id` — TL-side brand account owner |
+| `owner_publisher_id` | int FK | → `auth_user.id` — on advertiser profiles: the adops user in charge |
+| `media_buying_network_join_date` | date | MBN (brand-side buying network) join date. **MBN membership = this column IS NOT NULL.** ⚠️ Don't confuse with the channel's `media_selling_network_join_date` (MSN — the channel-side network). |
+| `superuser_notes` | text | Internal TL notes about the profile |
+| `buying_preference_*` | various | The brand's buying preferences (audience age/gender/geo shares, face-on-screen, custom instructions) |
+
+**Profile with the person's name and email:**
+```sql
+SELECT p.id, u.first_name, u.last_name, u.email, p.organization_name
+FROM thoughtleaders_profile p
+JOIN auth_user u ON u.id = p.user_id
+WHERE p.organization_id = 123
+LIMIT 50 OFFSET 0
+```
+
+### `thoughtleaders_profile` persona constants
 
 | Value | Label |
 |-------|-------|
@@ -298,7 +344,7 @@ Joining `adspot.publisher_id → profile.id` directly mixes ID spaces and return
 | 2 | Creator |
 | 3 | Talent Manager |
 | 4 | Media Agency |
-| 5 | Creator Service |
+| 5 | Other |
 
 ## `thoughtleaders_profile_channels` (Profile ↔ Channel M2M)
 

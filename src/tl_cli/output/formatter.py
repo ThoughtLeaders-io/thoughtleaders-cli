@@ -94,11 +94,13 @@ def output(
         # Banner still goes to stderr so it surfaces even when stdout is
         # piped through `jq` or redirected to a file.
         _print_quota_notice(data)
+        _print_server_warnings(data)
         return
 
     if not results:
         err_console.print("[dim]No results found.[/dim]")
         _print_quota_notice(data)
+        _print_server_warnings(data)
         _print_usage(usage)
         return
 
@@ -118,6 +120,7 @@ def output(
 
     _print_pagination_notice(data)
     _print_quota_notice(data)
+    _print_server_warnings(data)
     _print_usage(usage)
     _print_breadcrumbs(breadcrumbs)
 
@@ -496,6 +499,17 @@ def _format_wait_clause(data: dict) -> str:
     return ""
 
 
+def _print_server_warnings(data: dict) -> None:
+    """Print advisory `_warnings` from the response envelope (stderr).
+
+    The server attaches these to queries that ran but did something
+    costly or fragile (e.g. a leading-wildcard ILIKE that scans a whole
+    table). Advisory only — the results are still valid.
+    """
+    for warning in data.get("_warnings") or []:
+        err_console.print(f"[bold yellow]Warning:[/bold yellow] [yellow]{warning}[/yellow]")
+
+
 def _print_quota_notice(data: dict) -> None:
     """Print a banner when the server signals a billing-quota refusal or
     truncation on a raw-DB call.
@@ -546,6 +560,7 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
     """
     if fmt == "json":
         print(_dump_json(data))
+        _print_server_warnings(data)
         _print_usage(data.get("usage"))
         return
 
@@ -595,6 +610,7 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
             sub.add_row(path, "column (per row)", f"{_fmt_credits(val)}/row")
         console.print(sub)
 
+    _print_server_warnings(data)
     _print_usage(data.get("usage"))
 
 
