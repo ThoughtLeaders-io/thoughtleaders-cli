@@ -242,21 +242,19 @@ tl channels update 12345 '{"demographic_male_share": 62}'
 tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
 tl channels update 12345 '{"outreach_email": "press@creator.com"}'
-tl channels update 12345 '{"all_emails": {"press@creator.com": {"timestamp": "2026-06-25T12:00:00+00:00", "source": "manual"}}}'
 tl channels update 12345 '{"media_selling_network_join_date": "2026-01-15"}'
 ```
 
-**Channel contact emails.** Besides demographics, `tl channels update` accepts two
-contact fields:
+**Channel contact emails.** Besides demographics, `tl channels update` accepts one
+contact field:
 
 - **`outreach_email`** — the channel's primary outreach address (a single email string, or `null`).
-- **`all_emails`** — the channel's full email archive. It is **not** a free-form blob: it's
-  a JSON object keyed by email address, each value an object `{"timestamp": <ISO-8601 datetime>, "source": <string>}`.
-  `timestamp` must parse as ISO-8601 (e.g. `"2026-06-25T12:00:00+00:00"`); `source` records
-  where the address came from. Known `source` values: `outreach_email` (the address that was
-  the primary outreach email, archived when the channel was blacklisted), `google_search`,
-  `scheduled_rescrape`. Use a descriptive token such as `manual` for hand-added entries.
-  An edit **replaces** the whole `all_emails` object, so include every entry you want to keep.
+
+The channel's full email archive (`all_emails` — a JSON object keyed by email address,
+each value recording when and where the address was found) is **not editable here**;
+sending it returns a 400. It is append-only: new addresses are added with the
+internal CLI's `tl-internal channels add-email` command (superuser-only), which never
+modifies or removes existing entries.
 
 **MSN membership.** `tl channels update` also accepts **`media_selling_network_join_date`** —
 the date the channel joined the Media Selling Network, as a `YYYY-MM-DD` string. This date is
