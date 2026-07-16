@@ -34,12 +34,12 @@ For context / future automation. All are session-auth under `/api/workflows`:
 | Action | Request |
 |--------|---------|
 | Convert a report → workflow | `POST /api/workflows` · `{ campaignId, workflowName }` → new 1-stage workflow |
-| Add a stage | `POST /api/workflows/add-step` |
-| Delete a stage | `DELETE /api/workflows/delete-step` |
+| Add a stage | `POST /api/workflows/add-step` · `{ campaignTitle, workflowId }` |
+| Delete a stage (step owner only) | `DELETE /api/workflows/delete-step?stepId=` |
 | Rename the workflow | `PATCH /api/workflows/:id` · `{ name }` |
-| Delete the workflow (owner only) | `DELETE /api/workflows/:id` |
+| Delete the workflow | `DELETE /api/workflows/:id` |
 | Fetch a workflow + stages | `GET /api/workflows/:id` |
-| Link a report to a stage / move entities | `POST` to the stage filterset's `add_relation` |
+| Link a report to a stage / move entities | `PATCH` the stage filterset's `add_relation` action |
 
 **Known limitation to flag to the user:** because create only *converts an
 existing report*, there is no single "create a full multi-stage workflow (name +
