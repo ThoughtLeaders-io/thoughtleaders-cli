@@ -242,7 +242,6 @@ tl channels update 12345 '{"demographic_male_share": 62}'
 tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
 tl channels update 12345 '{"outreach_email": "press@creator.com"}'
-tl channels update 12345 '{"media_selling_network_join_date": "2026-01-15"}'
 ```
 
 **Channel contact emails.** Besides demographics, `tl channels update` accepts one
@@ -255,11 +254,6 @@ each value recording when and where the address was found) is **not editable her
 sending it returns a 400. It is append-only: new addresses are added with the
 internal CLI's `tl-internal channels add-email` command (superuser-only), which never
 modifies or removes existing entries.
-
-**MSN membership.** `tl channels update` also accepts **`media_selling_network_join_date`** —
-the date the channel joined the Media Selling Network, as a `YYYY-MM-DD` string. This date is
-itself the membership flag: set it to add the channel to MSN (it then reads as `is_msn` and
-appears in MSN-filtered queries), or send `null` to remove the channel from the network.
 
 **Profile notes.** `tl profiles update` (superuser only) edits a brand/publisher profile's
 **`superuser_notes`** — the internal free-text notes field on the customer record
