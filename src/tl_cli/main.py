@@ -30,6 +30,7 @@ from tl_cli.commands.describe import app as describe_app
 from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
+from tl_cli.commands.workflows import app as workflows_app
 from tl_cli.commands.setup import app as setup_app
 from tl_cli.commands.snapshots import app as snapshots_app
 from tl_cli.commands.uploads import app as uploads_app
@@ -98,6 +99,7 @@ app.add_typer(profiles_app, name="profiles")
 app.add_typer(recommender_app, name="recommender")
 app.add_typer(snapshots_app, name="snapshots")
 app.add_typer(reports_app, name="reports")
+app.add_typer(workflows_app, name="workflow")
 # Direct command (not a sub-Typer) so `tl bulk-import <entity> --campaign <id>`
 # parses ENTITY as the positional and --campaign as a command option, instead
 # of Typer treating `--campaign` as a group-level flag that has to come first.

@@ -14,9 +14,9 @@ description: >
   "build an acquisition funnel". It designs the funnel from the goal + the TL
   methodology, sources the entry stage with real data (delegating to
   tl-keyword-research / tl channels / tl recommender / guide-brand research),
-  defines each stage as a query-or-list report, and hands back a create-ready
-  blueprint + the exact in-app assembly steps — the tl CLI has no workflow
-  endpoint, so the Workflow itself is assembled in the web app. Also answers
+  defines each stage as a query-or-list report, and creates it with
+  "tl workflow create" (or, until the backend endpoint is deployed, hands back the
+  create-ready blueprint + in-app assembly steps). Also answers
   HELP asks about how workflows work ("how do workflows work", "what's a
   query vs a list stage", "explain workflow stages") for free.
 ---
@@ -48,16 +48,15 @@ A workflow is **not a new kind of object** — every stage IS a saved Report
   single most important rule and the #1 cause of broken hand-built workflows —
   see `references/workflow-model.md` (query vs list) and
   `references/pitfalls.md`. Never make stage 2+ a query.
-- **Creating the workflow — the CLI cannot.** There is **no CLI (Bearer)
-  workflow endpoint and no `tl workflow` command**. Every `/api/workflows*` route
-  is session-authenticated (the web app's), not on the CLI's Bearer surface. So
-  this skill **designs + sources + emits a create-ready blueprint** and the user
-  stands the workflow up in the web app (Convert → Add stage) — see
-  `references/creating-in-app.md`. A Bearer CLI twin of the web builder
-  (`POST /api/cli/v1/workflows/build`) plus a `tl workflow` command would be a
-  natural future addition, and the blueprint is already its exact input — but
-  until they actually exist, never POST to that route and **never claim a
-  workflow was created**; you prepared a blueprint.
+- **Creating the workflow.** `tl workflow create --file <blueprint.json>` builds
+  it in one call — it POSTs `{name, report_type, steps}` to the Bearer endpoint
+  `/api/cli/v1/workflows/build` (the twin of the web builder). The command ships
+  in this repo; the endpoint ships with backend **PR #4192** — **until that is
+  deployed the command errors**, and the user stands the workflow up in the web
+  app from the blueprint (Convert → Add stage). Both paths are in
+  `references/creating-in-app.md`. **Never claim a workflow was created unless a
+  `tl workflow create` call actually returned one** — otherwise you prepared a
+  blueprint.
 - **Source with real data, never placeholder channels.** The entry stage must
   be filled from the index (delegate to `tl-keyword-research` /
   `tl channels find` / `tl recommender` / guide-brand research), never a made-up
