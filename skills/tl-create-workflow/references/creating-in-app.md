@@ -62,8 +62,8 @@ immediately, where the team moves / edits / duplicates it.
 | **Build a full workflow** (`tl workflow create`) | `POST /api/cli/v1/workflows/build` · `{ name, report_type, steps[] }` | **Bearer (CLI)** |
 | Convert one report → 1-stage workflow | `POST /api/workflows` · `{ campaignId, workflowName }` | session |
 | Add a stage | `POST /api/workflows/add-step` · `{ campaignTitle, workflowId }` | session |
-| Delete a stage (owner only) | `DELETE /api/workflows/delete-step?stepId=` | session |
-| Rename / delete the workflow | `PATCH` / `DELETE /api/workflows/:id` | session |
+| Delete a stage (any same-org collaborator) | `DELETE /api/workflows/delete-step?stepId=` | session |
+| Rename / delete the workflow (delete is owner-only) | `PATCH` / `DELETE /api/workflows/:id` | session |
 | Fetch a workflow + stages | `GET /api/workflows/:id` | session |
 | Link a report / move entities on a stage | `PATCH` the stage filterset's `add_relation` action | session |
 
