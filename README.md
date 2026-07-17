@@ -256,6 +256,21 @@ The plugin ships several focused skills (installed by all the `tl setup *` comma
 - **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
 - **`tl-top-partnerships`** — brand-user performance report. Ranks a brand's sold sponsorships by live eCPM vs the sold-date projection, aggregates per channel, and delivers a two-tab Google Sheet ("By Deal" / "By Channel") via `gws`. Uses only public CLI commands (`tl whoami`, `tl sponsorships list`).
 
+## Distributed skills
+
+Beyond the bundled set above, an organization can be granted additional skills that aren't part of a CLI release — `tl skill` fetches and installs them on demand into the same directories `tl setup` uses (Claude Code's standalone skills directory, OpenCode's skills directory, and the directory shared by Gemini and Codex), so every supported agent picks them up automatically.
+
+```bash
+tl skill list                 # skills available to your organization, with installed/latest versions
+tl skill list --all           # full catalog (full-access accounts only)
+tl skill download my-skill    # fetch and install into every AI-agent skill directory
+tl skill download my-skill --force   # overwrite a directory tl doesn't already manage
+tl skill update                # refresh every downloaded skill to its latest version
+tl skill remove my-skill        # uninstall a downloaded skill
+```
+
+A directory `tl skill download` doesn't already manage (no prior `tl`-managed install there) is left alone unless `--force` is passed — it never overwrites a skill you installed some other way. `tl` warns once a day, on any command, when a downloaded skill has a newer version available. `tl setup` and self-update re-syncs also respect these directories: a downloaded skill is never rmtree'd or overwritten, even if its name collides with a bundled skill.
+
 ## Output Formats
 
 By default, output is a styled table in the terminal and JSON when piped.

@@ -31,6 +31,7 @@ from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
 from tl_cli.commands.setup import app as setup_app
+from tl_cli.commands.skills import app as skills_app, check_skill_staleness
 from tl_cli.commands.snapshots import app as snapshots_app
 from tl_cli.commands.uploads import app as uploads_app
 from tl_cli.commands.whoami import app as whoami_app
@@ -81,10 +82,18 @@ def main(
         for warn in check_plugin_version():
             Console(stderr=True).print(f"[yellow]{warn}[/yellow]")
 
+    # Skip for `skill` invocations themselves — the staleness nag would be
+    # noise while the user is already running the command that fixes it.
+    if "skill" not in sys.argv:
+        warn = check_skill_staleness()
+        if warn:
+            Console(stderr=True).print(f"[yellow]{warn}[/yellow]")
+
 
 # System
 app.add_typer(auth_app, name="auth")
 app.add_typer(setup_app, name="setup")
+app.add_typer(skills_app, name="skill")
 
 # Data commands (primary interface)
 app.add_typer(sponsorships_app, name="sponsorships")

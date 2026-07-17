@@ -21,6 +21,7 @@ from pytoon import encode as toon_encode
 from rich.console import Console
 
 from tl_cli import __version__
+from tl_cli.skill_registry import is_marked_for
 
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Set up integrations (Claude Code, OpenCode, Gemini, Codex)")
 console = Console(stderr=True)
@@ -201,6 +202,20 @@ def check_plugin_version() -> list[str]:
     return warnings
 
 
+def _warn_marker_skip(path: Path, name: str) -> None:
+    """Print the standard warning when setup leaves a tl-managed skill dir alone.
+
+    Shared by every place in this module that would otherwise rmtree/copytree
+    over a skill directory — a directory carrying a valid `.tl-skill.json`
+    marker was installed by `tl skill download` and must never be clobbered
+    by a bundled-skill sync, regardless of name collision or content match.
+    """
+    console.print(
+        f"  [yellow]![/yellow] skipping {path}: managed by 'tl skill' downloads — "
+        f"remove with [cyan]tl skill remove {name}[/cyan] if you want the bundled version"
+    )
+
+
 def _install_standalone_skills(plugin_root: Path) -> int:
     """Copy skills and commands to ~/.claude/ for non-namespaced invocation.
 
@@ -214,6 +229,9 @@ def _install_standalone_skills(plugin_root: Path) -> int:
         for skill_dir in skills_src.iterdir():
             if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
                 dst = CLAUDE_SKILLS_DIR / skill_dir.name
+                if dst.exists() and is_marked_for(dst, skill_dir.name):
+                    _warn_marker_skip(dst, skill_dir.name)
+                    continue
                 if dst.exists():
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
@@ -278,6 +296,11 @@ def _remove_matching_standalone_skills(plugin_root: Path) -> tuple[int, int]:
             continue
         standalone = CLAUDE_SKILLS_DIR / skill_dir.name
         if not standalone.is_dir():
+            continue
+        if is_marked_for(standalone, skill_dir.name):
+            # tl-managed download — excluded from deletion candidates entirely,
+            # regardless of whether its content happens to match the bundled skill.
+            _warn_marker_skip(standalone, skill_dir.name)
             continue
         if _trees_identical(skill_dir, standalone):
             shutil.rmtree(standalone)
@@ -537,7 +560,10 @@ def _install_skill_trees(plugin_root: Path, target_dir: Path) -> int:
     (OpenCode, Gemini, Codex) — each agent reads skills from a different
     base directory, so we just parameterise on that. A `.tl-version`
     stamp is written into the target so `check_plugin_version()` can
-    detect drift later. Returns the number of skills installed.
+    detect drift later. A destination carrying a `.tl-skill.json` marker
+    for this skill name is a `tl skill download` install — it's skipped
+    (with a warning) rather than clobbered, and isn't counted in the
+    returned total. Returns the number of skills installed.
     """
     count = 0
     skills_src = plugin_root / "skills"
@@ -545,6 +571,9 @@ def _install_skill_trees(plugin_root: Path, target_dir: Path) -> int:
         for skill_dir in skills_src.iterdir():
             if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
                 dst = target_dir / skill_dir.name
+                if dst.exists() and is_marked_for(dst, skill_dir.name):
+                    _warn_marker_skip(dst, skill_dir.name)
+                    continue
                 if dst.exists():
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
