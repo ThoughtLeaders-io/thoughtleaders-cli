@@ -142,6 +142,8 @@ Useful for verifying the API key resolves to the user you expect before kicking 
 
 `GET /balance` — credit balance plus the last 10 metered calls for the org. Free.
 
+`balance` is the combined total of two pools: `topup_balance` (plan-granted credits, reset to the plan allowance each top-up period, spent first) and `purchased_balance` (bought credits — they survive top-up resets, are spent last, and keep working after the per-user session quota is exhausted).
+
 ```bash
 curl -sS "$TL_API_BASE/balance" \
   -H "Authorization: Bearer $TL_API_KEY" \
@@ -155,6 +157,8 @@ print(get('/balance'))
 ```json
 {
   "balance": 9995.88,
+  "topup_balance": 8995.88,
+  "purchased_balance": 1000.00,
   "allow_overage": false,
   "recent_usage": [
     {

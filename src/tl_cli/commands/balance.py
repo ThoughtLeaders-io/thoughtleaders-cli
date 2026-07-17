@@ -44,6 +44,12 @@ def balance(
         allow_overage = data.get("allow_overage", False)
 
         console.print(f"\n[bold]Credit Balance:[/bold] [cyan]{balance_val}[/cyan] credits")
+        # Older servers return only the combined balance; newer ones split it
+        # into the plan-granted (top-up) pool and the purchased pool.
+        topup_val = data.get("topup_balance")
+        purchased_val = data.get("purchased_balance")
+        if topup_val is not None and purchased_val is not None:
+            console.print(f"[dim]Plan (top-up) credits: {topup_val} · Purchased: {purchased_val}[/dim]")
         if allow_overage:
             console.print("[dim]Overage: enabled[/dim]")
 
