@@ -48,17 +48,16 @@ A workflow is **not a new kind of object** — every stage IS a saved Report
   single most important rule and the #1 cause of broken hand-built workflows —
   see `references/workflow-model.md` (query vs list) and
   `references/pitfalls.md`. Never make stage 2+ a query.
-- **Creating the workflow.** A CLI create endpoint —
-  `POST /api/cli/v1/workflows/build` (Bearer) — turns the blueprint into a real
-  workflow in one atomic call (the Bearer twin of the web builder; ships with
-  backend PR #4192 and is invoked by a `tl workflow` command). A workflow made
-  this way is identical to an in-app one and appears in the web list/detail
-  immediately. **Until that endpoint + command are live**, this skill instead
-  **designs + sources + emits a blueprint** and the user assembles it in the web
-  app. Either path is in `references/creating-in-app.md`; the blueprint is the
-  exact input the endpoint needs, so nothing is wasted. Do not claim a workflow
-  was created unless the build call actually returned one — otherwise you
-  prepared a blueprint.
+- **Creating the workflow — the CLI cannot.** There is **no CLI (Bearer)
+  workflow endpoint and no `tl workflow` command**. Every `/api/workflows*` route
+  is session-authenticated (the web app's), not on the CLI's Bearer surface. So
+  this skill **designs + sources + emits a create-ready blueprint** and the user
+  stands the workflow up in the web app (Convert → Add stage) — see
+  `references/creating-in-app.md`. A Bearer CLI twin of the web builder
+  (`POST /api/cli/v1/workflows/build`) plus a `tl workflow` command would be a
+  natural future addition, and the blueprint is already its exact input — but
+  until they actually exist, never POST to that route and **never claim a
+  workflow was created**; you prepared a blueprint.
 - **Source with real data, never placeholder channels.** The entry stage must
   be filled from the index (delegate to `tl-keyword-research` /
   `tl channels find` / `tl recommender` / guide-brand research), never a made-up
