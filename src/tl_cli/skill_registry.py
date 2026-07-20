@@ -22,6 +22,7 @@ of this change).
 """
 
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -86,6 +87,11 @@ def validate_relpath(relpath: str) -> None:
         raise PathSafetyError(f"NUL byte not allowed in path: {relpath!r}")
     if relpath.startswith("/"):
         raise PathSafetyError(f"absolute path not allowed: {relpath!r}")
+    # A Windows drive-qualified path ('C:/x', 'C:x') is absolute on Windows, so
+    # joining it to the install directory would discard that directory. This is
+    # pure string logic and is correct regardless of the host OS.
+    if ntpath.splitdrive(relpath)[0]:
+        raise PathSafetyError(f"drive-qualified path not allowed: {relpath!r}")
     for segment in relpath.split("/"):
         if segment in ("", ".", ".."):
             raise PathSafetyError(f"unsafe path segment in {relpath!r}")

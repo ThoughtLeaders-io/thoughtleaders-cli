@@ -63,6 +63,9 @@ class TestValidateRelpath:
             "a/",
             "/a",
             "a\x00b",
+            "C:/Windows/System32/evil",
+            "C:evil",
+            "c:/evil",
         ],
     )
     def test_rejects_unsafe_paths(self, bad):
