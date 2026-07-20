@@ -23,8 +23,8 @@ class TLClient:
             },
         )
 
-    def get(self, path: str, params: dict | None = None) -> dict:
-        return self._request("GET", path, params=params)
+    def get(self, path: str, params: dict | None = None, timeout: float | None = None) -> dict:
+        return self._request("GET", path, params=params, timeout=timeout)
 
     def post(self, path: str, json_body: dict | None = None) -> dict:
         return self._request("POST", path, json_body=json_body)
@@ -38,20 +38,24 @@ class TLClient:
         path: str,
         params: dict | None = None,
         json_body: dict | None = None,
+        timeout: float | None = None,
     ) -> dict:
         headers = self._auth_headers()
+        # Only overrides the client's default timeout when the caller asks
+        # for one — passing `timeout=None` through to httpx means "no
+        # timeout", not "use the default", so it's omitted entirely here.
+        request_kwargs = {"params": params, "json": json_body, "headers": headers}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
 
-        response = self._client.request(
-            method, path, params=params, json=json_body, headers=headers
-        )
+        response = self._client.request(method, path, **request_kwargs)
 
         # On 401, try refreshing the token once
         if response.status_code == 401:
             headers = self._refresh_and_get_headers()
             if headers:
-                response = self._client.request(
-                    method, path, params=params, json=json_body, headers=headers
-                )
+                request_kwargs["headers"] = headers
+                response = self._client.request(method, path, **request_kwargs)
 
         if response.status_code >= 400:
             detail = self._extract_detail(response)
