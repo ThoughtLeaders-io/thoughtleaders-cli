@@ -31,11 +31,11 @@ Quick **FilterSet-mapping reference** (where these business terms land in a save
 | Term | FilterSet / `filters_json` mapping in this skill |
 |---|---|
 | **MSN** | `msn_channels_only: true` |
-| **TPP** | resolve-and-pin pattern — `SELECT id FROM thoughtleaders_channel WHERE is_tl_channel = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels` |
+| **TPP** | resolve-and-pin pattern — `SELECT id FROM thoughtleaders_channel WHERE is_tpp = TRUE AND is_active = TRUE ORDER BY id` → put IDs in `filterset.channels` |
 | **MBN** | `cross_references` type `include_sponsored_by_mbn` |
 | **AM** / Account Manager | `owner_advertiser_name` (in `filters_json` for type 8) |
 | **TM** / Talent Manager | `owner_publisher_name` (in `filters_json` for type 8) |
-| **Reach** | `reach_from` / `reach_to` (narrate as "subscribers" per business-glossary) |
+| **Reach** | `subscribers_from` / `subscribers_to` (narrate as "subscribers" per business-glossary) |
 | **Projected Views (PV)** | `projected_views_from` / `projected_views_to`; column `Projected Views` |
 | **View Guarantee (VG)** | Type 8 columns: `Views Guaranteed`, `Views Guarantee Days` |
 | **Net revenue** | Type 8 column: `Revenue` |
@@ -60,16 +60,35 @@ Map informal descriptions → `filters_json.publish_status` IDs (integer; platfo
 | User says | `publish_status` ID(s) | Other `filters_json` | Status name |
 |---|---|---|---|
 | "booked" / "sold" / "closed" / "won" | `3` | — | Sold |
-| "proposed" / "approved by creator" | `0` | — | Creator Approved |
-| "pending" | `2` | — | Pending |
+| "open" / "in negotiation" | `10` | — | Open |
 | "rejected" *(any side)* | `4, 5, 9` | — | Rejected by Brand / Creator / Agency |
 | "matched" | `7` | — | Matched |
-| "reached out" / "outreach" | `8` | — | Reached Out |
-| **"pipeline"** *(default)* | `0, 2, 6, 7, 8` | — | All active non-sold |
-| **"in progress"** / **"active"** | `0, 2, 3, 6` | — | Active incl. sold |
+| **"pipeline"** *(default)* | `7, 10` | — | Matched + Open (pre-sale) |
+| **"in progress"** / **"active"** | `3, 7, 10` | — | Active incl. sold |
 | **"live"** / **"currently running"** | `3` | `ad_publish_status: "0"` | Sold AND published |
 
-Full `publish_status` enum (all 12 codes incl. CLIENT_SIDE_* and pipeline weights) lives at the canonical schema home: [`tl/references/postgres-schema.md` → `publish_status` Constants](../../tl/references/postgres-schema.md#publish_status-constants). The NL → ID mapping above is what this skill consumes; refer to the schema doc for the full enum and Django-side constants.
+### Open and per-party approvals
+
+A deal at **Open** (`publish_status` `10`) is an active, in-negotiation deal. Its progress is tracked by three independent per-party approval fields, each `PENDING`, `APPROVED`, `FINISHED`, or unset (`null`):
+
+- `brand_approval` — the advertiser's sign-off
+- `channel_approval` — the creator's sign-off
+- `agency_approval` — the agency's sign-off (when an agency is involved)
+
+These are **first-class FilterSet properties** — set directly on the report, not as keys inside `filters_json`. Each takes a comma list of `PENDING`/`APPROVED`/`FINISHED` (or ints `1`/`2`/`3`), plus `0`/`null`/`none` to match unset. They narrow the Open rows only and have no effect unless `publish_status` includes `10`.
+
+The `committed` flag is a `filters_json` key (like `publish_status`): `filters_json.committed: "1"` selects Sold deals together with Open deals the brand has approved.
+
+Users often name a deal by where it sits inside Open. Map those phrases to `publish_status` `10` plus the matching approval state:
+
+| User says | `publish_status` | Approval filter (first-class) | Meaning |
+|---|---|---|---|
+| "reached out" / "outreach" | `10` | `channel_approval = PENDING` | Creator contacted, awaiting their reply |
+| "proposed" / "creator approved" | `10` | `channel_approval = APPROVED` | Creator has agreed |
+| "proposal approved" | `10` | `brand_approval = PENDING` | Brand is reviewing |
+| "pending" | `10` | `brand_approval = APPROVED` | Brand has committed |
+
+The `publish_status` set is `{3, 4, 5, 7, 9, 10}` (3 Sold, 4 Rejected by Brand, 5 Rejected by Creator, 7 Matched, 9 Rejected by Agency, 10 Open). The canonical schema home is [`tl/references/postgres-schema.md` → `publish_status` Constants](../../tl/references/postgres-schema.md#publish_status-constants); refer to it for the full enum.
 
 ## Field-pair disambiguation
 
@@ -80,15 +99,15 @@ Full `publish_status` enum (all 12 codes incl. CLIENT_SIDE_* and pipeline weight
 | "Last 90 days" / rolling | `days_ago` (+ optionally `days_ago_to`) | Rolling = relative to now |
 | "Between Jan 1 and Mar 31" | `start_date` + `end_date` | Absolute window |
 | "Channels created on TL since X" | `createdat_from` (+ `createdat_to`) | TL-side record creation, not YouTube publish |
-| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses for send_date) | Type 8 semantics shift — see schema |
+| Sponsorship send/publish | `start_date` / `end_date` (type 8 reuses for scheduled_date) | Type 8 semantics shift — see schema |
 
 ### Channel-size signals
 
-> SQL/internal term = `reach`; user-facing term = **subscribers** (see business-glossary canonical mapping). Emit `reach_from` / `reach_to` in FilterSet; narrate as "subscribers" everywhere user-facing (sample headers, takeaways, summaries).
+> SQL/internal term = `subscribers`; user-facing term = **subscribers** (see business-glossary canonical mapping). Emit `subscribers_from` / `subscribers_to` in FilterSet; narrate as "subscribers" everywhere user-facing (sample headers, takeaways, summaries).
 
 | User intent | Field | Narrate as |
 |---|---|---|
-| "100K+ subscribers" / size floor | `reach_from` (+ `reach_to`) | "subscribers" / "channel size" |
+| "100K+ subscribers" / size floor | `subscribers_from` (+ `subscribers_to`) | "subscribers" / "channel size" |
 | "Channels expecting >X projected views" | `projected_views_from` (+ `projected_views_to`) | "projected views" — forward-looking pricing estimate |
 | Raw YouTube views per video | `youtube_views_from` (+ `youtube_views_to`) | "views per video" — per-upload, type 1 only |
 
@@ -104,7 +123,7 @@ Full `publish_status` enum (all 12 codes incl. CLIENT_SIDE_* and pipeline weight
 
 | User intent | Fields | Why |
 |---|---|---|
-| Match keywords in video transcripts/titles | `content_fields` includes `content`, `title`, `transcript` | Standard type 1 |
+| Match keywords in video transcripts/titles | `content_fields` includes `title`, `transcript` (add `summary` for the video's description text; `content` is podcast-only) | Standard type 1 |
 | Match channel descriptions only | `content_fields = ["channel_description", "channel_description_ai", "channel_topic_description"]` | Standard type 3 |
 | Different keywords need different fields | `keyword_content_fields_map` (per-position) | E.g., brand name → `channel.channel_name`; topic → descriptions |
 | "But not X" | `keywords` includes `X` + `keyword_exclude_map["<index>"] = true` | Substring negation per-position |

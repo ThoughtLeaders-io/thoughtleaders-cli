@@ -458,3 +458,54 @@ class TestPgPricingEstimate:
         out = capsys.readouterr().out
         assert "Query cost estimate" in out
         assert "depends on rows returned" in out
+
+
+class TestServerWarnings:
+    """Advisory `_warnings` from the response envelope render on stderr."""
+
+    def test_warnings_render_on_stderr_in_json_mode(self, capsys):
+        from tl_cli.output.formatter import output
+        data = {
+            "results": [{"id": 1}],
+            "total": 1,
+            "_warnings": ["Leading-wildcard match on `url` cannot use an index."],
+        }
+        output(data, "json")
+        captured = capsys.readouterr()
+        assert '"id": 1' in captured.out
+        err = " ".join(captured.err.split())
+        assert "Warning:" in err
+        assert "`url`" in err
+
+    def test_warnings_render_in_table_mode(self, capsys):
+        from tl_cli.output.formatter import output
+        data = {
+            "results": [{"id": 1}],
+            "total": 1,
+            "_warnings": ["Leading-wildcard match on `url` cannot use an index."],
+        }
+        output(data, "table")
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Warning:" in err
+
+    def test_no_warnings_no_banner(self, capsys):
+        from tl_cli.output.formatter import output
+        output({"results": [{"id": 1}], "total": 1}, "json")
+        assert "Warning:" not in capsys.readouterr().err
+
+    def test_warnings_render_on_pricing_estimate(self, capsys):
+        from tl_cli.output.formatter import output_pricing_estimate
+        data = {
+            "pricing_estimate": {
+                "default": 1.0, "multiplier": 1.0, "per_row_extra": 0.0,
+                "table_rates": {}, "expensive_columns": {},
+                "limit": 50, "planner_estimated_rows": 10,
+                "estimated_cost_at_limit": 50.0,
+            },
+            "results": [],
+            "usage": {"credits_charged": 1},
+            "_warnings": ["Leading-wildcard match on `url` cannot use an index."],
+        }
+        output_pricing_estimate(data, "table")
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Warning:" in err

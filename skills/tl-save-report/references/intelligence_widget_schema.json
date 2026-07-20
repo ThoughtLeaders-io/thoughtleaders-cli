@@ -51,9 +51,9 @@
             "comments_sum_metric", "comments_avg_metric",
             "duration_avg_metric", "duration_avg_histogram",
             "duration_median_metric",
-            "channel_reach_at_scrape_metric", "channel_reach_at_scrape_histogram",
-            "channel_reach_at_scrape_difference_histogram",
-            "channel_reach_last_28_days",
+            "channel_subscribers_at_scrape_metric", "channel_subscribers_at_scrape_histogram",
+            "channel_subscribers_at_scrape_difference_histogram",
+            "channel_subscribers_last_28_days",
             "channel_total_views_at_scrape_metric", "channel_total_views_at_scrape_histogram",
             "channel_total_views_last_28_days",
             "evergreenness_avg_metric", "evergreenness_median_metric",
@@ -108,10 +108,10 @@
       "duration_median_metric":  { "type": "metrics-box", "describes": "Median video duration" }
     },
     "subscribers_channel_level": {
-      "channel_reach_at_scrape_metric":             { "type": "metrics-box", "describes": "Total subscribers across channels" },
-      "channel_reach_at_scrape_histogram":          { "type": "histogram",   "describes": "Subscriber growth over time" },
-      "channel_reach_at_scrape_difference_histogram":{"type": "histogram",   "describes": "Subscriber gains over time" },
-      "channel_reach_last_28_days":                 { "type": "metrics-box", "describes": "Subscriber change in last 28 days" }
+      "channel_subscribers_at_scrape_metric":             { "type": "metrics-box", "describes": "Total subscribers across channels" },
+      "channel_subscribers_at_scrape_histogram":          { "type": "histogram",   "describes": "Subscriber growth over time" },
+      "channel_subscribers_at_scrape_difference_histogram":{"type": "histogram",   "describes": "Subscriber gains over time" },
+      "channel_subscribers_last_28_days":                 { "type": "metrics-box", "describes": "Subscriber change in last 28 days" }
     },
     "channel_total_views": {
       "channel_total_views_at_scrape_metric":    { "type": "metrics-box", "describes": "Total channel views" },
@@ -149,9 +149,9 @@
     ],
     "3": [
       { "aggregator": "channels_count_metric",              "type": "metrics-box", "index": 1, "width": 2, "height": 1 },
-      { "aggregator": "channel_reach_at_scrape_metric",     "type": "metrics-box", "index": 2, "width": 2, "height": 1 },
+      { "aggregator": "channel_subscribers_at_scrape_metric",     "type": "metrics-box", "index": 2, "width": 2, "height": 1 },
       { "aggregator": "views_avg_metric",                   "type": "metrics-box", "index": 3, "width": 2, "height": 1 },
-      { "aggregator": "channel_reach_at_scrape_histogram",  "type": "histogram",   "index": 4, "width": 3, "height": 1 },
+      { "aggregator": "channel_subscribers_at_scrape_histogram",  "type": "histogram",   "index": 4, "width": 3, "height": 1 },
       { "aggregator": "uploads_histogram",                  "type": "histogram",   "index": 5, "width": 3, "height": 1 }
     ]
   },
@@ -161,7 +161,7 @@
       "trigger_phrases": ["outreach", "product placements", "pitch list"],
       "swap": [
         { "remove": "views_avg_metric", "add": "sponsored_brands_count_metric" },
-        { "remove": "channel_reach_at_scrape_histogram", "add": "channel_reach_at_scrape_difference_histogram" }
+        { "remove": "channel_subscribers_at_scrape_histogram", "add": "channel_subscribers_at_scrape_difference_histogram" }
       ]
     },
     "engagement_focus_type1": {

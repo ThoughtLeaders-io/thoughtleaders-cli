@@ -256,7 +256,7 @@ def similar_cmd(
     """Find channels similar to a given one (by id or name).
 
     Costs 25 credits per call. Intelligence plan required. Results are
-    ranked by similarity and enriched with subscribers, impression,
+    ranked by similarity and enriched with subscribers, projected_views,
     total_views, category, and the channel's representative CPM.
 
     Server-side filters (pushed to the recommender):

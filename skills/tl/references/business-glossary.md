@@ -12,13 +12,13 @@ Maps business terms to database concepts.
 | **Cost** | `adlink.cost` | What the channel earns |
 | **Price** | `adlink.price` | What the advertiser pays |
 | **Closed-lost** | `publish_status IN (4, 5, 9)` | All three rejection statuses |
-| **Open opportunity** | `publish_status IN (0, 2, 6, 7, 8)` | Pipeline — not revenue, not lost |
-| **Proposal Approved** | `publish_status = 6` | AM approved to show to brand — NOT brand approval. Internal gate only. |
-| **Pending** | `publish_status = 2` | Brand has agreed — this is the real high-intent signal |
-| **Weighted pipeline** | `SUM(weighted_price)` for open opps | Pre-calculated on save |
+| **Open opportunity** | `publish_status IN (7, 10)` | Pipeline (MATCHED, OPEN) — not revenue, not lost. Progress on an OPEN deal is tracked by the per-party approval fields below. |
+| **Per-party approval** | `brand_approval_status` / `channel_approval_status` / `agency_approval_status` on an OPEN deal | Each is NULL or 1=PENDING / 2=APPROVED / 3=FINISHED — approval to proceed is tracked per party on the OPEN deal. `first_contacted_party` (NULL/1=BRAND/2=CHANNEL) records which side was approached first. |
+| **Committed / bought** | `publish_status = 3` (SOLD), OR `publish_status = 10` AND `brand_approval_status IN (APPROVED, FINISHED)` | Brand has agreed — the real high-intent signal. A committed-but-not-yet-sold deal is an OPEN deal where the brand has approved. |
+| **Weighted pipeline** | `SUM(weighted_price)` for open opps | `weighted_price` is derived from the brand/channel approval combination on OPEN deals. |
 | **Ad is live** | `publish_date IS NOT NULL` | Until publish_date is set, ad is not on YouTube |
 | **Cancellation risk** | Sold but `publish_date IS NULL` | Sold deals without publish_date can still be canceled |
-| **Immediately bookable** | `is_tl_channel = true` | TPP channels — TL's closest partners. Fastest to respond, easiest to close, prefer when booking. |
+| **Immediately bookable** | `is_tpp = true` | TPP channels — TL's closest partners. Fastest to respond, easiest to close, prefer when booking. |
 
 ## Performance Grade (`adlink.performance_grade`)
 
@@ -35,7 +35,7 @@ Maps business terms to database concepts.
 
 | Field | Description |
 |-------|-------------|
-| `adlink.impressions_guarantee` | The number of views guaranteed for the ad (bigint). 0 or NULL = no guarantee. |
+| `adlink.views_guarantee` | The number of views guaranteed for the ad (bigint). 0 or NULL = no guarantee. |
 | `adlink.view_guarantee_hit_date` | Timestamp when the guarantee was met. NULL = not yet hit or no guarantee. |
 | `adlink.projected_views_at_purchase_date` | Projected views at time of purchase (used for CPM estimation). |
 
@@ -65,10 +65,11 @@ Maps business terms to database concepts.
 | `owner_sales_id` | `adlink` | **Most important.** Person responsible for closing the deal and for the revenue. Final accountability. |
 | `owner_advertiser_id` | `adlink` | Brand-side owner for this specific deal |
 | `owner_publisher_id` | `adlink` | Channel-side owner for this specific deal |
-| `creator_id` | `adlink` | The brand-side user account that *created the record*. ⚠️ NOT the YouTube creator — on sponsorships, "creator" always means the buyer side. Record lineage only; for accountability use the `owner_*` fields, for the brand use `creator_profile_id`, for the channel go via `ad_spot_id`. |
+| `advertiser_id` | `adlink` | The brand-side (advertiser/buyer) user account that *created the record*. Record lineage only; for accountability use the `owner_*` fields, for the brand use `advertiser_profile_id`, for the channel go via `ad_spot_id`. |
 | `owner_advertiser_id` | `profile` | **Account owner.** Who owns the brand relationship overall. Often same person as owner_sales on adlinks, but not always. |
 | `owner_publisher_id` | `profile` | Channel relationship owner on the profile level |
 | `owner_sales_id` | `profile` | Sales owner at profile level |
+| `superuser_notes` | `profile` | Internal free-text account-handling notes on the customer record (max 2500 chars). Team-facing only — never shown to the customer. Superusers can edit it through the CLI (see SKILL.md → "Updating records"). |
 
 **Key insight:** Ownership exists on both `profile` (account-level) and `adlink` (deal-level). For revenue attribution, always use `adlink.owner_sales_id`.
 
@@ -77,7 +78,7 @@ Maps business terms to database concepts.
 - Channels where TL has **≥80% confidence** they can buy an ad tomorrow
 - Key data: **who is the contact** to buy the ad from
 - `thoughtleaders_channel.media_selling_network_join_date` = when channel joined MSN
-- `thoughtleaders_channel.is_tl_channel` = TPP channel — TL's closest partners, a strict subset of MSN. **Prefer when booking**: fastest response, easiest to close. Not a gating flag; not a process barrier.
+- `thoughtleaders_channel.is_tpp` = TPP channel — TL's closest partners, a strict subset of MSN. **Prefer when booking**: fastest response, easiest to close. Not a gating flag; not a process barrier.
 - **Rule:** Only one active adspot with `integration=mention` per channel at any time
 - MSN quality depends on having current, accurate contact info
 
@@ -87,16 +88,16 @@ Vocabulary that AMs use about channels, mapped to the actual DB encoding. Most o
 
 | Business Term | DB Concept | Notes |
 |---------------|------------|-------|
-| **Subscribers** | `thoughtleaders_channel.reach` (bigint) | ⚠️ There is no `subscribers` column. The DB column is `reach`. |
-| **MSN member** | `media_selling_network_join_date IS NOT NULL` | Whole MSN pool. NOT `is_tl_channel = true` — that's the VIP subset only. |
-| **TPP / TL channel** | `is_tl_channel = true` | TL's closest-partner channels (~144 at 100k+ reach). Prefer when booking — fastest to respond, easiest to close. A strict subset of MSN; *don't* use as a general "MSN" proxy — silently drops ~98% of MSN. |
+| **Subscribers** | `thoughtleaders_channel.subscribers` (bigint) | Channel subscriber count. |
+| **MSN member** | `media_selling_network_join_date IS NOT NULL` | Whole MSN pool. NOT `is_tpp = true` — that's the VIP subset only. |
+| **TPP / TL channel** | `is_tpp = true` | TL's closest-partner channels (~144 at 100k+ subscribers). Prefer when booking — fastest to respond, easiest to close. A strict subset of MSN; *don't* use as a general "MSN" proxy — silently drops ~98% of MSN. |
 | **Active channel** | `is_active = true AND last_published >= CURRENT_DATE - INTERVAL '120 days'` | Standard filter for "channel is live and posting." Always include `is_active = true` in channel queries. |
 | **Country / Geo of a deal** | `thoughtleaders_channel.country` (ISO 3166-1 alpha-2) | `thoughtleaders_adlink` has NO geo column. Geo for sponsorships almost always means the channel's country. |
 | **Language of a channel** | `thoughtleaders_channel.language` (short ISO 639 code) | ⚠️ Short ISO 639 codes — NOT BCP-47. Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with BCP-47 (`en-US`/`pt-BR`) returns zero. Don't assume `LENGTH(language) = 2`. |
-| **Brand on a deal** | `adlink → creator_profile_id → profile_brands.profile_id → profile_brands.brand_id → brand` | 3-table chain. There is NO direct `brand_id` on adlink. See [postgres-schema.md](postgres-schema.md). |
+| **Brand on a deal** | `adlink → advertiser_profile_id → profile_brands.profile_id → profile_brands.brand_id → brand` | 3-table chain. There is NO direct `brand_id` on adlink. See [postgres-schema.md](postgres-schema.md). |
 | **Channel on a deal** | `adlink.ad_spot_id → adspot.channel_id → channel` | NO direct `channel_id` on adlink. |
 | **Brand-virgin / VPN-virgin (etc.)** | Channel has no `adlink` row joined to any of the target brand_ids | Used in candidate sourcing ("never sponsored by any VPN brand"). Caveat: only catches TL-brokered deals; channels that ran the brand directly (no TL involvement) appear "virgin" but aren't — cross-check ES `sponsored_brand_mentions` before final outreach. |
-| **Channel quality score** *(internal-only)* | `sponsorship_score` on the indexed channel doc + `thoughtleaders_channel.sponsorship_score` (PG) | TL-internal composite score combining engagement, fulfillment, and historical sponsorship performance. **Use it internally to rank/tiebreak candidates, but do NOT quote the raw decimal in AM-facing or external output** — the score isn't documented to AMs and the absolute value isn't meaningful without context. In AM-facing prose, translate to qualitative language: "top-quartile fit," "strongest quality score in the candidate set," "high sponsorship-quality signal." |
+| **Channel quality score** *(internal-only)* | `sponsorship_score` on the indexed channel doc + `thoughtleaders_channel.sponsorship_score` (PG) | TL-internal sponsorship track-record score, range 0–10: blends how many distinct brands sponsored the channel over the past 2 years (40%) with how many of them booked repeatedly (60%). Scores below 5 read as little/no track record (the low range is deliberately compressed). **Use it internally to rank/tiebreak candidates, but do NOT quote the raw decimal in AM-facing or external output** — the score isn't documented to AMs and the absolute value isn't meaningful without context. In AM-facing prose, translate to qualitative language: "top-quartile fit," "strongest quality score in the candidate set," "high sponsorship-quality signal." |
 
 ## Projected Views (PV) — three related but distinct fields
 
@@ -104,11 +105,12 @@ AMs use "PV" loosely. There are three different DB fields, each meaning somethin
 
 | AM Term | DB Field | What it actually is |
 |---------|----------|---------------------|
-| **PV (channel baseline)** | `thoughtleaders_channel.impression` | Channel-level "typical views per video" used as CPM denominator. ⚠️ Coverage and freshness vary; cross-check Firebolt longform median for hero-tier deals. |
+| **PV (channel baseline)** | `thoughtleaders_channel.projected_views` | Channel-level "typical views per video" used as CPM denominator. ⚠️ Coverage and freshness vary; cross-check Firebolt longform median for hero-tier deals. |
 | **PV (deal-specific)** | `thoughtleaders_adlink.projected_views_at_purchase_date` | Snapshot of projected views at the moment the deal was sold. Use this for historical CPM analysis. |
-| **VG (View Guarantee)** | `thoughtleaders_adlink.impressions_guarantee` | The contractual minimum views the brand is guaranteed. 0/NULL = no guarantee. NOT the same as PV — VG is a contractual floor, PV is an estimate. |
+| **PV (video, at upload)** — the web app's "video projected views" | `projected_views` on the ES **video** doc | The channel's format-specific PV **frozen when TL first indexed the video** (never updated afterwards). Compare to the channel's current PV to see growth/decline since the upload, or to the video's actual `views` to see over/under-performance vs expectation. See the ES schema reference for the calculation. |
+| **VG (View Guarantee)** | `thoughtleaders_adlink.views_guarantee` | The contractual minimum views the brand is guaranteed. 0/NULL = no guarantee. NOT the same as PV — VG is a contractual floor, PV is an estimate. |
 
-When an AM says "what's the PV on this channel?" — they almost always mean `channel.impression`. When they say "what was the PV on this deal?" — they mean `adlink.projected_views_at_purchase_date`. When they say "did we hit the VG?" — they mean `adlink.view_guarantee_hit_date IS NOT NULL`.
+When an AM says "what's the PV on this channel?" — they almost always mean `channel.projected_views`. When they say "what was the PV on this deal?" — they mean `adlink.projected_views_at_purchase_date`. When they say "did we hit the VG?" — they mean `adlink.view_guarantee_hit_date IS NOT NULL`.
 
 ## Channel Sponsorship Signals
 
@@ -119,7 +121,7 @@ Two derived metrics on the indexed channel doc that AMs use to qualify a channel
 | **Fulfillment rate** | `fulfillment_rate` (channel doc, scaled_float) | The share of a channel's content that is sponsored — `sponsored / all` content over the measurement window, expressed as a fraction. Higher = the channel reliably delivers paid integrations. | Quality signal: a high fulfillment rate means past brands have actually run on this channel, not just been pitched. AMs use it to filter out "looks promising but never closes" channels. |
 | **Renewal rate** | `renewal_rate` (channel doc, scaled_float) | The rate at which a brand-channel sponsorship relationship repeats over time, computed from clusters of sponsorship deals between a single subject (channel or brand) and its linked entities, with date-distribution heuristics (default 365-day max interval). | Loyalty signal: a high renewal rate means brands keep coming back to this channel. AMs use it to identify "sticky" channels worth premium positioning, and to flag low-renewal channels as one-shots. |
 
-Both metrics live on the channel side of the indexed video docs (the `channel.*` nested object). Channel pages in TL's product surface these as quality scores; in AM-facing reports, you can quote them as percentages (`0.45 → "45% renewal rate"`).
+Both metrics live on the **channel docs** in the search index — not on video docs (the embedded `channel.*` object on video docs carries no metrics). Channel pages in TL's product surface these as quality scores; in AM-facing reports, you can quote them as percentages (`0.45 → "45% renewal rate"`).
 
 ## Industry Terms vs TL Vocabulary
 
@@ -147,9 +149,8 @@ AMs and brand-facing readers don't know (or care) what Postgres, Elasticsearch, 
 | `sponsored_brand_mentions` (ES field) | **"tracked sponsorships"** / **"logged sponsored mentions"** / **"sponsored videos we tracked"** | Per-video brand-ID tags showing which brands paid for that video |
 | `organic_brand_mentions` (ES field) | **"organic / unpaid mentions"** | Brand mentioned in a video without a paid sponsorship |
 | `publish_status = 3` | **"sold"** | Already in glossary; never write the integer to AMs |
-| `creator_profile_id` chain / 3-table join | **"the brand's record"** | Engineering plumbing for brand lookup; AMs just hear "the brand" |
-| `reach` (PG column) | **"subscribers"** | Already in glossary; AMs say subscribers, SQL says reach |
-| `impression` (PG column) | **"projected views"** / **"PV"** | Already in glossary; flagged for reliability caveats |
+| `advertiser_profile_id` chain / 3-table join | **"the brand's record"** | Engineering plumbing for brand lookup; AMs just hear "the brand" |
+| `projected_views` (PG column) | **"projected views"** / **"PV"** | Flagged for reliability caveats |
 
 ### Common translations in context
 

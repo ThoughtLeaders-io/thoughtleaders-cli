@@ -37,7 +37,7 @@ If doing a database query, follow this recipe:
   ```bash
   tl db pg "SELECT al.id, b.name AS brand, al.weighted_price AS price
             FROM thoughtleaders_adlink al
-            JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
+            JOIN thoughtleaders_profile p ON p.id = al.advertiser_profile_id
             JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
             JOIN thoughtleaders_brand b ON b.id = pb.brand_id
             WHERE al.publish_status = 3
@@ -72,9 +72,9 @@ ThoughtLeaders is a sponsorship marketplace connecting **Brands** (advertisers /
 The centre of the data model are **Sponsorships** — business relationships between brands and channels. Sponsorships statuses form a sales funnel, from broad to narrow:
 
 - **Sponsorships** — the broadest category, encompassing all stages, stored in the `thoughtleaders_adlink` table.
-  - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work
-  - **Proposals** — matches that have been proposed to both sides to consider
-  - **Deals** — contractually agreed-upon sponsorships (sold), either in production or published
+  - **Matches** — possible brand-channel pairings that ThoughtLeaders thinks could work (`publish_status=7`)
+  - **Proposals** — open sponsorships actively in negotiation between the two sides (`publish_status=10`, `open`)
+  - **Deals** — contractually agreed-upon sponsorships (sold; `publish_status=3`), either in production or published
 
 Sponsorships are sometimes called "Ads" or "Ad campaigns". **"AdLink"** is another name for the same thing — it's the term the database uses (`thoughtleaders_adlink`) and shows up across internal code, schema docs, and AM Slack threads. Treat "sponsorship" and "adlink" as interchangeable; the user-facing word is "sponsorship," the engineering/DB word is "adlink."
 
@@ -87,29 +87,29 @@ Other key concepts:
 - **Comments** — notes attached to sponsorships, channels, or brands
 - **Adspots** — types of ads a channel is willing to publish (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost.
 - **Profiles** — actors that own sponsorship records on behalf of either side of a deal. A profile is either buyer-side or seller-side:
-  - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `creator_profile` is the buyer-side profile, and `creator_id` is the buyer-side user who created the record — on sponsorships, "creator" always means the buyer side, never the YouTube creator (the channel hangs off `ad_spot_id`).
+  - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `advertiser_profile` is the buyer-side profile, and `advertiser_id` is the buyer-side user who created the record — the advertiser is always the buyer/brand side, never the YouTube creator (the channel hangs off `ad_spot_id`).
   - *Seller-side (publisher) profiles* — attached to a `Publication`, which in turn owns one or more `Channel` records. A channel's adspots therefore inherit ownership through `channel.publication.profile`.
   - **How to tell them apart** — three signals on the `thoughtleaders_profile` row, used in this order:
     1. **`persona`** (canonical) — `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
     2. **`is_advertiser` / `is_publisher`** booleans — feature flags; either or both can be true for staff-style profiles, but on normal user profiles they reliably mark side.
-  - Org scoping for sponsorships is profile-mediated: a sponsorship belongs to your org if **either** `creator_profile.organization` (brand side) **or** `ad_spot.channel.publication.profile.organization` (publisher side) matches yours.
+  - Org scoping for sponsorships is profile-mediated: a sponsorship belongs to your org if **either** `advertiser_profile.organization` (brand side) **or** `ad_spot.channel.publication.profile.organization` (publisher side) matches yours.
 - **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
 - **MBN** (Media Buying Network) — the brand-side counterpart to MSN: brand profiles that have opted in to receive proposed sponsorships. A profile is in the MBN group if the `profile.media_buying_network_join_date` field is not null.
-- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the ~170 channels TL has the closest working relationship with. A channel is in the TPP group if `channel.is_tl_channel` is True. **Prefer TPP channels when booking**: they respond fastest, are the easiest to close, and don't need an outreach round-trip — treat them as immediately bookable. TPP is a strict subset of MSN, so the same booking rules (one active mention adspot, etc.) apply.
+- **TPP** (ThoughtLeaders Partner Program, a.k.a. "TL channels") — the ~170 channels TL has the closest working relationship with. A channel is in the TPP group if `channel.is_tpp` is True. **Prefer TPP channels when booking**: they respond fastest, are the easiest to close, and don't need an outreach round-trip — treat them as immediately bookable. TPP is a strict subset of MSN, so the same booking rules (one active mention adspot, etc.) apply.
 - **`demographics_updated_at`** (on channels) — If non-null, the channel has demographics screenshots on file. If null, no demographics screenshots have been uploaded. Use this to check whether a channel has demographics data from screenshots.
-- **`reach`** (on channels) — subscriber count. ⚠️ Despite the name, this is NOT ad-industry "reach" (unique audience exposed). There is no `subscribers` field — `reach` is it.
-- **`impression`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed. ⚠️ NOT actual views and NOT ad-industry "impressions" (ads served).
+- **`subscribers`** (on channels) — the channel's subscriber count.
+- **`projected_views`** (on channels) — projected views per video on that channel. Forward-looking estimate. May be null when not yet computed. ⚠️ NOT actual views and NOT ad-industry "impressions" (ads served).
 - **`views`** (on sponsorships) — actual view count of the sold and published sponsored video, accessible when `article_id` is set.
-- **`impressions_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric.
+- **`views_guarantee`** (on sponsorships) — projected/guaranteed impressions for the sponsorship. Numeric.
 - **Sponsorship detail fields** (returned by `tl sponsorships show <id> --json`) — the detail payload includes `integration` (raw int), `publish_count`, `common_name`, `outreach_email`, nested `publisher` (`first_name`, `last_name`, `email`), nested `brand_contact` (`first_name`, `last_name`, `email`), and `brand.organization_name`. Use these when generating IOs, contracts, or outreach.
 - **CPM** has two distinct meanings depending on level — pick the one the user actually wants:
-  - **Channel CPM** = `(adspot.price / channel.impression) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
-  - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `impression` fields.
+  - **Channel CPM** = `(adspot.price / channel.projected_views) * 1000` — projected price per thousand projected views. Used for pricing decisions **before** a sponsorship is sold. Available for channels with active adspots via `tl channels show <channel_id>`.
+  - **Sponsorship CPM** = calculated in either of two ways: if `views` is present, then CPM is `(sponsorship.price / sponsorship.views) × 1000`, meaning realized cost per thousand actual views, computed post-publication. If `views` is null, Compute from the sponsorship's `price` and the channel's `projected_views` fields.
   - Where possible, calculate the correct CPM in a SQL expression.
 - **Sponsorship dates** — each sponsorship has four distinct dates, useful for different queries:
   - **`created_at`** — when the sponsorship record was created in the system
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
-  - **`send_date`** — the date the video is/was expected to be published (scheduled)
+  - **`scheduled_date`** — the date the video is/was expected to be published (scheduled)
   - **`publish_date`** — the date the video was actually published; These make up live ads.
 - **Credits** — every data query costs credits; use `tl describe` to see rates. Top up with `tl credits buy --amount-usd N` (free; opens a browser checkout). New accounts get a starter balance on first `tl auth login`; the rate is shown by `tl credits pricing`.
 
@@ -181,20 +181,20 @@ Filter-to-SQL examples (deals/matches/proposals all live on `thoughtleaders_adli
 | All sponsorships matching filters | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE …"` |
 | Sold deals (`publish_status=3`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 3"` |
 | Matched (`publish_status=7`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 7"` |
-| Proposed (`publish_status=0`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 0"` |
+| Open / in negotiation (`publish_status=10`) | `tl db pg "SELECT … FROM thoughtleaders_adlink WHERE publish_status = 10"` |
 | Video uploads from ElasticSearch | `tl db es '{"size":N,"query":{"term":{"channel.id":<id>}}}'` |
 
 Single-record / mutation commands:
 
 ```bash
 tl sponsorships show <id>              # Sponsorship detail
-tl sponsorships create --channel <id> --brand <id>  # Create proposal
+tl sponsorships create --channel <id> --brand <id>  # Create sponsorship (matched)
 tl sponsorships update <id> '<json>'   # Update a sponsorship
 tl deals show <id>                     # Deal detail
 tl matches show <id>                   # Match detail
 tl matches create --channel <id> --brand <id>  # Create match
 tl proposals show <id>                 # Proposal detail
-tl proposals create --channel <id> --brand <id>  # Create proposal
+tl proposals create --channel <id> --brand <id>  # Create sponsorship (matched)
 tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
@@ -229,16 +229,38 @@ tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or super
 ```bash
 tl sponsorships update <id> '<json>'   # Edit a sponsorship (adlink)
 tl channels update <id> '<json>'       # Edit a channel
+tl profiles update <id> '<json>'       # Edit a brand/publisher profile (superuser only)
 ```
 
 Examples:
 ```bash
 tl sponsorships update 98765 '{"publish_status": "sold"}'
 tl sponsorships update 98765 '{"publish_status": 3}'
+tl profiles update 8871 '{"superuser_notes": "VIP account — always cc the AM lead"}'
+tl profiles update 8871 '{"superuser_notes": null}'
 tl channels update 12345 '{"demographic_male_share": 62}'
 tl channels update 12345 '{"demographic_geo": {"US": 60, "UK": 12, "CA": 8}}'
 tl channels update 12345 '{"demographic_male_share": 55, "demographic_usa_share": 70}'
+tl channels update 12345 '{"outreach_email": "press@creator.com"}'
 ```
+
+**Channel contact emails.** Besides demographics, `tl channels update` accepts one
+contact field:
+
+- **`outreach_email`** — the channel's primary outreach address (a single email string, or `null`).
+
+The channel's full email archive (`all_emails` — a JSON object keyed by email address,
+each value recording when and where the address was found) is **not editable here**;
+sending it returns a 400. It is append-only: new addresses are added with the
+internal CLI's `tl-internal channels add-email` command (superuser-only), which never
+modifies or removes existing entries.
+
+**Profile notes.** `tl profiles update` (superuser only) edits a brand/publisher profile's
+**`superuser_notes`** — the internal free-text notes field on the customer record
+(`thoughtleaders_profile.superuser_notes`, max 2500 chars). Send a string to set, `null` to
+clear. This is currently the only editable profile field; anything else returns a 400 listing
+the editable surface. Use it for account-handling notes meant for the internal team — it is
+never shown to the customer.
 
 ### Creating and vetting sponsorships
 
@@ -246,10 +268,10 @@ This is the end-to-end workflow for proposing a sponsorship, then moving it thro
 
 #### Creating a sponsorship
 
-`tl sponsorships create` always creates the adlink in **proposed** status. Use the `tl matches create` or `tl proposals create` shortcuts when you specifically want a `matched` adlink or want a clearer log of intent — they share the same backend and accept the same flags.
+`tl sponsorships create` creates the adlink in **matched** status by default. Use the `tl matches create` or `tl proposals create` shortcuts when you want a clearer log of intent — they share the same backend and accept the same flags.
 
 ```bash
-# Minimum: channel ID + brand ID. Creates a proposal (publish_status=PREVIEW=0).
+# Minimum: channel ID + brand ID. Creates a match (publish_status=MATCHED=7).
 tl sponsorships create --channel 5607 --brand 11459
 
 # Optional price (USD):
@@ -267,10 +289,10 @@ tl sponsorships create -c 5607 -b 11459 --json | jq -r '.results[0].sponsorship_
 
 # Shortcuts (delegated to the same server endpoint with a preset status):
 tl matches create -c 5607 -b 11459      # creates with publish_status=matched (7)
-tl proposals create -c 5607 -b 11459    # creates with publish_status=proposed (0)
+tl proposals create -c 5607 -b 11459    # creates with publish_status=matched (7)
 ```
 
-Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "proposed"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
+Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "matched"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
 
 The adlink is owned by the **brand's** advertiser profile (not the calling user's profile) and its `list` FK is set to the requested brand — so the new sponsorship appears under the brand's pipeline, not the AM's.
 
@@ -278,9 +300,13 @@ The adlink is owned by the **brand's** advertiser profile (not the calling user'
 
 After a sponsorship exists, `tl sponsorships update <id> '<json>'` is the single CLI lever for moving it through the funnel. The interesting transitions for vetting are below — pass `publish_status` as a string label (the integer code also works but the label is clearer for both humans and the audit log).
 
+An `open` sponsorship in negotiation progresses through three independent per-party **approval** fields: `brand_approval_status`, `channel_approval_status`, and `agency_approval_status`, each accepting `pending` / `approved` / `finished` (or `null`). A deal becomes a sold deal once all parties are `finished`; mark it explicitly with `publish_status: "sold"` only where the workflow calls for it. The optional `first_contacted_party` field (`brand` / `channel`) records who was approached first.
+
 | Action | Command | What it means |
 |---|---|---|
-| **Accept** (either side, in negotiation) | `tl sponsorships update <id> '{"publish_status": "pending"}'` | Moves the adlink to `PENDING` — both sides are working it but it's not yet sold. |
+| **Open for negotiation** | `tl sponsorships update <id> '{"publish_status": "open"}'` | Moves a matched adlink to `open` — it's now actively being worked by both sides. |
+| **Brand agrees** | `tl sponsorships update <id> '{"brand_approval_status": "approved"}'` | Records brand-side approval on an open deal (this is what makes a deal *committed*). |
+| **Channel agrees** | `tl sponsorships update <id> '{"channel_approval_status": "approved"}'` | Records channel-side approval on an open deal. |
 | **Mark sold** (deal finalised) | `tl sponsorships update <id> '{"publish_status": "sold"}'` | Final commercial step. Sets purchase semantics server-side. |
 | **Reject — Advertiser side** | `tl sponsorships update <id> '{"publish_status": "advertiser_reject"}'` | Maps to `DENY` ("Rejected by Advertiser"). Use when the *brand* turns the offer down. |
 | **Reject — Publisher side** | `tl sponsorships update <id> '{"publish_status": "publisher_reject"}'` | Maps to `REJECT` ("Rejected by Publisher"). Use when the *channel* turns the offer down. |
@@ -302,7 +328,7 @@ tl sponsorships update 98765 '{
 }'
 ```
 
-Full set of `publish_status` labels the CLI accepts: `proposed`, `unavailable`, `pending`, `sold`, `advertiser_reject`, `publisher_reject`, `proposal_approved`, `matched`, `outreach`, `agency_reject`. Numeric codes (0–9) are also accepted but labels are preferred.
+Full set of `publish_status` labels the CLI accepts: `sold`, `advertiser_reject`, `publisher_reject`, `matched`, `agency_reject`, `open`. Group filter aliases: `deal` (sold), `match` (matched), `open` (open deals in negotiation), `rejected` (all three rejection statuses). Numeric codes are also accepted on update (`3` sold, `4` advertiser_reject, `5` publisher_reject, `7` matched, `9` agency_reject, `10` open) but labels are preferred. Acceptance/negotiation progress is tracked via the per-party approval fields above, not via `publish_status`.
 
 #### Worked example: propose → reject
 
@@ -386,8 +412,8 @@ tl db fb "SELECT age, view_count, like_count FROM article_metrics
           WHERE channel_id = 12345 AND id = 'dQw4w9WgXcQ'
           ORDER BY age"
 
-# Channel reach over time
-tl db fb "SELECT scrape_date, total_views, reach FROM channel_metrics
+# Channel subscribers over time
+tl db fb "SELECT scrape_date, total_views, subscribers FROM channel_metrics
           WHERE id = 12345
           ORDER BY scrape_date"
 ```
@@ -400,7 +426,7 @@ See [references/firebolt-schema.md](references/firebolt-schema.md) for accepted-
 # Example: Top brands by deal count
 tl db pg "SELECT b.name, COUNT(*) AS deals
           FROM thoughtleaders_adlink a
-          JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+          JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
           JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
           JOIN thoughtleaders_brand b ON pb.brand_id = b.id
           WHERE a.publish_status = 3
@@ -531,28 +557,22 @@ Use `tl recommender top` for category/topic discovery (it's ranked) and `tl chan
 - **Channel–brand fit check** — does this candidate channel's content actually touch the brand's category? (Use with `channel.id` filter on the downstream ES query.)
 - **Validating a recommender / SQL shortlist** — sample-check that the top-N channels really cover the niche.
 
-**Do NOT compose keyword sets by hand for `tl db es`.** Always run the skill's script first. It broadens the user input, probes each candidate via `multi_match phrase`, and returns ranked counts:
+**Do NOT compose keyword sets by hand for `tl db es`.** Always invoke the whole skill. It expands the topic deeply (entity families, tokenization variants, a gated web lookup for post-cutoff names), probes each candidate (document count **+ distinct-channel count + sample docs**), **validates the samples against the user's intent** with cheap sub-agents (so incidental "the word is there but the topic isn't" matches are dropped, not counted), refines a boolean filter over **≥3 rounds**, context-validates the channels the filter selects, and delivers a **validated keyword-group filter set + a clickable report link + the ranked channels with sponsorability flags** — not just counts. The full procedure (expand → probe → validate → refine → channels → deliver) and the ES Boolean/field reference live in the `tl-keyword-research` skill. Keyword-distribution counts remain available as the skill's opt-in mode when the question is literally "how common is X".
 
-```json
-{"operator": "OR", "keywords": [{"keyword": "crypto", "count": 18742}, {"keyword": "bitcoin", "count": 15103}, {"keyword": "rugpull", "count": 0}]}
-```
-
-Then run the actual content search via `tl db es` (`multi_match` on the `title`, `summary`, `transcript` fields) with the surviving high-count keywords. The skill's full procedure (Phase 1 = seed expansion by you; Phase 2 = the script) is in the `tl-keyword-research` skill file.
-
-**Path 4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tl_channel`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
+**Path 4. Pure attribute filter** — user wants channels filtered by metadata like: `is_tpp`, `language`, `demographic_device_primary`, country share in `demographic_geo` JSON, aggregations, joins. Use `tl db pg` with a SELECT on `thoughtleaders_channel`. Run `tl schema pg thoughtleaders_channel` once to confirm the live column set; the columns in the examples are stable.
 
 ```bash
 # All TPP (TL-managed) channels — pure attribute filter, not a category query
 tl db pg "SELECT id, channel_name, content_category, total_views
           FROM thoughtleaders_channel
-          WHERE is_tl_channel = TRUE
+          WHERE is_tpp = TRUE
           ORDER BY total_views DESC
           LIMIT 200 OFFSET 0"
 
 # Mobile-first non-TPP channels — device share, not topic
 tl db pg "SELECT id, channel_name, demographic_device_primary, total_views
           FROM thoughtleaders_channel
-          WHERE is_tl_channel = FALSE
+          WHERE is_tpp = FALSE
             AND demographic_device_primary = 'mobile'
           ORDER BY total_views DESC
           LIMIT 100 OFFSET 0"
@@ -614,7 +634,7 @@ Users only see data their plan allows:
 ```bash
 tl db pg "SELECT al.id, al.weighted_price, al.purchase_date, b.name AS brand
           FROM thoughtleaders_adlink al
-          JOIN thoughtleaders_profile p ON p.id = al.creator_profile_id
+          JOIN thoughtleaders_profile p ON p.id = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
           JOIN thoughtleaders_brand b ON b.id = pb.brand_id
           WHERE al.publish_status = 3
@@ -716,7 +736,7 @@ tl db es '{
 # TL-brokered deal count for the brand (PG, not ES — adlinks where the brand is on the creator profile)
 tl db pg "SELECT COUNT(*) AS tl_brokered
           FROM thoughtleaders_adlink al
-          JOIN thoughtleaders_profile p  ON p.id = al.creator_profile_id
+          JOIN thoughtleaders_profile p  ON p.id = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb ON pb.profile_id = p.id
           WHERE pb.brand_id = 21416 AND al.article_id IS NOT NULL"
 ```

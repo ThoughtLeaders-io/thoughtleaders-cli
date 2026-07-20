@@ -165,7 +165,7 @@ def main() -> None:
                         {
                             "id": c.get("id"),
                             "name": c.get("channel_name"),
-                            "subscribers": c.get("reach"),
+                            "subscribers": c.get("subscribers"),
                         }
                         for c in exc.candidates
                     ],

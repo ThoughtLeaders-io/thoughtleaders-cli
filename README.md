@@ -93,7 +93,7 @@ tl whoami
 # profile → profile_brands → brand chain.
 tl db pg "SELECT al.id, al.weighted_price, al.purchase_date
           FROM thoughtleaders_adlink al
-          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile p           ON p.id  = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
           JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
           WHERE al.publish_status = 3
@@ -196,11 +196,11 @@ ThoughtLeaders has its internal terminology that's exposed throughout this tool.
 * **Sponsorships** — Either possible or realised business relationships between brands and channels, stored in `thoughtleaders_adlink`. There are several specific sub-types differentiated by the row's `publish_status`:
     * *Deals* — Contractually agreed-upon sponsorships (sold; `publish_status = 3`). They can be in a production pipeline or already published.
     * *Matches* — Possible brand-channel pairings (`publish_status = 7`); ThoughtLeaders thinks they could work.
-    * *Proposals* — Matches that have been proposed to both sides (`publish_status = 0`).
+    * *Proposals* — Open sponsorships actively in negotiation between the two sides (`publish_status = 10`).
 * **Adspots** — types of ads a channel carries (e.g. mention, dedicated video, product placement). Returned by `tl channels show`; each carries price/cost and a computed CPM.
 * **AdLink** — engineering / DB name for the row that backs a sponsorship. Treat as interchangeable with "sponsorship"; the table is `thoughtleaders_adlink`.
 * **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channel is in MSN if `channel.media_selling_network_join_date IS NOT NULL`.
-* **TPP** (ThoughtLeaders Partner Program) — TL's closest-partner channels, a strict subset of MSN. A channel is TPP if `channel.is_tl_channel = TRUE`. Prefer TPP channels when booking — fastest response, easiest to close.
+* **TPP** (ThoughtLeaders Partner Program) — TL's closest-partner channels, a strict subset of MSN. A channel is TPP if `channel.is_tpp = TRUE`. Prefer TPP channels when booking — fastest response, easiest to close.
 * **MBN** (Media Buying Network) — the brand-side counterpart to MSN: profiles that have opted in to receive proposed sponsorships (`profile.media_buying_network_join_date IS NOT NULL`).
 
 Sponsorships are the centre of attention in ThoughtLeaders — all other analytics and operations serve to produce or optimise sponsorships. Note that the term "Sponsorship" is wide and encompasses pre-deal stages. The funnel is large at the Sponsorship end and narrowest at the Deal end.
@@ -222,7 +222,7 @@ Talk naturally in Claude Code:
 ```
 /tl Which channels did we sponsor in Q1?
 /tl sold sponsorships for Nike in Q1
-/tl show me pending proposals with send dates in April
+/tl show me pending proposals with scheduled dates in April
 /tl what channels does Nike sponsor?
 /tl find me Cooking creators in the US with mobile-heavy audiences
 /tl check my balance
@@ -230,7 +230,7 @@ Talk naturally in Claude Code:
 
 Resource-specific slash commands:
 ```
-/tl-sponsorships pending with send dates in April
+/tl-sponsorships pending with scheduled dates in April
 /tl-reports run my Q1 pipeline
 /tl-balance
 ```
@@ -250,11 +250,26 @@ Each agent discovers the skill automatically and uses it when you ask about spon
 The plugin ships several focused skills (installed by all the `tl setup *` commands):
 
 - **`tl`** — the data-analyst skill. Defaults to raw database queries via `tl db pg|fb|es` for anything non-trivial; uses the structured `tl <resource> show` / `find` / `similar` commands for single-record lookups and similarity / ID-resolution special cases. Comes with full schema references for Postgres, Elasticsearch, and Firebolt under `references/`.
-- **`tl-keyword-research`** — broadens and ranks content-search keywords by Elasticsearch document count before a `tl db es` content search, so finding videos or channels by topic isn't bottlenecked on hand-guessed terms.
+- **`tl-keyword-research`** — turns a topic into a validated keyword-group filter set + a clickable report link, plus the results it selects — context-validated channels with sponsorability flags, or the matching videos/uploads for trend reports — refining a boolean filter over the live index instead of hand-guessing terms. Keyword-distribution counts remain as an opt-in mode.
 - **`tl-save-report`** — persists the result set from an in-chat exploration session as a saved TL report ("save this as a report", "turn this into a campaign").
 - **`tl-channel-authenticity`** — vets a YouTube channel for non-organic views and bot/spam comments before booking (or after delivering) a sponsorship.
 - **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
 - **`tl-top-partnerships`** — brand-user performance report. Ranks a brand's sold sponsorships by live eCPM vs the sold-date projection, aggregates per channel, and delivers a two-tab Google Sheet ("By Deal" / "By Channel") via `gws`. Uses only public CLI commands (`tl whoami`, `tl sponsorships list`).
+
+## Distributed skills
+
+Beyond the bundled set above, an organization can be granted additional skills that aren't part of a CLI release — `tl skill` fetches and installs them on demand into the same directories `tl setup` uses (Claude Code's standalone skills directory, OpenCode's skills directory, and the directory shared by Gemini and Codex), so every supported agent picks them up automatically.
+
+```bash
+tl skill list                 # skills available to your organization, with installed/latest versions
+tl skill list --all           # full catalog (full-access accounts only)
+tl skill download my-skill    # fetch and install into every AI-agent skill directory
+tl skill download my-skill --force   # overwrite a directory tl doesn't already manage
+tl skill update                # refresh every downloaded skill to its latest version
+tl skill remove my-skill        # uninstall a downloaded skill
+```
+
+A directory `tl skill download` doesn't already manage (no prior `tl`-managed install there) is left alone unless `--force` is passed — it never overwrites a skill you installed some other way. `tl` warns once a day, on any command, when a downloaded skill has a newer version available. `tl setup` and self-update re-syncs also respect these directories: a downloaded skill is never rmtree'd or overwritten, even if its name collides with a bundled skill.
 
 ## Output Formats
 
@@ -262,7 +277,7 @@ By default, output is a styled table in the terminal and JSON when piped.
 
 ```bash
 tl sponsorships show 12345 --json | jq '.results'
-tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE is_tl_channel = TRUE
+tl db pg "SELECT id, channel_name FROM thoughtleaders_channel WHERE is_tpp = TRUE
           LIMIT 200 OFFSET 0" --csv > tpp.csv
 tl channels show "MrBeast" --md      # markdown table for Slack / docs
 tl channels show "MrBeast" --toon    # token-efficient encoding for LLMs

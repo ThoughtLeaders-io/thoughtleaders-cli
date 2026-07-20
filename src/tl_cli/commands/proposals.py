@@ -1,4 +1,4 @@
-"""tl proposals — Shortcut for proposed sponsorships."""
+"""tl proposals — Shortcut for open sponsorships in negotiation."""
 
 from typing import Optional
 
@@ -8,12 +8,12 @@ from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli.commands.sponsorships import do_create, do_list, do_show
 from tl_cli.output.formatter import detect_format
 
-app = typer.Typer(cls=AlphaSortedTyperGroup, help="Proposals — matches proposed to both sides (shortcut for sponsorships status:proposal)")
+app = typer.Typer(cls=AlphaSortedTyperGroup, help="Proposals — open sponsorships in negotiation (shortcut for sponsorships status:open)")
 
 
 @app.callback(invoke_without_command=True)
 def proposals(ctx: typer.Context) -> None:
-    """Proposals — matches proposed to both sides."""
+    """Proposals — open sponsorships in negotiation."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(list_cmd, args=[], json_output=False, csv_output=False, md_output=False, limit=50, offset=0)
 
@@ -35,7 +35,7 @@ def list_cmd(
         tl proposals list brand:"Nike"        # Filter proposals
     """
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
-    do_list(args or [], fmt, limit, offset, default_status="proposal", title="Proposals")
+    do_list(args or [], fmt, limit, offset, default_status="open", title="Proposals")
 
 
 @app.command("show")
@@ -61,10 +61,10 @@ def create_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Create a new proposal (free, no credits charged).
+    """Create a new sponsorship in matched status (free, no credits charged).
 
     Examples:
         tl proposals create --channel 1 --brand 2
     """
     fmt = detect_format(json_output, False, False, toon_output)
-    do_create(channel, brand, price, fmt, status="proposed")
+    do_create(channel, brand, price, fmt, status="matched")

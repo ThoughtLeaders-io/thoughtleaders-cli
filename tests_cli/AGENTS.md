@@ -30,10 +30,17 @@ together over the wire.
    (`SELECT 1`), `size: 1` / `LIMIT 1`, leading-index filters, or `--pricing`
    dry-runs. Never run an unbounded scan or a full-table aggregate.
 
-4. **Skip, never fail, when there is no backend.** The suite auto-skips when
-   `tl` is absent or the API is unreachable/unauthenticated (the
-   `_live_api_or_skip` fixture probes `tl whoami`). Preserve that — a developer
-   or CI with no live API must see skips, not red.
+4. **Skip when there's no backend — unless a live run was demanded.** By
+   default the suite auto-skips when `tl` is absent or the API is
+   unreachable/unauthenticated (the `_live_api_or_skip` fixture probes
+   `tl whoami`), so a developer with no API sees skips, not red. But when
+   `TL_CLI_REQUIRE_LIVE=1` is set — as the `cli-integration` workflow does — an
+   unreachable/unauthenticated backend becomes a hard **failure** instead. That
+   is what makes a real outage, an expired/removed `TL_API_KEY`, or a broken
+   deploy show up red in CI rather than hiding behind a green "all skipped".
+   Keep both behaviours: skip locally, fail loud where a live check was asked
+   for (route every "no backend" exit through `_no_backend`, never a bare
+   `pytest.skip`).
 
 ## Running
 

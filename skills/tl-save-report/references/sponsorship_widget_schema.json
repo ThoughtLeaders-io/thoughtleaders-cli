@@ -18,7 +18,7 @@
       "type": "array",
       "minItems": 4,
       "maxItems": 6,
-      "description": "Array of widget objects. 4–6 total. First (index: 1) is `count_sponsorships`; histograms occupy the highest indices and use a SHARED axis (send_date OR purchase_date — see _tl_axis_branching).",
+      "description": "Array of widget objects. 4–6 total. First (index: 1) is `count_sponsorships`; histograms occupy the highest indices and use a SHARED axis (scheduled_date OR purchase_date — see _tl_axis_branching).",
       "items": { "$ref": "#/$defs/widget" }
     },
     "histogram_bucket_size": {
@@ -39,10 +39,10 @@
           "description": "Aggregator key from the sponsorship catalog. See _tl_aggregator_catalog below.",
           "enum": [
             "count_sponsorships",
-            "count_sponsorships_over_send_date",
+            "count_sponsorships_over_scheduled_date",
             "count_sponsorships_over_purchase_date",
             "sum_cost", "sum_price",
-            "sum_price_over_send_date", "sum_price_over_purchase_date",
+            "sum_price_over_scheduled_date", "sum_price_over_purchase_date",
             "sum_profit", "sum_impression",
             "count_channels",
             "sum_views", "sum_projected_views",
@@ -74,11 +74,11 @@
   "_tl_aggregator_catalog": {
     "core_sponsorships": {
       "count_sponsorships":                    { "type": "metrics-box", "describes": "Total sponsorship count" },
-      "count_sponsorships_over_send_date":     { "type": "histogram",   "describes": "Sponsorships scheduled over time", "axis": "send_date" },
+      "count_sponsorships_over_scheduled_date":     { "type": "histogram",   "describes": "Sponsorships scheduled over time", "axis": "scheduled_date" },
       "count_sponsorships_over_purchase_date": { "type": "histogram",   "describes": "Sponsorships purchased over time", "axis": "purchase_date" },
       "sum_cost":                              { "type": "metrics-box", "describes": "Total cost" },
       "sum_price":                             { "type": "metrics-box", "describes": "Total price" },
-      "sum_price_over_send_date":              { "type": "histogram",   "describes": "Price scheduled over time", "axis": "send_date" },
+      "sum_price_over_scheduled_date":              { "type": "histogram",   "describes": "Price scheduled over time", "axis": "scheduled_date" },
       "sum_price_over_purchase_date":          { "type": "histogram",   "describes": "Price purchased over time", "axis": "purchase_date" },
       "sum_profit":                            { "type": "metrics-box", "describes": "Net profit (price - cost). TL profit, not 'margin'." },
       "sum_impression":                        { "type": "metrics-box", "describes": "Total projected views" },
@@ -111,9 +111,9 @@
   "_tl_axis_branching": {
     "description": "Both histograms in a single type-8 report MUST use the SAME axis. Pick by filters_json.publish_status content.",
     "rules": [
-      { "publish_status_includes": [0, 2, 6, 7, 8], "axis": "send_date",     "use_aggregators": ["count_sponsorships_over_send_date", "sum_price_over_send_date"], "label": "pipeline view" },
+      { "publish_status_includes": [7, 10], "axis": "scheduled_date",     "use_aggregators": ["count_sponsorships_over_scheduled_date", "sum_price_over_scheduled_date"], "label": "pipeline view" },
       { "publish_status_only":     [3],             "axis": "purchase_date", "use_aggregators": ["count_sponsorships_over_purchase_date", "sum_price_over_purchase_date"], "label": "won-deals view" },
-      { "publish_status_includes_pre_sale_and_sold": true, "axis": "send_date", "label": "mixed pipeline (send_date dominates)" },
+      { "publish_status_includes_pre_sale_and_sold": true, "axis": "scheduled_date", "label": "mixed pipeline (scheduled_date dominates)" },
       { "performance_grades_present": true, "axis": "purchase_date", "label": "performance view" }
     ]
   },
@@ -129,7 +129,7 @@
   "_tl_intent_overrides": {
     "pipeline_forecasting": {
       "trigger_phrases": ["pipeline", "forecast", "projected"],
-      "axis": "send_date",
+      "axis": "scheduled_date",
       "metrics_emphasis": ["count_sponsorships", "sum_price", "sum_impression"]
     },
     "won_deals_review": {

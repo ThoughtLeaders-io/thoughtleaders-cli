@@ -77,29 +77,39 @@ def tl_list(*args) -> list[dict]:
 
 
 def fetch_future_bookings(brand: str) -> dict[str, dict]:
-    """Return channel -> {send_date, status} for the earliest future booking per channel.
-    Future = send_date strictly after today, status in {sold, proposal_approved, pending}.
+    """Return channel -> {scheduled_date, status} for the earliest future booking per channel.
+    Future = scheduled_date strictly after today, status sold, or open with the brand
+    having reviewed it (brand_approval pending or approved).
     """
     today = date.today()
     cutoff = (today + timedelta(days=1)).isoformat()
     end = (today + timedelta(days=365 * 2)).isoformat()
     rows: list[dict] = []
-    for status in ("sold", "proposal_approved", "pending"):
+    # sold deals: a plain status filter.
+    # open deals only count when the brand has reviewed them — narrow the OPEN
+    # arm with brand_approval (pending or approved); a bare status:open would
+    # over-count cold/un-reviewed open deals.
+    queries = (
+        ("sold", []),
+        ("open", ["brand_approval:PENDING,APPROVED"]),
+    )
+    for status, extra in queries:
         rows.extend(tl_list(
             f"brand:{brand}",
             f"status:{status}",
-            f"send-date-start:{cutoff}",
-            f"send-date-end:{end}",
+            *extra,
+            f"scheduled-date-start:{cutoff}",
+            f"scheduled-date-end:{end}",
         ))
     by_channel: dict[str, dict] = {}
     for r in rows:
         ch = r.get("channel")
-        sd = r.get("send_date")
+        sd = r.get("scheduled_date")
         st = r.get("status")
         if not ch or not sd:
             continue
-        if ch not in by_channel or sd < by_channel[ch]["send_date"]:
-            by_channel[ch] = {"send_date": sd, "status": st}
+        if ch not in by_channel or sd < by_channel[ch]["scheduled_date"]:
+            by_channel[ch] = {"scheduled_date": sd, "status": st}
     return by_channel
 
 
@@ -117,12 +127,12 @@ def build_deal_rows(raw: list[dict], future: dict[str, dict]) -> list[dict]:
         measurable = bool(publish_date and views)
         ch = r.get("channel")
         f = future.get(ch)
-        next_booking = f"{f['send_date']} ({f['status']})" if f else "Re-book - no future spot"
+        next_booking = f"{f['scheduled_date']} ({f['status']})" if f else "Re-book - no future spot"
         out.append({
             "channel": ch,
             "title": (r.get("title") or "").strip(),
             "video_url": youtube_url(r.get("article_id")),
-            "send_date": r.get("send_date"),
+            "scheduled_date": r.get("scheduled_date"),
             "publish_date": publish_date,
             "price": price,
             "price_currency": r.get("price_currency", "USD"),
@@ -157,7 +167,7 @@ def build_channel_rows(deals: list[dict], future: dict[str, dict]) -> list[dict]
         ratio = (a["live"] / a["promised"]) if a["promised"] and a["live"] else None
         delta = (live_cpm - sold_cpm) if (live_cpm is not None and sold_cpm is not None) else None
         f = future.get(ch)
-        next_booking = f"{f['send_date']} ({f['status']})" if f else "Re-book - no future spot"
+        next_booking = f"{f['scheduled_date']} ({f['status']})" if f else "Re-book - no future spot"
         out.append({
             "channel": ch,
             "deals": a["deals"],
@@ -197,7 +207,7 @@ def gws(cmd: list[str], params: dict | None = None, body: dict | None = None) ->
 
 
 def upload_sheet(brand: str, deals: list[dict], channels: list[dict], rankable: list[dict]) -> str:
-    title = f"{brand} Top Partnerships ({deals[0]['send_date'][:4] if deals else 'no-data'})"
+    title = f"{brand} Top Partnerships ({deals[0]['scheduled_date'][:4] if deals else 'no-data'})"
 
     # 1) Create empty spreadsheet via Sheets API
     sheet = gws(["sheets", "spreadsheets", "create"], body={
@@ -210,7 +220,7 @@ def upload_sheet(brand: str, deals: list[dict], channels: list[dict], rankable: 
     sid = sheet["spreadsheetId"]
 
     # 2) Write By Deal
-    deal_header = ["rank", "channel", "title", "video_url", "send_date", "publish_date",
+    deal_header = ["rank", "channel", "title", "video_url", "scheduled_date", "publish_date",
                    "price", "promised_views", "live_views", "view_ratio",
                    "sold_date_ecpm", "live_ecpm", "delta_ecpm", "measurable", "next_booking"]
     rank_ids = {id(d): i + 1 for i, d in enumerate(rankable)}
@@ -224,7 +234,7 @@ def upload_sheet(brand: str, deals: list[dict], channels: list[dict], rankable: 
     for d in ordered:
         deal_values.append([
             rank_ids.get(id(d), ""),
-            d["channel"] or "", d["title"], d["video_url"], d["send_date"] or "",
+            d["channel"] or "", d["title"], d["video_url"], d["scheduled_date"] or "",
             (d["publish_date"] or "")[:10], d["price"] or "",
             d["promised_views"] or "", d["live_views"] or "",
             round(d["view_ratio"], 4) if d["view_ratio"] is not None else "",
@@ -275,14 +285,14 @@ def upload_sheet(brand: str, deals: list[dict], channels: list[dict], rankable: 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", required=True)
-    ap.add_argument("--send-date-start", required=True)
-    ap.add_argument("--send-date-end", required=True)
+    ap.add_argument("--scheduled-date-start", required=True)
+    ap.add_argument("--scheduled-date-end", required=True)
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
 
     raw = tl_list(
         "status:sold", f"brand:{args.brand}",
-        f"send-date-start:{args.send_date_start}", f"send-date-end:{args.send_date_end}",
+        f"scheduled-date-start:{args.scheduled_date_start}", f"scheduled-date-end:{args.scheduled_date_end}",
     )
     future = fetch_future_bookings(args.brand)
     deals = build_deal_rows(raw, future)

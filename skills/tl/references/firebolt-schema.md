@@ -33,10 +33,12 @@ Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (cu
 - **SELECT only.** No DDL/DML/transactions/SET/locks.
 - **Single table.** No JOIN, CTE (`WITH`), subquery, set operation, or `LATERAL`.
 - **Only known tables:** `article_metrics`, `channel_metrics`. Other names return `UNKNOWN_TABLE`.
+- **Constant-only probes are allowed:** `SELECT 1` (no FROM, no column references) works as a connectivity check. Anything naming a column or `*` still needs a FROM.
 - **WHERE/HAVING may only reference indexed columns** (`channel_id`/`id` for `article_metrics`; `id` for `channel_metrics`). Filtering by `age`, `publication_date`, `view_count`, `duration`, `scrape_date`, etc. in WHERE returns `NON_INDEXED_FILTER:<col>`. Apply those constraints client-side after fetching.
 - **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
 - **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
 - **No mandatory LIMIT/OFFSET** — but Firebolt will time out on bad plans, so keep the leading-index filter selective.
+- **Errors carry the real diagnostic.** A query that Firebolt itself rejects (unknown column, syntax error) comes back as a 400 with Firebolt's own error description, plus a rename hint where one is known. Common trap: `channel_metrics` has `subscribers`, not the older `reach`.
 
 ## Tables
 
@@ -71,7 +73,7 @@ Tracks YouTube video metrics over time. Each row = one scrape of one video on on
 |--------|------|-------------|
 | `id` | INT | TL channel ID |
 | `total_views` | INT | Channel total views at time of scrape |
-| `reach` | INT | Subscriber count at time of scrape |
+| `subscribers` | INT | Subscriber count at time of scrape |
 | `scrape_date` | DATE | When this data point was captured |
 
 **Primary Index: `(id)`**
@@ -124,7 +126,7 @@ tl recommender top-channels "Tech" msn:yes --limit 50 --json \
 tl db pg "SELECT al.id, al.article_id, s.channel_id
           FROM thoughtleaders_adlink al
           JOIN thoughtleaders_adspot s            ON s.id  = al.ad_spot_id
-          JOIN thoughtleaders_profile p           ON p.id  = al.creator_profile_id
+          JOIN thoughtleaders_profile p           ON p.id  = al.advertiser_profile_id
           JOIN thoughtleaders_profile_brands pb   ON pb.profile_id = p.id
           JOIN thoughtleaders_brand b             ON b.id  = pb.brand_id
           WHERE al.publish_status = 3
@@ -182,7 +184,7 @@ tl db fb "SELECT id, age, view_count, like_count, comment_count, duration, publi
 ### Channel subscriber/view growth over time
 
 ```bash
-tl db fb "SELECT scrape_date, total_views, reach
+tl db fb "SELECT scrape_date, total_views, subscribers
           FROM channel_metrics
           WHERE id = 12345
           ORDER BY scrape_date"
@@ -191,7 +193,7 @@ tl db fb "SELECT scrape_date, total_views, reach
 ### Compare multiple channels' growth
 
 ```bash
-tl db fb "SELECT id, scrape_date, total_views, reach
+tl db fb "SELECT id, scrape_date, total_views, subscribers
           FROM channel_metrics
           WHERE id IN (123, 456, 789)
           ORDER BY id, scrape_date"

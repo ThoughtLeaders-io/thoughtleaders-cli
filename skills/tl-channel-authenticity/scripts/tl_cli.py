@@ -48,7 +48,7 @@ class AmbiguousChannel(DataError):
         self.ref = ref
         self.candidates = candidates
         lines = "\n".join(
-            f"  {c.get('id'):>9}  {(c.get('reach') or 0):>13,}  "
+            f"  {c.get('id'):>9}  {(c.get('subscribers') or 0):>13,}  "
             f"{c.get('channel_name', '')}"
             for c in candidates
         )
@@ -140,15 +140,15 @@ def channels_show(ref: str | int) -> dict:
     # Build the exact query rather than calling `tl channels show`: the
     # structured command returns a curated public schema (channel_id/name/
     # subscribers/category) that doesn't match the raw-table columns the rest
-    # of the skill reads (id/channel_name/reach/content_category).
+    # of the skill reads (id/channel_name/subscribers/content_category).
     sql = (
-        "SELECT id, channel_name, slug, url, external_channel_id, reach, "
+        "SELECT id, channel_name, slug, url, external_channel_id, subscribers, "
         "total_views, country, language, content_category, is_active, "
-        "media_selling_network_join_date, is_tl_channel, engagement, "
+        "media_selling_network_join_date, is_tpp, engagement, "
         "sponsorship_score, num_uploads, last_published, "
         "demographic_male_share, demographic_usa_share "
         f"FROM thoughtleaders_channel WHERE {_channel_where(ref)} "
-        "ORDER BY reach DESC NULLS LAST LIMIT 10"
+        "ORDER BY subscribers DESC NULLS LAST LIMIT 10"
     )
     rows = db_pg(sql)
     if not rows:

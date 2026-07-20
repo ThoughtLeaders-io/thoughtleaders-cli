@@ -19,9 +19,9 @@ The main sponsorships table. Each row = one sponsorship between a brand and a Yo
 The profile table is tightly coupled with the brand table for media buyers, so many reports that operate on the brand levels must access the profile data first.
 
 > 🚨 **Columns that DO NOT exist on `thoughtleaders_adlink` — common hallucinations:**
-> - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `creator_profile_id → profile → profile_brands → brand`.
-> - ❌ `organization_id` — there is NO direct org FK. Org is reached via `creator_profile_id → profile.organization_id → organization`.
-> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`. Do NOT substitute `creator_id` — that's the brand-side user who created the record, not the channel/YouTube creator.
+> - ❌ `brand_id` — there is NO direct brand FK. Brand is reached via `advertiser_profile_id → profile → profile_brands → brand`.
+> - ❌ `organization_id` — there is NO direct org FK. Org is reached via `advertiser_profile_id → profile.organization_id → organization`.
+> - ❌ `channel_id` — channel is reached via `ad_spot_id → adspot.channel_id → channel`. Do NOT substitute `advertiser_id` — that's the brand-side user who created the record, not the channel.
 > - ❌ `youtube_id` (on channel) — use `external_channel_id`.
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
@@ -35,12 +35,12 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `updated_at` | timestamptz | Last modification |
 | `publish_status` | int | Deal status (see constants below) |
 | `ad_spot_id` | int FK | → `thoughtleaders_adspot.id` |
-| `creator_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `creator_profile` — the "creator_" prefix lives on the FK column, not the table. |
-| `creator_id` | int FK | → `auth_user.id` — the brand-side user account that created the sponsorship record. ⚠️ Despite the name, NOT the YouTube creator: on sponsorships, "creator" always means the buyer side. Record lineage only — for the channel use `ad_spot_id → adspot.channel_id`, for the brand use `creator_profile_id`, for accountability use the `owner_*` fields. |
+| `advertiser_profile_id` | int FK | → `thoughtleaders_profile.id` (the brand/advertiser's profile). ⚠️ The table is named `thoughtleaders_profile`, NOT `advertiser_profile`. |
+| `advertiser_id` | int FK | → `auth_user.id` — the brand-side user account that created the sponsorship record (the advertiser/buyer side). Record lineage only — for the channel use `ad_spot_id → adspot.channel_id`, for the brand use `advertiser_profile_id`, for accountability use the `owner_*` fields. |
 | `owner_advertiser_id` | int FK | → `auth_user.id` (brand-side owner) |
 | `owner_publisher_id` | int FK | → `auth_user.id` (channel-side owner) |
 | `owner_sales_id` | int FK | → `auth_user.id` (sales rep) |
-| `send_date` | timestamptz | Scheduled send/publish date |
+| `scheduled_date` | timestamptz | Scheduled send/publish date |
 | `publish_date` | timestamptz | Actual publish date |
 | `outreach_date` | timestamptz | When outreach was sent |
 | `purchase_date` | timestamptz | When deal was purchased/sold |
@@ -61,18 +61,18 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 
 #### `publish_status` Constants
 
-| Value | Constant | Label | Pipeline Weight |
-|-------|----------|-------|----------------|
-| 0 | PREVIEW | Proposed | 10% |
-| 1 | UNAVAILABLE | Unavailable | — |
-| 2 | PENDING | Pending | 70% |
-| 3 | SOLD | Sold | — |
-| 4 | DENY | Rejected by Advertiser | 0% |
-| 5 | REJECT | Rejected by Publisher | 0% |
-| 6 | PROPOSAL_APPROVED | Proposal Approved | 25% |
-| 7 | MATCHED | Matched (default) | 1% |
-| 8 | OUTREACH | Reached Out | 5% |
-| 9 | REJECTED_AGENCY | Rejected by Agency | 0% |
+| Value | Constant | Label | Notes |
+|-------|----------|-------|-------|
+| 3 | SOLD | Sold | Realized revenue / concluded deal |
+| 4 | DENY | Rejected by Advertiser | Closed-lost |
+| 5 | REJECT | Rejected by Publisher | Closed-lost |
+| 7 | MATCHED | Matched (default) | Pre-negotiation initial stage |
+| 9 | REJECTED_AGENCY | Rejected by Agency | Closed-lost |
+| 10 | OPEN | Open | Active/in-negotiation deal; progress tracked via per-party approval fields |
+
+Live open deals are a single `OPEN` (10) status driven by three independent per-party approval fields: `brand_approval_status`, `channel_approval_status`, `agency_approval_status` (each `1 PENDING` / `2 APPROVED` / `3 FINISHED`, or NULL), plus `first_contacted_party` (`1 BRAND` / `2 CHANNEL`, or NULL).
+
+A deal is **committed** when it is SOLD, or OPEN with `brand_approval_status` in (APPROVED, FINISHED). `weighted_price` is derived from the brand/channel approval combination on OPEN deals.
 
 #### `rejection_reason` Constants
 
@@ -126,11 +126,22 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 
 ### `thoughtleaders_brand`
 
+> 🚨 **Columns that DO NOT exist on `thoughtleaders_brand` — common hallucinations:**
+> - ❌ `domain` / `url` — the website column is `website`.
+> - ❌ `brand_name` — it's plain `name` here (unlike channel, which prefixes its display fields).
+> - ❌ `is_active` — brands have no active/inactive flag; every row is live.
+> - ❌ `sponsored_topics` (or similar topic columns) — the closest fields are `keywords` and `ai_description`.
+> - ❌ `organization_id` — org lives on profile, not brand (see Key Relationships below).
+
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | int | Primary key |
-| `name` | varchar | Brand name |
+| `name` | varchar | Brand name. ⚠️ Plain `name`, not `brand_name`. |
 | `description` | text | Brand description |
+| `website` | varchar | Brand website URL. ⚠️ The column is `website`, NOT `domain`. |
+| `slug` | varchar | TL-platform slug |
+| `keywords` | varchar | Topic/detection keywords for the brand |
+| `ai_description` | JSONB | AI-generated descriptive info about the brand |
 | `creator_id` | int FK | User who created it |
 
 #### Junction Tables
@@ -166,17 +177,17 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `url` | varchar | Channel URL (external — usually the YouTube URL). |
 | `slug` | varchar | TL-platform-specific slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any user-facing surface (reports, samples, Slack posts). Fall back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
 | `total_views` | int | Total views for the entire channel |
-| `reach` | bigint | Subscriber count. ⚠️ There is NO `subscribers` column — `reach` is the subscriber count. Many internal docs and outputs use the word "subscribers"; in SQL, always query `reach`. |
+| `subscribers` | bigint | Subscriber count. |
 | `media_selling_network_join_date` | date/timestamptz | When the channel joined the MSN. **MSN membership = this column IS NOT NULL.** |
-| `is_tl_channel` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ reach), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **This is not the MSN flag.** For MSN, use `media_selling_network_join_date IS NOT NULL`. |
-| `content_category` | int | Content category code (1–22), as assigned by YouTube. This assignment is too unreliable, do not use it for discovering channels. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` |
+| `is_tpp` | boolean | True = TPP channel — TL's closest-partner channels (~144 at 100k+ subscribers), a strict subset of MSN. Prefer when booking: fastest response, easiest to close. ⚠️ **This is not the MSN flag.** For MSN, use `media_selling_network_join_date IS NOT NULL`. |
+| `content_category` | int | TL's own content-category code (1–22) — **not YouTube's categories**: 1 Backend Development, 2 Design, 3 Entrepreneurship, 4 Frontend Development, 5 Lifestyle, 6 Marketing, 7 Mobile Development, 8 Sales, 9 Travel, 10 Business, 11 Photography, 12 General Knowledge, 13 Personal Finance, 14 News & Politics, 15 Technology, 16 Gaming, 17 Food, 18 Sports, 19 How To & Crafts, 20 Entertainment, 21 Health & Fitness, 22 Music. The assignment is too unreliable for discovery — do not use it to find channels by topic. **For topic/category discovery, prefer `tl recommender top-channels "<tag>"` |
 | `is_active` | boolean | Whether the channel is active. ⚠️ **Always include `is_active = true` in channel queries** unless explicitly looking for archived rows. |
 | `country` | varchar | Channel's primary country (ISO 3166-1 alpha-2 code, e.g. `US`, `GB`, `BR`). This is often the cleanest answer to "geography" questions on sponsorships. May be NULL or blank. |
 | `language` | varchar | Primary content language. ⚠️ **Short ISO 639 codes — NOT BCP-47.** Mostly 2-letter ISO 639-1 (`en`, `pt`, `hi`) for major languages; occasionally 3-letter ISO 639-2/3 (`arc`, `arz`, `ase`, `ceb`) for languages without a 2-letter code. Filtering with `language = 'en-US'` returns zero rows. **Don't assume `LENGTH(language) = 2`** — that silently drops the 3-letter long-tail. May be NULL. |
 | `last_published` | date | Date of the channel's most recently seen video. Use for "is the channel still active?" filters — e.g. `last_published >= CURRENT_DATE - INTERVAL '120 days'`. |
 | `sponsorship_score` | double precision | TL-internal channel quality score (range 0-10, higher is better, if below 5, the channel is low quality). Useful as a tiebreaker when ranking candidate channels. |
 | `ai_description` | JSON | Descriptive information about a channel. Contains fields such as `description`, `audience`, `topic_descriptions`, and `brand_safety`. Useful as a regex-target for thematic filtering when the recommender results are too coarse (e.g. filtering "technology" down to actual tech reviewers via keywords like `tech|gadget|review|software`). |
-| `evergreenness` | float | Evergreen score |
+| `evergreenness` | float | Longform evergreen score: median per-video `(views@180d − views@30d) / views@30d` over the channel's trailing-year uploads; ≥ 1 = evergreen (day-180 views at least double day-30). In ES this lands on the channel doc as `evergreenness_longform`. |
 | `demographic_usa_share` | smallint (0–100) | Percentage of the channel's audience based in the US. Convenience for the common "is this a US-heavy channel?" filter — pre-computed from `demographic_geo['US']`. NULL when the channel has no demographic data. |
 | `demographic_male_share` | smallint (0–100) | Percentage of the channel's audience that's male. `female_share = 100 - demographic_male_share` (no separate column). NULL when the channel has no demographic data. |
 | `demographic_age_median_value` | varchar | The age-bucket label (e.g. `25-34`) corresponding to the median of `demographic_age`, pre-computed on save. Indexed; cheap to filter on. NULL when there's no age data. |
@@ -193,8 +204,8 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 
 When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the output of `tl schema pg thoughtleaders_channel` or the column table above. The `tl schema` command is authoritative. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring problems:
 
-- Subscriber count is in the field named `reach`
-- Projected views is in the field named `impression`
+- Subscriber count is in the field named `subscribers`
+- Projected views is in the field named `projected_views`
 - ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns  use bare names.
 - ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
 - ❌ **Bare-noun forms without the table-prefix** (e.g. `name` instead of `channel_name`). This table prefixes its display fields with `channel_` to avoid SQL keyword collisions and ambiguity in joins.
@@ -237,7 +248,7 @@ thoughtleaders_adlink
   ├── owner_advertiser_id → auth_user.id
   ├── owner_publisher_id → auth_user.id
   ├── owner_sales_id → auth_user.id
-  └── creator_profile_id → thoughtleaders_profile.id
+  └── advertiser_profile_id → thoughtleaders_profile.id
                               ├── organization_id → thoughtleaders_organization.id
                               └── profile_brands.profile_id → brand.id
 
@@ -270,15 +281,16 @@ JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
 
 **Adlink → Brand name:**
 ```sql
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
 JOIN thoughtleaders_brand b ON pb.brand_id = b.id
--- NEVER: JOIN brand b ON b.id = a.creator_profile_id (different ID spaces, returns wrong data)
+-- NEVER: JOIN brand b ON b.id = a.advertiser_profile_id (different ID spaces, returns wrong data)
 ```
+This 3-table join is the one brand path that works in every session — use it in anything reusable.
 
 **Adlink → Organization:**
 ```sql
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_organization o ON p.organization_id = o.id
 ```
 
@@ -289,7 +301,42 @@ JOIN thoughtleaders_profile p ON p.user_id = adspot.publisher_id
 ```
 Joining `adspot.publisher_id → profile.id` directly mixes ID spaces and returns garbage.
 
-## `thoughtleaders_profile` persona constants
+## Key columns for the `thoughtleaders_profile` table
+
+The profile is the account record for a person/company on the platform. Every brand-side query hops through it (`adlink.advertiser_profile_id → profile → profile_brands → brand`), which makes it the most-joined table after the sponsorships themselves.
+
+> 🚨 **Columns that DO NOT exist on `thoughtleaders_profile` — common hallucinations:**
+> - ❌ `name` / `email` — the person's name and email live on `auth_user` (join via `user_id`: `first_name`, `last_name`, `email`). The company name is `organization_name`, denormalized onto the profile.
+> - ❌ `auth_user_id` — the FK column is `user_id`.
+> - ❌ `brand_id` — a profile can have several brands; join `thoughtleaders_profile_brands` on `profile_id`.
+> - ❌ `is_tpp` — that's a channel attribute; a profile's channels come via `thoughtleaders_profile_channels`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | int | Primary key. ⚠️ NOT the same ID space as `auth_user.id` — never join a `*_id` pointing at users to `profile.id` directly. |
+| `user_id` | int FK | → `auth_user.id` (the person's name and email live there) |
+| `organization_id` | int FK | → `thoughtleaders_organization.id` |
+| `organization_name` | varchar | Denormalized company/organization display name |
+| `persona` | int | Account persona (see constants below) |
+| `is_advertiser` | boolean | Buyer (brand) side capability flag |
+| `is_publisher` | boolean | Seller (channel) side capability flag |
+| `owner_sales_id` | int FK | → `auth_user.id` — TL-side sales owner for this profile |
+| `owner_advertiser_id` | int FK | → `auth_user.id` — TL-side brand account owner |
+| `owner_publisher_id` | int FK | → `auth_user.id` — on advertiser profiles: the adops user in charge |
+| `media_buying_network_join_date` | date | MBN (brand-side buying network) join date. **MBN membership = this column IS NOT NULL.** ⚠️ Don't confuse with the channel's `media_selling_network_join_date` (MSN — the channel-side network). |
+| `superuser_notes` | text | Internal TL notes about the profile |
+| `buying_preference_*` | various | The brand's buying preferences (audience age/gender/geo shares, face-on-screen, custom instructions) |
+
+**Profile with the person's name and email:**
+```sql
+SELECT p.id, u.first_name, u.last_name, u.email, p.organization_name
+FROM thoughtleaders_profile p
+JOIN auth_user u ON u.id = p.user_id
+WHERE p.organization_id = 123
+LIMIT 50 OFFSET 0
+```
+
+### `thoughtleaders_profile` persona constants
 
 | Value | Label |
 |-------|-------|
@@ -297,7 +344,7 @@ Joining `adspot.publisher_id → profile.id` directly mixes ID spaces and return
 | 2 | Creator |
 | 3 | Talent Manager |
 | 4 | Media Agency |
-| 5 | Creator Service |
+| 5 | Other |
 
 ## `thoughtleaders_profile_channels` (Profile ↔ Channel M2M)
 
@@ -315,7 +362,7 @@ Note: separate from the adspot publisher relationship. Not always in sync.
 ```sql
 SELECT owner_sales_id, SUM(weighted_price) AS pipeline
 FROM thoughtleaders_adlink
-WHERE publish_status IN (0, 2, 6, 7, 8)
+WHERE publish_status IN (7, 10)
 GROUP BY owner_sales_id
 ORDER BY pipeline DESC
 LIMIT 100 OFFSET 0
@@ -323,7 +370,7 @@ LIMIT 100 OFFSET 0
 
 **Sold deals this month:**
 ```sql
-SELECT id, price, purchase_date, ad_spot_id, creator_profile_id
+SELECT id, price, purchase_date, ad_spot_id, advertiser_profile_id
 FROM thoughtleaders_adlink
 WHERE publish_status = 3
   AND purchase_date >= date_trunc('month', CURRENT_DATE)
@@ -346,7 +393,7 @@ SELECT a.id, a.price, a.publish_status, b.name AS brand, ch.channel_name
 FROM thoughtleaders_adlink a
 JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id
 JOIN thoughtleaders_channel ch ON s.channel_id = ch.id
-JOIN thoughtleaders_profile p ON a.creator_profile_id = p.id
+JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id
 JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id
 JOIN thoughtleaders_brand b ON pb.brand_id = b.id
 WHERE a.id = 12345

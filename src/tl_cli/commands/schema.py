@@ -75,6 +75,15 @@ def _try_render_yaml_tree(content: str) -> bool:
             if fcomment:
                 line.append(f'  — {fcomment}', style='dim')
             tree.add(line)
+
+        # Curated "common traps" for this table (old → new field names, join
+        # hints), surfaced as a sub-branch so it's visible during discovery.
+        common_traps = fields.get('__common_traps')
+        if isinstance(common_traps, list) and common_traps:
+            traps_branch = tree.add(Text('common traps', style='bold red'))
+            for trap in common_traps:
+                traps_branch.add(Text(str(trap), style='dim'))
+
         console.print(tree)
         console.print()
 

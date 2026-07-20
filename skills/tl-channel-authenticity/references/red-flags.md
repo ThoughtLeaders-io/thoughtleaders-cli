@@ -16,7 +16,7 @@ label only.
 | `A_per_video_outliers` | ≥⅓ of longforms >1.5σ below the channel's own like:view mean | One real audience produces consistent ratios; promoted videos don't. |
 
 Peer baseline: niche-matched (`tl channels similar`, fallback PG cohort:
-same content_category+language, active, reach ±50%, published <60d), median
+same content_category+language, active, subscribers ±50%, published <60d), median
 of each peer's last-10-longform like/comment rates. Cached 30 days.
 
 ## Group B — view-curve time-series (`anomaly_detector.py`)

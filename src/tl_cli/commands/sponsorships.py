@@ -14,12 +14,12 @@ from tl_cli.filters import parse_filters
 from tl_cli.hints import detail_hint
 from tl_cli.output.formatter import detect_format, output, output_single
 
-COLUMNS = ["sponsorship_id", "created_at", "brand_id", "brand", "channel_id", "channel", "article_id", "views", "impressions_guarantee", "status", "price", "cost", "cpm", "owner_sales_email"]
+COLUMNS = ["sponsorship_id", "created_at", "brand_id", "brand", "channel_id", "channel", "article_id", "views", "views_guarantee", "status", "price", "cost", "cpm", "owner_sales_email"]
 COLUMN_CONFIG = {
     "price": {"justify": "right"},
     "cost": {"justify": "right"},
     "views": {"justify": "right"},
-    "impressions_guarantee": {"justify": "right"},
+    "views_guarantee": {"justify": "right"},
     "cpm": {"justify": "right"},
 }
 
@@ -27,10 +27,10 @@ COLUMN_CONFIG = {
 def _format_results(results: list[dict]) -> list[dict]:
     """Clean up sponsorship results for display."""
     for row in results:
-        sd = row.get("send_date")
+        sd = row.get("scheduled_date")
         if sd and isinstance(sd, str) and "T" in sd:
-            row["send_date"] = sd[:10]
-        for field in ("price", "cost", "impressions_guarantee"):
+            row["scheduled_date"] = sd[:10]
+        for field in ("price", "cost", "views_guarantee"):
             val = row.get(field)
             if val is not None:
                 try:
@@ -56,7 +56,7 @@ def do_list(
     _EQUIVALENT_STATUSES = {
         "deal": {"deal", "sold"},
         "match": {"match", "matched"},
-        "proposal": {"proposal", "proposed", "pending", "outreach"},
+        "open": {"open", "proposal"},
     }
 
     if default_status and "status" in filters:
@@ -197,7 +197,10 @@ def create_cmd(
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Create a new sponsorship proposal (free, no credits charged).
+    """Create a new sponsorship (free, no credits charged).
+
+    Creates the sponsorship in `matched` status by default; pass a different
+    `status` in the JSON body to override.
 
     Either pass --channel and --brand (with optional --price) as flags, or
     pass a JSON body as the positional argument — never both.
@@ -230,7 +233,7 @@ def create_cmd(
                 "[red]Error:[/red] JSON body must include channel_id and brand_id."
             )
             raise typer.Exit(1)
-        body.setdefault("status", "proposed")
+        body.setdefault("status", "matched")
         do_create_body(body, fmt)
         return
 
@@ -239,7 +242,7 @@ def create_cmd(
             "[red]Error:[/red] --channel and --brand are required (or pass a JSON body)."
         )
         raise typer.Exit(1)
-    do_create(channel, brand, price, fmt, status="proposed")
+    do_create(channel, brand, price, fmt, status="matched")
 
 
 @app.command("update")

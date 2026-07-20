@@ -23,7 +23,7 @@ Column catalogue for Sponsorships reports. Each row of the saved report = one sp
 - `Rejection Reason`
 
 ### Dates
-- `Scheduled Date` — planned send date
+- `Scheduled Date` — planned scheduled date
 - `Publish Date` — actual publish
 - `Purchase Date` — when the deal was won
 - `Created`, `Last Updated`

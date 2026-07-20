@@ -69,10 +69,10 @@ Defaults: metrics-boxes → `width: 2`; histograms → `width: 3`. `height` is a
 - `duration_median_metric` (metrics-box) — median video duration
 
 ### Subscribers (channel-level)
-- `channel_reach_at_scrape_metric` (metrics-box) — total subscribers across channels
-- `channel_reach_at_scrape_histogram` (histogram) — subscriber growth over time
-- `channel_reach_at_scrape_difference_histogram` (histogram) — subscriber gains over time
-- `channel_reach_last_28_days` (metrics-box) — subscriber change last 28 days
+- `channel_subscribers_at_scrape_metric` (metrics-box) — total subscribers across channels
+- `channel_subscribers_at_scrape_histogram` (histogram) — subscriber growth over time
+- `channel_subscribers_at_scrape_difference_histogram` (histogram) — subscriber gains over time
+- `channel_subscribers_last_28_days` (metrics-box) — subscriber change last 28 days
 
 ### Channel total views
 - `channel_total_views_at_scrape_metric` (metrics-box) — total channel views
@@ -97,11 +97,11 @@ Defaults: metrics-boxes → `width: 2`; histograms → `width: 3`. `height` is a
 
 ### Core sponsorships
 - `count_sponsorships` (metrics-box) — total sponsorship count
-- `count_sponsorships_over_send_date` (histogram) — sponsorships scheduled over time
+- `count_sponsorships_over_scheduled_date` (histogram) — sponsorships scheduled over time
 - `count_sponsorships_over_purchase_date` (histogram) — sponsorships purchased over time
 - `sum_cost` (metrics-box) — total cost
 - `sum_price` (metrics-box) — total price
-- `sum_price_over_send_date` (histogram) — price scheduled over time
+- `sum_price_over_scheduled_date` (histogram) — price scheduled over time
 - `sum_price_over_purchase_date` (histogram) — price purchased over time
 - `sum_profit` (metrics-box) — net profit (`price - cost`)
 - `sum_impression` (metrics-box) — total projected views
@@ -139,7 +139,7 @@ Per-widget `type`/`width`/`height` follow the global defaults above (metrics-box
 
 **Type 2 (BRANDS)** — 1. `brands_count_metric` (M), 2. `total` (M), 3. `views_sum_metric` (M), 4. `brands_count_histogram` (H), 5. `views_sum_histogram` (H)
 
-**Type 3 (CHANNELS)** — 1. `channels_count_metric` (M), 2. `channel_reach_at_scrape_metric` (M), 3. `views_avg_metric` (M), 4. `channel_reach_at_scrape_histogram` (H), 5. `uploads_histogram` (H)
+**Type 3 (CHANNELS)** — 1. `channels_count_metric` (M), 2. `channel_subscribers_at_scrape_metric` (M), 3. `views_avg_metric` (M), 4. `channel_subscribers_at_scrape_histogram` (H), 5. `uploads_histogram` (H)
 
 **Type 8 (SPONSORSHIPS)** — 1. `count_sponsorships` (M), 2. `sum_price` (M), 3. `count_channels` (M), 4. `count_sponsorships_over_<axis>` (H), 5. `sum_price_over_<axis>` (H). `<axis>` per branching table below.
 
@@ -149,24 +149,24 @@ Per-widget `type`/`width`/`height` follow the global defaults above (metrics-box
 
 | Report type | Intent | Adjustment |
 |---|---|---|
-| Type 3 | outreach / product placements | Add `sponsored_brands_count_metric`; consider swapping a histogram for `channel_reach_at_scrape_difference_histogram` |
+| Type 3 | outreach / product placements | Add `sponsored_brands_count_metric`; consider swapping a histogram for `channel_subscribers_at_scrape_difference_histogram` |
 | Type 1 | engagement focus | Replace `views_avg_metric` with `likes_sum_metric` or `comments_avg_metric`; consider `views_30_avg_histogram` |
 | Type 1 | sponsor-surfacing | Add `sponsored_brands_count_metric`; keep `total` + `views_sum_metric` for context |
 | Type 2 | recency / momentum | Add `publication_date_max_metric` (surfaces "last mention") |
-| Type 8 | pipeline / forecasting | Axis: `send_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_impression` |
+| Type 8 | pipeline / forecasting | Axis: `scheduled_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_impression` |
 | Type 8 | won deals review | Axis: `purchase_date`. Metrics: `count_sponsorships`, `sum_price`, `sum_revenue`, `sum_profit` |
 | Type 8 | performance / ROI | Replace one histogram with `count_sponsorships_over_performance_grade` (`histogram-category`). Metrics emphasize `roas`, `avg_cpv`, `sum_revenue` |
 | Type 8 | assets / drafts QA | Replace value metrics with `count_sponsorships_where_published`, `_where_unpublished`, `_where_assets_are_incomplete`, `_where_draft_is_missing`. Drop or keep one histogram |
 
 ## Type-8 axis branching
 
-Two date axes — `send_date` (scheduled) and `purchase_date` (won). Histograms branch on deal stage:
+Two date axes — `scheduled_date` (scheduled) and `purchase_date` (won). Histograms branch on deal stage:
 
 | `filters_json.publish_status` includes | Use axis |
 |---|---|
-| Pre-sale (0, 2, 6, 7, 8) | `send_date` (pipeline view) |
+| Pre-sale (7, 10) — matched / open | `scheduled_date` (pipeline view) |
 | Sold (3) only | `purchase_date` (won-deals view) |
-| Mix of pre-sale + sold | `send_date` (pipeline view dominates) |
+| Mix of pre-sale + sold | `scheduled_date` (pipeline view dominates) |
 | Performance grades (winners/losers) | `purchase_date` |
 
 Both `_over_<axis>` histograms in the same report use the SAME axis — don't mix within one report.

@@ -22,6 +22,7 @@ from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
 from tl_cli.commands.matches import app as matches_app
+from tl_cli.commands.profiles import app as profiles_app
 from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.recommender import app as recommender_app
 from tl_cli.commands.sponsorships import app as sponsorships_app
@@ -29,7 +30,9 @@ from tl_cli.commands.describe import app as describe_app
 from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
+from tl_cli.commands.workflows import app as workflows_app
 from tl_cli.commands.setup import app as setup_app
+from tl_cli.commands.skills import app as skills_app, check_skill_staleness
 from tl_cli.commands.snapshots import app as snapshots_app
 from tl_cli.commands.uploads import app as uploads_app
 from tl_cli.commands.whoami import app as whoami_app
@@ -80,10 +83,18 @@ def main(
         for warn in check_plugin_version():
             Console(stderr=True).print(f"[yellow]{warn}[/yellow]")
 
+    # Skip for `skill` invocations themselves — the staleness nag would be
+    # noise while the user is already running the command that fixes it.
+    if "skill" not in sys.argv:
+        warn = check_skill_staleness()
+        if warn:
+            Console(stderr=True).print(f"[yellow]{warn}[/yellow]")
+
 
 # System
 app.add_typer(auth_app, name="auth")
 app.add_typer(setup_app, name="setup")
+app.add_typer(skills_app, name="skill")
 
 # Data commands (primary interface)
 app.add_typer(sponsorships_app, name="sponsorships")
@@ -93,9 +104,11 @@ app.add_typer(deals_app, name="deals")
 app.add_typer(uploads_app, name="uploads")
 app.add_typer(channels_app, name="channels")
 app.add_typer(brands_app, name="brands")
+app.add_typer(profiles_app, name="profiles")
 app.add_typer(recommender_app, name="recommender")
 app.add_typer(snapshots_app, name="snapshots")
 app.add_typer(reports_app, name="reports")
+app.add_typer(workflows_app, name="workflow")
 # Direct command (not a sub-Typer) so `tl bulk-import <entity> --campaign <id>`
 # parses ENTITY as the positional and --campaign as a command option, instead
 # of Typer treating `--campaign` as a group-level flag that has to come first.

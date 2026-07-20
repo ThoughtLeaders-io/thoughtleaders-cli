@@ -23,7 +23,7 @@ class TestParseFilters:
         assert parse_filters([]) == {}
 
     def test_hyphenated_key(self):
-        assert parse_filters(["send-date-start:2026-01"]) == {"send-date-start": "2026-01"}
+        assert parse_filters(["scheduled-date-start:2026-01"]) == {"scheduled-date-start": "2026-01"}
 
     def test_empty_value(self):
         # Empty value is valid — endpoints interpret it (e.g. owner-sales: = unassigned)
