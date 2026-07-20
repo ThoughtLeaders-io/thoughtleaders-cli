@@ -7,7 +7,7 @@ workflows that break the way hand-built ones do.
 
 ## A stage IS a Report
 
-- A **Workflow** has a `name`, a `report_type` (channels / brands / uploads /
+- A **Workflow** has a `name`, a `report_type` (content / brands / channels /
   sponsorships), an `owner`, and an ordered set of **steps**.
 - **There is no separate "step" / "stage" object.** A step *is* a `Campaign`
   (the platform's word for a saved Report), linked to the workflow by a
