@@ -106,6 +106,9 @@ def create_workflow(
     if not isinstance(steps, list) or not steps:
         err.print("[red]Blueprint needs a non-empty 'steps' list.[/red]")
         raise typer.Exit(1)
+    if not all(isinstance(step, dict) for step in steps):
+        err.print("[red]Each step in 'steps' must be a JSON object, e.g. {\"title\": \"Sourced\"}.[/red]")
+        raise typer.Exit(1)
 
     payload = {"name": wf_name, "report_type": rt, "steps": steps}
 
