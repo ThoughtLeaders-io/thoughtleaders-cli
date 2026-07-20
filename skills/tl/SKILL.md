@@ -251,9 +251,8 @@ contact field:
 
 The channel's full email archive (`all_emails` — a JSON object keyed by email address,
 each value recording when and where the address was found) is **not editable here**;
-sending it returns a 400. It is append-only: new addresses are added with the
-internal CLI's `tl-internal channels add-email` command (superuser-only), which never
-modifies or removes existing entries.
+sending it returns a 400. It is append-only and managed through an internal-only
+process that never modifies or removes existing entries — not available via this CLI.
 
 **Profile notes.** `tl profiles update` (superuser only) edits a brand/publisher profile's
 **`superuser_notes`** — the internal free-text notes field on the customer record
@@ -502,6 +501,21 @@ tl changelog v0.4.17 v0.4.18           # Notes for explicit versions
 tl changelog since v0.4.10             # Notes from v0.4.10 to latest
 tl changelog --md > CHANGELOG.md       # Capture for a doc
 ```
+
+#### Distributed skills — beyond the bundled set
+
+An organization can be granted additional skills that aren't part of a CLI release. `tl skill` fetches and installs them on demand into the same directories `tl setup` uses (Claude Code's standalone skills directory, OpenCode's skills directory, and the directory shared by Gemini and Codex), so every supported agent picks them up automatically — no restart or reconfiguration needed beyond re-reading the skill listing.
+
+```bash
+tl skill list                          # Skills available to your org, with installed/latest versions (free)
+tl skill list --all                    # Full catalog (full-access accounts only)
+tl skill download <name>                # Fetch and install into every AI-agent skill directory on this machine
+tl skill download <name> --force        # Overwrite a directory tl doesn't already manage
+tl skill update                         # Refresh every downloaded skill to its latest version
+tl skill remove <name>                  # Uninstall a downloaded skill
+```
+
+If a user asks to find, add, or refresh a skill by capability ("is there a skill for X", "get me the latest Y skill"), check `tl skill list` before saying no — the bundled set isn't the whole catalog. `tl skill download` never overwrites a directory it doesn't already manage unless `--force` is passed, so it's safe to run without clobbering a manually-installed skill of the same name. `tl` warns once a day, on any command, when a downloaded skill has a newer version available — surface that nag to the user rather than silently ignoring it, and offer to run `tl skill update`.
 
 #### Channel & video discovery — pick the path for the question shape
 
