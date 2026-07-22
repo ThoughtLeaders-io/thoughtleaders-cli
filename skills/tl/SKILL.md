@@ -217,6 +217,8 @@ tl snapshots channel <id>              # Channel metrics over time (Firebolt-bac
 tl snapshots video <id> --channel <id> # Video view curve (--channel required!)
 tl reports                             # List saved reports
 tl reports run <id>                    # Run a saved report
+tl reports link <id> --source <id> --entity <e> [--type include|exclude] [--source-side included|excluded]  # Link another report in as a live entity source
+tl reports unlink <id> --source <id> [--entity <e>] [--type include|exclude]  # Remove report links (all from that source unless narrowed)
 tl <entity> comment-list <id>          # List comments on a sponsorship/channel/brand/upload
 tl <entity> comment-add <id> "msg"     # Add a comment
 tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser)
@@ -260,6 +262,28 @@ process that never modifies or removes existing entries — not available via th
 clear. This is currently the only editable profile field; anything else returns a 400 listing
 the editable surface. Use it for account-handling notes meant for the internal team — it is
 never shown to the customer.
+
+**Report linking.** `tl reports link` attaches another report to a report as a **live**
+include/exclude entity source — the target report's results are filtered by the source
+report's entities (channels, brands, articles, or sponsorships) and stay in sync as the
+source changes. This is the "include/exclude entities from another report" feature the
+web UI offers, and it differs from `tl bulk-import`, which copies a **frozen snapshot**
+of IDs. `--type` defaults to `include`; `--source-side` defaults to `included` (pass
+`excluded` to pull the source report's excluded entities instead of its results).
+Requires owning the target report (or full access), and the source report must be
+visible to you. Linking a report to itself, an exact duplicate link, or an unknown key
+comes back as a 400.
+
+`tl reports unlink` removes links: with only `--source`, every link pulling from that
+source report is removed; add `--entity` and/or `--type` to remove just the matching
+one. No matching link comes back as a 404, never a silent no-op.
+
+```bash
+tl reports link 1234 --source 5678 --entity channels                 # include source's channels
+tl reports link 1234 --source 5678 --entity brands --type exclude    # exclude source's brands
+tl reports unlink 1234 --source 5678                                 # remove all links from 5678
+tl reports unlink 1234 --source 5678 --entity brands --type exclude  # remove one specific link
+```
 
 ### Creating and vetting sponsorships
 
