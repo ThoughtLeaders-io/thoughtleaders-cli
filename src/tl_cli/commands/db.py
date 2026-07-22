@@ -99,9 +99,11 @@ def pg_cmd(
     Common traps — check before writing SQL:
 
     - Column names follow the current schema: subscribers, projected_views,
-      scheduled_date, is_tpp, advertiser_profile_id, views_guarantee — NOT the
-      older reach / impression / send_date / is_tl_channel / creator_profile_id
-      / impressions_guarantee.
+      scheduled_date, is_tpp, advertiser_profile_id, views_guarantee, url (the
+      channel's own URL) — NOT the older reach / impression / send_date /
+      is_tl_channel / creator_profile_id / impressions_guarantee / channel_url.
+    - thoughtleaders_adlink has no bare `url` column — the live sponsored-video
+      URL is `media_url`.
     - The sponsorship table (thoughtleaders_adlink) hides its relations behind
       joins: no channel_id/channel_name (join thoughtleaders_adspot via
       ad_spot_id, then thoughtleaders_channel) and no brand_id (join
