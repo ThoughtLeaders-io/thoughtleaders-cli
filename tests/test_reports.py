@@ -215,3 +215,54 @@ class TestUpdateArgValidation:
         result = runner.invoke(app, ["update", "12345", '"just a string"'])
         assert result.exit_code == 1
         assert "json object" in (result.stderr or result.output).lower()
+
+
+# ---------------------------------------------------------------------------
+# tl reports link / unlink — argument validation
+# ---------------------------------------------------------------------------
+
+
+class TestLinkArgValidation:
+    def test_invalid_entity_rejected(self) -> None:
+        result = runner.invoke(app, ["link", "1", "--source", "2", "--entity", "widgets"])
+        assert result.exit_code == 2
+        assert "entity" in result.output
+
+    def test_invalid_type_rejected(self) -> None:
+        result = runner.invoke(
+            app, ["link", "1", "--source", "2", "--entity", "channels", "--type", "maybe"]
+        )
+        assert result.exit_code == 2
+        assert "type" in result.output
+
+    def test_invalid_source_side_rejected(self) -> None:
+        result = runner.invoke(
+            app,
+            ["link", "1", "--source", "2", "--entity", "channels", "--source-side", "both"],
+        )
+        assert result.exit_code == 2
+        assert "source-side" in result.output
+
+    def test_source_required(self) -> None:
+        result = runner.invoke(app, ["link", "1", "--entity", "channels"])
+        assert result.exit_code == 2
+
+    def test_entity_required(self) -> None:
+        result = runner.invoke(app, ["link", "1", "--source", "2"])
+        assert result.exit_code == 2
+
+
+class TestUnlinkArgValidation:
+    def test_invalid_entity_rejected(self) -> None:
+        result = runner.invoke(app, ["unlink", "1", "--source", "2", "--entity", "widgets"])
+        assert result.exit_code == 2
+        assert "entity" in result.output
+
+    def test_invalid_type_rejected(self) -> None:
+        result = runner.invoke(app, ["unlink", "1", "--source", "2", "--type", "maybe"])
+        assert result.exit_code == 2
+        assert "type" in result.output
+
+    def test_source_required(self) -> None:
+        result = runner.invoke(app, ["unlink", "1"])
+        assert result.exit_code == 2

@@ -672,3 +672,109 @@ def update_report(
         handle_api_error(e)
     finally:
         client.close()
+
+
+LINK_ENTITIES = ("channels", "brands", "articles", "sponsorships")
+LINK_TYPES = ("include", "exclude")
+LINK_SOURCE_SIDES = ("included", "excluded")
+
+
+@app.command("link")
+def link_report(
+    report_id: int = typer.Argument(..., help="Target report ID (the report being filtered)"),
+    source: int = typer.Option(..., "--source", "-s", help="Source report ID whose entities are pulled in"),
+    entity: str = typer.Option(..., "--entity", "-e", help=f"Entity type: one of {', '.join(LINK_ENTITIES)}"),
+    filter_type: str = typer.Option(
+        "include", "--type", "-t", help="How the source acts on the target: include or exclude"
+    ),
+    source_side: str = typer.Option(
+        "included",
+        "--source-side",
+        help="Pull the source report's results ('included', default) or its excluded entities ('excluded')",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Link another report into this report as an include/exclude entity source.
+
+    The target report's results are then filtered by the source report's
+    entities of the given type — the same linking the web UI offers, kept
+    in sync automatically (unlike a bulk-import snapshot).
+
+    Examples:
+        tl reports link 1234 --source 5678 --entity channels --type include
+        tl reports link 1234 --source 5678 --entity brands --type exclude
+    """
+    if entity not in LINK_ENTITIES:
+        err.print(f"[red]--entity must be one of: {', '.join(LINK_ENTITIES)}[/red]")
+        raise typer.Exit(2)
+    if filter_type not in LINK_TYPES:
+        err.print(f"[red]--type must be one of: {', '.join(LINK_TYPES)}[/red]")
+        raise typer.Exit(2)
+    if source_side not in LINK_SOURCE_SIDES:
+        err.print(f"[red]--source-side must be one of: {', '.join(LINK_SOURCE_SIDES)}[/red]")
+        raise typer.Exit(2)
+
+    fmt = detect_format(json_output, False, False, toon_output)
+    client = get_client()
+    try:
+        data = client.post(
+            f"/reports/{report_id}/link",
+            json_body={
+                "source_report_id": source,
+                "entity": entity,
+                "filter_type": filter_type,
+                "campaign_entity_type": source_side,
+            },
+        )
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
+
+
+@app.command("unlink")
+def unlink_report(
+    report_id: int = typer.Argument(..., help="Target report ID (the report holding the link)"),
+    source: int = typer.Option(..., "--source", "-s", help="Source report ID to unlink"),
+    entity: str | None = typer.Option(
+        None, "--entity", "-e", help=f"Only remove links of this entity type: one of {', '.join(LINK_ENTITIES)}"
+    ),
+    filter_type: str | None = typer.Option(
+        None, "--type", "-t", help="Only remove links of this type: include or exclude"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
+) -> None:
+    """Remove a report link created with `tl reports link`.
+
+    Without --entity/--type, removes every link pulling from the source
+    report. Narrow with --entity and/or --type to remove a specific one.
+
+    Examples:
+        tl reports unlink 1234 --source 5678
+        tl reports unlink 1234 --source 5678 --entity channels --type exclude
+    """
+    if entity is not None and entity not in LINK_ENTITIES:
+        err.print(f"[red]--entity must be one of: {', '.join(LINK_ENTITIES)}[/red]")
+        raise typer.Exit(2)
+    if filter_type is not None and filter_type not in LINK_TYPES:
+        err.print(f"[red]--type must be one of: {', '.join(LINK_TYPES)}[/red]")
+        raise typer.Exit(2)
+
+    body: dict = {"source_report_id": source}
+    if entity is not None:
+        body["entity"] = entity
+    if filter_type is not None:
+        body["filter_type"] = filter_type
+
+    fmt = detect_format(json_output, False, False, toon_output)
+    client = get_client()
+    try:
+        data = client.post(f"/reports/{report_id}/unlink", json_body=body)
+        output_single(data, fmt)
+    except ApiError as e:
+        handle_api_error(e)
+    finally:
+        client.close()
