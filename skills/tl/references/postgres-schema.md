@@ -25,6 +25,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 > - ❌ `youtube_id` (on channel) — use `external_channel_id`.
 > - ❌ `msn_join_date` (on channel) — use `media_selling_network_join_date`.
 > - ❌ `mbn_join_date` (on profile) — use `media_buying_network_join_date`.
+> - ❌ `url` — renamed to `urls` (array) by migration 0010 (2026-07-16, "AdLink.url becomes urls"). A sponsorship can carry several URLs now; use `urls` — e.g. `urls[1]` for the first entry, or `array_to_string(urls, ', ')` to flatten.
 
 #### Key Columns for the thoughtleaders_adlink table
 
@@ -58,6 +59,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | `performance_grade` | int | Performance rating (see business-glossary) |
 | `article_id` | varchar | Compound `<channel_id>:<youtube_id>` — links to ES `_id` and ES `id` field |
 | `created_where` | varchar | What mechanism / software / agent created the record |
+| `urls` | varchar(600)[] (array) | Destination/reference URLs for the sponsorship. ⚠️ Renamed from the old singular `url` column by migration 0010 (2026-07-16) — a sponsorship can carry several URLs now. Never NULL (empty array `{}` when none set). Use `urls[1]` for "the" URL when a single value is needed, or `array_to_string(urls, ', ')` to flatten for display. |
 
 #### `publish_status` Constants
 
@@ -204,7 +206,7 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 
 When composing `SELECT ... FROM thoughtleaders_channel ...`, do not improvise column names from semantic intuition — consult the output of `tl schema pg thoughtleaders_channel` or the column table above. The `tl schema` command is authoritative. Failed guesses return *"column '\<name\>' does not exist"* and cost a round-trip. Recurring problems:
 
-- Subscriber count is in the field named `subscribers`
+- ❌ `reach` — this column does NOT exist on Postgres. Use `subscribers`. (The Elasticsearch channel doc uses `reach` as a legacy alias for the same value — see [elasticsearch-schema.md](elasticsearch-schema.md) — but Postgres never had that name; don't carry the ES field name over when switching to a `tl db pg` query.)
 - Projected views is in the field named `projected_views`
 - ❌ **Suffix/qualifier variants of date columns** (e.g. an `_max` / `latest_` / `_date` form when the canonical column has neither). Date columns  use bare names.
 - ❌ **Platform-name-prefixed ID forms** (e.g. a platform-name prefix when the canonical column uses a neutral `external_` prefix). See the column table for the actual ID column.
