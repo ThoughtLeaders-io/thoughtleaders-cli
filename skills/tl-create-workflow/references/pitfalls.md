@@ -23,6 +23,12 @@ can only link reports); the in-app **Convert to workflow** flow avoids it by
 making the query report itself stage 1. Prefer Convert; use the CLI one-shot
 only with the user's explicit okay.
 
+The pitfall is *designing* this shape when you had a choice. Convert is
+superuser-only, so plenty of users don't have a choice — for them the wrapped
+entry is the correct build, and shipping it (named, so the user knows) beats
+shipping nothing. The failure is silently handing over a wrapper as if it were
+a proper entry query.
+
 ## 2. Empty pipeline
 
 Delivering a funnel whose entry stage is empty (or filled with placeholder

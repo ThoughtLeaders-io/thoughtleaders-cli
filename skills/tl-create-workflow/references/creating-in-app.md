@@ -9,6 +9,19 @@ stages — so its entry stage is a list-wrapper around the query report, which
 violates the rule. **Prefer the in-app Convert path; offer the CLI one-shot
 only if the user explicitly accepts the wrapped-entry tradeoff.**
 
+**Which path the user can actually run.** Convert is a **superuser-only** menu
+item — TL-internal accounts have it, external ones don't, and there's no CLI
+equivalent. So the choice is often made for you:
+
+| User | Path |
+|---|---|
+| Has **Convert to workflow** in the report ⋯ menu | Convert (stage 1 IS the query) |
+| Doesn't have it | `tl workflow create` — the wrapped entry is their only option. Name the tradeoff, then build. Don't stall the deliverable over a shape they can't reach. |
+
+`tl whoami` narrows it but doesn't settle it: no `full_access` means they
+certainly don't have Convert; `full_access` doesn't mean they do. If the user
+says the item isn't in their menu, that's the gate — take them to the CLI path.
+
 ## Convert in the web app (preferred — stage 1 IS the query)
 
 1. **Build + save the entry report first** so it exists as a saved **query**
@@ -17,6 +30,15 @@ only if the user explicitly accepts the wrapped-entry tradeoff.**
    the report title becomes the stage title.
 2. Open the saved entry report → **Convert to workflow** → name it. The report
    becomes **stage 1**, query filters and all — no wrapper, no nesting.
+
+   > **Convert consumes the report, and it's one-way.** The report isn't
+   > copied — it *becomes* the stage and leaves the saved-reports list. A
+   > workflow's first step can't be deleted or detached, and deleting the
+   > workflow deletes its stage reports, entry report included. If the user
+   > also wants the query to survive as a report of its own, have them
+   > **duplicate it first** and convert the duplicate. (The wrapped-entry shape
+   > is the opposite trade: uglier stage, but the query report stays a separate
+   > object.)
 3. **Add stage** for each downstream stage, in blueprint order (each is an
    empty **list**; names persist across reloads).
 4. **Link** supporting include/exclude reports where the blueprint calls for it
@@ -40,20 +62,24 @@ exclude_report_ids}`. The entry query can therefore only be *linked into*
 stage 1 (`include_report_ids: [<entryReportId>]`) — stage 1 is a list-wrapper,
 not the query itself. `tl reports update` can't fix it up afterwards either
 (filterset edits are unsupported). Until the backend lets a step *adopt* an
-existing report as the stage, use this path only with the user's explicit
-okay.
+existing report as the stage, use this path only with the user's explicit okay
+— or when Convert isn't available to them at all, in which case this is simply
+the way it gets built.
 
 ```bash
 tl workflow create --file blueprint.json        # add --yes to skip the confirm
 ```
 
-`blueprint.json`:
+`blueprint.json` — note what the first step is: **this is the wrapped entry**,
+the shape pitfall 1b names. It's what this endpoint can express, not a shape to
+copy into a Convert-path design.
 
 ```json
 {
   "name": "Q3 Creator Outreach",
   "report_type": 3,
   "steps": [
+    // ⚠ wrapped entry — an empty list stage LINKING the query report, not the query itself
     { "title": "Sourced",            "include_report_ids": [<entryReportId>], "exclude_report_ids": [] },
     { "title": "Qualify",            "include_report_ids": [], "exclude_report_ids": [] },
     { "title": "Get face on screen", "include_report_ids": [], "exclude_report_ids": [] },
@@ -61,6 +87,9 @@ tl workflow create --file blueprint.json        # add --yes to skip the confirm
   ]
 }
 ```
+
+(The `//` line and `<entryReportId>` are annotations — strip both before
+sending the file; the endpoint takes strict JSON.)
 
 - `report_type`: **1** content · **2** brands · **3** channels · **8** sponsorships.
 - Stages are created **in order**; the rest are empty **lists** channels move
