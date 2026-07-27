@@ -12,6 +12,17 @@ the entry stage is a query; everything after it is a list.** If the user wants
 to "filter" a mid-funnel stage, that's a transient **view filter** on the
 list's rows (narrow what's shown so you can bulk-select), not a query stage.
 
+## 1b. The entry query wrapped in a linked report
+
+The mirror image of pitfall 1: stage 1 built as an empty **list** that *links*
+the saved query report instead of **being** the query. The workflow "works",
+but the entry stage has no filters of its own — the real query sits one
+nesting hop away, invisible on the stage, and inherits every linked-report
+caveat. This is the shape `tl workflow create` currently produces (its steps
+can only link reports); the in-app **Convert to workflow** flow avoids it by
+making the query report itself stage 1. Prefer Convert; use the CLI one-shot
+only with the user's explicit okay.
+
 ## 2. Empty pipeline
 
 Delivering a funnel whose entry stage is empty (or filled with placeholder
@@ -47,10 +58,11 @@ reality in mind when naming/structuring stages.)
 
 ## 6. Claiming you created it
 
-The CLI can't create the Workflow object — you **design, source, and
+Unless a `tl workflow create` call actually returned a workflow (a path the
+user must explicitly okay — see pitfall 1b), you **design, source, and
 blueprint**, and the user assembles it in the app (Convert → Add stage → …).
-Never say "I created your workflow." Say "here's your populated blueprint and
-the steps to stand it up."
+Never say "I created your workflow" for a blueprint. Say "here's your
+populated blueprint and the steps to stand it up."
 
 ## 7. Too many stages
 
@@ -61,6 +73,8 @@ stop where the process stops. Every stage is a report someone has to maintain.
 ## Quick checklist
 
 - [ ] Entry stage is a **query**, populated from real data, breadth confirmed.
+- [ ] Entry stage **is** the query (own filterset) — not a list linking the
+      query report.
 - [ ] Every later stage is a **list**.
 - [ ] Nesting ≤ 1–2 layers; flat preferred.
 - [ ] Stage names are the team's real process words.

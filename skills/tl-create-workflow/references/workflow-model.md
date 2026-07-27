@@ -35,6 +35,12 @@ Why it matters for building a workflow:
 - **The entry stage should be a QUERY.** It's the pool — the funnel needs a way
   to *find* candidates, and a query does that (e.g. "channels matching this
   topic / these guide-brand look-alikes").
+- **The entry stage IS the query — its own FilterSet holds the criteria.** Do
+  not build stage 1 as an empty list that *links* a saved query report: that
+  wraps the query in a nesting layer for nothing (the wrapper has no filters of
+  its own, the real query lives one hop away, and every linked-report caveat
+  now applies to your entry stage). The in-app **Convert to workflow** flow
+  gets this right by turning the saved query report itself into stage 1.
 - **Every stage after the entry should be a LIST.** Downstream stages are where
   you *move* entities into as they progress. Moving an entity = adding it to the
   target stage's included list. A downstream stage that's a query has nothing to

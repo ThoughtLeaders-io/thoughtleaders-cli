@@ -14,9 +14,10 @@ description: >
   "build an acquisition funnel". It designs the funnel from the goal + the TL
   methodology, sources the entry stage with real data (delegating to
   tl-keyword-research / tl channels / tl recommender / guide-brand research),
-  defines each stage as a query-or-list report, and creates it with
-  "tl workflow create" (or, until the backend endpoint is deployed, hands back the
-  create-ready blueprint + in-app assembly steps). Also answers
+  defines each stage as a query-or-list report (the entry report becomes
+  stage 1 itself), and hands back the create-ready blueprint + in-app Convert
+  steps ("tl workflow create" only with explicit user okay — it wraps the
+  entry query in a linked report). Also answers
   HELP asks about how workflows work ("how do workflows work", "what's a
   query vs a list stage", "explain workflow stages") for free.
 ---
@@ -48,15 +49,28 @@ A workflow is **not a new kind of object** — every stage IS a saved Report
   single most important rule and the #1 cause of broken hand-built workflows —
   see `references/workflow-model.md` (query vs list) and
   `references/pitfalls.md`. Never make stage 2+ a query.
-- **Creating the workflow.** `tl workflow create --file <blueprint.json>` builds
-  it in one call — it POSTs `{name, report_type, steps}` to the Bearer endpoint
-  `/api/cli/v1/workflows/build` (the twin of the web builder). The command ships
-  in this repo; the endpoint ships with backend **PR #4192** — **until that is
-  deployed the command errors**, and the user stands the workflow up in the web
-  app from the blueprint (Convert → Add stage). Both paths are in
-  `references/creating-in-app.md`. **Never claim a workflow was created unless a
-  `tl workflow create` call actually returned one** — otherwise you prepared a
-  blueprint.
+- **The entry stage IS the query — never a list that links one.** The stage-1
+  campaign's **own FilterSet** must hold the filter criteria. Do not model
+  stage 1 as an empty list-stage that *links* a saved query report
+  (`include_report_ids`) — that wraps the query in a needless nesting layer and
+  breaks the stage-1-is-the-query model. You never *design* the wrapped shape;
+  it can only arise as the `tl workflow create` tradeoff below, knowingly
+  accepted by the user. The only creation path that achieves stage-1-as-query
+  today is the in-app **Convert to workflow** flow (the saved query report
+  itself becomes stage 1) — see `references/creating-in-app.md`.
+- **Creating the workflow.** The prescribed path: save the entry **query**
+  report, then the user converts it in the web app (**Convert to workflow** →
+  **Add stage** per downstream stage). `tl workflow create --file
+  <blueprint.json>` exists and works (it POSTs `{name, report_type, steps}` to
+  the Bearer endpoint `/api/cli/v1/workflows/build`, live since 2026-07), but
+  its steps only accept report *links* — it can't put the query on stage 1
+  itself, so it produces the wrapped-entry shape. Use it only if the user
+  explicitly accepts that tradeoff, and acceptance must be **informed**: name
+  the wrapped-entry shape to them first. A generic "just create it" or "one
+  command is fine" is not acceptance. Both paths are in
+  `references/creating-in-app.md`. **Never claim a workflow was created unless
+  the user confirmed the in-app conversion or a `tl workflow create` call
+  actually returned one** — otherwise you prepared a blueprint.
 - **Source with real data, never placeholder channels.** The entry stage must
   be filled from the index (delegate to `tl-keyword-research` /
   `tl channels find` / `tl recommender` / guide-brand research), never a made-up
@@ -160,6 +174,10 @@ entry — it's fine and correct for it to be a query. Populate it, eyeball the
 count and a sample, and confirm the breadth with the user (too broad → narrow
 the filter; too thin → widen), exactly like keyword-research's breadth check.
 
+This saved query report **becomes stage 1 itself** (via the in-app Convert) —
+it is not a side object that stage 1 links to. Design and name it as the stage
+("Leads", "Sourced"), because its title is the stage title.
+
 ### Stage 2 — Define the stages (query first, lists after)
 
 For each downstream stage, the report is a **list**: it starts empty and fills
@@ -196,8 +214,10 @@ so stage 1 exists as a real, openable report before assembly.
 
 ### Stage 4 — Assemble in the web app
 
-Workflows are built in-app (no CLI endpoint). Walk the user through
-`references/creating-in-app.md`:
+The in-app **Convert** flow is the prescribed assembly — it's the only path
+where the entry report becomes stage 1 itself (the CLI's `tl workflow create`
+can only *link* it into a wrapper stage; see `references/creating-in-app.md`).
+Walk the user through it:
 
 1. Open the **entry (Sourced) report** → **Convert to workflow** → name it. That
    report becomes **stage 1**.
@@ -234,12 +254,16 @@ in-app assembly costs nothing (it's the user clicking in the platform).
 2. **Stage 1 is a QUERY and it's populated** from real index data (not a
    placeholder list), with its breadth confirmed against the goal (narrowed /
    widened as needed). **Every stage after 1 is a LIST.** No stage 2+ is a query.
+   And **stage 1 IS the query** — its own filterset holds the criteria; you did
+   not design a list-stage that merely links the query report.
 3. Any **linked reports** are ≤1–2 nesting layers; you preferred a flat stage
    over a deep nest, and flagged per-stage **columns** the team acts on.
 4. The blueprint is **create-ready**: named stages, correct types, the entry
    filter summary + a working **report link**, and the in-app assembly steps.
-5. You were explicit that the **Workflow is assembled in the web app** (the CLI
-   can't create it) — you prepared it, you didn't claim to have created it.
+5. You were explicit about the creation path: **in-app Convert** (prescribed —
+   stage 1 IS the query) vs `tl workflow create` (wraps the entry query in a
+   linked report; only with the user's explicit okay) — and you didn't claim a
+   workflow was created unless one actually was.
 6. You narrated the run and its credit spend, and saved / created **nothing**
    without the user's say-so.
 7. If the user requests a diagram of the funnel, create it as an SVG graphic.

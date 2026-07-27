@@ -1,59 +1,76 @@
 # Creating the workflow
 
-**`tl workflow create` builds the workflow from a blueprint in one call** — it
+**The design rule that picks the path: the entry stage must BE the query** —
+the stage-1 campaign's own FilterSet holds the filter criteria. Today only the
+in-app **Convert to workflow** flow achieves that (the saved query report
+itself becomes stage 1). The CLI's `tl workflow create` builds a whole
+workflow in one call, but its steps can only *link* reports into fresh empty
+stages — so its entry stage is a list-wrapper around the query report, which
+violates the rule. **Prefer the in-app Convert path; offer the CLI one-shot
+only if the user explicitly accepts the wrapped-entry tradeoff.**
+
+## Convert in the web app (preferred — stage 1 IS the query)
+
+1. **Build + save the entry report first** so it exists as a saved **query**
+   report (populated by `tl-keyword-research`, `tl channels`, `tl recommender`,
+   or `tl reports create`). **Title it as the stage** ("Leads", "Sourced") —
+   the report title becomes the stage title.
+2. Open the saved entry report → **Convert to workflow** → name it. The report
+   becomes **stage 1**, query filters and all — no wrapper, no nesting.
+3. **Add stage** for each downstream stage, in blueprint order (each is an
+   empty **list**; names persist across reloads).
+4. **Link** supporting include/exclude reports where the blueprint calls for it
+   (nesting ≤1–2 layers), and set per-stage **columns** the team acts on
+   (Face On Screen, Outreach email).
+5. **Work the funnel:** on a stage, filter → select → **Move** to the next
+   stage (Move / Remove are non-destructive; moved channels leave the source
+   stage).
+
+## `tl workflow create` (one call — but the entry query gets wrapped)
+
 POSTs `{name, report_type, steps}` to the Bearer endpoint
-`/api/cli/v1/workflows/build` (the twin of the web "New Workflow" builder). The
-result is the same `Workflow` / stage-`Campaign` / `FilterSet` objects the rest of
-the platform uses, so it shows up in the web app's workflow list/detail
-immediately, where the team moves / edits / duplicates it.
+`/api/cli/v1/workflows/build` (`create_full_workflow`, the twin of the web
+"New Workflow" builder; live in production since 2026-07). One atomic call
+creates the workflow + stage campaigns + report links + the
+exclude-earlier-stages chaining, and it appears in the web app immediately.
 
-> **Availability.** The `tl workflow` command ships in this repo; the endpoint it
-> calls ships with backend **thoughtleaders PR #4192** (`create_full_workflow`).
-> Until that backend change is deployed, `tl workflow create` returns an error —
-> use the **manual in-app assembly** at the bottom of this file. The blueprint is
-> the exact same input either way, so nothing is wasted.
+**The limitation:** every stage campaign is created with a **fresh empty
+FilterSet**; steps accept only `{title, include_report_ids,
+exclude_report_ids}`. The entry query can therefore only be *linked into*
+stage 1 (`include_report_ids: [<entryReportId>]`) — stage 1 is a list-wrapper,
+not the query itself. `tl reports update` can't fix it up afterwards either
+(filterset edits are unsupported). Until the backend lets a step *adopt* an
+existing report as the stage, use this path only with the user's explicit
+okay.
 
-## Create it directly (preferred)
+```bash
+tl workflow create --file blueprint.json        # add --yes to skip the confirm
+```
 
-1. **Build + save the entry (Sourced) report first**, so it exists with an **id**.
-   It's a *query* report populated by this skill (`tl-keyword-research`,
-   `tl channels`, `tl recommender`, or `tl reports create`) and saved
-   (`tl-save-report` / `tl reports create`). This is the only stage that starts
-   with data, and it must be a saved **query** so the stage stays live.
-2. **Write the blueprint to a file** and run `tl workflow create`:
+`blueprint.json`:
 
-   ```bash
-   tl workflow create --file blueprint.json        # add --yes to skip the confirm
-   ```
+```json
+{
+  "name": "Q3 Creator Outreach",
+  "report_type": 3,
+  "steps": [
+    { "title": "Sourced",            "include_report_ids": [<entryReportId>], "exclude_report_ids": [] },
+    { "title": "Qualify",            "include_report_ids": [], "exclude_report_ids": [] },
+    { "title": "Get face on screen", "include_report_ids": [], "exclude_report_ids": [] },
+    { "title": "Reach out",          "include_report_ids": [], "exclude_report_ids": [] }
+  ]
+}
+```
 
-   `blueprint.json`:
-
-   ```json
-   {
-     "name": "Q3 Creator Outreach",
-     "report_type": 3,
-     "steps": [
-       { "title": "Sourced",            "include_report_ids": [<entryReportId>], "exclude_report_ids": [] },
-       { "title": "Qualify",            "include_report_ids": [], "exclude_report_ids": [] },
-       { "title": "Get face on screen", "include_report_ids": [], "exclude_report_ids": [] },
-       { "title": "Reach out",          "include_report_ids": [], "exclude_report_ids": [] }
-     ]
-   }
-   ```
-
-   - `report_type`: **1** content · **2** brands · **3** channels · **8** sponsorships.
-   - Stages are created **in order**; the first is the entry stage (link the saved
-     query report via `include_report_ids`), the rest are empty **lists** channels
-     move into. Keep any linked-report nesting shallow (≤1–2).
-   - Only reports you may edit are linked (others are dropped); the workflow is
-     owned by you. One atomic call creates the workflow + stage campaigns +
-     include/exclude report links + the exclude-earlier-stages chaining.
-   - Use `--config '<json>'` for inline JSON, or `--name` / `--report-type` to
-     supply/override those fields. `--json` / `--toon` for machine output.
-3. The command prints the new workflow **id** and an **"Open in app"** link
-   (`/#/workflows/<report_type>/<id>`). Hand that to the user to work the funnel:
-   on a stage, filter → bulk-select → **Move** to the next stage (Move / Remove
-   are non-destructive; moved channels leave the source stage).
+- `report_type`: **1** content · **2** brands · **3** channels · **8** sponsorships.
+- Stages are created **in order**; the rest are empty **lists** channels move
+  into. Keep any linked-report nesting shallow (≤1–2).
+- Only reports you may edit are linked (others are dropped); the workflow is
+  owned by you.
+- Use `--config '<json>'` for inline JSON, or `--name` / `--report-type` to
+  supply/override those fields. `--json` / `--toon` for machine output.
+- The command prints the new workflow **id** and an **"Open in app"** link
+  (`/#/workflows/<report_type>/<id>`).
 
 ## The endpoints (reference)
 
@@ -70,26 +87,13 @@ immediately, where the team moves / edits / duplicates it.
 Only the **build** endpoint is on the CLI's Bearer surface; the rest are the web
 app's session-authenticated management routes (used from the web UI).
 
-## Assemble it in the web app (fallback until the endpoint is live)
-
-If the build endpoint isn't deployed yet, the user stands the workflow up from
-the blueprint by hand — same design, more clicks:
-
-1. Open the saved entry report → **Convert to workflow** → name it. It becomes
-   **stage 1**.
-2. **Add stage** for each downstream stage, in blueprint order (each is an empty
-   **list**; names persist across reloads).
-3. **Link** supporting include/exclude reports where the blueprint calls for it
-   (nesting ≤1–2 layers).
-4. Set per-stage **columns** the team acts on (Face On Screen, Outreach email).
-5. **Work the funnel:** on a stage, filter → select → **Move** to the next stage.
-
 ## What to hand the user
 
 - The **entry report link** (populated, openable).
-- Either the **"Open in app" workflow link** (from `tl workflow create`) or the
-  **blueprint + in-app assembly steps** (fallback).
+- Either the **blueprint + in-app Convert steps** (preferred) or the **"Open in
+  app" workflow link** (if the user chose the `tl workflow create` shortcut).
 - The one-line "how to work the funnel": *filter a stage → select → Move to next.*
 
-Never claim a workflow was created unless a `tl workflow create` call actually
-returned one — otherwise you prepared a blueprint.
+Never claim a workflow was created unless the user confirmed the in-app
+conversion or a `tl workflow create` call actually returned one — otherwise you
+prepared a blueprint.
