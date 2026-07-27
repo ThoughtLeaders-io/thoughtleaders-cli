@@ -8,12 +8,14 @@ pipeline (stages + linked reports + exclude-earlier chaining) in one atomic call
 and returns the workflow. The result shows up in the web app's workflow
 list/detail immediately.
 
-One shape caveat: every stage is created with a fresh empty FilterSet, and steps
-accept only report *links*. So the entry query can only be linked *into* stage 1,
-never held *by* it — the entry stage is a list-wrapper around the query report.
-The in-app "Convert to workflow" flow (superuser-only) is the path that makes the
-saved query report itself stage 1. See the `tl-create-workflow` skill: design +
-source the entry report there, then feed the blueprint here.
+One shape caveat, and it matters: every stage is created with a fresh empty
+FilterSet, and steps accept only report *links*. A link contributes the entities
+explicitly listed on the linked report — it does not run that report's query. So
+linking a LIST report into stage 1 works (its channels land there), but linking a
+QUERY report contributes nothing and stage 1 renders empty. The in-app "Convert to
+workflow" flow (superuser-only) is the only path that makes a saved query report
+itself stage 1. See the `tl-create-workflow` skill: design + source the entry
+report there, then feed the blueprint here.
 """
 
 import json
@@ -69,10 +71,11 @@ def create_workflow(
     Only reports you may edit are linked (others are dropped); the workflow is
     owned by you. Later stages start empty and fill by moving.
 
-    Note the entry stage: linking a saved query report (as "Sourced" does above)
-    wraps the query in an empty list stage rather than putting it *on* the stage,
-    which this endpoint can't do. If you have "Convert to workflow" in the web
-    app, that path makes the query report itself stage 1 — prefer it. See the
+    Note the entry stage: a linked report contributes only the entities listed on
+    it, never its query results. Linking a LIST report (as "Sourced" does above)
+    puts those channels on stage 1. Linking a QUERY report contributes nothing and
+    stage 1 comes out EMPTY — for a live-query entry use "Convert to workflow" in
+    the web app instead, which makes the query report itself stage 1. See the
     tl-create-workflow skill.
 
     Examples:

@@ -16,8 +16,8 @@ description: >
   tl-keyword-research / tl channels / tl recommender / guide-brand research),
   defines each stage as a query-or-list report (the entry report becomes
   stage 1 itself), and hands back the create-ready blueprint + in-app Convert
-  steps ("tl workflow create" only with explicit user okay — it wraps the
-  entry query in a linked report). Also answers
+  steps ("tl workflow create" only for a list entry — a linked query entry
+  renders stage 1 empty). Also answers
   HELP asks about how workflows work ("how do workflows work", "what's a
   query vs a list stage", "explain workflow stages") for free.
 ---
@@ -71,13 +71,27 @@ A workflow is **not a new kind of object** — every stage IS a saved Report
   `references/creating-in-app.md`. **Never claim a workflow was created unless
   the user confirmed the in-app conversion or a `tl workflow create` call
   actually returned one** — otherwise you prepared a blueprint.
+- **A wrapped QUERY entry doesn't just look wrong — it comes out empty.** A
+  linked report contributes only the entities *explicitly listed* on it; the
+  linked report's **query is never run**. So a stage-1 wrapper linking a query
+  report contributes nothing, the stage ends up with no positive filter at all,
+  and a workflow stage with no positive filter resolves to **zero rows** (the
+  platform's guard against an emptied list stage matching the whole index).
+  Stage 1 renders empty. This is why the rule above is a rule and not a
+  preference.
+- **So `tl workflow create` can only build a LIST entry.** Link a list-style
+  report (one holding explicit channels) and stage 1 works — frozen, not live,
+  but populated. Link a query report and stage 1 is empty. Never hand over the
+  second one.
 - **Convert isn't available to everyone — check before you prescribe it.**
-  **Convert to workflow** is a TL-internal menu item (superuser accounts only).
-  Users without it have exactly one executable path: `tl workflow create`, i.e.
-  the wrapped entry. For them the wrapped shape is the *correct* answer — still
-  name it so the choice is informed, then build. Don't send a user hunting for
-  a button that isn't in their menu, and don't withhold the workflow because
-  the ideal shape is out of reach.
+  **Convert to workflow** is a TL-internal menu item (superuser accounts only),
+  and so is `tl bulk-import`. A user without them, who needs a **live query**
+  entry, cannot get a working workflow built today by any route — say so
+  plainly rather than shipping a wrapper that renders empty. Deliver the
+  designed funnel and the populated entry report (both real and useful), and
+  name what's missing: Convert access, or backend step-adoption. Don't send
+  someone hunting for a button that isn't in their menu, and don't paper over
+  the gap with `tl workflow create`.
 - **Convert consumes the entry report.** It doesn't copy — the saved report
   *becomes* stage 1 and stops being a standalone report. It can't be detached
   (a workflow's first step can't be deleted), and deleting the workflow deletes
@@ -105,8 +119,9 @@ No `full_access` in `tl whoami` means **Convert to workflow** is definitely not
 in their report menu. `full_access` doesn't guarantee it either (the menu item
 is superuser-only, and full access is the wider group), so if the user says
 they can't find **Convert to workflow** in the report's ⋯ menu, believe them —
-that's the gate, not a mistake. Switch to `tl workflow create` and name the
-wrapped-entry tradeoff.
+that's the gate, not a mistake. What you do next depends on the entry stage: a
+**list** entry can still be built with `tl workflow create`; a **live query**
+entry can't be built at all without Convert. Say which one they're in.
 
 ## When to invoke / skip
 
@@ -239,9 +254,11 @@ so stage 1 exists as a real, openable report before assembly.
 The in-app **Convert** flow is the prescribed assembly — it's the only path
 where the entry report becomes stage 1 itself (the CLI's `tl workflow create`
 can only *link* it into a wrapper stage; see `references/creating-in-app.md`).
-It's also **superuser-only**: if the user has no **Convert to workflow** item
-in the report's ⋯ menu, don't walk them through this — go to
-`tl workflow create`, name the wrapped-entry tradeoff, and build.
+It's also **superuser-only**. If the user has no **Convert to workflow** item in
+the report's ⋯ menu, don't walk them through this — and don't substitute
+`tl workflow create` with a query entry, which renders an empty stage 1. Either
+their entry is a list (build it with `tl workflow create`) or they need Convert
+access; tell them which.
 
 Walk the user through it:
 
@@ -289,9 +306,10 @@ in-app assembly costs nothing (it's the user clicking in the platform).
    filter summary + a working **report link**, and the in-app assembly steps.
 5. You were explicit about the creation path: **in-app Convert** (prescribed —
    stage 1 IS the query, superuser-only, and it consumes the entry report) vs
-   `tl workflow create` (wraps the entry query in a linked report; only with
-   the user's explicit okay) — you picked the one the user can actually run,
-   and you didn't claim a workflow was created unless one actually was.
+   `tl workflow create` (usable only for a **list** entry; a linked query entry
+   renders stage 1 empty) — you picked the one the user can actually run, you
+   said so when neither was reachable, and you didn't claim a workflow was
+   created unless one actually was.
 6. You narrated the run and its credit spend, and saved / created **nothing**
    without the user's say-so.
 7. If the user requests a diagram of the funnel, create it as an SVG graphic.

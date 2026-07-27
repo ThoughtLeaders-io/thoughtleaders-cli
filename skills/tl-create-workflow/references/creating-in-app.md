@@ -9,18 +9,31 @@ stages — so its entry stage is a list-wrapper around the query report, which
 violates the rule. **Prefer the in-app Convert path; offer the CLI one-shot
 only if the user explicitly accepts the wrapped-entry tradeoff.**
 
+**Why the wrapped entry isn't merely ugly — it's empty.** A linked report
+contributes only the entities *explicitly listed* on it (its channels, brands,
+articles, sponsorships). The linked report's **query is never executed**. So a
+stage-1 wrapper linking a *query* report contributes nothing at all; the stage
+is left with no positive filter; and a workflow stage with no positive filter
+resolves to **zero rows** — the platform's guard against an emptied list stage
+matching the entire index. The funnel exists and its entrance is blank.
+
+Link a **list** report (one holding explicit channels) and it does work: those
+channels land on stage 1. Frozen rather than live, but populated. That is the
+only entry shape `tl workflow create` can actually deliver.
+
 **Which path the user can actually run.** Convert is a **superuser-only** menu
 item — TL-internal accounts have it, external ones don't, and there's no CLI
-equivalent. So the choice is often made for you:
+equivalent (`tl bulk-import` is superuser-only too).
 
-| User | Path |
+| Situation | Path |
 |---|---|
-| Has **Convert to workflow** in the report ⋯ menu | Convert (stage 1 IS the query) |
-| Doesn't have it | `tl workflow create` — the wrapped entry is their only option. Name the tradeoff, then build. Don't stall the deliverable over a shape they can't reach. |
+| Has **Convert to workflow** | Convert — stage 1 IS the query. Prescribed. |
+| No Convert, entry is a **list** (a known shortlist) | `tl workflow create` linking that list report. Works; say that the entry won't refresh itself. |
+| No Convert, entry must be a **live query** | **Can't be built today.** Hand over the design + the populated entry report, and name the blocker: Convert access, or backend step-adoption. Do not ship a wrapped query entry — it renders empty. |
 
 `tl whoami` narrows it but doesn't settle it: no `full_access` means they
 certainly don't have Convert; `full_access` doesn't mean they do. If the user
-says the item isn't in their menu, that's the gate — take them to the CLI path.
+says the item isn't in their menu, that's the gate.
 
 ## Convert in the web app (preferred — stage 1 IS the query)
 
@@ -61,10 +74,12 @@ FilterSet**; steps accept only `{title, include_report_ids,
 exclude_report_ids}`. The entry query can therefore only be *linked into*
 stage 1 (`include_report_ids: [<entryReportId>]`) — stage 1 is a list-wrapper,
 not the query itself. `tl reports update` can't fix it up afterwards either
-(filterset edits are unsupported). Until the backend lets a step *adopt* an
-existing report as the stage, use this path only with the user's explicit okay
-— or when Convert isn't available to them at all, in which case this is simply
-the way it gets built.
+(filterset edits are unsupported).
+
+**So: only link a list report here.** Linking a query report produces an empty
+stage 1 for the reason above. Until the backend lets a step *adopt* an existing
+report as the stage, a live-query entry cannot be built through this command at
+all — that's a Convert-only shape.
 
 ```bash
 tl workflow create --file blueprint.json        # add --yes to skip the confirm
@@ -72,14 +87,16 @@ tl workflow create --file blueprint.json        # add --yes to skip the confirm
 
 `blueprint.json` — note what the first step is: **this is the wrapped entry**,
 the shape pitfall 1b names. It's what this endpoint can express, not a shape to
-copy into a Convert-path design.
+copy into a Convert-path design — and `<entryReportId>` must be a **list**
+report, or stage 1 renders empty.
 
 ```json
 {
   "name": "Q3 Creator Outreach",
   "report_type": 3,
   "steps": [
-    // ⚠ wrapped entry — an empty list stage LINKING the query report, not the query itself
+    // ⚠ wrapped entry — an empty list stage LINKING the entry report, not the query itself.
+    //   Only works if <entryReportId> is a LIST report. A query report yields an empty stage.
     { "title": "Sourced",            "include_report_ids": [<entryReportId>], "exclude_report_ids": [] },
     { "title": "Qualify",            "include_report_ids": [], "exclude_report_ids": [] },
     { "title": "Get face on screen", "include_report_ids": [], "exclude_report_ids": [] },

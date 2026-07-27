@@ -15,19 +15,24 @@ list's rows (narrow what's shown so you can bulk-select), not a query stage.
 ## 1b. The entry query wrapped in a linked report
 
 The mirror image of pitfall 1: stage 1 built as an empty **list** that *links*
-the saved query report instead of **being** the query. The workflow "works",
-but the entry stage has no filters of its own — the real query sits one
-nesting hop away, invisible on the stage, and inherits every linked-report
-caveat. This is the shape `tl workflow create` currently produces (its steps
-can only link reports); the in-app **Convert to workflow** flow avoids it by
-making the query report itself stage 1. Prefer Convert; use the CLI one-shot
-only with the user's explicit okay.
+the saved query report instead of **being** the query. This is the shape
+`tl workflow create` produces (its steps can only link reports); the in-app
+**Convert to workflow** flow avoids it by making the query report itself
+stage 1.
 
-The pitfall is *designing* this shape when you had a choice. Convert is
-superuser-only, so plenty of users don't have a choice — for them the wrapped
-entry is the correct build, and shipping it (named, so the user knows) beats
-shipping nothing. The failure is silently handing over a wrapper as if it were
-a proper entry query.
+It doesn't degrade gracefully — **it renders empty.** A linked report
+contributes only the entities explicitly listed on it; its query is never run.
+Link a query report and the wrapper gets nothing, leaving the stage with no
+positive filter, and a workflow stage with no positive filter resolves to zero
+rows (the guard that stops an emptied list stage from matching the whole
+index). You ship a funnel with a blank entrance.
+
+Linking a **list** report is fine — those channels do land on stage 1. It's
+frozen rather than live, which is a real tradeoff to name, not a defect.
+
+So: wrapped + list = a working compromise. Wrapped + query = broken, never hand
+it over. If the user needs a live query entry and has no Convert, the honest
+answer is that it can't be built yet — see pitfall 6.
 
 ## 2. Empty pipeline
 
@@ -80,7 +85,8 @@ stop where the process stops. Every stage is a report someone has to maintain.
 
 - [ ] Entry stage is a **query**, populated from real data, breadth confirmed.
 - [ ] Entry stage **is** the query (own filterset) — not a list linking the
-      query report.
+      query report. If it links one, that report is a **list**, never a query.
+- [ ] You opened stage 1 and it has rows in it.
 - [ ] Every later stage is a **list**.
 - [ ] Nesting ≤ 1–2 layers; flat preferred.
 - [ ] Stage names are the team's real process words.
