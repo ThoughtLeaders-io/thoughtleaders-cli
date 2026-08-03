@@ -285,6 +285,35 @@ tl reports unlink 1234 --source 5678                                 # remove al
 tl reports unlink 1234 --source 5678 --entity brands --type exclude  # remove one specific link
 ```
 
+### Profile memory
+
+`profile_memory` is the free-text summary of who a user is and what they want from
+sponsorships. The onboarding interview writes it first; `tl memory` keeps it current
+afterwards. **This is the standard way to update user data** — prefer it over any
+direct database write.
+
+```bash
+tl memory show                            # Your memory + the preferences derived from it (free)
+tl memory show --profile-id <id>          # Someone else's memory (full-access only) (free)
+tl memory add "<fact>"                    # Fold one new fact in — the server merges it (free)
+tl memory set "<blob>"                    # Replace the memory wholesale (free)
+tl memory set --from-file <path>          # Same, reading the text from a file (free)
+```
+
+Examples:
+```bash
+tl memory show --profile-id 8871
+tl memory add "Stopped doing finance ads. Now targeting 18-24 in the US."
+tl memory set --from-file ./memory.txt
+```
+
+`add` is the verb to reach for almost every time: the server merges the new fact into
+the existing memory, keeping what's still true and replacing only what the fact
+contradicts. `set` replaces the memory wholesale and, unlike `add`, isn't length-guarded
+— treat it as the repair hatch for when a merge has damaged a memory, not as a routine
+update path. `add` and `set` always write to the **caller's own** profile regardless of
+permissions; only `show --profile-id` can reach someone else's, and that's full-access only.
+
 ### Creating and vetting sponsorships
 
 This is the end-to-end workflow for proposing a sponsorship, then moving it through the funnel as the two sides respond. Three create commands plus `tl sponsorships update` cover every state transition the CLI exposes.
