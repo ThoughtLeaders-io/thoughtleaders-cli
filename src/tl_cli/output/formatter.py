@@ -14,6 +14,7 @@ import sys
 
 from pytoon import encode as toon_encode
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 # Stderr console for status messages (never pollutes piped data)
@@ -389,7 +390,10 @@ def _output_detail(record: dict) -> None:
         else:
             display = value
         label = f"[bold]{key:<{max_key_len}}[/bold]"
-        console.print(f"  {label}  {display}")
+        # Values are data, never markup. A free-text field holding a square-bracketed
+        # token ("[/finance]") is otherwise read as a Rich tag and either swallows the
+        # word or aborts the whole command with a markup error.
+        console.print(f"  {label}  {rich_escape(str(display))}")
 
     for key, rows in nested_items:
         console.print(f"\n  [bold]{key}[/bold] ({len(rows)}):")

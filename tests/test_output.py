@@ -14,6 +14,7 @@ from tl_cli.output.formatter import (
     _output_markdown,
     _sanitize_for_json,
     detect_format,
+    output_single,
 )
 
 
@@ -509,3 +510,21 @@ class TestServerWarnings:
         output_pricing_estimate(data, "table")
         err = " ".join(capsys.readouterr().err.split())
         assert "Warning:" in err
+
+
+class TestDetailValuesAreNotMarkup:
+    """Free-text values are data, not Rich markup.
+
+    A profile memory or a note holding a square-bracketed token is ordinary text;
+    rendering it as a tag either eats the word or aborts the command.
+    """
+
+    def test_bracketed_token_survives_and_does_not_raise(self, capsys):
+        output_single({"note": "Avoids [crypto] and [/finance] verticals."}, "table")
+        out = capsys.readouterr().out
+        assert "[crypto]" in out
+        assert "[/finance]" in out
+
+    def test_bold_looking_value_is_not_styled_away(self, capsys):
+        output_single({"note": "[bold]not a tag[/bold]"}, "table")
+        assert "[bold]not a tag[/bold]" in capsys.readouterr().out
