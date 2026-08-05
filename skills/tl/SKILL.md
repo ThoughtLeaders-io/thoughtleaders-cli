@@ -227,7 +227,16 @@ tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or super
 
 **Credit costs are server-authoritative — run `tl describe` (overview) or `tl describe show <resource>` (one resource) to see the current rates and multipliers for every endpoint. Do not memorise rate values — they change.**
 
-### Updating records
+### Commenting as another organization (superusers)
+
+`--organization-id` takes a **numeric org ID only** — never guess it from an org name. Comments are an org's private notes, so posting (or reading) under the wrong org is a real data leak. When the user names the target org instead of giving an ID:
+
+1. Resolve the name first, e.g. `tl db pg "SELECT id, name, created_at FROM thoughtleaders_organization WHERE name ILIKE '%<name>%'"`.
+2. **Exactly one match** → use its ID, and state which org you resolved to ("posting as <name>, org <id>") so the user can catch a wrong pick.
+3. **Multiple matches (org names are NOT unique)** → STOP and ask the user which one. Never pick silently, not even by "most recently active" or "biggest". Present the candidates with enough context to tell them apart — for each: org ID, plan, member names/emails (`thoughtleaders_profile` joined to `auth_user` via `organization_id`), created date, and recent activity (e.g. deals/sponsorships reachable via the org's profiles) when the users alone don't disambiguate.
+4. **Zero matches** → report it and ask; don't fuzzy-match to something else.
+
+Omitting the flag always posts to your own org — when the user doesn't name an org, don't pass the flag at all.
 
 ```bash
 tl sponsorships update <id> '<json>'   # Edit a sponsorship (adlink)
