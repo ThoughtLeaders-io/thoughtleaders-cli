@@ -221,7 +221,8 @@ tl reports link <id> --source <id> --entity <e> [--type include|exclude] [--sour
 tl reports unlink <id> --source <id> [--entity <e>] [--type include|exclude]  # Remove report links (all from that source unless narrowed)
 tl <entity> comment-list <id>          # List comments on a sponsorship/channel/brand/upload
 tl <entity> comment-add <id> "msg"     # Add a comment
-tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser)
+tl <entity> comment-list/comment-add ... --organization-id <id>  # Superusers: read/write another org's comments (defaults to your own org)
+tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser); always your own org's comments
 ```
 
 **Credit costs are server-authoritative — run `tl describe` (overview) or `tl describe show <resource>` (one resource) to see the current rates and multipliers for every endpoint. Do not memorise rate values — they change.**

@@ -17,12 +17,24 @@ from tl_cli.output.formatter import detect_format, output, output_single
 
 COLUMNS = ["comment_id", "author", "text", "created_at"]
 
+_ORG_ID_HELP = "Read/write comments as another organization (superuser only; defaults to your own org)"
 
-def list_comments(entity_type: str, entity_id: str, json_output: bool, toon_output: bool) -> None:
+
+def _org_params(organization_id: int | None) -> dict | None:
+    return {"organization_id": organization_id} if organization_id is not None else None
+
+
+def list_comments(
+    entity_type: str,
+    entity_id: str,
+    json_output: bool,
+    toon_output: bool,
+    organization_id: int | None = None,
+) -> None:
     fmt = detect_format(json_output, False, False, toon_output)
     client = get_client()
     try:
-        data = client.get(f"/{entity_type}/{entity_id}/comments")
+        data = client.get(f"/{entity_type}/{entity_id}/comments", params=_org_params(organization_id))
         for r in data.get("results", []):
             r["comment_id"] = r.pop("id", None)
         output(
@@ -37,11 +49,22 @@ def list_comments(entity_type: str, entity_id: str, json_output: bool, toon_outp
         client.close()
 
 
-def add_comment(entity_type: str, entity_id: str, message: str, json_output: bool, toon_output: bool) -> None:
+def add_comment(
+    entity_type: str,
+    entity_id: str,
+    message: str,
+    json_output: bool,
+    toon_output: bool,
+    organization_id: int | None = None,
+) -> None:
     fmt = detect_format(json_output, False, False, toon_output)
     client = get_client()
     try:
-        data = client.post(f"/{entity_type}/{entity_id}/comments", json_body={"text": message})
+        data = client.post(
+            f"/{entity_type}/{entity_id}/comments",
+            json_body={"text": message},
+            params=_org_params(organization_id),
+        )
         for r in data.get("results", []):
             r["comment_id"] = r.pop("id", None)
         output_single(data, fmt)
@@ -80,19 +103,21 @@ def register_comment_commands(app: typer.Typer, entity_type: str, entity_label: 
     @app.command("comment-list", help=f"List comments on a {entity_label} (free, no credits).")
     def comment_list(
         entity_id: str = typer.Argument(..., help=f"{entity_label.capitalize()} ID"),
+        organization_id: int | None = typer.Option(None, "--organization-id", help=_ORG_ID_HELP),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
         toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     ) -> None:
-        list_comments(entity_type, entity_id, json_output, toon_output)
+        list_comments(entity_type, entity_id, json_output, toon_output, organization_id)
 
     @app.command("comment-add", help=f"Add a comment to a {entity_label} (free, no credits).")
     def comment_add(
         entity_id: str = typer.Argument(..., help=f"{entity_label.capitalize()} ID"),
         message: str = typer.Argument(..., help="Comment text"),
+        organization_id: int | None = typer.Option(None, "--organization-id", help=_ORG_ID_HELP),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
         toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
     ) -> None:
-        add_comment(entity_type, entity_id, message, json_output, toon_output)
+        add_comment(entity_type, entity_id, message, json_output, toon_output, organization_id)
 
     @app.command("comment-edit")
     def comment_edit(
