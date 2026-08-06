@@ -528,3 +528,30 @@ class TestDetailValuesAreNotMarkup:
     def test_bold_looking_value_is_not_styled_away(self, capsys):
         output_single({"note": "[bold]not a tag[/bold]"}, "table")
         assert "[bold]not a tag[/bold]" in capsys.readouterr().out
+
+    def test_bracketed_field_name_survives(self, capsys):
+        """Field names are data too — a raw-query column alias is caller-chosen text."""
+        output_single({"[bold]alias": "v", "plain": "w"}, "table")
+        lines = capsys.readouterr().out.splitlines()
+        assert any("[bold]alias" in ln for ln in lines)
+        # Escaping must not shift the value column: the backslashes Rich consumes
+        # are not printed, so both values still start at the same offset.
+        value_cols = [ln.index(v) for ln, v in zip(lines, ("v", "w"))]
+        assert value_cols[0] == value_cols[1]
+
+    def test_nested_row_value_survives(self, capsys):
+        """Sub-table cells render through Rich as well, so they need the same guard."""
+        output_single({"id": 1, "notes": [{"body": "Avoids [crypto] and [/finance]."}]}, "table")
+        out = capsys.readouterr().out
+        assert "[crypto]" in out
+        assert "[/finance]" in out
+
+    def test_nested_column_name_survives(self, capsys):
+        output_single({"id": 1, "[b]rows": [{"[i]col": "x"}]}, "table")
+        out = capsys.readouterr().out
+        assert "[b]rows" in out
+        assert "[i]col" in out
+
+    def test_empty_nested_field_name_survives(self, capsys):
+        output_single({"[b]rows": []}, "table")
+        assert "[b]rows" in capsys.readouterr().out
