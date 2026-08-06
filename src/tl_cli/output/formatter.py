@@ -14,6 +14,7 @@ import sys
 
 from pytoon import encode as toon_encode
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 # Stderr console for status messages (never pollutes piped data)
@@ -374,6 +375,12 @@ def _output_detail(record: dict) -> None:
     If a value is a non-empty list of dicts, it's rendered as an indented
     sub-table beneath its label instead of stringified. Empty lists show
     `(none)` to signal "no entries" explicitly rather than printing `[]`.
+
+    Field names and values are both data, never markup: a square-bracketed
+    token ("[/finance]" in a free-text note, a `SELECT ... AS "[x]"` alias) is
+    otherwise read as a Rich tag and either swallows the word or aborts the
+    whole command with a markup error. Everything interpolated below is
+    escaped; only the styling this function itself adds stays live.
     """
     console = Console()
     nested_items = [(k, v) for k, v in record.items() if _is_list_of_dicts(v)]
@@ -388,30 +395,35 @@ def _output_detail(record: dict) -> None:
             display = json.dumps(value, default=str)
         else:
             display = value
-        label = f"[bold]{key:<{max_key_len}}[/bold]"
-        console.print(f"  {label}  {display}")
+        # Escape the padded label, not the bare key: the escape only adds
+        # backslashes Rich consumes, so the rendered width still lines up.
+        label = f"[bold]{rich_escape(f'{key:<{max_key_len}}')}[/bold]"
+        console.print(f"  {label}  {rich_escape(str(display))}")
 
     for key, rows in nested_items:
-        console.print(f"\n  [bold]{key}[/bold] ({len(rows)}):")
+        console.print(f"\n  [bold]{rich_escape(key)}[/bold] ({len(rows)}):")
         sub_cols = list(rows[0].keys())
         sub_table = Table(show_header=True, padding=(0, 1))
         for col in sub_cols:
             kwargs: dict = {"overflow": "ellipsis", "max_width": 40}
             if col in _RIGHT_ALIGN_COLS:
                 kwargs["justify"] = "right"
-            sub_table.add_column(col, **kwargs)
+            sub_table.add_column(rich_escape(col), **kwargs)
         for row in rows:
             sub_table.add_row(*[_format_cell(row.get(col)) for col in sub_cols])
         console.print(sub_table)
 
     for key in empty_list_items:
-        console.print(f"\n  [bold]{key}[/bold]: [dim](none)[/dim]")
+        console.print(f"\n  [bold]{rich_escape(key)}[/bold]: [dim](none)[/dim]")
 
 
 def _format_cell(value: object) -> str:
+    """Render one sub-table cell. Escaped for the same reason the detail rows are:
+    Rich reads markup in table cells too, so a bracketed token in free text would
+    vanish or abort the render."""
     if value is None:
         return ""
-    return _truncate(str(value), 40)
+    return rich_escape(_truncate(str(value), 40))
 
 
 def _output_detail_csv(record: dict) -> None:

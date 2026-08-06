@@ -22,6 +22,7 @@ from tl_cli.commands.channels import app as channels_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
 from tl_cli.commands.matches import app as matches_app
+from tl_cli.commands.memory import app as memory_app
 from tl_cli.commands.profiles import app as profiles_app
 from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.recommender import app as recommender_app
@@ -104,6 +105,7 @@ app.add_typer(deals_app, name="deals")
 app.add_typer(uploads_app, name="uploads")
 app.add_typer(channels_app, name="channels")
 app.add_typer(brands_app, name="brands")
+app.add_typer(memory_app, name="memory")
 app.add_typer(profiles_app, name="profiles")
 app.add_typer(recommender_app, name="recommender")
 app.add_typer(snapshots_app, name="snapshots")
