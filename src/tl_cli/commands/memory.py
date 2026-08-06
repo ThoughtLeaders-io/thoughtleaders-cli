@@ -83,7 +83,7 @@ def add_cmd(
 
 @app.command("set")
 def set_cmd(
-    memory: str = typer.Argument(None, help="The full replacement text"),
+    memory: str | None = typer.Argument(None, help="The full replacement text"),
     from_file: Path | None = typer.Option(None, "--from-file", help="Read the replacement text from a file"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
@@ -110,7 +110,10 @@ def set_cmd(
 
     if from_file is not None:
         try:
-            memory = from_file.read_text(encoding="utf-8")
+            # utf-8-sig, not utf-8: an editor that writes a byte-order mark leaves it
+            # as the first character of the text, where it is not whitespace, survives
+            # the strip below, and is stored invisibly at the head of the memory.
+            memory = from_file.read_text(encoding="utf-8-sig")
         # A non-text file raises UnicodeDecodeError, a ValueError rather than an
         # OSError. The path and the error text are escaped because a bracket in
         # either would abort on a markup error and lose the message itself.
@@ -121,7 +124,7 @@ def set_cmd(
     # A blank replacement erases the whole memory, and the two ways to arrive at one
     # — a stray empty argument, or a --from-file that was never written — are both
     # mistakes rather than an intent to erase.
-    memory = memory.strip()
+    memory = (memory or "").strip()
     if not memory:
         source = f"{rich_escape(str(from_file))} is empty" if from_file is not None else "the replacement text is empty"
         err.print(f"[red]Error:[/red] {source}; that would erase your whole memory.")
