@@ -312,7 +312,9 @@ existing memory, keeping what's still true and replacing only what the fact
 contradicts. Never read the memory, edit it yourself and write it back with `set` when
 `add` would do — one `add` per fact is the whole interface. `add` takes noticeably
 longer than the other two; that is expected, so let it finish rather than retrying,
-because a repeated `add` can land twice.
+because a repeated `add` can land twice. A fact is one statement, not a document:
+anything past 4,000 characters is rejected, so split a long update into several `add`
+calls rather than sending it as one.
 
 `set` replaces the memory wholesale and, unlike `add`, accepts a short replacement for
 a long memory — treat it as the repair hatch for when a merge has damaged a memory,

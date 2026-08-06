@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from tl_cli.commands import memory as memory_mod
 from tl_cli.commands.memory import app as memory_app
+from tl_cli.main import app as root_app
 
 runner = CliRunner()
 
@@ -92,6 +93,17 @@ class TestMemorySet:
             result = runner.invoke(memory_app, ["set", "A clean rewrite.", "--json"])
         assert result.exit_code == 0, result.output
         assert fake.posts == [("/memory", {"memory": "A clean rewrite."})]
+
+    def test_byte_order_mark_is_not_stored(self, tmp_path) -> None:
+        """An editor that prefixes a BOM must not plant an invisible character at the
+        head of the memory — it is not whitespace, so nothing downstream removes it."""
+        blob = tmp_path / "memory.txt"
+        blob.write_text("From a file.\n", encoding="utf-8-sig")
+        fake = _FakeClient(_payload())
+        with patch.object(memory_mod, "get_client", return_value=fake):
+            result = runner.invoke(memory_app, ["set", "--from-file", str(blob), "--json"])
+        assert result.exit_code == 0, result.output
+        assert fake.posts == [("/memory", {"memory": "From a file."})]
 
     def test_reads_from_file(self, tmp_path) -> None:
         """A text file ends with a newline that is no part of the memory."""
@@ -187,3 +199,15 @@ class TestMemorySet:
         assert result.exit_code == 1
         assert "could not read" in result.output
         assert fake.posts == []
+
+
+class TestMemoryIsReachableFromTheRootApp:
+    """The other cases drive the sub-app directly, so none of them would notice the
+    group never being mounted — `tl memory ...` is the only invocation users have."""
+
+    def test_show_runs_as_tl_memory_show(self) -> None:
+        fake = _FakeClient(_payload())
+        with patch.object(memory_mod, "get_client", return_value=fake):
+            result = runner.invoke(root_app, ["memory", "show", "--json"])
+        assert result.exit_code == 0, result.output
+        assert fake.gets == [("/memory", {})]
