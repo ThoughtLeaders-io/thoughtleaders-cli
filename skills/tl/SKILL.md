@@ -224,6 +224,16 @@ tl <entity> comment-add <id> "msg"     # Add a comment
 tl <entity> comment-edit <comment-id> "msg"  # Edit own comment (author or superuser)
 ```
 
+**Comments on a sponsorship are private to one organization, and only the deal's
+own parties (the brand-side org and the channel-side org) plus ThoughtLeaders'
+own orgs may hold a thread on one.** Commenting on a sponsorship your
+organization is not party to returns 403 — including for superusers, whose
+comments land in whichever organization's thread is being written to, not in a
+general-purpose one. So don't reach for `comment-add` to leave a note on an
+arbitrary sponsorship id: a comment is a message *into a specific customer's
+private thread*, and that customer's own users can read and reply to it.
+Comments on channels, brands and uploads are not restricted this way.
+
 **Credit costs are server-authoritative — run `tl describe` (overview) or `tl describe show <resource>` (one resource) to see the current rates and multipliers for every endpoint. Do not memorise rate values — they change.**
 
 ### Updating records
