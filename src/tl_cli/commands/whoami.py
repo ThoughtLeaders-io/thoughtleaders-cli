@@ -17,6 +17,18 @@ from tl_cli.output.formatter import detect_format
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Show current user, profile, org, and brands (free)")
 
 
+def _newsletter_subscribed(data: dict) -> bool | None:
+    """Industry Weekly membership, or None when the response doesn't say.
+
+    The field is absent whenever membership can't be determined, so None means
+    unknown — callers must not render it as a "no".
+    """
+    newsletter = data.get("newsletter")
+    if not isinstance(newsletter, dict) or "subscribed" not in newsletter:
+        return None
+    return bool(newsletter["subscribed"])
+
+
 def _render_whoami(data: dict) -> None:
     """Rich-formatted whoami output."""
     console = Console()
@@ -53,6 +65,16 @@ def _render_whoami(data: dict) -> None:
     lines.append("\n")
     lines.append("Joined:  ", style="dim")
     lines.append(user.get("date_joined", "")[:10])
+    # Unknown membership prints no row at all, rather than a "no" the reader
+    # would take as fact.
+    subscribed = _newsletter_subscribed(data)
+    if subscribed is not None:
+        lines.append("\n")
+        lines.append("Weekly:  ", style="dim")
+        lines.append(
+            "subscribed" if subscribed else "not subscribed",
+            style="green" if subscribed else "yellow",
+        )
 
     console.print(Panel(lines, title=title, border_style="cyan"))
 
@@ -141,6 +163,9 @@ def _render_whoami_md(data: dict) -> None:
         print(f"- **Flags:** {', '.join(flags)}")
     print(f"- **Paid:** {'yes' if profile.get('is_paid') else 'no'}")
     print(f"- **Joined:** {user.get('date_joined', '')[:10]}")
+    subscribed = _newsletter_subscribed(data)
+    if subscribed is not None:
+        print(f"- **Industry Weekly:** {'subscribed' if subscribed else 'not subscribed'}")
 
     print(f"\n## Organization: {org.get('name', '')}\n")
     plan = org.get("plan")
