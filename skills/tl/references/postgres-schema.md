@@ -8,7 +8,7 @@ Accepted SQL:
 - **SELECT only**, single statement. No DDL/DML/transactions/SET/COPY/MERGE.
 - Functions accepted from an explicit list (aggregates, window, string, JSON, math, date-time, array). Catalog-resolving casts (`::regclass`, `::regprocedure`, …) are not accepted.
 - `LIMIT` and `OFFSET` are optional. Omit them and the server fills in `LIMIT 50 OFFSET 0`. Explicit `LIMIT` must be an integer literal ≤ 10,000. Explicit `OFFSET` ≥ 10,000 is rejected with HTTP 403 (`OFFSET_TOO_DEEP`); paginate with the response's `next_offset`/breadcrumbs instead of jumping deep.
-- **Case-insensitive equality: `UPPER(col) = UPPER('…')` / `UPPER(col) IN (UPPER('…'), …)` — never `LOWER(col)`.** The functional indexes on this database are built on `UPPER(…)` (e.g. channel `url`, `common_name`); a `LOWER(col)` predicate can't use them, seq-scans the 1.3M-row channel table, and dies on statement timeout (504). For substring search use `ILIKE '%…%'` on the bare column instead — that's served by trigram indexes where present (`channel_name`, `slug`).
+- **Case-insensitive equality: `UPPER(col) = UPPER('…')` / `UPPER(col) IN (UPPER('…'), …)` — never `LOWER(col)`.** The case-insensitive functional indexes on this database are built on `UPPER(…)` — on channel `channel_name`, `common_name` and `url`, among others. A `LOWER(col)` predicate can't use them: it seq-scans the 1.3M-row channel table (~20s+) and often dies on statement timeout (504). This holds for channel **names** exactly as it does for handles and URLs — see *Finding a single channel or brand ID* below for the bulk-lookup form. For substring search use `ILIKE '%…%'` on the **bare** column instead — that's served by trigram indexes where present (channel `channel_name`, `slug`; brand `name`, `website`). `LOWER(col) ILIKE '%…%'` is both redundant (`ILIKE` is already case-insensitive) and slow (the trigram index is on the bare column).
 
 ## Core Tables
 
@@ -262,16 +262,19 @@ thoughtleaders_adlink
 
 As a special case, the `tl channels find` and `tl brands find` commands accept a name of the channel / brand (be sure to properly quote them for the shell) and will return the respective ID. Use this instead of constructing SQL for this particular case. The commands will return a list of possible choices
 
-For bulk handle/name lookups in SQL (e.g. resolving a list of YouTube handles against `common_name`), compare case-insensitively with `UPPER(…)` on both sides — that's the form the functional indexes serve:
+For bulk handle/name lookups in SQL (e.g. resolving a list of YouTube handles against `common_name`, or a list of channel names against `channel_name`), compare case-insensitively with `UPPER(…)` on both sides — that's the form the functional indexes serve:
 
 ```sql
 SELECT id, channel_name, common_name
 FROM thoughtleaders_channel
 WHERE UPPER(common_name) IN (UPPER('@TheInfographicsShow'), UPPER('@DrewDirksen'))
+   OR UPPER(channel_name) IN (UPPER('The Infographics Show'), UPPER('Drew Dirksen'))
 LIMIT 100 OFFSET 0
 ```
 
-`LOWER(common_name)` (or `LOWER()` on any indexed column) cannot use those indexes — it seq-scans and times out.
+Wrap **both** sides in `UPPER(…)`. `UPPER(col) IN ('lowercase literal', …)` matches nothing, since the indexed side is upper-cased.
+
+`LOWER(channel_name)`, `LOWER(common_name)` — or `LOWER()` on any indexed column — cannot use those indexes. Every such predicate is a full sequential scan of 1.3M channel rows: ~20s when it survives, a 504 statement timeout when it doesn't. One `OR LOWER(col) IN (…)` branch is enough to force the scan even when every other branch in the `WHERE` is indexed, so do not mix the two forms.
 
 ### Common Join Paths
 

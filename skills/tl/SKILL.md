@@ -61,7 +61,7 @@ Retry after 5 seconds if the server returns a "connection denied" or a "server e
 
 Where possible reference sponsorships, brands, channel by numeric IDs.
 
-In raw SQL, match text case-insensitively with `UPPER(x)` on both sides — never `LOWER(x)`, which misses the indexes and times out. See `references/postgres-schema.md`.
+In raw SQL, match text case-insensitively with `UPPER(x)` on both sides — never `LOWER(x)`, which misses the indexes and times out. This includes channel names (`channel_name`, `common_name`), not just handles and URLs. See `references/postgres-schema.md`.
 
 ## Data Model & Terminology
 
