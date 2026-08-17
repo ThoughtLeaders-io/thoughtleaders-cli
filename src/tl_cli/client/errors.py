@@ -60,7 +60,15 @@ def handle_api_error(error: ApiError) -> None:
         _print_debug(error)
         sys.exit(1)
     elif error.status_code == 429:
-        err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
+        # Both quota gates refuse with 429 and compose the whole explanation
+        # into `detail` — which cap was hit, how much of it is used, and when it
+        # frees up. Collapsing that to a flat "rate limited" line drops the only
+        # thing that tells the user whether to wait, buy credits, or ask for a
+        # seat. An edge/WAF 429 carries no detail and keeps the generic wording.
+        if error.detail:
+            err.print(f"[yellow]{error.detail}[/yellow]")
+        else:
+            err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
         _print_debug(error)
         sys.exit(3)
     elif error.status_code >= 500:

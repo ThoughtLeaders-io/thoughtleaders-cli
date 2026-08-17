@@ -523,17 +523,17 @@ def _print_server_warnings(data: dict) -> None:
 
 
 def _print_quota_notice(data: dict) -> None:
-    """Print a banner when the server signals a billing-quota refusal or
-    truncation on a raw-DB call.
+    """Print a banner when the server signals a billing-quota truncation
+    on a raw-DB call.
 
-    The server emits `_billing_quota_exhausted` on the response envelope
-    in two cases: (a) the query was refused outright before execution
-    because the org has already used its expensive-query allowance for
-    the window; (b) the query ran but the result list was truncated
-    because the remaining expensive-row allowance was smaller than the
-    natural row count. Either way the response carries an empty or
-    short ``results`` array and the caller needs to know *why* and
-    *when they can retry*.
+    The query ran, but the result list was cut to the org's remaining
+    premium-row allowance for the window — so ``results`` is short of what
+    the query would naturally return, and the caller needs to know *why*
+    and *when the rest becomes reachable*.
+
+    An outright refusal never lands here: it is a 429 carrying the server's
+    detail, rendered by `client.errors.handle_api_error`. A short result set
+    and a refused query must not look alike.
     """
     if not data.get("_billing_quota_exhausted"):
         return
