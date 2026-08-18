@@ -11,7 +11,7 @@ fi
 
 # Check for 402 (insufficient credits)
 if [[ "$OUTPUT" =~ "402" ]] || [[ "$OUTPUT" =~ "Insufficient credits" ]]; then
-  echo "WARN: Credits exhausted. Deposit more at https://app.thoughtleaders.io/settings/billing" >&2
+  echo "WARN: Credits exhausted. Deposit more at https://app.thoughtleaders.io/billing" >&2
   exit 0
 fi
 

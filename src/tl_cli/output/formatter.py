@@ -95,12 +95,14 @@ def output(
         # Banner still goes to stderr so it surfaces even when stdout is
         # piped through `jq` or redirected to a file.
         _print_quota_notice(data)
+        _print_upgrade_notice(data)
         _print_server_warnings(data)
         return
 
     if not results:
         err_console.print("[dim]No results found.[/dim]")
         _print_quota_notice(data)
+        _print_upgrade_notice(data)
         _print_server_warnings(data)
         _print_usage(usage)
         return
@@ -121,6 +123,7 @@ def output(
 
     _print_pagination_notice(data)
     _print_quota_notice(data)
+    _print_upgrade_notice(data)
     _print_server_warnings(data)
     _print_usage(usage)
     _print_breadcrumbs(breadcrumbs)
@@ -552,6 +555,28 @@ def _print_quota_notice(data: dict) -> None:
     if rows_max is not None:
         err_console.print(
             f"[yellow]  expensive rows:    {rows_used}/{rows_max} this window[/yellow]"
+        )
+
+
+def _print_upgrade_notice(data: dict) -> None:
+    """Print a banner when the server withheld premium fields from a
+    successful response (``_upgrade_required``).
+
+    The rows are real, but transcript / brand-mention / demographic fields
+    were omitted for the caller's plan — without this line a free-tier user
+    reads the gaps as "no data exists". The sentence is the server's own
+    (UPGRADE_MESSAGE), the same one the web app's field locks show, so the
+    wording stays composed in exactly one place.
+    """
+    notice = data.get("_upgrade_required")
+    if not isinstance(notice, dict):
+        return
+    message = notice.get("message") or "Some fields are available on paid plans."
+    err_console.print(f"[bold yellow]⚠ {message}[/bold yellow]")
+    fields = notice.get("fields") or []
+    if fields:
+        err_console.print(
+            f"[yellow]  withheld field(s): {', '.join(str(f) for f in fields)}[/yellow]"
         )
 
 

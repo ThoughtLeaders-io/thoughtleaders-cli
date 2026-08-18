@@ -53,6 +53,17 @@ def balance(
         if allow_overage:
             console.print("[dim]Overage: enabled[/dim]")
 
+        # The server's own read on the caller's allowance — the session-quota
+        # percentage, or the seatless explanation. This is the same sentence
+        # the refusal path uses, so a seatless member learns why from
+        # `tl balance` instead of only from their first refused call (it used
+        # to be visible solely under --json).
+        usage = data.get("credit_usage") or {}
+        usage_message = usage.get("message")
+        if isinstance(usage_message, str) and usage_message:
+            style = "yellow" if usage.get("warn") else "dim"
+            console.print(f"[{style}]{usage_message}[/{style}]")
+
         # Top-up hint when running low. Threshold matches the hook warning
         # that nudges the user before they hit 0.
         try:
@@ -63,7 +74,7 @@ def balance(
             console.print(
                 "[yellow]Running low.[/yellow] Top up with: "
                 "[bold]tl credits buy --amount-usd 10[/bold] "
-                "(or https://app.thoughtleaders.io/billing/cli)"
+                "(or https://app.thoughtleaders.io/billing)"
             )
 
         recent = data.get("recent_usage", [])
