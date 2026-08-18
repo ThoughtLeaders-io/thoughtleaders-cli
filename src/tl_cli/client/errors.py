@@ -65,7 +65,9 @@ def handle_api_error(error: ApiError) -> None:
         # frees up. Collapsing that to a flat "rate limited" line drops the only
         # thing that tells the user whether to wait, buy credits, or ask for a
         # seat. An edge/WAF 429 carries no detail and keeps the generic wording.
-        if error.detail:
+        if _print_no_seat(error):
+            pass
+        elif error.detail:
             err.print(f"[yellow]{error.detail}[/yellow]")
         else:
             err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
@@ -90,3 +92,38 @@ def handle_api_error(error: ApiError) -> None:
             err.print(f"[red]Error ({error.status_code}):[/red] {detail}")
         _print_debug(error)
         sys.exit(1)
+
+
+def _print_no_seat(error: ApiError) -> bool:
+    """Render the seatless refusal as its own thing, or return False.
+
+    The server already composes a complete sentence for this case and the 429
+    branch above would print it — but when several people can grant the seat
+    they arrive as a comma-run inside one long line, which is the least legible
+    shape for the only part the reader has to act on. The refusal also carries
+    them structurally (`_billing_seat_admins`), so they can be listed instead.
+
+    Everything else about the 429 path is deliberately left alone: the server
+    owns the wording, and this must not become a second place that composes it.
+    """
+    raw = error.raw if isinstance(error.raw, dict) else {}
+    admins = raw.get("_billing_seat_admins")
+    # Only worth taking over when there is actually a list to lay out; a
+    # single-contact or self-serve refusal reads fine as the server's sentence.
+    if not raw.get("_billing_no_seat") or not isinstance(admins, list) or len(admins) < 2:
+        return False
+    err.print(
+        "[yellow]No CLI seat.[/yellow] Your organization is on a paid plan, "
+        "but your user isn't assigned to a seat."
+    )
+    err.print("Ask an owner or admin on your team to assign you one:")
+    for a in admins:
+        if not isinstance(a, dict):
+            continue
+        name = a.get("name") or a.get("email") or "?"
+        role = a.get("role") or ""
+        err.print(f"  · {name} <{a.get('email', '')}>" + (f" [dim]({role})[/dim]" if role else ""))
+    url = raw.get("_billing_seats_url")
+    if url:
+        err.print(f"Seats are managed at: [bold]{url}[/bold]")
+    return True
