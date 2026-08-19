@@ -756,3 +756,74 @@ def setup_codex(
         json_output=json_output,
         toon_output=toon_output,
     )
+
+
+def _prepend_user_path(new_dir: str) -> bool:
+    """Prepend ``new_dir`` to the persistent per-user PATH.
+
+    Writes HKCU\\Environment and broadcasts the change so new processes pick it
+    up without a sign-out. Returns True if PATH was changed, False if new_dir
+    was already present. Windows-only.
+    """
+    import ctypes
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+        try:
+            current, _ = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            current = ""
+        parts = [p for p in current.split(os.pathsep) if p]
+        target = os.path.normcase(os.path.normpath(new_dir))
+        if any(os.path.normcase(os.path.normpath(p)) == target for p in parts):
+            return False
+        updated = os.pathsep.join([new_dir, *parts]) if parts else new_dir
+        winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, updated)
+
+    # Tell running shells the environment changed (best-effort).
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 0x2, 5000, None)
+    return True
+
+
+@app.command("windows")
+def setup_windows(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing tl.cmd wrapper"),
+) -> None:
+    """Make `tl` runnable under Windows Smart App Control (Windows only).
+
+    pipx/uv expose `tl` through an *unsigned* launcher stub that Smart App
+    Control (and enforced WDAC policies) block. This writes a small `tl.cmd`
+    that runs the CLI through the already-signed `python.exe` instead, and
+    puts it ahead of the blocked stub on your PATH.
+
+    Run once. On a machine where `tl` is already blocked, bootstrap it with
+    the venv's signed python directly:
+
+        <pipx-venv>\\Scripts\\python.exe -m tl_cli setup windows
+
+    Examples:
+        tl setup windows
+    """
+    if sys.platform != "win32":
+        console.print("[yellow]`tl setup windows` only applies on Windows — nothing to do here.[/yellow]")
+        return
+
+    python_exe = Path(sys.executable)
+    wrapper_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "tl-cli"
+    wrapper = wrapper_dir / "tl.cmd"
+
+    if wrapper.exists() and not force:
+        console.print(f"[yellow]Wrapper already exists:[/yellow] {wrapper}\nRe-run with --force to regenerate it.")
+        return
+
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    # Absolute path to the signed interpreter bypasses PATH so the launch can't
+    # resolve back to the blocked stub. %* forwards all arguments unchanged.
+    wrapper.write_text(f'@echo off\r\n"{python_exe}" -m tl_cli %*\r\n', encoding="ascii", newline="")
+
+    console.print(f"[green]✓[/green] Wrote signed-launcher wrapper: {wrapper}")
+    if _prepend_user_path(str(wrapper_dir)):
+        console.print(f"[green]✓[/green] Added to your user PATH (ahead of the blocked stub): {wrapper_dir}")
+    else:
+        console.print(f"[dim]Already on your user PATH: {wrapper_dir}[/dim]")
+    console.print("[dim]Open a new terminal, then run:[/dim] tl whoami")
