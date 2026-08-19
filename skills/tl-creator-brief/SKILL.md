@@ -41,8 +41,9 @@ Resolve everything the data can answer before asking anything:
   interview or clips channels, resolve each by name with its own
   `tl channels find` — there is no automatic link between them.
 
-Then gather the rest with **one** AskUserQuestion batch — never drip
-questions:
+Then gather the rest in **one** consolidated prompt — the host agent's
+structured question tool if it has one (AskUserQuestion in Claude Code),
+otherwise a single chat message listing all four — never drip questions:
 
 1. **The current offer and CTA** — what this campaign sells and the exact
    call to action (link, code, landing page). The single most load-bearing
@@ -85,10 +86,11 @@ here's the upgrade".
 
 **4. Audience resonance** — pull the channel's uploads from the last 12
 months (widen to 18 if that leaves fewer than 20 uploads) and score each
-topic framing against the median views of uploads in its **own age bucket**
-— never against a whole-channel average, since recent videos haven't
-finished accumulating. Output: which framings of the brand's topic this
-audience rewards and which it punishes.
+upload against the median views of its **own age bucket** — never against a
+whole-channel average, since recent videos haven't finished accumulating.
+Fixed buckets: 0–30, 31–90, 91–180, and 181+ days old; merge any bucket
+with fewer than 5 uploads into its older neighbor. Output: which framings
+of the brand's topic this audience rewards and which it punishes.
 
 ### Transcript honesty rules (all agents)
 
@@ -96,7 +98,9 @@ audience rewards and which it punishes.
   quote is not evidence the creator never said it.
 - Transcripts are auto-captions: proper nouns get mangled. Search spelling
   and phonetic variants of company and product names before concluding zero
-  hits, and fix obvious mis-transcriptions when quoting — flag every fix.
+  hits. When quoting, never silently correct a caption: put the corrected
+  proper noun in square brackets and note the raw caption text in the
+  brief's caveats. Bracketed proper-noun fixes are the only permitted edits.
 - Captions carry no speaker labels. On interview channels, verify from
   surrounding context that the *host* is speaking; drop anything ambiguous.
 - Quote verbatim or not at all, and link every quote to its video (add a
