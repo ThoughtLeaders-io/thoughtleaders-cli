@@ -108,7 +108,8 @@ Contains a denormalized subset of the PostgreSQL channel data.
 | `media_selling_network_join_date` | date | MSN join date; non-null = MSN member (~1%) |
 | `has_outreach_email` | boolean | Has contact email (100%) |
 | `outreach_email` | text | Contact email (~45%) |
-| `social_links` | text | Flat array of the channel's profile URLs (~47%), e.g. `["https://twitter.com/…", "https://instagram.com/…", "https://discord.gg/…"]`. Source is a per-platform map plus a catch-all `_other` map for unrecognized platforms; in ES all of it is flattened into this one URL array (the `_other` URLs are folded in, the platform names are dropped). Occasional stray entries (bare emails, nested arrays) exist. |
+| `social_links` | text | Flat array of the channel's known profile links as **canonical keys** — lowercase `host/path` with no scheme, no `www.`, no query string, and `x.com` spelled as `twitter.com`, e.g. `["twitter.com/mrbeast", "instagram.com/mrbeast", "linktr.ee/foo"]` (~47%, growing). Sourced from the `all_social_links` accumulator (About-page scrapes plus web-search discoveries); platform names are dropped, e-mails never appear. |
+| `social_links.canonical` | text | Subfield of the above with a path-segment analyzer: one token per URL segment, subdomain-insensitive host. `{"match_phrase": {"social_links.canonical": "twitch.tv/ludwig"}}` is the precise way to ask "which channels carry exactly this profile link" — it matches `m.twitch.tv/ludwig` and deep paths under the profile, but never a channel that merely mentions the same words in different links. Prefer it over matching the parent field when the query is a `domain/handle` pair. |
 | `male_share` | byte | Male audience % — only ~1.6% of channel docs have demographic data |
 | `usa_share` | byte | US audience % — same ~1.6% coverage |
 | `device` | object | Audience device demographics where known: `device.primary` (most common device) and `device.share` (per-device % map). Very sparse (~0.2%). |
