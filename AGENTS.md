@@ -92,6 +92,8 @@ A "release" means using the `gh` command to create a release on GitHub, named li
 
 Warn the user if they are creating a release and the latest commit didn't bump the version number, and ask for confirmation before releasing.
 
+Release notes are written by hand for the user, never with `--generate-notes` (that yields only a compare link). Follow the style of previous releases: a `##` heading naming the change from the user's perspective, a short prose explanation of what changed and why it matters, a usage example where one helps, and a closing line on what the user has to do (e.g. `tl setup claude` to pick up skill changes, or nothing). Describe user-visible behaviour only — same rules as commit messages and skills apply, so no internal architecture or server details.
+
 ## Coding
 
 * Do not reference internal architecture of the ThoughtLeaders app in comments or skills. Specifially: do not reference internal table names, field names, API endpoints, Python modules or functions (including the sanitizer).
