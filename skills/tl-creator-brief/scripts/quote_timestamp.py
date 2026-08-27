@@ -55,8 +55,9 @@ def fetch_cues(video_ref: str) -> list[dict]:
         text = re.sub(r"<[^>]+>", "", m.group(2))
         # captions double-escape: &amp;#39; -> &#39; -> '
         text = text.replace("&amp;", "&")
-        for ent, ch in (("&#39;", "'"), ("&quot;", '"'), ("&gt;", ">"),
-                        ("&lt;", "<"), ("&amp;", "&")):
+        for ent, ch in (("&#39;", "'"), ("&apos;", "'"), ("&quot;", '"'),
+                        ("&gt;", ">"), ("&lt;", "<"), ("&nbsp;", " "),
+                        ("&amp;", "&")):
             text = text.replace(ent, ch)
         cues.append({"start": float(m.group(1)), "text": text.replace("\n", " ")})
     return cues

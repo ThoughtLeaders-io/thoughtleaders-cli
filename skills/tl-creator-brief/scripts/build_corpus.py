@@ -38,6 +38,15 @@ import sys
 ES_PAGE = 10000  # the index's ceiling for a plain size request
 
 
+def tl_pg(sql: str) -> list[dict]:
+    proc = subprocess.run(["tl", "db", "pg", sql, "--json"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return []
+    data = json.loads(proc.stdout)
+    return data if isinstance(data, list) else data.get("results") or []
+
+
 def tl_es(body: dict) -> list[dict]:
     proc = subprocess.run(["tl", "db", "es", json.dumps(body)],
                           capture_output=True, text=True)
@@ -160,8 +169,13 @@ def main() -> None:
         selected = sorted(uploads, key=lambda v: -v["views"])[:a.max]
         selected.sort(key=lambda v: v["published"])
 
+    name_rows = tl_pg("SELECT channel_name FROM thoughtleaders_channel "
+                      f"WHERE id = {a.channel}")
+
     print(json.dumps({
         "channel_id": a.channel,
+        "channel_name": (name_rows[0].get("channel_name")
+                         if name_rows else None),
         "strategy": a.strategy,
         "max": a.max,
         "content_type": a.content_type,
