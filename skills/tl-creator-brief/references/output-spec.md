@@ -45,11 +45,6 @@ Each connection is three things, in this order:
    came from.
 3. **The thing that could be built on it.** Specific and concrete.
 
-Worked example of the shape: the creator has said on camera that their favourite
-food is pizza; the brand's in-app scoring unit is called pies; so instead of the
-usual merch, send real pizzas to users who hit a hundred day streak on that
-creator's code.
-
 A connection with no quote behind it is not a connection. Cut it.
 
 If the profile holds nothing that honestly meets the brand, say that, show what
@@ -69,10 +64,9 @@ found?**
 - Only repeats: the sweep has run dry, and reading more uploads will not help.
 - Still producing new material at the end: there is more in the catalogue.
 
-State it in one line, with numbers, for example: "the final third of the sample
-produced 2 new details and 6 repeats, so the sweep has largely run dry", or "the
-final third produced 9 new details, so there is more to find, and 478 uploads
-were not read".
+State it in one line, with the counts: how many new details the final third
+produced, how many were repeats, the conclusion that follows, and how many
+uploads were not read.
 
 Where there is more to find, name the way to get it: re-run Step 3 with a higher
 `--max`. Never suggest narrowing the search to the brand's subject instead.
@@ -80,9 +74,9 @@ Where there is more to find, name the way to get it: re-run Step 3 with a higher
 ### Caveats
 
 Transcript coverage, uploads not sampled, how many quotes were dropped as
-unattributable, how many are carried as unconfirmed, guest-attribution risk on an
-interview channel, caption corrections, reads that failed sponsorship
-verification, and anything inferred rather than found.
+unattributable, how many are carried as unconfirmed, the risk of crediting
+another voice where the format has one, caption corrections, reads that failed
+sponsorship verification, and anything inferred rather than found.
 
 ## Delivery: two files, and the paths come back
 

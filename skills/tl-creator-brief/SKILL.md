@@ -19,8 +19,8 @@ description: >
 Two outputs, in this order, and nothing else:
 
 1. **The creator profile.** Every place the creator talks about themselves
-   rather than about their subject. A geography creator mentioning offhand that
-   their favourite food is pizza is the find. Their view on borders is not.
+   rather than about their subject. An offhand personal detail is the find. Their
+   opinion on their own topic is not.
 2. **The brand connections.** Where that profile overlaps with what a named
    brand offers, and what could be built on the overlap.
 
@@ -187,10 +187,11 @@ skill does not ask it.
 ## Step 5: find the connections
 
 Now, and only now, put the profile next to the brand. For each connection: the
-creator's own words it rests on, with a timestamped link, and the concrete thing
-that could be built on it. A creator who loves pizza and a brand whose in-app
-scoring unit is called pies is a connection; real pizzas to users who hit a
-hundred day streak on that creator's code is the thing built on it.
+creator's own words it rests on, with a timestamped link, what the brand offers
+that meets them, and the concrete thing that could be built on it. A personal
+detail that happens to echo something the product already has is a connection;
+the specific thing to build on that echo is what the reader is owed. Full shape:
+`references/output-spec.md`.
 
 **Keywords may confirm, never discover.** Where the profile has already
 surfaced something that looks like a moment the product speaks to, one narrow

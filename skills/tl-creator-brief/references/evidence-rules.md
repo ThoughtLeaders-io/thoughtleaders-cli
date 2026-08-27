@@ -30,7 +30,7 @@ Worked through:
 | "I taught myself how to do this" | Passes. Speaker is the subject, true off camera, reveals a trait. |
 | "I founded a marketing agency because..." | Passes. |
 | "I consider myself an autodidact" | Passes. |
-| "my favourite food is pizza" | Passes, and is exactly the kind of find this skill exists for. |
+| "I can't stand coffee" | Passes. A trivial personal taste is exactly the kind of find this skill exists for. |
 | "I think you should buy gold" | Fails 2. An opinion about the world. |
 | "I'll show you in a second" | Fails 2. A stage direction. |
 | "I love maps" on a geography channel | Fails 3. Implied by the premise. |
@@ -144,7 +144,8 @@ nothing, because the reader cannot tell the difference.
 
 If Step 5's narrow probe searches the brand's problem space, a raw category
 search returns mostly metaphor. Judge each snippet individually before it
-becomes a connection, and **report the survival count** ("30 hits, 4 literal").
+becomes a connection, and **report the survival count**: how many hits were
+returned, and how many of those were literal rather than metaphor.
 That ratio is itself evidence of how close the creator is to the category.
 
 ## The evidence decides the answer
