@@ -35,7 +35,7 @@ import statistics
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
-import tl_cli
+import tl_data
 
 FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'd|i'll|my|me|myself)\b", re.I)
 
@@ -55,7 +55,7 @@ TITLE_SECOND_VOICE = {
 
 
 def channel_row(channel_id: int) -> dict:
-    rows = tl_cli.db_pg(
+    rows = tl_data.db_pg(
         "SELECT id, channel_name, url, external_channel_id, subscribers, "
         "total_views, num_uploads, country, language, last_published "
         f"FROM thoughtleaders_channel WHERE id = {channel_id}"
@@ -68,7 +68,7 @@ def channel_row(channel_id: int) -> dict:
 def channel_doc(channel_id: int) -> dict:
     # Channel documents are duplicated in the index; collapse on id or every
     # copy comes back.
-    rows = tl_cli.db_es({
+    rows = tl_data.db_es({
         "size": 1,
         "query": {"bool": {"filter": [
             {"term": {"doc_type": "channel"}},

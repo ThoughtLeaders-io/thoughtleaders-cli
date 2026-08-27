@@ -30,7 +30,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
-import tl_cli
+import tl_data
 
 PAGE = 500
 FIELDS = ["id", "title", "publication_date", "views", "duration",
@@ -84,7 +84,7 @@ def main() -> None:
                     "sort": [{"publication_date": "asc"}, {"id": "asc"}]}
             if after:
                 body["search_after"] = after
-            rows = tl_cli.db_es(body)
+            rows = tl_data.db_es(body)
             if not rows:
                 break
             for r in rows:

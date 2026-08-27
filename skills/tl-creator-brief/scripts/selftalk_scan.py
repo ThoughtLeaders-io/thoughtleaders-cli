@@ -49,7 +49,7 @@ from collections import defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import tl_cli
+import tl_data
 from channel_context import TITLE_SECOND_VOICE  # sibling script
 
 WINDOW_CHARS = 260
@@ -277,7 +277,7 @@ def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     out: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for i in range(0, len(refs), IDS_CHUNK):
         chunk = refs[i:i + IDS_CHUNK]
-        rows = tl_cli.db_es({
+        rows = tl_data.db_es({
             "size": len(chunk),
             "query": {"ids": {"values": chunk}},
             "_source": ["id", "brand_mentions"],

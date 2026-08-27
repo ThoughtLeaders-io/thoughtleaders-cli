@@ -35,7 +35,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
-import tl_cli
+import tl_data
 
 PAD = 25  # seconds before a detected mention, since the read starts earlier
 
@@ -47,7 +47,7 @@ PLACEHOLDER = re.compile(r"^\(?\s*(in|found in)\s+(the\s+)?"
 
 def mention_videos(brand_ids: list[int], max_videos: int) -> list[dict]:
     """Videos carrying a sponsored mention of the brand, newest first."""
-    return tl_cli.db_es({
+    return tl_data.db_es({
         "size": max_videos,
         "query": {"bool": {"should": [
             {"term": {"sponsored_brand_mentions": str(b)}} for b in brand_ids
@@ -60,7 +60,7 @@ def mention_videos(brand_ids: list[int], max_videos: int) -> list[dict]:
 
 def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
     """The detected ad-read snippet per video, from the nested mention field."""
-    rows = tl_cli.db_es({
+    rows = tl_data.db_es({
         "size": max_videos,
         "query": {"nested": {"path": "brand_mentions", "query": {"bool": {
             "must": [
@@ -117,7 +117,7 @@ def channel_names(channel_ids: list[int]) -> dict[int, str]:
     ids = sorted({int(c) for c in channel_ids if c})
     if not ids:
         return {}
-    rows = tl_cli.db_pg("SELECT id, channel_name FROM thoughtleaders_channel "
+    rows = tl_data.db_pg("SELECT id, channel_name FROM thoughtleaders_channel "
                         f"WHERE id IN ({','.join(str(i) for i in ids)})")
     return {int(r["id"]): r.get("channel_name") for r in rows if r.get("id")}
 
@@ -125,7 +125,7 @@ def channel_names(channel_ids: list[int]) -> dict[int, str]:
 def brokered_deals(brand_ids: list[int]) -> list[dict]:
     """Sponsorships brokered through the platform. No price or cost selected."""
     ids = ",".join(str(b) for b in brand_ids)
-    return tl_cli.db_pg(
+    return tl_data.db_pg(
         "SELECT a.id AS adlink_id, a.publish_date, a.article_id, "
         "ch.id AS channel_id, ch.channel_name "
         "FROM thoughtleaders_adlink a "

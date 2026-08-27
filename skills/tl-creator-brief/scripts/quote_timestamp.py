@@ -32,7 +32,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import tl_cli
+import tl_data
 from fetch_corpus import cues as parse_cues
 
 
@@ -48,7 +48,7 @@ def fetch_cues(video_ref: str, corpus: str | None) -> list[tuple[float, str]]:
                 if str(v.get("id")) == video_ref:
                     return [(float(c[0]), c[1]) for c in v.get("cues") or []]
         sys.exit(f"{video_ref} not in corpus {corpus}")
-    rows = tl_cli.db_es({
+    rows = tl_data.db_es({
         "size": 1,
         "_source": ["transcript"],
         "query": {"ids": {"values": [video_ref]}},
