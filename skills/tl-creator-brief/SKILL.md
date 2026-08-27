@@ -145,11 +145,18 @@ python3 build_corpus.py --channel <channel_id> --max 40 --strategy spread \
   | python3 selftalk_scan.py --host-terms "<distinctive facts about the host>"
 ```
 
-**Choosing `--host-terms` is the difference between a usable result and a
-useless one**, because it is the only mechanical way to tell the host's "I" from
-a guest's. Use only things that are distinctively theirs: their surname, their
-companies by name, their funds, a named former role, a specific place they have
-said they lived.
+**`--host-terms` matters where another voice shares the transcript**, because
+there it is the only mechanical way to tell the host's "I" from a guest's. Use
+only things that are distinctively theirs: their surname, their companies by
+name, their funds, a named former role, a specific place they have said they
+lived.
+
+**On a solo channel it is close to irrelevant, and a thin result there does not
+mean the terms were badly chosen.** There is no second voice to separate, and a
+solo host almost never says his own name, so the anchor barely fires: measured on
+one solo channel it fired on 3 of 207 passages. Pass the terms anyway, since they
+still rank the pool, but on a solo channel the three-part test is what decides
+and a low anchor count is expected rather than a problem to fix.
 
 **Never generic possessives.** "my podcast", "my company", "my business" all
 look like host language and are not: guests have podcasts and companies too, and
