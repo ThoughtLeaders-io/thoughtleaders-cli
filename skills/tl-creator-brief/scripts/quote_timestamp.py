@@ -12,8 +12,8 @@ against the normalized concatenation of all cues, then mapped back to the cue
 that contains the match's first character.
 
 Usage:
-    quote_timestamp.py 55243:gzLPa6NbcrE "my chronotype is the lion"
-    echo "my chronotype is the lion" | quote_timestamp.py 55243:gzLPa6NbcrE
+    quote_timestamp.py <channel>:<video> "the quote, verbatim"
+    echo "the quote, verbatim" | quote_timestamp.py <channel>:<video>
 
 Output (stdout): one JSON object.
     {"video": "...", "found": true, "start": 512, "url": "https://...&t=512s",

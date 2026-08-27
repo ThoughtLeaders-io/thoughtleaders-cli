@@ -66,9 +66,10 @@ effectively free. Passages arrive carrying their video, timestamp and link,
 reusing ``quote_timestamp.fetch_cues``, so nothing needs timestamping later.
 
 Usage:
-    build_corpus.py --channel 138573 | selftalk_scan.py \\
-        --host-terms "bartlett,social chain,flight fund,flight story" \\
-        --host-first-name steven
+    build_corpus.py --channel <id> | selftalk_scan.py \\
+        --host-terms "<surname>,<company>,<former role>"
+    build_corpus.py --channel <id> | selftalk_scan.py \\
+        --host-terms "<surname>" --domain-terms team,squad,roster
 
 Output (stdout): one JSON object, passages ranked by attribution strength.
 """

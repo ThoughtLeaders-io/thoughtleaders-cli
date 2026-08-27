@@ -30,8 +30,8 @@ Two things it returns that matter more than they look:
   the expensive steps.
 
 Usage:
-    channel_profile.py --channel 138573
-    channel_profile.py --channel 138573 --titles 30
+    channel_profile.py --channel <id>
+    channel_profile.py --channel <id> --titles 30
 
 Output (stdout): one JSON object. Exit 1 if the channel has no record.
 """

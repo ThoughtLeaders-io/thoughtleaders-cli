@@ -30,8 +30,8 @@ about the product and is simply useless, which is visible from the absence of
 words rather than something needing a verdict.
 
 Usage:
-    brand_reads.py --brand 50485
-    brand_reads.py --brand 50485 --brand 61234 --max 15   # after a rebrand
+    brand_reads.py --brand <id>
+    brand_reads.py --brand <id> --brand <old-id> --max 15   # after a rebrand
 
 Output (stdout): one JSON object.
 """

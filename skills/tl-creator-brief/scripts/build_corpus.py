@@ -22,9 +22,9 @@ Longform only by default. Shorts are mostly hooks and clips, so they cost
 transcript fetches and return little self-talk.
 
 Usage:
-    build_corpus.py --channel 138573                       # spread, 40 videos
-    build_corpus.py --channel 138573 --max 25 --strategy recent
-    build_corpus.py --channel 138573 --since 2024-01-01
+    build_corpus.py --channel <id>                         # spread, 40 videos
+    build_corpus.py --channel <id> --max 25 --strategy recent
+    build_corpus.py --channel <id> --since 2024-01-01
 
 Output (stdout): one JSON object, ready to pipe into selftalk_scan.py.
 """
