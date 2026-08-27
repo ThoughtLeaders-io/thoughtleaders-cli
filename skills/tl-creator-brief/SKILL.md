@@ -169,9 +169,11 @@ requires every possessive in the passage to be a domain object, so "my team and
 my wife" still counts.
 
 **Never generic possessives.** "my podcast", "my company", "my business" all
-look like host language and are not: guests have podcasts and companies too, and
-on a real run those terms pulled in a guest describing his own show and another
-describing his own firm. Generic terms poison the one signal that works.
+look like host language and are not. They discriminate nothing, since anyone
+speaking can say them, and where another voice shares the transcript they
+actively pull that voice in: on a real interview run those terms returned a guest
+describing his own show and another describing his own firm. Generic terms poison
+the one signal that works.
 
 Candidates come back already carrying their video, timestamp and link, so no
 separate timestamping pass is needed.
@@ -184,7 +186,7 @@ findings with only 21 in common, and 49 distinct facts between them. So do not
 economise here by judging less.
 
 **Leave `--max-per-video` at its default of 30**, and never lower it to trim the
-pool. A two hour interview yields around 30 candidate passages, so a cap of 8
+pool. A two hour episode yields around 30 candidate passages, so a cap of 8
 threw away roughly three quarters of the material in each long episode without
 ever reading it. If the pool needs to grow, the answer is more agents, not a
 tighter cap.

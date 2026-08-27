@@ -78,7 +78,7 @@ and is where a measurable share of the findings live.
 | Bucket | What puts it here | What happens to it |
 |---|---|---|
 | **Confirmed** | `host_anchor`, `in_sponsor_read`, or `recurrence_videos` of 3 or more. | Usable as the host's own words. |
-| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Roughly half are guests. | **Kept, and labelled.** Never silently dropped: removing this bucket was tried twice and lost real findings both times. Never silently promoted either. |
+| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Where another voice shares the transcript, roughly half are that other voice. | **Kept, and labelled.** Never silently dropped: removing this bucket was tried twice and lost real findings both times. Never silently promoted either. |
 | **Unattributable** | No signal, and nothing nearby names the speaker. | Dropped, and counted in the caveats. |
 
 On a **solo** video the buckets are not signal-driven at all: one voice holds the
