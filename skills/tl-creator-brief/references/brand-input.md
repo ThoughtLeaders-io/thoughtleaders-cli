@@ -104,11 +104,3 @@ one being sold.
 
 If no read has any words in it, use the brand's website or their own brief
 instead.
-
-## What this file does not cover, on purpose
-
-- **Competitor and guide brand reads.** Another brand's material is not this
-  brand's, and the skill has one brand per run. Out.
-- **Performance.** Which past read did well is a different question from what
-  the product is. The skill does not rank, filter or report on it.
-- **LinkedIn and any other off-platform source.** Out.
