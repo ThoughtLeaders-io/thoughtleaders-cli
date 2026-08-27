@@ -37,10 +37,9 @@ rebrand, with a repeated `--brand`.
   brokered it. Essential, because this skill has to work for a brand that has
   never bought through us at all.
 
-**Never read zero brokered deals as "never sponsored anything."** Observed: one
-brand returns zero brokered deals and roughly ten thousand detected mention
-videos. The two counts measure completely different things and the output must
-label them separately.
+**Never read zero brokered deals as "never sponsored anything."** A brand can
+have none brokered here and thousands detected in the wild. The two counts
+measure different things, so label them separately in the output.
 
 **What the script deliberately does not return:** any price, cost, rate card or
 performance figure. None of that tells you what the product is, which is the

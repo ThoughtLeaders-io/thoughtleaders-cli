@@ -49,12 +49,11 @@ a name.** Both are sets, not single values:
   otherwise put the top five (name, handle, subscribers, last upload) into the
   question batch.
 
-**Plan.** The same `tl whoami --json` returns `organization.plan`. Read it from
-that call rather than making a second one. The tier gates **whose** data is
-readable, not which tables: `Intelligence` and above reach information not
-strictly related to the caller's own organisation, which is exactly what Step 3
-needs on a channel the caller does not own, and what Step 4 needs on a brand that
-is not theirs.
+**Plan.** The same `tl whoami --json` returns `organization.plan`; read it from
+that call rather than making a second one. The tier gates whose data is readable:
+`Intelligence` and above reach beyond the caller's own organisation, which is what
+Step 3 needs on a channel they do not own and Step 4 on a brand that is not
+theirs. Check it here so the skill does not build a corpus it cannot read.
 
 - **`Intelligence` or `Superuser`.** Everything here is available. Proceed.
 - **A known lower tier, currently `free` or `pro`.** Do not build a corpus that
@@ -65,11 +64,6 @@ is not theirs.
   all.
 - **An unrecognised value.** Name it and continue. Tier names change, and a stale
   list in this file is not a reason to refuse a run.
-
-This check exists so the skill does not sample 40 videos before discovering the
-account cannot read them. **It acts only on a tier it recognises**, where the
-limit is a fact rather than a guess. On anything else it defers, and the first
-real permission error is what stops a step.
 
 **Ask once.** One consolidated prompt via whatever the host provides, a
 structured question tool where one exists (`AskUserQuestion` in Claude Code),
@@ -100,9 +94,7 @@ subscriber and upload counts, and the 20 most recent titles with durations.
 channel has no identifiable host.** The name is what makes the transcript scan
 attributable, not background colour, so it is the output of this step.
 
-- **A long profile can still name nobody.** Observed on a 19M-subscriber
-  interview channel: several hundred words describing the show in detail, and
-  the presenter is never mentioned. So length is not the test.
+- **A long profile can still name nobody**, so length is not the test.
   `identity_is_thin` reports short OR nameless, and either way:
 - **run one web search**, of the form `who is <channel name>`, and one only. On a
   well known channel this returns the framing in a sentence, for example that a
@@ -145,51 +137,21 @@ python3 build_corpus.py --channel <channel_id> --max 40 --strategy spread \
   | python3 selftalk_scan.py --host-terms "<distinctive facts about the host>"
 ```
 
-**`--host-terms` matters where another voice shares the transcript**, because
-there it is the only mechanical way to tell the host's "I" from a guest's. Use
-only things that are distinctively theirs: their surname, their companies by
-name, their funds, a named former role, a specific place they have said they
-lived.
+**Passing the terms.** `--host-terms` takes facts distinctive to the host, their
+surname, companies, funds, a named former role. Never generic possessives like
+"my podcast" or "my company": anyone speaking can say those, so they discriminate
+nothing and pull in a second voice. On a solo channel the anchor barely fires and
+a low count there is expected, not a fault. Add `--domain-terms team,squad,roster`
+on a games or sport channel, where "my team" is an object in the video's subject
+matter rather than a fact about the speaker.
 
-**On a solo channel it is close to irrelevant, and a thin result there does not
-mean the terms were badly chosen.** There is no second voice to separate, and a
-solo host almost never says his own name, so the anchor barely fires: measured on
-one solo channel it fired on 3 of 207 passages. Pass the terms anyway, since they
-still rank the pool, but on a solo channel the three-part test is what decides
-and a low anchor count is expected rather than a problem to fix.
-
-**Pass `--domain-terms` where the channel's subject matter owns the
-possessives.** A possessive is self-disclosure only if the thing possessed
-belongs to the speaker's life, and on a gaming or sport channel "my team" is
-almost always the in-game team for that match. It was the largest single drop
-reason in a real run, roughly 12 of every 41 passages judged. Pass
-`--domain-terms team,squad,roster` there. It is off by default because on a
-business channel "my team" is a real fact about the speaker, and suppression
-requires every possessive in the passage to be a domain object, so "my team and
-my wife" still counts.
-
-**Never generic possessives.** "my podcast", "my company", "my business" all
-look like host language and are not. They discriminate nothing, since anyone
-speaking can say them, and where another voice shares the transcript they
-actively pull that voice in: on a real interview run those terms returned a guest
-describing his own show and another describing his own firm. Generic terms poison
-the one signal that works.
-
-Candidates come back already carrying their video, timestamp and link, so no
-separate timestamping pass is needed.
+Candidates come back carrying their video, timestamp and link, so no separate
+timestamping pass is needed.
 
 **Fan out helper agents**, one per roughly 50 passages and never fewer than
-four. The number of passages judged is the binding constraint on how rich the
-profile is, not the number of videos read: two runs over the same 40 uploads,
-differing only in which passages reached the judging step, produced 37 and 35
-findings with only 21 in common, and 49 distinct facts between them. So do not
-economise here by judging less.
-
-**Leave `--max-per-video` at its default of 30**, and never lower it to trim the
-pool. A two hour episode yields around 30 candidate passages, so a cap of 8
-threw away roughly three quarters of the material in each long episode without
-ever reading it. If the pool needs to grow, the answer is more agents, not a
-tighter cap.
+four. How many passages get judged is what limits the profile, so if the pool
+grows, add agents rather than tightening the caps. Leave `--max-per-video` at its
+default.
 
 **Deal the list out round-robin**, one passage to each agent in turn, rather than
 cutting it into blocks. It arrives sorted with the best-attributed passages
@@ -197,88 +159,15 @@ first, so slicing hands all the strong material to the first agent and leaves th
 rest with nothing but half-signals.
 
 **If the host cannot spawn helper agents**, run the same batches one after
-another instead, discarding each batch's raw text before starting the next so it
-does not accumulate. The batching, the round-robin deal and the per-batch
-instructions are identical either way, so a host without helper agents runs the
-same sweep rather than a smaller one.
+another, discarding each batch's raw text before the next so it does not
+accumulate. Same sweep, same brief, just sequential.
 
-**Never read transcripts in the main conversation.** Raw transcript text there
-crowds out everything else for the rest of the run, and the main conversation
-only ever needs the findings.
+**Never read transcripts in the main conversation.** The main conversation only
+ever needs the findings.
 
-Each agent gets this and nothing else:
-
-> You are given a list of candidate passages from one YouTube channel's
-> transcripts, each with a video id, a timestamp, and its attribution signals.
->
-> The channel is `<channel name>`. Its dominant format is `<format>`. The host is
-> `<host name>`, and these are the facts already known about them:
-> `<known facts from the identity step>`.
->
-> Each passage carries its video title, and where Step 2 detected a different
-> format for that video, that video's format too. **A passage's own video format
-> wins over the channel's**, because one channel mixes formats.
->
-> Apply the three-part self-reference test in `references/evidence-rules.md` to
-> every passage, and return only those that pass all three parts.
->
-> Then attribute, into three buckets rather than a yes or no. **Which rule
-> applies depends on the format of the video the passage came from**, so read that
-> first.
->
-> **Where one voice holds the transcript (solo talking head).** No attribution
-> signal is required. A passage that passes the three-part test is **Confirmed**.
-> The absence of `host_anchor` means nothing here: a solo host rarely says his own
-> name, so the signal barely fires. Measured on a solo channel, `host_anchor`
-> fired on 3 of 207 passages, and requiring it returned 3 findings where the
-> format-appropriate rule returned 33. Use **Unconfirmed** only for the genuine
-> exception, where a clip, a quoted line or another voice makes the speaker
-> unclear.
->
-> **Where another voice shares the transcript (interview, multi-host, reaction).**
-> Use the signals:
->
-> - **Confirmed.** `host_anchor`, `in_sponsor_read`, or a `recurrence_videos` of
->   3 or more. These are strong signals that the host is speaking.
-> - **Unconfirmed.** `weak_anchor`, which is first-person talk about running a
->   show or a business. Roughly half of these are a guest talking about their own
->   show or company. **Keep them and label them unconfirmed. Do not drop them.**
->   Dropping them has been measured twice and cost real findings both times, and
->   the label is what protects the reader, not the deletion.
-> - **Unattributable.** No signal at all, and nothing in the surrounding lines
->   names the speaker. Drop these.
->
-> On an interview channel most self-disclosure in the transcript belongs to the
-> guest, so never upgrade a passage to confirmed by guessing. A quote presented as
-> the host's when it was the guest's is the one error that discredits everything
-> around it, and the bucket label is how that is avoided.
->
-> In a **reaction** video the narration of the material being reacted to sits in
-> the same transcript with no speaker labels, so a passage from one is
-> **Unconfirmed** at best unless `host_anchor` or `in_sponsor_read` is true. This
-> has already produced near misses: a line about English not being the speaker's
-> first language, and a childhood memory, were both nearly credited to a host who
-> did not say them.
->
-> For each passage you keep, return the verbatim words, the video id, the
-> timestamp, one short phrase on what it reveals about the creator, and its
-> attribution bucket. Then state how many you dropped and the most common reason.
->
-> One trap to expect: **a possessive is only a life fact if the thing possessed
-> belongs to the speaker's life.** On a channel about games or sport, "my team",
-> "my squad" and "my run" are almost always objects in that video's subject
-> matter, not the speaker's life, and they were the largest single drop reason in
-> a real run. Reject those on the three-part test rather than treating the
-> possessive as disclosure.
->
-> Return nothing else: no raw transcript, no commentary, no summary of the
-> channel's topic. Do not look for further material beyond the list you were
-> given.
-
-**The helper agents are not told which brand this is for, and must not be.** A
-helper that knows the brand filters to the brand without being asked, and the
-pizza line never comes back. Casting wide happens here; narrowing to the brand
-happens in Step 5.
+Each agent gets the brief in `references/helper-brief.md`, with the placeholders
+filled in from Step 2, and nothing else. **The brand is never named to them**,
+which is why casting wide happens here and narrowing happens in Step 5.
 
 Merge the returns, drop duplicates, and write the creator profile. **The
 attribution bucket travels with every quote** into the output, so an unconfirmed
@@ -329,9 +218,8 @@ The profile is written separately because it is brand-independent, and the next
 brand reuses it instead of repeating Steps 2 and 3. Look for it before Step 2 and
 offer it, never reuse it silently.
 
-The creator profile is its own clearly visible section and is never folded into
-the brand connections. Every run also states whether the sweep ran dry or whether
-there is more to find. Full spec: `references/output-spec.md`.
+Full spec, including the section order and the sweep-ran-dry line every run
+carries: `references/output-spec.md`.
 
 ## Guardrails
 

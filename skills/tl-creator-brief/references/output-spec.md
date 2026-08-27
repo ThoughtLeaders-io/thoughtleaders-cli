@@ -95,7 +95,7 @@ Write **two** files, because the two sections have different lifespans:
 
 | File | Contents | Why separate |
 |---|---|---|
-| `creator-briefs/<channel_id>-profile.md` | Section 1 only, the creator profile, complete and standalone. | It is brand-independent. The next brand reuses it without re-running Steps 2 and 3, which is the expensive half of the run. |
+| `creator-briefs/<channel_id>-profile.md` | Section 1 only, the creator profile, complete and standalone. | It is brand-independent. The next brand reuses it without re-running Steps 2 and 3, which is the slow half of the run. |
 | `creator-briefs/<channel_id>-<brand_id>-brief.md` | The whole brief: the profile section, then the brand connections. | The deliverable for this run. Self-contained, so forwarding it needs no second file. |
 
 **Names are derived from the resolved IDs, never from names.** IDs came out of

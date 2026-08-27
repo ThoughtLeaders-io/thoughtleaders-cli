@@ -29,12 +29,12 @@ run these from this skill's `scripts/` directory.
 
 - **`tl db es` returns `{"results": [...]}`**, not the native Elasticsearch
   `hits.hits` shape. Read `results`.
-- **Channel documents are duplicated in Elasticsearch.** Observed: 35 identical
-  copies under one channel id. Every channel-document query needs
+- **Channel documents are duplicated in Elasticsearch**, many copies under one
+  channel id. Every channel-document query needs
   `"collapse": {"field": "id"}` or it returns all of them.
-- **The channel's raw `description` is usually not a description.** Observed on
-  a 19M-subscriber channel: the entire About text is a one-line nag about
-  subscribing. The platform's generated profile (`ai.description`) is the field
+- **The channel's raw `description` is usually not a description**, but
+  boilerplate about subscribing or socials. The platform's generated profile
+  (`ai.description`) is the field
   worth reading for identity. `channel_profile.py` returns both, in that order
   of preference.
 - **`query_string` is blocked** on Elasticsearch. Use `multi_match` for text

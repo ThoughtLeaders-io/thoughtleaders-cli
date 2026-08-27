@@ -48,11 +48,11 @@ rule.
 
 | Format | Confidence | Rule |
 |---|---|---|
-| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Measured on one channel: roughly half the machine-filtered candidates that matched a host anchor were still the guest. Expect lower recall than a solo channel, and say so. | Every quote carries an attribution bucket, per the buckets below. A candidate `selftalk_scan.py` anchored to the host is confirmed; a half-signal is kept and labelled unconfirmed; a candidate with no signal and no naming in the surrounding lines is dropped. State the guest-attribution risk in the caveats. |
+| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Roughly half the machine-filtered candidates that match a host anchor are still the guest. Expect lower recall than a solo channel, and say so. | Every quote carries an attribution bucket, per the buckets below. A candidate `selftalk_scan.py` anchored to the host is confirmed; a half-signal is kept and labelled unconfirmed; a candidate with no signal and no naming in the surrounding lines is dropped. State the guest-attribution risk in the caveats. |
 | **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
 | **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
 | **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |
-| **Reaction** | Usable with the tightest rule of the five. The creator's own speech and the narration of the material being reacted to sit in the **same transcript with no labels**, and the reacted material is often the more talkative of the two. Observed: 8 of 40 sampled uploads on one channel were reaction episodes, and they produced false attributions in the first pass. | A finding from a reaction video is **Unconfirmed** unless `host_anchor` or `in_sponsor_read` is true. Nothing else promotes it, because the second voice is not a guest who can be reasoned about but arbitrary third-party narration. |
+| **Reaction** | Usable with the tightest rule of the five. The creator's own speech and the narration of the material being reacted to sit in the **same transcript with no labels**, and the reacted material is often the more talkative of the two. | A finding from a reaction video is **Unconfirmed** unless `host_anchor` or `in_sponsor_read` is true. Nothing else promotes it, because the second voice is not a guest who can be reasoned about but arbitrary third-party narration. |
 
 **State the detected format and the confidence in the output**, every run.
 
@@ -78,7 +78,7 @@ and is where a measurable share of the findings live.
 | Bucket | What puts it here | What happens to it |
 |---|---|---|
 | **Confirmed** | `host_anchor`, `in_sponsor_read`, or `recurrence_videos` of 3 or more. | Usable as the host's own words. |
-| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Where another voice shares the transcript, roughly half are that other voice. | **Kept, and labelled.** Never silently dropped: removing this bucket was tried twice and lost real findings both times. Never silently promoted either. |
+| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Where another voice shares the transcript, roughly half are that other voice. | **Kept, and labelled.** Never silently dropped, and never silently promoted. |
 | **Unattributable** | No signal, and nothing nearby names the speaker. | Dropped, and counted in the caveats. |
 
 On a **solo** video the buckets are not signal-driven at all: one voice holds the
