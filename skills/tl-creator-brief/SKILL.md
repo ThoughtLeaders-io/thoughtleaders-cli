@@ -27,11 +27,6 @@ Two outputs, in this order, and nothing else:
 **One creator, one brand per run.** Batching is the caller's job, one line in
 their own prompt or routine.
 
-**Booking is not this skill's business.** It never asks whether the creator is
-booked, pitched or cold, and nothing it does changes based on the answer. Ad
-copy, briefs, outreach and packaging are separate skills that sit on top of this
-one. Keeping them out is what makes this one reusable.
-
 Read `references/code-reuse.md` before running anything.
 
 ## Step 0: setup
