@@ -152,6 +152,12 @@ def db_es(body: dict, *, timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
                           input_text=json.dumps(body), timeout=timeout))
 
 
+def cli_rows(args: list[str], *, input_text: str | None = None,
+             timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
+    """Run any ``tl`` command with ``--json`` and return unwrapped rows."""
+    return _rows(_tl_json(args, input_text=input_text, timeout=timeout))
+
+
 def whoami(*, timeout: int = DEFAULT_TIMEOUT) -> dict:
     data = _tl_json(["whoami", "--json"], timeout=timeout)
     return data if isinstance(data, dict) else {}
