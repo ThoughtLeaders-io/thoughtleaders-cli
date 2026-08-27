@@ -199,7 +199,12 @@ Merge the four returns, drop duplicates, and write the creator profile.
 
 Independent of Steps 2 and 3, so it can run alongside them. Run only the option
 the user picked in Step 1. Full spec, including the past-sponsorships script and
-the three-verified-reads floor: `references/brand-input.md`.
+both of its query paths: `references/brand-input.md`.
+
+**There is no minimum number of reads.** The step exists to learn what the
+product is, so one read that describes it does the job. There is no performance
+ranking here either: which past read did well is a different question, and this
+skill does not ask it.
 
 ## Step 5: find the connections
 

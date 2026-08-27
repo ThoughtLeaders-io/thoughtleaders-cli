@@ -47,7 +47,7 @@ PAD = 25  # seconds either side of a detected mention, since the read is longer
 
 # The detector sometimes records that a mention exists without capturing what was
 # said, as a bare placeholder like "(in transcript)". That is not a read, and
-# counting it as one would let the three-verified-reads floor pass on nothing.
+# counting it as one would report a read that says nothing about the product.
 PLACEHOLDER = re.compile(r"^\(?\s*(in|found in)\s+(the\s+)?"
                          r"(transcript|description|title)\s*\)?\.?$", re.I)
 
