@@ -29,18 +29,6 @@ their own prompt or routine.
 
 Read `references/code-reuse.md` before running anything.
 
-## Step 0: setup
-
-**Helper agents.** Step 3 fans out to as many as the passage pool needs, one per
-roughly 50 passages and never fewer than four. If the host cannot spawn helper
-agents, run the same batches one after another instead, and discard each batch's
-raw text before starting the next so it does not accumulate. Sequential batches
-change how long the step takes and nothing else: the batching, the round-robin
-deal and the per-batch instructions are identical either way. **Never read
-transcripts in the main conversation.** Raw transcript text there crowds out
-everything else for the rest of the run, and the main conversation only ever
-needs the findings.
-
 ## Step 1: resolve, then ask once
 
 **Resolve to IDs. This step ends with a confirmed set of brand IDs and a
@@ -158,6 +146,16 @@ tighter cap.
 cutting it into blocks. It arrives sorted with the best-attributed passages
 first, so slicing hands all the strong material to the first agent and leaves the
 rest with nothing but half-signals.
+
+**If the host cannot spawn helper agents**, run the same batches one after
+another instead, discarding each batch's raw text before starting the next so it
+does not accumulate. The batching, the round-robin deal and the per-batch
+instructions are identical either way, so a host without helper agents runs the
+same sweep rather than a smaller one.
+
+**Never read transcripts in the main conversation.** Raw transcript text there
+crowds out everything else for the rest of the run, and the main conversation
+only ever needs the findings.
 
 Each agent gets this and nothing else:
 
