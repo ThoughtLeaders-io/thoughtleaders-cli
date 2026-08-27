@@ -84,9 +84,37 @@ unattributable, how many are carried as unconfirmed, guest-attribution risk on a
 interview channel, caption corrections, reads that failed sponsorship
 verification, and anything inferred rather than found.
 
-## Format
+## Delivery: two files, and the paths come back
 
-Markdown in chat. Return a file path as well if the caller asks for a file.
+**The output is a markdown file, not a chat message.** Chat scrolls away and the
+brief is meant to be picked up later, forwarded, and reused against the next
+brand. So write the file, then return its path. A summary in chat is fine on top
+of that, never instead of it.
+
+Write **two** files, because the two sections have different lifespans:
+
+| File | Contents | Why separate |
+|---|---|---|
+| `creator-briefs/<channel_id>-profile.md` | Section 1 only, the creator profile, complete and standalone. | It is brand-independent. The next brand reuses it without re-running Steps 2 and 3, which is the expensive half of the run. |
+| `creator-briefs/<channel_id>-<brand_id>-brief.md` | The whole brief: the profile section, then the brand connections. | The deliverable for this run. Self-contained, so forwarding it needs no second file. |
+
+**Names are derived from the resolved IDs, never from names.** IDs came out of
+Step 1 and are exact; channel and brand names are fuzzy, get punctuation, and
+change on a rebrand. Where a rebrand gave several brand IDs, use the one the user
+named. Deterministic naming is the point: a re-run overwrites its own file rather
+than littering variants, and the profile cache is findable without a search.
+
+Write into `creator-briefs/` under the directory the skill was invoked from, and
+create it if it does not exist. Never write inside the skill's own directory,
+which is version-controlled and is not a place for run output.
+
+**Check for the cached profile before Step 2.** If
+`creator-briefs/<channel_id>-profile.md` already exists, offer it: say when it
+was written and what it covers, and ask whether to reuse it or re-run the sweep.
+Reusing it skips straight to Step 4. Never reuse it silently, since a profile
+written months ago has missed everything uploaded since, and never refuse to
+re-run: a wider sweep over the same channel is the documented fix for a thin
+profile.
 
 ## Never in the output
 

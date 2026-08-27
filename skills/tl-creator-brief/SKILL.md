@@ -242,6 +242,18 @@ cannot bias it.
 
 ## Step 6: output
 
+**Write the brief to a markdown file and return the path.** Not a chat message:
+the brief is made to be picked up later and forwarded. Two files, named from the
+resolved IDs so a re-run overwrites its own output:
+
+- `creator-briefs/<channel_id>-profile.md`, the creator profile alone.
+- `creator-briefs/<channel_id>-<brand_id>-brief.md`, the profile then the
+  connections.
+
+The profile is written separately because it is brand-independent, and the next
+brand reuses it instead of repeating Steps 2 and 3. Look for it before Step 2 and
+offer it, never reuse it silently.
+
 The creator profile is its own clearly visible section and is never folded into
 the brand connections. Every run also states whether the sweep ran dry or whether
 there is more to find. Full spec: `references/output-spec.md`.
