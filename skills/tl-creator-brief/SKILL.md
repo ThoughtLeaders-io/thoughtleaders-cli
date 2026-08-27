@@ -22,8 +22,12 @@ Two modes, one contract:
   `<channel_id>-<brand_id>-connections.md`, a ranked connection map. A no-fit
   verdict is a valid output.
 
-Read `references/code-reuse.md` before running anything. The attribution
-doctrine lives in `references/evidence-rules.md`; the transcript pipeline in
+Two standing rules: all data access from scripts goes through the shared
+wrapper (`skills/_shared/tl_data.py` — stdin-passed bodies, timeouts, loud
+failures), and a channel or brand name resolves via `tl channels find` /
+`tl brands find`, never `ILIKE` on a name. ES query gotchas live in the tl
+skill's `references/elasticsearch-schema.md`; the attribution doctrine in
+`references/evidence-rules.md`; the transcript pipeline in
 `references/transcript-mining.md`. Bulk-safe by construction: per-channel
 output paths, no `cd` anywhere, so many channels can run concurrently.
 

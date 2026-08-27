@@ -48,6 +48,17 @@ judgement the classifier makes from the format and the deterministic features
   Simultaneously, a "fact" inside an ad read is scripted, so it is banned as a
   gem source: it only enters the profile if it recurs outside reads.
 
+- **Detector output is evidence about detection, not about the video.** A
+  detected mention with a `(0,0)` span has no position — never pad it into a
+  claim about the video's opening. A description-field hit is the affiliate
+  link, not speech. And an affiliate read that only drops a link describes
+  nothing; one that describes the product is still a scripted read, so the
+  ad-read rule above applies.
+- **Identity reads come from the generated profile.** A channel's raw
+  `description` is usually subscribe-boilerplate; the platform's generated
+  profile (`ai.description`) is the identity field worth reading.
+  `channel_context.py` returns both, labelled.
+
 - **Merging quotes into one fact requires one speaker.** Two windows from
   the same interview video are not the same voice by default — a host's
   origin story at minute 6 and a guest's at minute 90 sit in one transcript.
