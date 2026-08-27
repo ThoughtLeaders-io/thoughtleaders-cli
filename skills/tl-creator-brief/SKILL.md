@@ -31,12 +31,6 @@ Read `references/code-reuse.md` before running anything.
 
 ## Step 0: setup
 
-**Plan.** This reads brand records and transcripts, which need Intelligence or
-above. Check `organization.plan` in `tl whoami --json`. Proceed on `Intelligence`
-or `Superuser`. Stop only on a known lower tier, naming the plan and what it
-needs. On any other value, note the uncertainty and continue: the first query's
-error is the source of truth, not a stale plan list.
-
 **Helper agents.** Step 3 fans out to as many as the passage pool needs, one per
 roughly 50 passages and never fewer than four. If the host cannot spawn helper
 agents, run the same batches one after another instead, and discard each batch's
