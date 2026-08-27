@@ -14,17 +14,20 @@ Two things it returns that matter more than they look:
   channel, the entire description is a one-line nag about subscribing. Both are
   returned, generated profile first, so the caller can see which is useful.
 * **Whether the profile text names a person at all.** A generated profile can be
-  several hundred words long and still never name the host: observed on a large
-  interview channel, the profile describes the show in detail and never mentions
-  the person presenting it. Length is therefore not the test for whether the
+  several hundred words long and still never name the host, describing the show
+  in detail and never mentioning the person presenting it. Length is therefore
+  not the test for whether the
   identity step is done. The host's name is what makes the transcript search
   attributable, so ``identity_is_thin`` reports short OR nameless, and either way
   the caller runs the one web search.
 * **Median duration and the recent titles.** These are the cheap format signal.
-  Two-hour uploads titled "<name> sits down with <guest>" is an interview show;
-  eight-minute uploads with no host name anywhere may be faceless narration. The
-  format decides how far the self-reference analysis can be trusted at all, so
-  it has to be settled before the expensive steps.
+  Long uploads whose titles pair two names suggest an interview; titles of the
+  form "<name> reacts to <thing>" suggest reaction content; short uploads with no
+  host name anywhere may be faceless narration. Title markers are counted for
+  each, since one channel mixes formats and the per-video format is what decides
+  how a passage from it can be attributed. The format decides how far the
+  self-reference analysis can be trusted at all, so it has to be settled before
+  the expensive steps.
 
 Usage:
     channel_profile.py --channel 138573
@@ -41,11 +44,17 @@ import statistics
 import subprocess
 import sys
 
-# Interview-show tells in a title. Not a verdict, a hint for the caller.
-_GUEST_MARKERS = re.compile(
-    r"(\bwith\b|\bft\.?\b|\bfeat\.?\b|\bep(isode)?\.?\s*\d|\binterview\b|:\s)",
-    re.I,
-)
+# Title tells for the formats where a second voice shares the transcript. Not a
+# verdict, a hint for the caller. Counted per format, because one channel mixes
+# them and the per-video format decides how a passage can be attributed.
+_SECOND_VOICE_MARKERS = {
+    "interview": re.compile(
+        r"(\bwith\b|\bft\.?\b|\bfeat\.?\b|\bep(isode)?\.?\s*\d"
+        r"|\binterview\b|:\s)", re.I),
+    "reaction": re.compile(
+        r"(\breact(s|ing|ion)?\b|\bwatch(es|ing)\b|\bfirst time\b"
+        r"|\breview(s|ing)?\b|\btier list\b)", re.I),
+}
 
 # A capitalised bigram is a weak proxy for a personal name. Words that routinely
 # start sentences or label things would otherwise read as names.
@@ -144,16 +153,23 @@ def format_hints(titles: list[dict]) -> dict:
     del titles
     durations = [t["duration"] for t in longform
                  if isinstance(t.get("duration"), (int, float)) and t["duration"]]
-    guesty = [t["title"] for t in longform
-              if t.get("title") and _GUEST_MARKERS.search(t["title"])]
+    titled = [t["title"] for t in longform if t.get("title")]
+    marker_counts = {
+        fmt: sum(1 for title in titled if rx.search(title))
+        for fmt, rx in _SECOND_VOICE_MARKERS.items()
+    }
     return {
         "longform_titles_sampled": len(longform),
         "median_duration_seconds": int(statistics.median(durations)) if durations else None,
-        "titles_with_guest_markers": len(guesty),
-        "guest_marker_share": (round(len(guesty) / len(longform), 2)
-                               if longform else None),
-        "note": ("guest markers are a hint towards an interview format, not a "
-                 "verdict; decide the format from these plus the profile text"),
+        "second_voice_title_markers": marker_counts,
+        "second_voice_marker_share": {
+            fmt: (round(n / len(longform), 2) if longform else None)
+            for fmt, n in marker_counts.items()
+        },
+        "note": ("title markers hint at a format where a second voice shares the "
+                 "transcript, they are not a verdict; decide the format from "
+                 "these plus the profile text, and expect one channel to mix "
+                 "formats, so carry the per-video format forward"),
     }
 
 

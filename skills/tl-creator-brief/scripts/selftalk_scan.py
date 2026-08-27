@@ -11,30 +11,33 @@ Two jobs, and they are different questions:
    because the video exists, and opinions about the world, which are not facts
    about the speaker.
 
-2. **Whose mouth did it come out of?** On an interview channel a guest sits
-   there talking about their own life for two hours, and captions carry no
-   speaker labels. "My father was a salesman his whole life" is perfect
-   self-disclosure belonging to the wrong person. Four signals are attached to
-   every passage so the judgement step is not guessing:
+2. **Whose mouth did it come out of?** Captions carry no speaker labels, so
+   wherever a second voice is in the transcript, its self-disclosure is
+   indistinguishable from the host's. "My father was a salesman his whole life"
+   is perfect self-disclosure belonging to the wrong person. The second voice
+   might be an interview guest, a co-host, or narration from material being
+   reacted to. Where only one voice is present there is nothing to separate, and
+   these signals are ranking information rather than a test to pass. Four signals
+   are attached to every passage so the judgement step is not guessing:
 
    * ``host_anchor`` (strong): matches a distinctive fact about the host, from
      ``--host-terms``. Their surname, their companies, their funds, a named
      former role.
    * ``weak_anchor``: first-person talk about running a show or a business
      ("my podcast", "my company"). Only about half of these are the host, since
-     guests have podcasts and companies too. They are kept and LABELLED rather
-     than discarded, because dropping them was measured and it was a mistake:
-     removing them cut the signalled pool from 84 passages to 17, while the
-     judging step had been correctly rejecting the guest half of them anyway.
-     Precision here is cheap to recover downstream and recall is not.
+     anyone speaking can have a podcast or a company. They are kept and LABELLED
+     rather than discarded, because dropping them was measured twice and was a
+     mistake both times: the judging step rejects the misattributed half
+     reliably, so the label costs nothing and the deletion cost real findings.
    * ``in_sponsor_read``: falls inside a detected sponsored segment. Ad reads are
-     spoken by the host, never the guest, so this is close to proof. Some of the
-     best material sits here, because a host explaining why they use a product
-     talks about their own life to do it.
+     spoken by the host, never by a guest or by reacted material, so this is
+     close to proof in any format. Some of the best material sits here, because a
+     host explaining why they use a product talks about their own life to do it.
    * ``recurrence_videos``: how many DIFFERENT videos share a distinctive phrase
-     with this passage. The guest changes every episode and the host does not, so
-     a personal claim appearing in three episodes cannot be three different
-     guests saying the same thing about themselves. "Distinctive" has to be
+     with this passage. Whoever else is in the transcript changes between
+     uploads and the host does not, so a personal claim appearing in three
+     uploads cannot be three different visitors saying the same thing about
+     themselves. "Distinctive" has to be
      enforced or this signal is worthless: a first attempt counted any four
      content words and duly reported that "I've always wondered" and "little bit
      more" recur, which says nothing about anybody. A phrase now qualifies only
@@ -44,12 +47,11 @@ Two jobs, and they are different questions:
 Two further signals were tried here and removed, and both are recorded so nobody
 spends the time again:
 
-* **Position in the video.** The theory was that an interview host speaks alone
-  in the opening minutes. Tested on a large interview channel it did the
-  opposite, because the show cold-opens on a clip of the GUEST, so "early"
-  reliably tagged guest speech.
-* **Who is named.** The theory was that the host says the guest's first name and
-  the guest says the host's. It failed twice over. Guest names had to come from
+* **Position in the video.** The theory was that a host speaks alone in the
+  opening minutes. Tested on a channel that cold-opens on a clip of the second
+  voice it did the exact opposite, so "early" reliably tagged the wrong speaker.
+* **Who is named.** The theory was that each speaker says the other's first
+  name. It failed twice over. The other speaker's name had to come from
   the video title, and on a clickbait title the extractor reads "Cancer Expert"
   and "Body Language" as names, whose words then match everywhere: 146 hits,
   almost all false. And the host's own name is ambiguous evidence anyway, because
@@ -110,7 +112,8 @@ DISCLOSURE = [
 
 # Both of these are first person and neither is a find.
 # Half-signals. First-person talk about running a show or a business: often the
-# host, frequently a guest. Worth a look, never worth trusting on its own.
+# host, frequently whoever else is in the transcript. Worth a look, never worth
+# trusting on its own.
 # A possessive is only self-disclosure if the thing possessed belongs to the
 # speaker's life. On a gaming channel "my team" is almost always the in-game team
 # for that match, and it was the single largest drop reason in a real run, roughly
@@ -215,7 +218,8 @@ RARE_SHARE = 0.30
 def add_recurrence(cands: list[dict]) -> None:
     """How many different videos share a distinctive phrase with each passage.
 
-    The guest changes every episode and the host does not, so a personal claim
+    Whoever else is in the transcript changes between uploads and the host does
+    not, so a personal claim
     that turns up in several episodes belongs to the host.
     """
     videos = {c["id"] for c in cands}
@@ -380,10 +384,10 @@ def main() -> None:
     ap.add_argument("--unsignalled", choices=["keep", "drop"], default="keep",
                     help="'drop' returns only passages carrying at least one "
                          "host signal; the count set aside is always reported. "
-                         "Default is keep, measured: dropping them on an "
-                         "interview channel cost 10 good findings out of 45, "
-                         "because the signals are sparse and the judging step "
-                         "rejects the guest material reliably anyway.")
+                         "Default is keep: the signals are sparse, and the "
+                         "judging step rejects misattributed material reliably "
+                         "anyway. On a single-voice channel the signals barely "
+                         "fire at all, so dropping here empties the pool.")
     a = ap.parse_args()
 
     if a.ids:
@@ -464,13 +468,14 @@ def main() -> None:
                         "in references/evidence-rules.md"),
         "attribution_note": ("host_anchor, in_sponsor_read and recurrence are "
                              "strong signals. weak_anchor is a half-signal: "
-                             "roughly half are the guest, so treat those "
-                             "sceptically and drop the ambiguous ones. On an "
-                             "interview channel a passage with no signal at all "
-                             "is not attributable from the transcript alone. On "
-                             "a solo channel there is no attribution risk and no "
-                             "signal is required, so run with "
-                             "--unsignalled keep."),
+                             "roughly half are whoever else is in the "
+                             "transcript, so keep those and LABEL them "
+                             "unconfirmed rather than dropping them. Where a "
+                             "second voice shares the transcript, a passage with "
+                             "no signal at all is not attributable from the "
+                             "transcript alone. Where only one voice is present "
+                             "there is nothing to separate and no signal is "
+                             "required, so the three-part test decides."),
         "candidates": pool,
     }, indent=1, default=str))
 

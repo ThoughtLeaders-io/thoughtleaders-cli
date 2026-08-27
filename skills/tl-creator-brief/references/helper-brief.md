@@ -40,16 +40,18 @@ Use the signals:
 - **Confirmed.** `host_anchor`, `in_sponsor_read`, or a `recurrence_videos` of
   3 or more. These are strong signals that the host is speaking.
 - **Unconfirmed.** `weak_anchor`, which is first-person talk about running a
-  show or a business. Roughly half of these are a guest talking about their own
-  show or company. **Keep them and label them unconfirmed. Do not drop them.**
-  The label is what protects the reader, not the deletion.
+  show or a business. Roughly half of these are the other voice talking about
+  their own. **Keep them and label them unconfirmed. Do not drop them.** The
+  label is what protects the reader, not the deletion.
 - **Unattributable.** No signal at all, and nothing in the surrounding lines
   names the speaker. Drop these.
 
-On an interview channel most self-disclosure in the transcript belongs to the
-guest, so never upgrade a passage to confirmed by guessing. A quote presented as
-the host's when it was the guest's is the one error that discredits everything
-around it, and the bucket label is how that is avoided.
+Wherever a second voice is present, most self-disclosure in the transcript
+belongs to it rather than to the host, so never upgrade a passage to confirmed by
+guessing. A quote presented as the host's when someone else said it is the one
+error that discredits everything around it, and the bucket label is how that is
+avoided. On an interview channel that second voice is the guest, and the guest
+usually talks more than the host does.
 
 In a **reaction** video the narration of the material being reacted to sits in
 the same transcript with no speaker labels, so a passage from one is
