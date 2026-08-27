@@ -48,6 +48,12 @@ judgement the classifier makes from the format and the deterministic features
   Simultaneously, a "fact" inside an ad read is scripted, so it is banned as a
   gem source: it only enters the profile if it recurs outside reads.
 
+- **Merging quotes into one fact requires one speaker.** Two windows from
+  the same interview video are not the same voice by default — a host's
+  origin story at minute 6 and a guest's at minute 90 sit in one transcript.
+  Merge only quotes that each independently attribute to the host; a window
+  that merely *continues the video* of an attributed one proves nothing.
+
 Every fact carries a confidence bucket, and the bucket travels into the
 output:
 
