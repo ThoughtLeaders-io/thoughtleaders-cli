@@ -1,20 +1,85 @@
 # Evidence rules
 
 The output is written to be forwarded. Every rule here exists to stop a wrong
-quote reaching a creator.
+quote, or an invented one, reaching someone outside this session.
+
+## What counts as the creator talking about themselves
+
+The whole first half of this skill rests on this distinction, so it is written
+down rather than left to judgement. **A first-person search is not the test.**
+"I think you should buy gold" and "I'll show you in a second" are both first
+person and neither is worth anything.
+
+A line qualifies only if it passes **all three**:
+
+1. **Is the speaker the subject?** The line is about their own life, work,
+   history, habits, relationships or tastes. Not about the topic, not about the
+   audience, not about what happens next in the video.
+2. **Would it still be true if the video did not exist?** "I founded a marketing
+   agency" is true off camera. "I'll show you in a second" exists only because
+   the video exists. "I think you should buy gold" is a claim about the world,
+   not a fact about the speaker.
+3. **Does it disclose something the channel's premise does not already imply?**
+   A geography host saying "I love maps" discloses nothing. "I trained as an
+   accountant" does.
+
+Worked through:
+
+| Line | Verdict |
+|---|---|
+| "I taught myself how to do this" | Passes. Speaker is the subject, true off camera, reveals a trait. |
+| "I founded a marketing agency because..." | Passes. |
+| "I consider myself an autodidact" | Passes. |
+| "my favourite food is pizza" | Passes, and is exactly the kind of find this skill exists for. |
+| "I think you should buy gold" | Fails 2. An opinion about the world. |
+| "I'll show you in a second" | Fails 2. A stage direction. |
+| "I love maps" on a geography channel | Fails 3. Implied by the premise. |
+
+**Cast wide at this stage.** Do not filter to what looks useful for the brand.
+The unrelated material is where the good connections come from, and narrowing to
+the brand is a later step with its own inputs.
+
+## Channel format decides how far to trust any of it
+
+Transcripts carry no speaker labels, and the signal is worth wildly different
+amounts depending on the format. Detect the format first, from the channel's
+profile text, its recent titles and their durations, then apply the matching
+rule.
+
+| Format | Confidence | Rule |
+|---|---|---|
+| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. | Verify from context that the host is speaking, per the captions rule below, on **every** quote. Drop anything ambiguous. State the guest-attribution risk in the caveats. |
+| **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
+| **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
+| **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |
+
+**State the detected format and the confidence in the output**, every run.
+
+## An empty profile is a valid answer
+
+Where the format cannot support the analysis, return an empty creator profile
+naming the detected format and why it defeats the method, and do not proceed
+into the transcript steps to produce something anyway.
+
+This output can be forwarded to a brand. "This channel's format does not support
+self-reference profiling" is a correct and useful answer. A profile assembled
+from low-confidence guesses presented as findings is not, and is worse than
+nothing, because the reader cannot tell the difference.
 
 ## Spoken versus written
 
-- Anything claimed as **spoken**: `fetch_context.py --fields transcript`, and
-  discard every snippet whose `field` is not `transcript`.
+- Anything claimed as **spoken** must come from the transcript field. Discard
+  every snippet whose field is not the transcript.
 - Descriptions have one use: confirming a sponsorship happened and reading the
-  current CTA format. Separate call, labelled as such. Never merge the two
-  result sets.
+  current call-to-action format. Separate call, labelled as such. Never merge
+  the two result sets.
 
 ## Quotes
 
 - Verbatim or not at all.
-- **Timestamp every quote** with `scripts/quote_timestamp.py`:
+- **Timestamp every quote.** `selftalk_scan.py` returns candidates already
+  carrying their offset, so a quote that came through it needs no extra pass.
+  For a quote from anywhere else:
   ```bash
   python3 scripts/quote_timestamp.py <channel_id>:<video_id> "the quote"
   ```
@@ -33,39 +98,20 @@ quote reaching a creator.
 - Corrections are never silent: corrected proper noun in square brackets, raw
   caption text noted in the caveats. Bracketed proper-noun fixes are the only
   permitted edit.
-- No speaker labels. On interview channels verify from context that the *host*
-  is speaking, and drop anything ambiguous.
+- **No speaker labels.** Verify from surrounding context that the channel's own
+  host is speaking, and drop anything ambiguous. This is the rule the format
+  table above refers to; it is not restated there.
 
 ## Figurative use
 
-A raw category search returns mostly metaphor. Screen twice:
+If Step 5's narrow probe searches the brand's problem space, a raw category
+search returns mostly metaphor. Judge each snippet individually before it
+becomes a connection, and **report the survival count** ("30 hits, 4 literal").
+That ratio is itself evidence of how close the creator is to the category.
 
-- **Channel level:** `keyword-context-classifier` with an explicit `TOPIC:` line
-  for the product's literal sense and a `NOT:` line for the figurative ones.
-  Example `NOT:` "puzzle" as a geopolitical problem, "memory" as historical
-  memory, "brain" as rhetoric.
-- **Snippet level:** that agent judges channels, not snippets, so it cannot pick
-  quotes. Judge each snippet individually before it becomes a quote-bridge, and
-  **report the survival count** ("30 hits, 4 literal"). That ratio is itself
-  evidence of how close the creator is to the category.
+## The evidence decides the answer
 
-## Competitor check
-
-Both halves, or it misses:
-
-```bash
-tl sponsorships list channel:<channel_id> publish-date-start:<12 months ago> --md
-```
-
-covers TL-brokered deals, including live proposals other people own. For reads
-bought outside TL, scan the channel's sponsored mentions in Elasticsearch over
-the same window.
-
-Compare against the competitor and guide brands named in Step 1. If none were
-named, **ask** rather than inferring the competitor set from the category.
-
-## The evidence decides the verdict
-
-If there is no format precedent and no credible bridge, say exactly that, show
-what was searched, and stop. At the research moment that is the whole answer and
-a good one.
+If the profile holds nothing that genuinely connects to the brand, say exactly
+that, show what was searched, and stop. Forcing a connection out of thin
+material is the one failure mode that costs the reader their trust in every
+other line of the output.
