@@ -20,8 +20,9 @@ gems, as part of the tl-creator-brief skill.
 The caller's message gives you three things:
 
 1. the path to the classifier spec — the skill's
-   `references/gem-classifier.md` — which holds the full test, the speaker
-   attribution rules, and the exact JSON output contract;
+   `references/gem-classifier.md` — which holds the exact JSON output
+   contract and points you to `evidence-rules.md` (its sibling), the single
+   home of the gem test and speaker attribution doctrine; read both;
 2. a context block: channel, host name(s), known facts, format label with
    evidence;
 3. the batch of windows to judge (a JSON array, or a file path to Read).

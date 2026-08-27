@@ -73,8 +73,14 @@ def main() -> None:
     out = pathlib.Path(a.out) / str(a.channel)
     out.mkdir(parents=True, exist_ok=True)
 
+    # Write to a sibling temp file and rename only after the last page lands:
+    # a timeout / credit failure mid-sweep must never leave a valid-looking
+    # partial corpus (or clobber a previous complete one) — a later scan
+    # could not tell it from the promised census.
+    final = out / "corpus.jsonl"
+    partial = out / "corpus.jsonl.partial"
     after, n_total, n_with = None, 0, 0
-    with open(out / "corpus.jsonl", "w", encoding="utf-8") as f:
+    with open(partial, "w", encoding="utf-8") as f:
         while True:
             body = {"size": PAGE,
                     "query": {"bool": {"filter": [
@@ -97,13 +103,15 @@ def main() -> None:
             after = [rows[-1].get("publication_date"), rows[-1].get("id")]
 
     if n_total == 0:
+        partial.unlink(missing_ok=True)
         sys.exit(f"no uploads found for channel {a.channel}")
+    partial.replace(final)
 
     print(json.dumps({
         "channel": a.channel, "videos": n_total,
         "with_transcript": n_with,
         "coverage": round(n_with / n_total, 2),
-        "corpus": str(out / "corpus.jsonl"),
+        "corpus": str(final),
         "note": "all transcripts fetched; nothing sampled away"}))
 
 
