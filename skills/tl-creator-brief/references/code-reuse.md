@@ -18,7 +18,7 @@ that regenerates it is slower and less correct every run.
 
 ## How this skill's scripts are built
 
-All four shell out to the `tl` CLI directly and import nothing but the standard
+All five shell out to the `tl` CLI directly and import nothing but the standard
 library and each other. That is deliberate: the sibling skills' helpers
 (`tl_cli.py`, `resolve_channel.py`) import their own siblings, so they only run
 from their own `scripts/` directory and cannot be imported from here without a
