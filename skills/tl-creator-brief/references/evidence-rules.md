@@ -48,12 +48,28 @@ rule.
 
 | Format | Confidence | Rule |
 |---|---|---|
-| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Measured on one channel: roughly half the machine-filtered candidates that matched a host anchor were still the guest. | Verify from context that the host is speaking, per the captions rule below, on **every** quote. A candidate that `selftalk_scan.py` did not anchor to the host is kept only if the speaker names themselves or is named nearby. Drop anything ambiguous. State the guest-attribution risk in the caveats. |
+| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Measured on one channel: roughly half the machine-filtered candidates that matched a host anchor were still the guest. Expect lower recall than a solo channel, and say so. | Every quote carries an attribution bucket, per the buckets below. A candidate `selftalk_scan.py` anchored to the host is confirmed; a half-signal is kept and labelled unconfirmed; a candidate with no signal and no naming in the surrounding lines is dropped. State the guest-attribution risk in the caveats. |
 | **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
 | **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
 | **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |
 
 **State the detected format and the confidence in the output**, every run.
+
+## Attribution buckets
+
+Attribution is three buckets, not a yes or no, because the middle bucket is real
+and is where a measurable share of the findings live.
+
+| Bucket | What puts it here | What happens to it |
+|---|---|---|
+| **Confirmed** | `host_anchor`, `in_sponsor_read`, or `recurrence_videos` of 3 or more. | Usable as the host's own words. |
+| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Roughly half are guests. | **Kept, and labelled.** Never silently dropped: removing this bucket was tried twice and lost real findings both times. Never silently promoted either. |
+| **Unattributable** | No signal, and nothing nearby names the speaker. | Dropped, and counted in the caveats. |
+
+The label travels with the quote all the way into the output. That is what makes
+the middle bucket safe to keep: the reader can see exactly which quotes are the
+host beyond doubt and which are probable, and can weigh a connection built on
+one differently from a connection built on the other.
 
 ## An empty profile is a valid answer
 
@@ -98,9 +114,10 @@ nothing, because the reader cannot tell the difference.
 - Corrections are never silent: corrected proper noun in square brackets, raw
   caption text noted in the caveats. Bracketed proper-noun fixes are the only
   permitted edit.
-- **No speaker labels.** Verify from surrounding context that the channel's own
-  host is speaking, and drop anything ambiguous. This is the rule the format
-  table above refers to; it is not restated there.
+- **No speaker labels.** Verify from surrounding context who is speaking, and
+  sort the result into the three attribution buckets above. Ambiguous is a
+  bucket, not a delete: only a passage with no signal and no naming nearby is
+  dropped outright.
 
 ## Figurative use
 

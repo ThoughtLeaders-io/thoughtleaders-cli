@@ -22,11 +22,12 @@ any brand after this one.
   counts, which the reader can already see.
 - **Detected channel format, and the confidence that follows from it.** Stated
   plainly, every run, per `evidence-rules.md`.
-- **The self-references.** Verbatim, each with video title, date and a
-  timestamped link, and one short line on what it reveals. Group them loosely
-  by what they are about: history and origin, how they work and learn, beliefs,
-  habits and tastes, life details. Material with nothing to do with the brand
-  belongs here and is not to be trimmed for being off-brand.
+- **The self-references.** Verbatim, each with video title, date, a timestamped
+  link, one short line on what it reveals, and its **attribution bucket**
+  (confirmed or unconfirmed, per `evidence-rules.md`). Group them loosely by what
+  they are about: history and origin, how they work and learn, beliefs, habits
+  and tastes, life details. Material with nothing to do with the brand belongs
+  here and is not to be trimmed for being off-brand.
 - **Coverage**: how many uploads the channel has, how many were sampled and by
   which strategy, how many had no transcript.
 - **Whether the sweep ran dry.** See below. This is not optional.
@@ -78,10 +79,10 @@ Where there is more to find, name the way to get it: re-run Step 3 with a higher
 
 ### Caveats
 
-Transcript coverage, uploads not sampled, quotes dropped for ambiguous
-attribution, guest-attribution risk on an interview channel, caption
-corrections, reads that failed sponsorship verification, and anything inferred
-rather than found.
+Transcript coverage, uploads not sampled, how many quotes were dropped as
+unattributable, how many are carried as unconfirmed, guest-attribution risk on an
+interview channel, caption corrections, reads that failed sponsorship
+verification, and anything inferred rather than found.
 
 ## Format
 

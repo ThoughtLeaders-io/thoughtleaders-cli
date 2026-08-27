@@ -175,17 +175,26 @@ Each agent gets this and nothing else:
 > Apply the three-part self-reference test in `references/evidence-rules.md` to
 > every passage, and return only those that pass all three parts.
 >
-> Then attribute. `host_anchor`, `in_sponsor_read` and a `recurrence_videos` of 3
-> or more are strong signals that the host is speaking. `weak_anchor` is a
-> half-signal: roughly half of those are a guest talking about their own show or
-> company, so be sceptical and drop the ambiguous ones. On an interview channel,
-> most self-disclosure in the transcript belongs to the guest, so a passage you
-> cannot attribute to `<host name>` gets dropped rather than guessed at. A quote
-> attributed to the wrong person is worse than a missing quote.
+> Then attribute, into three buckets rather than a yes or no.
+>
+> - **Confirmed.** `host_anchor`, `in_sponsor_read`, or a `recurrence_videos` of
+>   3 or more. These are strong signals that the host is speaking.
+> - **Unconfirmed.** `weak_anchor`, which is first-person talk about running a
+>   show or a business. Roughly half of these are a guest talking about their own
+>   show or company. **Keep them and label them unconfirmed. Do not drop them.**
+>   Dropping them has been measured twice and cost real findings both times, and
+>   the label is what protects the reader, not the deletion.
+> - **Unattributable.** No signal at all, and nothing in the surrounding lines
+>   names the speaker. Drop these.
+>
+> On an interview channel most self-disclosure in the transcript belongs to the
+> guest, so never upgrade a passage to confirmed by guessing. A quote presented as
+> the host's when it was the guest's is the one error that discredits everything
+> around it, and the bucket label is how that is avoided.
 >
 > For each passage you keep, return the verbatim words, the video id, the
-> timestamp, one short phrase on what it reveals about the creator, and your
-> confidence. Then state how many you dropped and the most common reason.
+> timestamp, one short phrase on what it reveals about the creator, and its
+> attribution bucket. Then state how many you dropped and the most common reason.
 >
 > Return nothing else: no raw transcript, no commentary, no summary of the
 > channel's topic. Do not look for further material beyond the list you were
@@ -196,7 +205,9 @@ helper that knows the brand filters to the brand without being asked, and the
 pizza line never comes back. Casting wide happens here; narrowing to the brand
 happens in Step 5.
 
-Merge the returns, drop duplicates, and write the creator profile.
+Merge the returns, drop duplicates, and write the creator profile. **The
+attribution bucket travels with every quote** into the output, so an unconfirmed
+quote is never presented as a confirmed one.
 
 ## Step 4: understand the brand
 
