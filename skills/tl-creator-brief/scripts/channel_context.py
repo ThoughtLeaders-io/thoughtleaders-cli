@@ -111,16 +111,28 @@ def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
     candidate to a TL channel id (`tl channels find`) and deciding to scan it
     belongs to the identity & socials lane.
     """
-    own = {str(row.get("external_channel_id") or "").lower()}
-    for u in (row.get("url"), doc.get("name")):
-        if u:
-            own.add(str(u).lower().rstrip("/"))
+    # Compare exact channel identities, never substrings: the second channel
+    # is routinely a derivative handle (@foo -> @fooVlogs), so a substring
+    # test against the main URL would reject exactly the channels we want.
+    def _identity(link: str) -> str:
+        s = link.lower().rstrip("/")
+        for marker in ("/channel/", "/@", "/c/", "/user/"):
+            if marker in s:
+                return s.split(marker, 1)[1].split("/")[0].split("?")[0]
+        if "youtu.be/" in s:
+            return s.split("youtu.be/", 1)[1].split("/")[0].split("?")[0]
+        return s
+
+    own = {str(row.get("external_channel_id") or "").lower()} | {
+        _identity(str(u)) for u in (row.get("url"),) if u
+    }
+    own.discard("")
     seen: set[str] = set()
     out: list[dict] = []
 
     def add(link: str, source: str) -> None:
-        key = link.lower().rstrip("/")
-        if key in seen or any(o and o in key for o in own if o):
+        key = _identity(link)
+        if not key or key in seen or key in own:
             return
         seen.add(key)
         out.append({"link": link, "source": source})

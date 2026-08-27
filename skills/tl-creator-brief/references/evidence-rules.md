@@ -50,8 +50,8 @@ judgement the classifier makes from the format and the deterministic features
 
 - **Detector output is evidence about detection, not about the video.** A
   detected mention with a `(0,0)` span has no position — never pad it into a
-  claim about the video's opening. A description-field hit is the affiliate
-  link, not speech. And an affiliate read that only drops a link describes
+  claim about the video's opening. A `summary`-field hit (the creator-written
+  upload description) is the affiliate link, not speech. And an affiliate read that only drops a link describes
   nothing; one that describes the product is still a scripted read, so the
   ad-read rule above applies.
 - **Identity reads come from the generated profile.** A channel's raw

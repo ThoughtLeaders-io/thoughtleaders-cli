@@ -82,7 +82,7 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
             if m.get("type") != "sponsored":
                 continue
             if m.get("field") != "transcript":
-                continue  # a description hit is the affiliate link, not speech
+                continue  # a summary (description) hit is the affiliate link, not speech
             key = str(r.get("id"))
             if key in out:
                 continue
