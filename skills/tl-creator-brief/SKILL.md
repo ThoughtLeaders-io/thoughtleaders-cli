@@ -44,9 +44,10 @@ error is the source of truth, not a stale plan list.
 
 **Helper agents.** Step 3 fans out to four of them. If the host cannot spawn
 helper agents, run the four batches one after another instead, and discard each
-batch's raw text before starting the next so it does not accumulate. Never read
-transcripts in the main conversation: raw transcript text there is paid for
-again on every later turn, which is the single largest cost in this skill.
+batch's raw text before starting the next so it does not accumulate. **Never read
+transcripts in the main conversation.** Raw transcript text there crowds out
+everything else for the rest of the run, and the main conversation only ever
+needs the findings.
 
 ## Step 1: resolve, then ask once
 
@@ -81,8 +82,8 @@ tool by name without checking it exists.
 
 ## Step 2: who is the creator, and what kind of channel is this
 
-Before any transcript is touched, because it costs almost nothing and it gives
-the transcript search a target instead of a fishing licence.
+Before any transcript is touched. Three queries, and they give the transcript
+search a target instead of a fishing licence.
 
 ```bash
 cd <this skill>/scripts && python3 channel_profile.py --channel <channel_id>
@@ -101,8 +102,8 @@ attributable, not background colour, so it is the output of this step.
   `identity_is_thin` reports short OR nameless, and either way:
 - **run one web search**, of the form `who is <channel name>`, and one only. On a
   well known channel this returns the framing in a sentence, for example that a
-  show is hosted by a named entrepreneur who founded a particular company. That
-  framing costs a fraction of discovering the same thing from transcripts.
+  show is hosted by a named entrepreneur who founded a particular company. One
+  sentence of framing does more for the search than the transcripts can.
 - **Detect the channel format** from that material: interview show, solo
   talking head, faceless narrated or animated, or multi-host. The four formats
   and how far each can be trusted are in `references/evidence-rules.md`.
@@ -125,9 +126,9 @@ in a five year old video as in last week's. `recent` and `top-views` exist for
 callers who want them. The script reports what it left out; say so in the
 output.
 
-**Machine filter, then judge.** The filter is plain pattern matching, no model,
-so it is effectively free, and it exists to cut the volume the model has to read
-by roughly an order of magnitude.
+**Machine filter, then judge.** The filter is plain pattern matching, no model
+involved, and it exists to cut a whole back catalogue of speech down to the
+passages worth a human-grade read.
 
 ```bash
 python3 build_corpus.py --channel <channel_id> --max 40 --strategy spread \
@@ -148,19 +149,37 @@ describing his own firm. Generic terms poison the one signal that works.
 Candidates come back already carrying their video, timestamp and link, so no
 separate timestamping pass is needed.
 
-**Fan out four helper agents**, one per quarter of the candidate list. Each gets
-this and nothing else:
+**Fan out four helper agents.** Deal the candidate list out round-robin, one
+passage to each agent in turn, rather than cutting it into four blocks. The list
+arrives sorted with the best-attributed passages first, so slicing it hands all
+the strong material to the first agent and leaves the other three with nothing
+but half-signals. Each agent gets this and nothing else:
 
-> You are given a list of candidate lines from one YouTube channel's
-> transcripts, each with a video id and a timestamp. Apply the self-reference
-> test in `references/evidence-rules.md` to every line and return only the lines
-> that pass all three parts of it. The channel format is `<format>`, so apply
-> the attribution rule for that format; drop anything you cannot attribute to
-> the channel's own host. For each line you keep, return the verbatim line, the
-> video id, the timestamp, and one short phrase saying what it reveals about the
-> creator. Return nothing else: no raw transcript, no commentary, no summary of
-> the channel's topic. Do not search for further material beyond the list you
-> were given.
+> You are given a list of candidate passages from one YouTube channel's
+> transcripts, each with a video id, a timestamp, and its attribution signals.
+>
+> The channel is `<channel name>`. Its format is `<format>`. The host is
+> `<host name>`, and these are the facts already known about them:
+> `<known facts from the identity step>`.
+>
+> Apply the three-part self-reference test in `references/evidence-rules.md` to
+> every passage, and return only those that pass all three parts.
+>
+> Then attribute. `host_anchor`, `in_sponsor_read` and a `recurrence_videos` of 3
+> or more are strong signals that the host is speaking. `weak_anchor` is a
+> half-signal: roughly half of those are a guest talking about their own show or
+> company, so be sceptical and drop the ambiguous ones. On an interview channel,
+> most self-disclosure in the transcript belongs to the guest, so a passage you
+> cannot attribute to `<host name>` gets dropped rather than guessed at. A quote
+> attributed to the wrong person is worse than a missing quote.
+>
+> For each passage you keep, return the verbatim words, the video id, the
+> timestamp, one short phrase on what it reveals about the creator, and your
+> confidence. Then state how many you dropped and the most common reason.
+>
+> Return nothing else: no raw transcript, no commentary, no summary of the
+> channel's topic. Do not look for further material beyond the list you were
+> given.
 
 **The helper agents are not told which brand this is for, and must not be.** A
 helper that knows the brand filters to the brand without being asked, and the
@@ -183,14 +202,23 @@ that could be built on it. A creator who loves pizza and a brand whose in-app
 scoring unit is called pies is a connection; real pizzas to users who hit a
 hundred day streak on that creator's code is the thing built on it.
 
-Where the profile suggests the creator already does on camera something the
-product enables, one narrow extra probe for that moment is worth it. One probe,
-capped, and only when the profile points at it.
+**Keywords may confirm, never discover.** Where the profile has already
+surfaced something that looks like a moment the product speaks to, one narrow
+keyword probe to pin that moment down and timestamp it is fine. A keyword search
+is never allowed to decide what gets looked for: it can only find what someone
+already thought to name, and the connection worth having is the one nobody
+thought of. That is also why Step 3 runs without knowing the brand.
+
+If the profile is too thin to connect to the brand, the answer is **more of the
+same wide sweep, never a narrower one**: raise `--max` and re-run Step 3 over
+more of the catalogue. The filter has no idea what the brand is, so widening it
+cannot bias it.
 
 ## Step 6: output
 
 The creator profile is its own clearly visible section and is never folded into
-the brand connections. Full spec: `references/output-spec.md`.
+the brand connections. Every run also states whether the sweep ran dry or whether
+there is more to find. Full spec: `references/output-spec.md`.
 
 ## Guardrails
 
