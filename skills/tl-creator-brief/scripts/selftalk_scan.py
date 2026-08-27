@@ -111,6 +111,13 @@ DISCLOSURE = [
 # Both of these are first person and neither is a find.
 # Half-signals. First-person talk about running a show or a business: often the
 # host, frequently a guest. Worth a look, never worth trusting on its own.
+# A possessive is only self-disclosure if the thing possessed belongs to the
+# speaker's life. On a gaming channel "my team" is almost always the in-game team
+# for that match, and it was the single largest drop reason in a real run, roughly
+# 12 of every 41 passages judged. Pass --domain-terms team,squad,roster there to
+# stop it counting. Off by default, because on a business channel "my team" is a
+# real fact about the speaker. Suppression needs EVERY possessive in the passage
+# to be a domain object, so "my team and my wife" still counts.
 WEAK_ANCHOR = re.compile(
     r"\b(my|our) (podcast|show|channel|company|companies|business|businesses|"
     r"agency|startup|fund|team|book|brand|investors|co-?founder|"
@@ -254,14 +261,41 @@ def windows(cues: list[dict]) -> list[tuple[int, str]]:
     return out
 
 
-def judge(text: str) -> list[str] | None:
+def _possessive_nouns(rx: re.Pattern, text: str) -> list[str]:
+    """The possessive nouns a cue matched, lowercased. The noun is the last
+    capture group in both own_life and WEAK_ANCHOR."""
+    return [m.groups()[-1].lower().replace("-", "") for m in rx.finditer(text)]
+
+
+def _all_domain(nouns: list[str], domain: frozenset[str]) -> bool:
+    """True when every possessive in the passage is a domain object, so the cue
+    says nothing about the speaker's life."""
+    return bool(nouns) and all(n in domain for n in nouns)
+
+
+def judge(text: str, domain: frozenset[str] = frozenset()) -> list[str] | None:
     """Return which disclosure cues fired, or None if the passage is rejected."""
     if not FIRST_PERSON.search(text):
         return None
     if EXCLUDE.search(text):
         return None
-    fired = [name for name, rx in DISCLOSURE if rx.search(text)]
+    fired = []
+    for name, rx in DISCLOSURE:
+        if not rx.search(text):
+            continue
+        if domain and name == "own_life" \
+                and _all_domain(_possessive_nouns(rx, text), domain):
+            continue
+        fired.append(name)
     return fired or None
+
+
+def weak_anchor(text: str, domain: frozenset[str] = frozenset()) -> bool:
+    if not WEAK_ANCHOR.search(text):
+        return False
+    if domain and _all_domain(_possessive_nouns(WEAK_ANCHOR, text), domain):
+        return False
+    return True
 
 
 def _in_sponsor(start: int, segments: list[tuple[float, float]]) -> bool:
@@ -289,7 +323,8 @@ def _rank(c: dict) -> tuple:
 
 
 def scan_video(video: dict, host_rx,
-               segments: list[tuple[float, float]]) -> dict:
+               segments: list[tuple[float, float]],
+               domain: frozenset[str] = frozenset()) -> dict:
     ref = video["id"]
     try:
         cues = fetch_cues(ref)
@@ -302,7 +337,7 @@ def scan_video(video: dict, host_rx,
     vid = video.get("video_id") or str(ref).split(":")[-1]
     found = []
     for start, text in windows(cues):
-        fired = judge(text)
+        fired = judge(text, domain)
         if not fired:
             continue
         found.append({
@@ -314,7 +349,7 @@ def scan_video(video: dict, host_rx,
             "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
             "cues_fired": fired,
             "host_anchor": bool(host_rx and host_rx.search(text)),
-            "weak_anchor": bool(WEAK_ANCHOR.search(text)),
+            "weak_anchor": weak_anchor(text, domain),
             "in_sponsor_read": _in_sponsor(start, segments),
             "text": text,
             "_phrases": _phrases(text),
@@ -329,6 +364,14 @@ def main() -> None:
     ap.add_argument("--host-terms", default=None,
                     help="comma-separated facts distinctive to the host, from the "
                          "identity step. Never generic possessives.")
+    ap.add_argument("--domain-terms", default=None,
+                    help="comma-separated possessive nouns that are objects in "
+                         "this channel's subject matter rather than facts about "
+                         "the speaker's life, for example team,squad,roster on a "
+                         "gaming or sport channel. A passage whose only "
+                         "possessive is one of these stops counting as "
+                         "self-disclosure. Off by default, because on a business "
+                         "channel \"my team\" is a real life fact.")
     ap.add_argument("--max-per-video", type=int, default=30,
                     help="ceiling per video (default 30). A two-hour episode "
                          "yields about 30, so this protects against an outlier "
@@ -355,11 +398,13 @@ def main() -> None:
     host_terms = [t.strip() for t in (a.host_terms or "").split(",") if t.strip()]
     host_rx = (re.compile("|".join(re.escape(t) for t in host_terms), re.I)
                if host_terms else None)
+    domain = frozenset(w.strip().lower().replace("-", "")
+                       for w in (a.domain_terms or "").split(",") if w.strip())
     segments = sponsor_segments([v["id"] for v in videos if v.get("id")])
 
     all_cands, no_transcript, per_video_dropped = [], [], 0
     for v in videos:
-        res = scan_video(v, host_rx, segments.get(v["id"], []))
+        res = scan_video(v, host_rx, segments.get(v["id"], []), domain)
         if not res["transcript"]:
             no_transcript.append(res["id"])
             continue
@@ -402,6 +447,7 @@ def main() -> None:
         "dropped_by_total_cap": dropped_by_cap,
         "candidates_returned": len(pool),
         "host_terms_used": host_terms,
+        "domain_terms_used": sorted(domain),
         "signals": {
             "host_anchor": sum(1 for c in pool if c["host_anchor"]),
             "in_sponsor_read": sum(1 for c in pool if c["in_sponsor_read"]),

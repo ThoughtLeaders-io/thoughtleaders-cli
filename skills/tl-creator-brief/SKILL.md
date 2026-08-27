@@ -158,6 +158,16 @@ one solo channel it fired on 3 of 207 passages. Pass the terms anyway, since the
 still rank the pool, but on a solo channel the three-part test is what decides
 and a low anchor count is expected rather than a problem to fix.
 
+**Pass `--domain-terms` where the channel's subject matter owns the
+possessives.** A possessive is self-disclosure only if the thing possessed
+belongs to the speaker's life, and on a gaming or sport channel "my team" is
+almost always the in-game team for that match. It was the largest single drop
+reason in a real run, roughly 12 of every 41 passages judged. Pass
+`--domain-terms team,squad,roster` there. It is off by default because on a
+business channel "my team" is a real fact about the speaker, and suppression
+requires every possessive in the passage to be a domain object, so "my team and
+my wife" still counts.
+
 **Never generic possessives.** "my podcast", "my company", "my business" all
 look like host language and are not: guests have podcasts and companies too, and
 on a real run those terms pulled in a guest describing his own show and another
@@ -251,6 +261,13 @@ Each agent gets this and nothing else:
 > For each passage you keep, return the verbatim words, the video id, the
 > timestamp, one short phrase on what it reveals about the creator, and its
 > attribution bucket. Then state how many you dropped and the most common reason.
+>
+> One trap to expect: **a possessive is only a life fact if the thing possessed
+> belongs to the speaker's life.** On a channel about games or sport, "my team",
+> "my squad" and "my run" are almost always objects in that video's subject
+> matter, not the speaker's life, and they were the largest single drop reason in
+> a real run. Reject those on the three-part test rather than treating the
+> possessive as disclosure.
 >
 > Return nothing else: no raw transcript, no commentary, no summary of the
 > channel's topic. Do not look for further material beyond the list you were
