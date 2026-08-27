@@ -166,9 +166,11 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
                 continue
             text = " ".join(c[1] for c in cues)
             words = max(len(text.split()), 1)
+            lang = str(v.get("transcript_language") or "").lower()
             per_video.append({
                 "id": str(v.get("id")),
                 "title": v.get("title"),
+                "language": lang or None,
                 "fp_per_1k_words": round(
                     1000 * len(FIRST_PERSON.findall(text)) / words, 1),
                 "interview_markers": len(INTERVIEW.findall(text)),
@@ -180,9 +182,42 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
             })
     if not per_video:
         return {"videos_measured": 0}
-    fp = [v["fp_per_1k_words"] for v in per_video]
+    # The first-person stats are English regex counts; on other languages
+    # (pro-drop Spanish, subject-omitting Japanese) they measure nothing, so
+    # they are computed over English-language videos only — and a channel
+    # with no English videos gets null, never "likely faceless".
+    en_videos = [v for v in per_video
+                 if not v["language"] or v["language"].startswith("en")]
+    langs: dict[str, int] = {}
+    for v in per_video:
+        key = v["language"] or "unknown"
+        langs[key] = langs.get(key, 0) + 1
+    fp = [v["fp_per_1k_words"] for v in en_videos]
+    if not fp:
+        return {
+            "videos_measured": len(per_video),
+            "languages": dict(sorted(langs.items(), key=lambda kv: -kv[1])),
+            "fp_per_1k_words_median": None,
+            "fp_per_1k_words_p10": None,
+            "likely_faceless": None,
+            "language_note": ("no English-language videos: first-person "
+                              "density is not meaningful here — format and "
+                              "faceless calls belong to the model read of a "
+                              "sample, with no lexical prior"),
+            "videos_with_interview_markers": sum(
+                1 for v in per_video if v["interview_markers"] >= 2),
+            "questions_per_1k_words_median": round(statistics.median(
+                v["questions_per_1k_words"] for v in per_video), 1),
+            "title_hints": {
+                fmt: sum(1 for v in per_video if v["title_hint"] == fmt)
+                for fmt in TITLE_SECOND_VOICE
+            },
+            "per_video": per_video,
+        }
     return {
         "videos_measured": len(per_video),
+        "languages": dict(sorted(langs.items(), key=lambda kv: -kv[1])),
+        "fp_videos_measured": len(en_videos),
         "fp_per_1k_words_median": round(statistics.median(fp), 1),
         "fp_per_1k_words_p10": round(sorted(fp)[len(fp) // 10], 1),
         "videos_with_interview_markers": sum(

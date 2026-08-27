@@ -76,7 +76,12 @@ tier names change.
    nothing exits early.
 3. **Recall pass.** `scripts/selftalk_scan.py --corpus ... --host-terms ...`
    ranks windows locally and writes rank-ordered ~50-window batches. Nothing
-   with first-person content is hard-rejected; lexicons only rank.
+   with first-person content is hard-rejected; lexicons only rank. The
+   lexicons are English, so on non-English videos they neither rank nor
+   drop: every window is kept for the model layer (`--lexicon auto`, the
+   default — only ~half the transcript corpus is English). Expect more
+   windows and budget the classifier fan-out accordingly; the classifiers
+   judge in the source language.
 4. **Model layer.** Fan the batches out to the `gem-classifier` agent
    (haiku) **in parallel**; sonnet confirms the gems (verbatim check,
    attribution reasoning, entity corrections). New entities ("my dog Luna")

@@ -45,6 +45,12 @@ Applying them to a window batch:
   so the recurrence check can use it.
 - When genuinely unsure whose voice it is, say `speaker_guess: "unclear"` —
   never guess "host" to save a gem.
+- **Windows come in any language** (each carries a `language` code, and a
+  non-English channel's batches arrive unranked and larger — the lexical
+  pre-ranking only exists for English). Judge the window in its source
+  language; write `notable` in English; report `entity_corrections` the
+  same way. Quotes downstream stay verbatim in the original language, so
+  never translate the window text itself.
 
 ## Output — strict JSON only
 

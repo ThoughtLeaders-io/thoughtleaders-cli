@@ -78,6 +78,10 @@ output:
 
 - Verbatim or not at all. Bracketed proper-noun corrections are the only
   permitted edit, with the raw caption text noted.
+- **A non-English quote publishes verbatim in its source language**, with an
+  English gloss alongside labelled as a translation. The gloss is never the
+  quote: verification (`quote_timestamp.py`) always runs against the
+  original words.
 - Every quote carries its `&t=` link. The scan attaches offsets at birth; a
   quote from anywhere else goes through `scripts/quote_timestamp.py`.
 - **A partial match is never a verification.** `quote_timestamp.py` reports

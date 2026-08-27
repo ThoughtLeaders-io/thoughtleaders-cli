@@ -34,7 +34,7 @@ import tl_data
 
 PAGE = 500
 FIELDS = ["id", "title", "publication_date", "views", "duration",
-          "content_type", "transcript"]
+          "content_type", "transcript", "transcript_language"]
 
 CUE = re.compile(r'<text start="([\d.]+)"[^>]*>(.*?)</text>', re.S)
 TAG = re.compile(r"<[^>]+>")

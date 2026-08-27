@@ -222,7 +222,7 @@ class FuzzyMatcher:
     def __init__(self, terms: list[str]):
         self.terms = []
         for t in terms:
-            words = [w for w in re.findall(r"[a-z0-9']+", t.lower()) if w]
+            words = [w for w in re.findall(r"[\w']+", t.lower()) if w]
             if words:
                 self.terms.append((t, words))
 
@@ -253,7 +253,9 @@ class FuzzyMatcher:
 
 
 def _window_tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9']+", text.lower())
+    # \w is Unicode-aware: accented names and non-Latin scripts tokenize
+    # instead of being silently stripped.
+    return re.findall(r"[\w']+", text.lower())
 
 
 # --------------------------------------------------------------------------- #
@@ -332,8 +334,8 @@ def windows(cues: list) -> list[tuple[int, str]]:
 # that rule lives with the model, in references/evidence-rules.md)
 # --------------------------------------------------------------------------- #
 def _content_words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[a-z']+", text.lower())
-            if w not in _STOP and len(w) > 2]
+    return [w for w in re.findall(r"[\w']+", text.lower())
+            if w not in _STOP and len(w) > 2 and not w.isdigit()]
 
 
 def _phrases(text: str, n: int = 4) -> set[str]:
@@ -403,6 +405,11 @@ def main() -> None:
                          "names, pet names, brands) for the free local "
                          "re-scan; matched the same fuzzy way")
     ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    ap.add_argument("--lexicon", choices=["auto", "on", "off"], default="auto",
+                    help="auto (default): apply the English recall lexicons "
+                         "only to English-language videos and keep every "
+                         "window of other languages for the model layer; "
+                         "on/off force one path for the whole corpus")
     a = ap.parse_args()
 
     corpus_path = pathlib.Path(a.corpus)
@@ -418,26 +425,37 @@ def main() -> None:
     segments = sponsor_segments([str(v["id"]) for v in with_transcript])
 
     kept, dropped_boiler, dropped_no_signal, total_windows = [], 0, 0, 0
+    lang_counts: dict[str, int] = defaultdict(int)
     for v in with_transcript:
         ref = str(v["id"])
         vid = ref.split(":")[-1]
         segs = segments.get(ref, [])
+        lang_counts[str(v.get("transcript_language") or "unknown").lower()] += 1
         # Per-VIDEO format hint: one channel mixes formats, and a reaction or
         # collab upload on a solo channel must not inherit the solo rule.
         title_hint = next((fmt for fmt, rx in TITLE_SECOND_VOICE.items()
                            if v.get("title") and rx.search(v["title"])), None)
+        # The recall lexicons are English. A non-English video gets NO
+        # lexical gating — every window goes to the (multilingual) model
+        # layer, because Spanish pro-drop or Japanese subject omission means
+        # an English-shaped pronoun regex finds nothing to anchor on. An
+        # absent language (older corpus) keeps the English path.
+        lang = str(v.get("transcript_language") or "").lower()
+        lexical = (a.lexicon == "on"
+                   or (a.lexicon == "auto"
+                       and (not lang or lang.startswith("en"))))
         for start, text in windows(v["cues"]):
             total_windows += 1
             tokens = _window_tokens(text)
             first_person = bool(FIRST_PERSON.search(text))
             host_hits = host_m.hits(tokens)
             ent_hits = entity_m.hits(tokens)
-            if not first_person and not host_hits and not ent_hits:
+            if lexical and not first_person and not host_hits and not ent_hits:
                 dropped_no_signal += 1
                 continue
             cues_fired = [name for name, rx in DISCLOSURE if rx.search(text)]
             boiler = bool(BOILERPLATE.search(text))
-            if boiler and not host_hits and not ent_hits:
+            if lexical and boiler and not host_hits and not ent_hits:
                 masked = BOILER_FP.sub(" ", BOILERPLATE.sub(" ", text))
                 if not FIRST_PERSON.search(masked):
                     dropped_boiler += 1
@@ -446,6 +464,7 @@ def main() -> None:
                 "id": ref,
                 "video_id": vid,
                 "title": v.get("title"),
+                "language": lang or None,
                 "format_hint": title_hint,
                 "published": str(v.get("publication_date") or "")[:10],
                 "start": start,
@@ -495,6 +514,12 @@ def main() -> None:
         "kept_share": round(len(kept) / max(total_windows, 1), 2),
         "dropped_boilerplate_only": dropped_boiler,
         "dropped_no_first_person_no_entity": dropped_no_signal,
+        "lexicon_mode": a.lexicon,
+        "languages": dict(sorted(lang_counts.items(),
+                                 key=lambda kv: -kv[1])),
+        "non_english_windows_kept": sum(
+            1 for c in kept
+            if c["language"] and not c["language"].startswith("en")),
         "host_terms": host_terms,
         "entity_terms": entity_terms,
         "features": {
@@ -509,7 +534,10 @@ def main() -> None:
         "batches": batch_paths,
         "note": ("ranked recall pass, not a verdict; batches are rank-ordered "
                  "so early stopping loses the least-promising windows. The "
-                 "features are model inputs, never gates."),
+                 "features are model inputs, never gates. Non-English "
+                 "windows carry near-zero lexicon scores and sort in "
+                 "chronological order — expect more windows per channel and "
+                 "budget the model layer accordingly."),
     }, indent=1, default=str))
 
 
