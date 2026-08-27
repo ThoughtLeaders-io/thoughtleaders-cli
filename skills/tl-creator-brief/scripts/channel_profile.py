@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Who is this creator, and what kind of channel is this, for three queries.
 
-Runs before any transcript is read. Establishing the creator cheaply is what
+Runs before any transcript is read. Establishing who the creator is first is what
 turns the transcript search from a fishing expedition into a targeted one: one
 sentence of framing ("a show hosted by an entrepreneur who founded a marketing
 agency") tells the scan what to expect, and costs a rounding error next to
@@ -20,14 +20,15 @@ Two things it returns that matter more than they look:
   identity step is done. The host's name is what makes the transcript search
   attributable, so ``identity_is_thin`` reports short OR nameless, and either way
   the caller runs the one web search.
-* **Median duration and the recent titles.** These are the cheap format signal.
+* **Median duration and the recent titles.** These are the format signal available
+  before any transcript is read.
   Long uploads whose titles pair two names suggest an interview; titles of the
   form "<name> reacts to <thing>" suggest reaction content; short uploads with no
   host name anywhere may be faceless narration. Title markers are counted for
   each, since one channel mixes formats and the per-video format is what decides
   how a passage from it can be attributed. The format decides how far the
   self-reference analysis can be trusted at all, so it has to be settled before
-  the expensive steps.
+  the transcript steps.
 
 Usage:
     channel_profile.py --channel <id>
@@ -176,9 +177,9 @@ def format_hints(titles: list[dict]) -> dict:
 def names_a_person(text: str | None, channel_name: str | None) -> bool:
     """Weak proxy: does this text contain something shaped like a person's name.
 
-    Deliberately conservative. A false negative just triggers one web search; a
-    false positive would let the run proceed with no idea who the host is, which
-    is the expensive mistake.
+    Deliberately conservative. A false negative triggers one web search; a false
+    positive lets the run proceed with no idea who the host is, which is the
+    failure that cannot be recovered later.
     """
     if not text:
         return False

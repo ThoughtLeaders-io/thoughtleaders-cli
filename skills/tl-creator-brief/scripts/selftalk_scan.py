@@ -28,7 +28,7 @@ Two jobs, and they are different questions:
      anyone speaking can have a podcast or a company. They are kept and LABELLED
      rather than discarded, because dropping them was measured twice and was a
      mistake both times: the judging step rejects the misattributed half
-     reliably, so the label costs nothing and the deletion cost real findings.
+     reliably, so the label loses nothing and the deletion lost real findings.
    * ``in_sponsor_read``: falls inside a detected sponsored segment. Ad reads are
      spoken by the host, never by a guest or by reacted material, so this is
      close to proof in any format. Some of the best material sits here, because a
@@ -61,9 +61,9 @@ spends the time again:
 
 A heuristic that points the wrong way is worse than none.
 
-The whole first job is plain pattern matching, no model, so the reading is
-effectively free. Passages arrive carrying their video, timestamp and link,
-reusing ``quote_timestamp.fetch_cues``, so nothing needs timestamping later.
+The whole first job is plain pattern matching, with no model involved. Passages
+arrive carrying their video, timestamp and link, reusing
+``quote_timestamp.fetch_cues``, so nothing needs timestamping later.
 
 Usage:
     build_corpus.py --channel <id> | selftalk_scan.py \\
