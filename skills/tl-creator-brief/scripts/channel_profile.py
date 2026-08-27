@@ -95,8 +95,8 @@ def channel_row(channel_id: int) -> dict:
 def channel_doc(channel_id: int) -> dict:
     """The Elasticsearch channel document, deduplicated.
 
-    Channel documents are duplicated in the index (observed: 35 identical copies
-    under one id), so this collapses on id or it pays for all of them.
+    Channel documents are duplicated in the index, many identical copies under
+    one id, so this collapses on id or every copy comes back.
     """
     rows = tl_es({
         "size": 1,

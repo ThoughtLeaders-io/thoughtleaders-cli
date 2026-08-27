@@ -129,9 +129,9 @@ nothing, because the reader cannot tell the difference.
 ## Captions
 
 - Coverage is partial. Report the rate. Absence is not evidence of absence.
-- Auto-captions mangle proper nouns. Search spelling and phonetic variants
-  before concluding zero hits. Observed: "Matiks" appears in transcripts as
-  *Matics*, *Matx* and *Matis*, and never as itself.
+- Auto-captions mangle proper nouns, and a short or unusual brand name may never
+  appear correctly spelled anywhere in a transcript. Search spelling and phonetic
+  variants before concluding zero hits.
 - Corrections are never silent: corrected proper noun in square brackets, raw
   caption text noted in the caveats. Bracketed proper-noun fixes are the only
   permitted edit.
