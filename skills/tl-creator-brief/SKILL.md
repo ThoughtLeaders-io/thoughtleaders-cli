@@ -49,6 +49,28 @@ a name.** Both are sets, not single values:
   otherwise put the top five (name, handle, subscribers, last upload) into the
   question batch.
 
+**Plan.** The same `tl whoami --json` returns `organization.plan`. Read it from
+that call rather than making a second one. The tier gates **whose** data is
+readable, not which tables: `Intelligence` and above reach information not
+strictly related to the caller's own organisation, which is exactly what Step 3
+needs on a channel the caller does not own, and what Step 4 needs on a brand that
+is not theirs.
+
+- **`Intelligence` or `Superuser`.** Everything here is available. Proceed.
+- **A known lower tier, currently `free` or `pro`.** Do not build a corpus that
+  cannot be read. Name the tier, and carry the alternatives into the question
+  batch below rather than asking separately: a channel the caller's own
+  organisation owns is still readable, their own brand's reads are still
+  readable, and brand-input options 2 and 3 need no cross-organisation read at
+  all.
+- **An unrecognised value.** Name it and continue. Tier names change, and a stale
+  list in this file is not a reason to refuse a run.
+
+This check exists so the skill does not sample 40 videos before discovering the
+account cannot read them. **It acts only on a tier it recognises**, where the
+limit is a fact rather than a guess. On anything else it defers, and the first
+real permission error is what stops a step.
+
 **Ask once.** One consolidated prompt via whatever the host provides, a
 structured question tool where one exists (`AskUserQuestion` in Claude Code),
 otherwise a single message. Never drip questions, and never call a host-specific
@@ -59,6 +81,8 @@ tool by name without checking it exists.
 2. **Any channel tie-break** left over from the resolve step.
 3. **What they already know about the creator personally.** "Nothing" is fine,
    Step 3 finds it.
+4. **Only on a known lower tier**, which of the still-available paths they want,
+   per the plan check above. Asked here, in the same prompt, never as a follow-up.
 
 ## Step 2: who is the creator, and what kind of channel is this
 
