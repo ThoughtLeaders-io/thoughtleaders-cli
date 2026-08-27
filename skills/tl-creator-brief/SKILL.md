@@ -149,11 +149,18 @@ describing his own firm. Generic terms poison the one signal that works.
 Candidates come back already carrying their video, timestamp and link, so no
 separate timestamping pass is needed.
 
-**Fan out four helper agents.** Deal the candidate list out round-robin, one
-passage to each agent in turn, rather than cutting it into four blocks. The list
-arrives sorted with the best-attributed passages first, so slicing it hands all
-the strong material to the first agent and leaves the other three with nothing
-but half-signals. Each agent gets this and nothing else:
+**Fan out helper agents**, one per roughly 50 passages and never fewer than
+four. The number of passages judged is the binding constraint on how rich the
+profile is, not the number of videos read: two runs over the same 40 uploads,
+differing only in which passages reached the judging step, produced 37 and 35
+findings with only 21 in common. So do not economise here by judging less.
+
+**Deal the list out round-robin**, one passage to each agent in turn, rather than
+cutting it into blocks. It arrives sorted with the best-attributed passages
+first, so slicing hands all the strong material to the first agent and leaves the
+rest with nothing but half-signals.
+
+Each agent gets this and nothing else:
 
 > You are given a list of candidate passages from one YouTube channel's
 > transcripts, each with a video id, a timestamp, and its attribution signals.

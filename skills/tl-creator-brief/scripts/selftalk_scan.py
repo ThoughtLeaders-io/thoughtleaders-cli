@@ -334,9 +334,13 @@ def main() -> None:
                          "yields about 30, so this protects against an outlier "
                          "rather than routinely discarding material.")
     ap.add_argument("--max-candidates", type=int, default=400)
-    ap.add_argument("--unsignalled", choices=["keep", "drop"], default="drop",
+    ap.add_argument("--unsignalled", choices=["keep", "drop"], default="keep",
                     help="'drop' returns only passages carrying at least one "
-                         "host signal; the count set aside is always reported")
+                         "host signal; the count set aside is always reported. "
+                         "Default is keep, measured: dropping them on an "
+                         "interview channel cost 10 good findings out of 45, "
+                         "because the signals are sparse and the judging step "
+                         "rejects the guest material reliably anyway.")
     a = ap.parse_args()
 
     if a.ids:
