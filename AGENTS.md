@@ -32,7 +32,7 @@ Every request includes an `X-TL-Client: cli/<version>` header. This header is us
 
 ## Error Handling (`client/errors.py`)
 
-Exit codes: 1 (forbidden/not-found), 2 (auth required), 3 (rate-limit/server-error), 4 (insufficient credits).
+Exit codes: 1 (not-found/other), 2 (auth required), 3 (rate-limit/server-error), 4 (insufficient credits), 5 (access denied — plan gates, permission errors). These are a contract: skill scripts (`skills/_shared/tl_data.py`) classify failures by exit code, never by parsing stderr.
 
 ## Output (`output/formatter.py`)
 
