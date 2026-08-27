@@ -13,6 +13,13 @@ Two things it returns that matter more than they look:
   literal About field is often boilerplate. Observed on a 19M-subscriber
   channel, the entire description is a one-line nag about subscribing. Both are
   returned, generated profile first, so the caller can see which is useful.
+* **Whether the profile text names a person at all.** A generated profile can be
+  several hundred words long and still never name the host: observed on a large
+  interview channel, the profile describes the show in detail and never mentions
+  the person presenting it. Length is therefore not the test for whether the
+  identity step is done. The host's name is what makes the transcript search
+  attributable, so ``identity_is_thin`` reports short OR nameless, and either way
+  the caller runs the one web search.
 * **Median duration and the recent titles.** These are the cheap format signal.
   Two-hour uploads titled "<name> sits down with <guest>" is an interview show;
   eight-minute uploads with no host name anywhere may be faceless narration. The
@@ -39,6 +46,17 @@ _GUEST_MARKERS = re.compile(
     r"(\bwith\b|\bft\.?\b|\bfeat\.?\b|\bep(isode)?\.?\s*\d|\binterview\b|:\s)",
     re.I,
 )
+
+# A capitalised bigram is a weak proxy for a personal name. Words that routinely
+# start sentences or label things would otherwise read as names.
+_NOT_A_NAME = {
+    "the", "a", "an", "this", "that", "it", "its", "his", "her", "their", "and",
+    "but", "with", "for", "from", "in", "on", "of", "to", "by", "as", "at",
+    "youtube", "channel", "videos", "video", "content", "english", "language",
+    "shorts", "subscribers", "views", "million", "billion", "podcast", "show",
+    "series", "episode", "episodes", "team", "world", "us", "uk", "ai",
+}
+_CAP_BIGRAM = re.compile(r"\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})\b")
 
 
 def _tl(args: list[str]) -> str:
@@ -139,6 +157,24 @@ def format_hints(titles: list[dict]) -> dict:
     }
 
 
+def names_a_person(text: str | None, channel_name: str | None) -> bool:
+    """Weak proxy: does this text contain something shaped like a person's name.
+
+    Deliberately conservative. A false negative just triggers one web search; a
+    false positive would let the run proceed with no idea who the host is, which
+    is the expensive mistake.
+    """
+    if not text:
+        return False
+    own = {w.lower() for w in re.findall(r"[A-Za-z]+", channel_name or "")}
+    for first, second in _CAP_BIGRAM.findall(str(text)):
+        pair = (first.lower(), second.lower())
+        if any(w in _NOT_A_NAME or w in own for w in pair):
+            continue
+        return True
+    return False
+
+
 def _nested(doc: dict, path: str):
     """Read ``ai.description`` whether the CLI flattened the key or nested it."""
     if path in doc:
@@ -164,10 +200,13 @@ def main() -> None:
 
     generated = _nested(doc, "ai.description")
     about = doc.get("description")
+    name = row.get("channel_name") or doc.get("name")
+    named = (names_a_person(generated, name)
+             or names_a_person(about, name))
 
     print(json.dumps({
         "channel_id": a.channel,
-        "name": row.get("channel_name") or doc.get("name"),
+        "name": name,
         "url": row.get("url"),
         "external_channel_id": row.get("external_channel_id"),
         "subscribers": row.get("subscribers"),
@@ -179,7 +218,12 @@ def main() -> None:
         "generated_profile": generated,
         "about_text": about,
         "topic_descriptions": _nested(doc, "ai.topic_descriptions"),
-        "identity_is_thin": not (generated and len(str(generated)) > 120),
+        "profile_names_a_person": named,
+        "identity_is_thin": (not (generated and len(str(generated)) > 120)
+                             or not named),
+        "identity_note": ("if identity_is_thin, run one web search of the form "
+                          "'who is <name>'. The host's name is the attribution "
+                          "key for the transcript scan, not background colour."),
         "recent_longform_titles": titles,
         "format_hints": format_hints(titles),
     }, indent=1, default=str))

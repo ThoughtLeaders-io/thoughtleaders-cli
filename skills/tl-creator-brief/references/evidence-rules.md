@@ -48,7 +48,7 @@ rule.
 
 | Format | Confidence | Rule |
 |---|---|---|
-| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. | Verify from context that the host is speaking, per the captions rule below, on **every** quote. Drop anything ambiguous. State the guest-attribution risk in the caveats. |
+| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Measured on one channel: roughly half the machine-filtered candidates that matched a host anchor were still the guest. | Verify from context that the host is speaking, per the captions rule below, on **every** quote. A candidate that `selftalk_scan.py` did not anchor to the host is kept only if the speaker names themselves or is named nearby. Drop anything ambiguous. State the guest-attribution risk in the caveats. |
 | **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
 | **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
 | **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |

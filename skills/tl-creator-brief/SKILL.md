@@ -91,12 +91,18 @@ cd <this skill>/scripts && python3 channel_profile.py --channel <channel_id>
 Returns the channel's own about text, the platform's generated profile of it,
 subscriber and upload counts, and the 20 most recent titles with durations.
 
-- **If the profile text is thin or boilerplate, one web search**, of the form
-  `who is <channel name>`, and one only. On a well known channel this returns
-  the framing in a sentence, for example that a show is hosted by a named
-  entrepreneur who founded a particular company. That framing makes the
-  transcript search far more targeted and costs a fraction of discovering the
-  same thing from transcripts.
+**This step is not done until you have the host's name, or a finding that the
+channel has no identifiable host.** The name is what makes the transcript scan
+attributable, not background colour, so it is the output of this step.
+
+- **A long profile can still name nobody.** Observed on a 19M-subscriber
+  interview channel: several hundred words describing the show in detail, and
+  the presenter is never mentioned. So length is not the test.
+  `identity_is_thin` reports short OR nameless, and either way:
+- **run one web search**, of the form `who is <channel name>`, and one only. On a
+  well known channel this returns the framing in a sentence, for example that a
+  show is hosted by a named entrepreneur who founded a particular company. That
+  framing costs a fraction of discovering the same thing from transcripts.
 - **Detect the channel format** from that material: interview show, solo
   talking head, faceless narrated or animated, or multi-host. The four formats
   and how far each can be trusted are in `references/evidence-rules.md`.
@@ -125,8 +131,19 @@ by roughly an order of magnitude.
 
 ```bash
 python3 build_corpus.py --channel <channel_id> --max 40 --strategy spread \
-  | python3 selftalk_scan.py
+  | python3 selftalk_scan.py --host-terms "<distinctive facts about the host>"
 ```
+
+**Choosing `--host-terms` is the difference between a usable result and a
+useless one**, because it is the only mechanical way to tell the host's "I" from
+a guest's. Use only things that are distinctively theirs: their surname, their
+companies by name, their funds, a named former role, a specific place they have
+said they lived.
+
+**Never generic possessives.** "my podcast", "my company", "my business" all
+look like host language and are not: guests have podcasts and companies too, and
+on a real run those terms pulled in a guest describing his own show and another
+describing his own firm. Generic terms poison the one signal that works.
 
 Candidates come back already carrying their video, timestamp and link, so no
 separate timestamping pass is needed.
