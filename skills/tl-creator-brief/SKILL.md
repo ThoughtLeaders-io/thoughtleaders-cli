@@ -186,14 +186,32 @@ Each agent gets this and nothing else:
 > You are given a list of candidate passages from one YouTube channel's
 > transcripts, each with a video id, a timestamp, and its attribution signals.
 >
-> The channel is `<channel name>`. Its format is `<format>`. The host is
+> The channel is `<channel name>`. Its dominant format is `<format>`. The host is
 > `<host name>`, and these are the facts already known about them:
 > `<known facts from the identity step>`.
+>
+> Each passage carries its video title, and where Step 2 detected a different
+> format for that video, that video's format too. **A passage's own video format
+> wins over the channel's**, because one channel mixes formats.
 >
 > Apply the three-part self-reference test in `references/evidence-rules.md` to
 > every passage, and return only those that pass all three parts.
 >
-> Then attribute, into three buckets rather than a yes or no.
+> Then attribute, into three buckets rather than a yes or no. **Which rule
+> applies depends on the format of the video the passage came from**, so read that
+> first.
+>
+> **Where one voice holds the transcript (solo talking head).** No attribution
+> signal is required. A passage that passes the three-part test is **Confirmed**.
+> The absence of `host_anchor` means nothing here: a solo host rarely says his own
+> name, so the signal barely fires. Measured on a solo channel, `host_anchor`
+> fired on 3 of 207 passages, and requiring it returned 3 findings where the
+> format-appropriate rule returned 33. Use **Unconfirmed** only for the genuine
+> exception, where a clip, a quoted line or another voice makes the speaker
+> unclear.
+>
+> **Where another voice shares the transcript (interview, multi-host, reaction).**
+> Use the signals:
 >
 > - **Confirmed.** `host_anchor`, `in_sponsor_read`, or a `recurrence_videos` of
 >   3 or more. These are strong signals that the host is speaking.
@@ -209,6 +227,13 @@ Each agent gets this and nothing else:
 > guest, so never upgrade a passage to confirmed by guessing. A quote presented as
 > the host's when it was the guest's is the one error that discredits everything
 > around it, and the bucket label is how that is avoided.
+>
+> In a **reaction** video the narration of the material being reacted to sits in
+> the same transcript with no speaker labels, so a passage from one is
+> **Unconfirmed** at best unless `host_anchor` or `in_sponsor_read` is true. This
+> has already produced near misses: a line about English not being the speaker's
+> first language, and a childhood memory, were both nearly credited to a host who
+> did not say them.
 >
 > For each passage you keep, return the verbatim words, the video id, the
 > timestamp, one short phrase on what it reveals about the creator, and its
