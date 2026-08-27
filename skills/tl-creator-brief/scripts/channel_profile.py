@@ -1,34 +1,24 @@
 #!/usr/bin/env python3
 """Who is this creator, and what kind of channel is this, for three queries.
 
-Runs before any transcript is read. Establishing who the creator is first is what
-turns the transcript search from a fishing expedition into a targeted one: one
-sentence of framing ("a show hosted by an entrepreneur who founded a marketing
-agency") tells the scan what to expect, and costs a rounding error next to
-discovering the same thing from two-hour transcripts.
+Runs before any transcript is read, so the transcript scan has a name to attribute
+to. Three things it returns that matter more than they look:
 
-Two things it returns that matter more than they look:
+* **The platform's generated profile as well as the raw About text**, generated
+  first, because a channel's literal About field is often boilerplate rather than
+  a description.
+* **``identity_is_thin``**, which reports short OR nameless. A generated profile
+  can run several hundred words and never name the host, so length is not the
+  test. Either way the caller runs one web search for the name.
+* **Median duration and title markers per format.** Long uploads whose titles
+  pair two names suggest an interview, "<name> reacts to <thing>" suggests
+  reaction content, short uploads naming no host may be faceless narration.
+  Markers are counted per format because one channel mixes them, and the
+  per-video format is what decides how a passage from it can be attributed.
 
-* **The platform's generated profile, not the raw About text.** A channel's
-  literal About field is often boilerplate. Observed on a 19M-subscriber
-  channel, the entire description is a one-line nag about subscribing. Both are
-  returned, generated profile first, so the caller can see which is useful.
-* **Whether the profile text names a person at all.** A generated profile can be
-  several hundred words long and still never name the host, describing the show
-  in detail and never mentioning the person presenting it. Length is therefore
-  not the test for whether the
-  identity step is done. The host's name is what makes the transcript search
-  attributable, so ``identity_is_thin`` reports short OR nameless, and either way
-  the caller runs the one web search.
-* **Median duration and the recent titles.** These are the format signal available
-  before any transcript is read.
-  Long uploads whose titles pair two names suggest an interview; titles of the
-  form "<name> reacts to <thing>" suggest reaction content; short uploads with no
-  host name anywhere may be faceless narration. Title markers are counted for
-  each, since one channel mixes formats and the per-video format is what decides
-  how a passage from it can be attributed. The format decides how far the
-  self-reference analysis can be trusted at all, so it has to be settled before
-  the transcript steps.
+The format decides how far the analysis can be trusted at all, so it is settled
+before the transcript steps. The five formats and their rules:
+``references/evidence-rules.md``.
 
 Usage:
     channel_profile.py --channel <id>

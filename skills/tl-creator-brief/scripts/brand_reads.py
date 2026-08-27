@@ -1,33 +1,19 @@
 #!/usr/bin/env python3
-"""A brand's past sponsorship reads: what creators have actually said on camera.
+"""A brand's past sponsorship reads: what creators have said about it on camera.
 
-One of three ways the skill can be told what a brand offers, and the only one
-that needs a query. The others are the brand's website and a brief pasted in by
-whoever ran the skill.
+Returns every read from two sources, each labelled:
 
-**The purpose is to learn what the product is**, in the words creators have used
-out loud. It is not to find the brand's best-performing ad. Which past read did
-well is a different question and this script deliberately does not answer it: no
-prices, no costs, no rate cards, no performance grades are fetched or returned.
-None of that says what the product does, and none of it may reach an output that
-can be forwarded.
-
-**Two sources, always both, always labelled:**
-
-* ``deal``: a sponsorship brokered through the platform. Unambiguous.
+* ``deal``: a sponsorship brokered through the platform.
 * ``mention``: a sponsorship the platform detected out on YouTube, whoever
-  brokered it. Essential, because a brand may never have bought through us at
-  all, and the skill still has to work for them.
+  brokered it, so a brand that never bought through us still returns reads.
 
-Never read zero deals as "never sponsored anything". Observed: one brand returns
-zero brokered deals and roughly ten thousand detected mention videos. The two
-numbers measure different things.
+**Zero deals does not mean the brand has never sponsored anyone.** The two counts
+measure different things and the output labels them separately.
 
-**What matters is whether a read has words.** Any single read that describes the
-product tells you what the product is, which is the only thing this step is for,
-so there is no sample size to satisfy. A read that only drops a link says nothing
-about the product and is simply useless, which is visible from the absence of
-words rather than something needing a verdict.
+**Never returns price, cost, rate cards or performance grades.** None of them say
+what the product is, and the output can be forwarded.
+
+Why this exists and how to read the results: ``references/brand-input.md``.
 
 Usage:
     brand_reads.py --brand <id>
