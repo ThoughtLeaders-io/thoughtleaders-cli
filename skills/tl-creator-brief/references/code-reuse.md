@@ -22,8 +22,10 @@ All five shell out to the `tl` CLI directly and import nothing but the standard
 library and each other. That is deliberate: the sibling skills' helpers
 (`tl_cli.py`, `resolve_channel.py`) import their own siblings, so they only run
 from their own `scripts/` directory and cannot be imported from here without a
-path hack. `selftalk_scan.py` imports `fetch_cues` from `quote_timestamp.py`, so
-run these from this skill's `scripts/` directory.
+path hack. Two of them import a sibling: `selftalk_scan.py` takes
+`fetch_cues` from `quote_timestamp.py`, and `build_corpus.py` takes
+`title_format_hint` from `channel_profile.py`, so run these from this skill's
+`scripts/` directory.
 
 ## Gotchas that will break a run
 
