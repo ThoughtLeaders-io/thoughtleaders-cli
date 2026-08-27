@@ -46,21 +46,25 @@ label them separately.
 performance figure. None of that tells you what the product is, which is the
 only reason this step exists, and none of it may reach the output.
 
-## Verifying a read before you believe it
+## Reading them
 
-Detected mentions group affiliate reads in with paid ones. An affiliate read is
-not the brand's own pitch and can describe the product wrong, so it cannot be
-treated as evidence of what the brand offers.
+The only thing this step is for is learning what the product is, so any read
+that describes the product does the job. One creator saying "a mobile app for
+quick one minute mind sport duels against real people" tells you more than a
+count of reads ever could. There is no sample size to satisfy.
 
-The script cannot make this call, so it returns each read's actual words with
-`needs_verification: true`. Read the words. A genuine sponsorship read names the
-product and makes the brand's own claims about it; an affiliate mention drops a
-link and moves on.
+Detected mentions do group affiliate reads in with paid ones, but that matters
+less than it sounds here. An affiliate read that describes the product still
+describes the product. An affiliate read that only drops a link describes
+nothing, and that is visible from the absence of words rather than needing a
+verdict.
 
-**The floor is three verified reads.** Below three, the picture is too thin to
-trust: one or two reads can be one affiliate's misreading or one creator's odd
-take. When fewer than three survive verification, say so, and ask for the
-website or their own brief instead of extrapolating.
+Where several reads disagree about what the product is, say so and prefer the
+most recent, because a product can change and only the current version is the
+one being sold.
+
+If no read has any words in it, use the brand's website or their own brief
+instead.
 
 ## What this file does not cover, on purpose
 

@@ -23,11 +23,11 @@ Never read zero deals as "never sponsored anything". Observed: one brand returns
 zero brokered deals and roughly ten thousand detected mention videos. The two
 numbers measure different things.
 
-**Every read comes back ``needs_verification: true``.** Detected mentions group
-affiliate reads in with paid ones, and an affiliate read is not the brand's own
-pitch, so it can describe the product wrong. This script cannot tell them apart,
-so it returns each read's actual words for a human or a model to judge. The floor
-is three verified reads before the picture is worth trusting.
+**What matters is whether a read has words.** Any single read that describes the
+product tells you what the product is, which is the only thing this step is for,
+so there is no sample size to satisfy. A read that only drops a link says nothing
+about the product and is simply useless, which is visible from the absence of
+words rather than something needing a verdict.
 
 Usage:
     brand_reads.py --brand 50485
@@ -151,8 +151,7 @@ def main() -> None:
     ap.add_argument("--brand", type=int, action="append", required=True,
                     help="brand id from `tl brands find`; repeat for a rebrand")
     ap.add_argument("--max", type=int, default=10,
-                    help="reads returned (default 10; the floor for trusting "
-                         "the picture is 3 verified)")
+                    help="reads returned, most descriptive first (default 10)")
     a = ap.parse_args()
 
     videos = mention_videos(a.brand, max(a.max * 3, 30))
@@ -194,7 +193,6 @@ def main() -> None:
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
             "url": url,
-            "needs_verification": True,
         })
 
     # A read whose words we actually have is worth more than a bare row.
@@ -210,16 +208,13 @@ def main() -> None:
         "brokered_deals_found": len(deals),
         "reads_returned": len(kept),
         "reads_with_spoken_words": with_words,
-        "below_verification_floor": with_words < 3,
         "counts_note": ("brokered deals and detected mentions measure different "
                         "things; zero deals does not mean the brand has never "
                         "sponsored anyone"),
-        "verification_note": ("every read is unverified: detected mentions "
-                             "include affiliate reads, which are not the brand's "
-                             "own pitch. Read the words and confirm each is a "
-                             "genuine sponsorship. Fewer than 3 verified means "
-                             "the history is too thin, so ask for the website or "
-                             "a brief instead."),
+        "usage_note": ("read the words to learn what the product is. A read with "
+                       "no words describes nothing and can be ignored. If no "
+                       "read has words at all, use the brand's website or a "
+                       "brief instead."),
         "excluded_by_design": ["price", "cost", "rate cards",
                                "performance grades"],
         "reads": kept,
