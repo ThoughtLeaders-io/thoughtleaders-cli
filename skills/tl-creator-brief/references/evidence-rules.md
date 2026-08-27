@@ -52,8 +52,23 @@ rule.
 | **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
 | **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
 | **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |
+| **Reaction** | Usable with the tightest rule of the five. The creator's own speech and the narration of the material being reacted to sit in the **same transcript with no labels**, and the reacted material is often the more talkative of the two. Observed: 8 of 40 sampled uploads on one channel were reaction episodes, and they produced false attributions in the first pass. | A finding from a reaction video is **Unconfirmed** unless `host_anchor` or `in_sponsor_read` is true. Nothing else promotes it, because the second voice is not a guest who can be reasoned about but arbitrary third-party narration. |
 
 **State the detected format and the confidence in the output**, every run.
+
+## Format is a property of the video, not only of the channel
+
+One channel routinely mixes formats: a solo channel runs reaction episodes, an
+interview show posts solo monologues. So detect the format per video as well as
+for the channel, and **the video's own format is what decides the bucket** for
+passages from it. The channel's dominant format is the fallback where a video's
+own format was not determined, never an override.
+
+Titles carry most of this. A title of the form "X Reacts to Y" marks a reaction
+episode whatever the channel usually does, and the reaction rule applies to
+every passage from it. Where a video's format is genuinely unclear, treat it as
+sharing the transcript with another voice, since that is the assumption that
+cannot invent a quote.
 
 ## Attribution buckets
 
@@ -65,6 +80,12 @@ and is where a measurable share of the findings live.
 | **Confirmed** | `host_anchor`, `in_sponsor_read`, or `recurrence_videos` of 3 or more. | Usable as the host's own words. |
 | **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Roughly half are guests. | **Kept, and labelled.** Never silently dropped: removing this bucket was tried twice and lost real findings both times. Never silently promoted either. |
 | **Unattributable** | No signal, and nothing nearby names the speaker. | Dropped, and counted in the caveats. |
+
+On a **solo** video the buckets are not signal-driven at all: one voice holds the
+transcript, so a passage that passes the three-part test is Confirmed and the
+absence of `host_anchor` says nothing. Requiring a signal there is what turns a
+solo channel into an empty profile. On a **reaction** video the ceiling is
+Unconfirmed unless `host_anchor` or `in_sponsor_read` fires.
 
 The label travels with the quote all the way into the output. That is what makes
 the middle bucket safe to keep: the reader can see exactly which quotes are the

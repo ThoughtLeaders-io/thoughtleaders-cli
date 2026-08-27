@@ -109,8 +109,14 @@ attributable, not background colour, so it is the output of this step.
   show is hosted by a named entrepreneur who founded a particular company. One
   sentence of framing does more for the search than the transcripts can.
 - **Detect the channel format** from that material: interview show, solo
-  talking head, faceless narrated or animated, or multi-host. The four formats
-  and how far each can be trusted are in `references/evidence-rules.md`.
+  talking head, faceless narrated or animated, multi-host, or reaction. The five
+  formats and how far each can be trusted are in `references/evidence-rules.md`.
+- **Format is per video, not only per channel.** One channel mixes them: a solo
+  channel runs reaction episodes, an interview show posts monologues. Read the
+  sampled titles for per-video formats too, since a title of the form "X Reacts
+  to Y" marks a reaction episode whatever the channel usually does, and carry
+  those per-video formats into Step 3. A video's own format decides the bucket
+  for passages from it, and the channel's format is only the fallback.
 - **If the format cannot support self-reference analysis, stop here** and return
   an empty creator profile with the detected format and the reason, per that
   same file. Do not continue into the transcript steps to produce something.
