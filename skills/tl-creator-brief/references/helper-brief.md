@@ -17,9 +17,10 @@ The channel is `<channel name>`. Its dominant format is `<format>`. The host is
 `<host name>`, and these are the facts already known about them:
 `<known facts from the identity step>`.
 
-Each passage carries its video title, and where Step 2 detected a different
-format for that video, that video's format too. **A passage's own video format
-wins over the channel's**, because one channel mixes formats.
+Each passage carries its video title and a `format_hint` for that video, which is
+empty where the title suggested nothing. **A passage's own `format_hint` wins over
+the channel's format**, because one channel mixes formats. Where it is empty, use
+the channel's.
 
 Apply the three-part self-reference test in `references/evidence-rules.md` to
 every passage, and return only those that pass all three parts.

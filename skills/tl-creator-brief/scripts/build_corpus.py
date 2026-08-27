@@ -55,6 +55,9 @@ def tl_es(body: dict) -> list[dict]:
     return json.loads(proc.stdout).get("results") or []
 
 
+from channel_profile import title_format_hint  # sibling script, same directory
+
+
 def fetch_uploads(channel_id: int, content_type: str | None,
                   since: str | None, until: str | None) -> list[dict]:
     flt: list[dict] = [
@@ -91,6 +94,7 @@ def fetch_uploads(channel_id: int, content_type: str | None,
             "views": int(r["views"]) if r.get("views") else 0,
             "duration": r.get("duration"),
             "content_type": r.get("content_type"),
+            "format_hint": title_format_hint(r.get("title")),
         })
     out.sort(key=lambda v: v["published"])
     return out
@@ -181,6 +185,10 @@ def main() -> None:
         "content_type": a.content_type,
         "available": len(uploads),
         "selected_count": len(selected),
+        "format_hints_selected": {
+            fmt: sum(1 for v in selected if v.get("format_hint") == fmt)
+            for fmt in ("interview_or_collab", "reaction")
+        },
         "not_read": len(uploads) - len(selected),
         "date_range_available": [uploads[0]["published"],
                                  uploads[-1]["published"]],

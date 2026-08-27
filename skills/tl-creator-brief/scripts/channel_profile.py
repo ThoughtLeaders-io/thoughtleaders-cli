@@ -38,13 +38,21 @@ import sys
 # Title tells for the formats where a second voice shares the transcript. Not a
 # verdict, a hint for the caller. Counted per format, because one channel mixes
 # them and the per-video format decides how a passage can be attributed.
+# Tuned for precision, not recall. A missed hint is harmless, because the
+# channel's own format is the fallback and an unclear video counts as sharing the
+# transcript anyway. A FALSE hint is not: it makes the judging step demand an
+# attribution signal on a video that never had a second voice, which is what
+# empties a solo profile. So loose markers are deliberately absent: a bare colon
+# and an episode number matched most of one solo channel's back catalogue.
 _SECOND_VOICE_MARKERS = {
-    "interview": re.compile(
-        r"(\bwith\b|\bft\.?\b|\bfeat\.?\b|\bep(isode)?\.?\s*\d"
-        r"|\binterview\b|:\s)", re.I),
+    "interview_or_collab": re.compile(
+        r"(\binterview(s|ed|ing)?\b|\bsits down with\b"
+        r"|\bin conversation with\b|\bft\.?\s|\bfeat\.?\s"
+        r"|\bw/\s?\w|\bwith @|\bvs\.?\s)", re.I),
     "reaction": re.compile(
-        r"(\breact(s|ing|ion)?\b|\bwatch(es|ing)\b|\bfirst time\b"
-        r"|\breview(s|ing)?\b|\btier list\b)", re.I),
+        r"(\breact(s|ing|ion|ions)?\b"
+        r"|\bfirst time (watching|hearing|playing|seeing)\b"
+        r"|\bwatch(es|ing) (a|the|my|his|her|their|every)\b)", re.I),
 }
 
 # A capitalised bigram is a weak proxy for a personal name. Words that routinely
@@ -162,6 +170,22 @@ def format_hints(titles: list[dict]) -> dict:
                  "these plus the profile text, and expect one channel to mix "
                  "formats, so carry the per-video format forward"),
     }
+
+
+def title_format_hint(title: str | None) -> str | None:
+    """The format a single title suggests, or None if it suggests nothing.
+
+    Per video, not per channel: one channel mixes formats, and a passage can only
+    be attributed against the format of the video it came from. Shared with
+    build_corpus.py so the corpus carries the hint to every passage rather than
+    leaving it to be eyeballed from titles later.
+    """
+    if not title:
+        return None
+    for fmt, rx in _SECOND_VOICE_MARKERS.items():
+        if rx.search(title):
+            return fmt
+    return None
 
 
 def names_a_person(text: str | None, channel_name: str | None) -> bool:

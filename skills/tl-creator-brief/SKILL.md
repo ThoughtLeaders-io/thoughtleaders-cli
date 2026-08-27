@@ -104,11 +104,15 @@ attributable, not background colour, so it is the output of this step.
   talking head, faceless narrated or animated, multi-host, or reaction. The five
   formats and how far each can be trusted are in `references/evidence-rules.md`.
 - **Format is per video, not only per channel.** One channel mixes them: a solo
-  channel runs reaction episodes, an interview show posts monologues. Read the
-  sampled titles for per-video formats too, since a title of the form "X Reacts
-  to Y" marks a reaction episode whatever the channel usually does, and carry
-  those per-video formats into Step 3. A video's own format decides the bucket
-  for passages from it, and the channel's format is only the fallback.
+  channel runs reaction episodes, an interview show posts monologues. This part
+  is mechanical, so do not eyeball it: `build_corpus.py` tags every selected
+  upload with a `format_hint` from its title, and `selftalk_scan.py` carries that
+  tag onto every passage. A tagged video's own format decides the bucket for its
+  passages; an untagged one falls back to the channel format detected here, which
+  is why settling the channel format still matters. Check
+  `format_hints_selected` in the corpus summary against the channel format: a
+  solo channel returning reaction tags is the case that produced false
+  attributions before this was mechanical.
 - **If the format cannot support self-reference analysis, stop here** and return
   an empty creator profile with the detected format and the reason, per that
   same file. Do not continue into the transcript steps to produce something.
