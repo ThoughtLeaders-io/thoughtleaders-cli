@@ -156,7 +156,14 @@ separate timestamping pass is needed.
 four. The number of passages judged is the binding constraint on how rich the
 profile is, not the number of videos read: two runs over the same 40 uploads,
 differing only in which passages reached the judging step, produced 37 and 35
-findings with only 21 in common. So do not economise here by judging less.
+findings with only 21 in common, and 49 distinct facts between them. So do not
+economise here by judging less.
+
+**Leave `--max-per-video` at its default of 30**, and never lower it to trim the
+pool. A two hour interview yields around 30 candidate passages, so a cap of 8
+threw away roughly three quarters of the material in each long episode without
+ever reading it. If the pool needs to grow, the answer is more agents, not a
+tighter cap.
 
 **Deal the list out round-robin**, one passage to each agent in turn, rather than
 cutting it into blocks. It arrives sorted with the best-attributed passages
