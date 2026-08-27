@@ -42,9 +42,12 @@ or `Superuser`. Stop only on a known lower tier, naming the plan and what it
 needs. On any other value, note the uncertainty and continue: the first query's
 error is the source of truth, not a stale plan list.
 
-**Helper agents.** Step 3 fans out to four of them. If the host cannot spawn
-helper agents, run the four batches one after another instead, and discard each
-batch's raw text before starting the next so it does not accumulate. **Never read
+**Helper agents.** Step 3 fans out to as many as the passage pool needs, one per
+roughly 50 passages and never fewer than four. If the host cannot spawn helper
+agents, run the same batches one after another instead, and discard each batch's
+raw text before starting the next so it does not accumulate. Sequential batches
+change how long the step takes and nothing else: the batching, the round-robin
+deal and the per-batch instructions are identical either way. **Never read
 transcripts in the main conversation.** Raw transcript text there crowds out
 everything else for the rest of the run, and the main conversation only ever
 needs the findings.
@@ -193,7 +196,7 @@ helper that knows the brand filters to the brand without being asked, and the
 pizza line never comes back. Casting wide happens here; narrowing to the brand
 happens in Step 5.
 
-Merge the four returns, drop duplicates, and write the creator profile.
+Merge the returns, drop duplicates, and write the creator profile.
 
 ## Step 4: understand the brand
 
