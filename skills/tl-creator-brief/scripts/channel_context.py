@@ -93,6 +93,54 @@ def _nested(doc: dict, path: str):
     return cur
 
 
+SECOND_CHANNEL_PHRASE = re.compile(
+    r"(second channel|other channel|vlog channel|clips channel|gaming "
+    r"channel|podcast channel|main channel)", re.I)
+YT_LINK = re.compile(
+    r"(?:youtube\.com/(?:@[\w.-]+|channel/UC[\w-]+|c/[\w.-]+|user/[\w.-]+)"
+    r"|youtu\.be/[\w-]+)", re.I)
+
+
+def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
+    """Other YouTube channels this creator points at — often the gem mine.
+
+    A big channel's smaller vlog/second channel is frequently where the
+    personal material lives. Candidates come from the channel's own pointers:
+    YouTube links among its social links, and YouTube links or "my second
+    channel" phrasing in the About text. Detection only — resolving a
+    candidate to a TL channel id (`tl channels find`) and deciding to scan it
+    belongs to the identity & socials lane.
+    """
+    own = {str(row.get("external_channel_id") or "").lower()}
+    for u in (row.get("url"), doc.get("name")):
+        if u:
+            own.add(str(u).lower().rstrip("/"))
+    seen: set[str] = set()
+    out: list[dict] = []
+
+    def add(link: str, source: str) -> None:
+        key = link.lower().rstrip("/")
+        if key in seen or any(o and o in key for o in own if o):
+            return
+        seen.add(key)
+        out.append({"link": link, "source": source})
+
+    for link in doc.get("social_links") or []:
+        if isinstance(link, str) and YT_LINK.search(link):
+            add(link, "social_links")
+    about = doc.get("description") or ""
+    for m in YT_LINK.finditer(about):
+        add(m.group(0), "about_text")
+    phrases = sorted({m.group(0).lower()
+                      for m in SECOND_CHANNEL_PHRASE.finditer(about)})
+    if phrases and not out:
+        # The About text names another channel without linking it: still a
+        # lead, handed to the lane as a phrase to chase, never dropped.
+        out.append({"link": None, "source": "about_text_phrase",
+                    "phrases": phrases})
+    return out
+
+
 def corpus_stats(corpus_path: pathlib.Path) -> dict:
     per_video = []
     with open(corpus_path, encoding="utf-8") as f:
@@ -166,6 +214,7 @@ def main() -> None:
         # the identity & socials lane opens these; a profile that cannot be
         # read is reported "linked but unread", never silently skipped
         "social_links": doc.get("social_links") or [],
+        "second_channel_candidates": second_channel_candidates(row, doc),
         "topic_descriptions": _nested(doc, "ai.topic_descriptions"),
         "note": ("format label is called by a model read of a small sample "
                  "WITH these stats as evidence; the stats are inputs, not a "

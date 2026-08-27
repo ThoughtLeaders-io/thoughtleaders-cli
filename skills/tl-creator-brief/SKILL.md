@@ -57,6 +57,15 @@ tier names change.
      `social`/`web` provenance and URLs, never dressed as quotes; a platform
      that blocks reading is reported "linked but unread". Names and handles
      found here feed the scan's `--host-terms`.
+   - **Second channels are part of this lane.** `channel_context.py` emits
+     `second_channel_candidates` (YouTube links and "my second channel"
+     phrasing from the channel's own pointers); also check the channel
+     page's featured/linked channels while reading it. When a personal,
+     vlog or podcast second channel surfaces, resolve it with
+     `tl channels find` and run the fetch + scan over it too — a smaller
+     second channel is often the densest self-disclosure source. Facts
+     mined there carry the second channel's provenance; a candidate that
+     can't be resolved or read is reported "linked but unread".
 2. **Channel context brief.** `channel_context.py --corpus ...` measures
    format from the transcripts (first-person density, interview markers); a
    model read of a small sample calls the label with evidence. Not a gate —

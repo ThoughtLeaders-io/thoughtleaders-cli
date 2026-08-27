@@ -68,6 +68,8 @@ DISCLOSURE = [
         r"majored|dropped out|graduated|got fired|was fired|quit|left school|"
         r"moved to|used to (be|work|play|live|do)|worked (at|as|for)|"
         r"trained as|my first job|when i was (a|\d)|i was born|"
+        r"as a kid|growing up|my childhood|back home( in)?|"
+        r"i collect|i('m| am) (really |super |big )?into|my go-?to|"
         r"i('ve| have) always|i never went|allergic|diagnosed|obsessed with)\b",
         re.I)),
     ("own_life", re.compile(
@@ -76,7 +78,10 @@ DISCLOSURE = [
         r"sister|family|dog|cat|pet|house|home|flat|hometown|school|"
         r"university|college|degree|company|business|agency|startup|team|"
         r"job|career|routine|morning|diet|training|therapist|doctor|"
-        r"podcast|studio|office|book|friend|best friend|nursery|garden)\b",
+        r"podcast|studio|office|book|friend|best friend|nursery|garden|"
+        r"hobby|hobbies|collection|setup|gym|workout|"
+        r"favou?rite (food|meal|snack|dish|game|band|movie|show|team)|"
+        r"comfort food|go-?to (order|meal|snack)|guitar|piano)\b",
         re.I)),
     ("self_characterisation", re.compile(
         r"\b(i consider myself|i see myself|i'?m the kind of|i'?m the type of|"

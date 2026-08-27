@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
 """A brand's past sponsorship reads: what creators have said about it on camera.
 
-Returns reads from two sources, each labelled, **newest first** — a product
-changes, and the current description of it is the one being sold:
-
-* ``deal``: a sponsorship brokered through the platform. A brokered deal whose
-  mention the detector missed still appears (with no words), because it is
-  still evidence of who the brand sponsors.
-* ``mention``: a sponsorship the platform detected out on YouTube, whoever
-  brokered it, so a brand that never bought through us still returns reads.
-
-**Zero deals does not mean the brand has never sponsored anyone.** The two
-counts measure different things and the output labels them separately.
+Returns sponsored mentions the platform detected across YouTube — whoever
+brokered them — **newest first**: a product changes, and the current
+description of it is the one being sold.
 
 Every snippet is re-checked per mention: only ``type == "sponsored"`` AND
 ``field == "transcript"`` counts, so an organic mention earlier in a video can
@@ -122,23 +114,6 @@ def channel_names(channel_ids: list[int]) -> dict[int, str]:
     return {int(r["id"]): r.get("channel_name") for r in rows if r.get("id")}
 
 
-def brokered_deals(brand_ids: list[int]) -> list[dict]:
-    """Sponsorships brokered through the platform. No price or cost selected."""
-    ids = ",".join(str(b) for b in brand_ids)
-    return tl_data.db_pg(
-        "SELECT a.id AS adlink_id, a.publish_date, a.article_id, "
-        "ch.id AS channel_id, ch.channel_name "
-        "FROM thoughtleaders_adlink a "
-        "JOIN thoughtleaders_profile p ON a.advertiser_profile_id = p.id "
-        "JOIN thoughtleaders_profile_brands pb ON p.id = pb.profile_id "
-        "JOIN thoughtleaders_adspot s ON a.ad_spot_id = s.id "
-        "JOIN thoughtleaders_channel ch ON s.channel_id = ch.id "
-        f"WHERE pb.brand_id IN ({ids}) AND a.publish_status = 3 "
-        "AND a.publish_date IS NOT NULL "
-        "ORDER BY a.publish_date DESC LIMIT 200"
-    )
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", type=int, action="append", required=True,
@@ -149,9 +124,6 @@ def main() -> None:
 
     videos = mention_videos(a.brand, max(a.max * 3, 30))
     snippets = mention_snippets(a.brand, max(a.max * 3, 30))
-    deals = brokered_deals(a.brand)
-    deal_articles = {str(d.get("article_id")): d for d in deals
-                     if d.get("article_id")}
 
     chan_ids = []
     for v in videos:
@@ -180,9 +152,7 @@ def main() -> None:
             "published": str(v.get("publication_date") or "")[:10],
             "channel_id": cid,
             "channel_name": (chan.get("name") or v.get("channel.name")
-                             or (names.get(int(cid)) if cid else None)
-                             or (deal_articles.get(key) or {}).get("channel_name")),
-            "source": "deal" if key in deal_articles else "mention",
+                             or (names.get(int(cid)) if cid else None)),
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
@@ -206,30 +176,10 @@ def main() -> None:
             "published": snip.get("published"),
             "channel_id": snip.get("channel_id"),
             "channel_name": snip.get("channel_name"),
-            "source": "deal" if key in deal_articles else "mention",
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
             "url": url,
-        })
-
-    # Brokered deals whose mention the detector missed: still reads, no words.
-    for key, d in deal_articles.items():
-        if key in seen:
-            continue
-        vid = key.split(":")[-1]
-        reads.append({
-            "id": key,
-            "video_id": vid,
-            "title": None,
-            "published": str(d.get("publish_date") or "")[:10],
-            "channel_id": d.get("channel_id"),
-            "channel_name": d.get("channel_name"),
-            "source": "deal",
-            "read_words": None,
-            "entity_as_heard": None,
-            "start": None,
-            "url": f"https://www.youtube.com/watch?v={vid}",
         })
 
     # A read whose words we actually have outranks a bare row; newest first
@@ -242,14 +192,8 @@ def main() -> None:
     print(json.dumps({
         "brand_ids": a.brand,
         "mention_videos_found": len(videos),
-        "brokered_deals_found": len(deals),
-        "brokered_without_detected_mention": sum(
-            1 for k in deal_articles if k not in seen),
         "reads_returned": len(kept),
         "reads_with_spoken_words": with_words,
-        "counts_note": ("brokered deals and detected mentions measure "
-                        "different things; zero deals does not mean the brand "
-                        "has never sponsored anyone"),
         "usage_note": ("read the words to learn what the product is, newest "
                        "first — an old read can describe a product that no "
                        "longer exists. A read with no words describes nothing. "
