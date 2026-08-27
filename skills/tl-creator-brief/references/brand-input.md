@@ -46,6 +46,45 @@ label them separately.
 performance figure. None of that tells you what the product is, which is the
 only reason this step exists, and none of it may reach the output.
 
+### How the channels are pulled, both paths
+
+Neither path filters, ranks or orders by performance. **There is no winners
+filter, and no minimum number of reads.** Both paths take the most recent reads
+and stop, because a product changes and the current description of it is the one
+being sold. Recency is the only ordering.
+
+**Path 1, brokered, Postgres.** `thoughtleaders_adlink` is the deal. The brand
+hangs off the advertiser's profile, and the channel off the ad spot, so the join
+runs adlink to profile to profile_brands for the brand and adlink to adspot to
+channel for the creator:
+
+```
+thoughtleaders_adlink a
+  JOIN thoughtleaders_profile p          ON a.advertiser_profile_id = p.id
+  JOIN thoughtleaders_profile_brands pb  ON p.id = pb.profile_id
+  JOIN thoughtleaders_adspot s           ON a.ad_spot_id = s.id
+  JOIN thoughtleaders_channel ch         ON s.channel_id = ch.id
+WHERE pb.brand_id IN (<ids>) AND a.publish_status = 3
+  AND a.publish_date IS NOT NULL
+ORDER BY a.publish_date DESC
+```
+
+`publish_status = 3` is published, so the read actually aired. No price or cost
+column is selected. A `LIMIT` is not optional: Postgres reads through the CLI are
+row-capped and a missing limit truncates silently.
+
+**Path 2, detected, Elasticsearch.** Two queries against the upload index, both
+sorted `publication_date desc`:
+
+- `{"term": {"sponsored_brand_mentions": "<brand_id>"}}` lists the videos that
+  carry a sponsored mention. One `should` clause per brand ID after a rebrand.
+- a `nested` query on `brand_mentions`, matching `brand_mentions.id` and
+  `brand_mentions.type: "sponsored"`, returns the snippet, the entity as the
+  captions heard it, and the timestamps.
+
+Keep only mentions whose `field` is `transcript`. A `description` hit is the
+affiliate link in the video description, not anything anyone said out loud.
+
 ## Reading them
 
 The only thing this step is for is learning what the product is, so any read
