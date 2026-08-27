@@ -1,7 +1,7 @@
 # Reuse what exists
 
 Do not write new code for anything here. It exists, it is tested, and an agent
-that regenerates it is slower, more expensive and less correct every run.
+that regenerates it is slower and less correct every run.
 
 | Need | Call |
 |---|---|
@@ -25,13 +25,13 @@ from their own `scripts/` directory and cannot be imported from here without a
 path hack. `selftalk_scan.py` imports `fetch_cues` from `quote_timestamp.py`, so
 run these from this skill's `scripts/` directory.
 
-## Gotchas that will cost you a run
+## Gotchas that will break a run
 
 - **`tl db es` returns `{"results": [...]}`**, not the native Elasticsearch
   `hits.hits` shape. Read `results`.
 - **Channel documents are duplicated in Elasticsearch.** Observed: 35 identical
   copies under one channel id. Every channel-document query needs
-  `"collapse": {"field": "id"}` or it pays for all of them.
+  `"collapse": {"field": "id"}` or it returns all of them.
 - **The channel's raw `description` is usually not a description.** Observed on
   a 19M-subscriber channel: the entire About text is a one-line nag about
   subscribing. The platform's generated profile (`ai.description`) is the field

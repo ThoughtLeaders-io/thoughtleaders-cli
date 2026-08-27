@@ -113,5 +113,5 @@ That ratio is itself evidence of how close the creator is to the category.
 
 If the profile holds nothing that genuinely connects to the brand, say exactly
 that, show what was searched, and stop. Forcing a connection out of thin
-material is the one failure mode that costs the reader their trust in every
-other line of the output.
+material is the one failure mode that loses the reader's trust in every other
+line of the output.

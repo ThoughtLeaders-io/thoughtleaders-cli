@@ -18,8 +18,8 @@ any brand after this one.
 
 ### 1. The creator profile
 
-- **Who they are**, in one or two lines, from the cheap identity step. Not
-  subscriber counts, which the reader can already see.
+- **Who they are**, in one or two lines, from the identity step. Not subscriber
+  counts, which the reader can already see.
 - **Detected channel format, and the confidence that follows from it.** Stated
   plainly, every run, per `evidence-rules.md`.
 - **The self-references.** Verbatim, each with video title, date and a
@@ -29,6 +29,7 @@ any brand after this one.
   belongs here and is not to be trimmed for being off-brand.
 - **Coverage**: how many uploads the channel has, how many were sampled and by
   which strategy, how many had no transcript.
+- **Whether the sweep ran dry.** See below. This is not optional.
 
 Where the format does not support the analysis, this section says so and names
 the format, and there is nothing else in it. That is a complete answer.
@@ -52,6 +53,28 @@ A connection with no quote behind it is not a connection. Cut it.
 
 If the profile holds nothing that honestly meets the brand, say that, show what
 was searched, and stop.
+
+### Did the sweep run dry
+
+Every run answers this, because "we found nothing" and "we did not look far
+enough" are different answers and the reader cannot tell them apart on their own.
+
+The sample is drawn in date order, so every detail found knows which video it
+came from and where that video sat in the sample. Compare the last third of the
+sampled videos against the first two thirds and ask one question: **did the last
+third produce genuinely new details, or only restatements of what was already
+found?**
+
+- Only repeats: the sweep has run dry, and reading more uploads will not help.
+- Still producing new material at the end: there is more in the catalogue.
+
+State it in one line, with numbers, for example: "the final third of the sample
+produced 2 new details and 6 repeats, so the sweep has largely run dry", or "the
+final third produced 9 new details, so there is more to find, and 478 uploads
+were not read".
+
+Where there is more to find, name the way to get it: re-run Step 3 with a higher
+`--max`. Never suggest narrowing the search to the brand's subject instead.
 
 ### Caveats
 
