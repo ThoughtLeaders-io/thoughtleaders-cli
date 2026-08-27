@@ -1,205 +1,336 @@
 #!/usr/bin/env python3
-"""Cut transcripts down to candidate self-reference lines, and say whose they are.
+"""Generous local recall pass over a fetched corpus: rank windows, reject nothing.
 
-Two jobs, and they are different questions:
+Reads the local ``corpus.jsonl`` written by ``fetch_corpus.py`` — never the
+index — windows every transcript into ~260-char passages (keeping cue start
+seconds, so every future quote is born with its ``&t=`` link), and keeps any
+window carrying a first-person marker or a fuzzy entity hit.
 
-1. **Is this passage personal at all?** A first-person search is not the test.
-   "I think you should buy gold" and "I'll show you in a second" are both first
-   person and neither is worth anything. So a passage is kept only if it carries
-   a first-person marker AND a self-disclosure cue AND no exclusion. The
-   exclusions are the two failure modes: stage directions, which exist only
-   because the video exists, and opinions about the world, which are not facts
-   about the speaker.
+This layer exists solely to cut model-token spend, so it is tuned for recall,
+never precision. **Nothing with first-person content is hard-rejected.** The
+old disclosure/exclusion lexicons are demoted to *ranking features*: they
+order which windows the model reads first, they reject nothing. The only hard
+drop is provable boilerplate ("subscribe", "link in the description") carrying
+no other first-person content. The models decide what is a gem; this script
+only decides what they read first.
 
-2. **Whose mouth did it come out of?** Captions carry no speaker labels, so
-   wherever a second voice is in the transcript, its self-disclosure is
-   indistinguishable from the host's. "My father was a salesman his whole life"
-   is perfect self-disclosure belonging to the wrong person. The second voice
-   might be an interview guest, a co-host, or narration from material being
-   reacted to. Where only one voice is present there is nothing to separate, and
-   these signals are ranking information rather than a test to pass. Four signals
-   are attached to every passage so the judgement step is not guessing:
+Fuzzy entity matching is **token-bounded**: a term is compared against whole
+transcript tokens (and token n-grams for multi-word terms), never substrings,
+so a surname "Lee" can never match "sleep". Within a token, exact match,
+capped edit distance, a shared long prefix, or an equal phonetic key all
+count — that is what survives caption mangling ("Maddox" for Matiks,
+"social channel" for Social Chain).
 
-   * ``host_anchor`` (strong): matches a distinctive fact about the host, from
-     ``--host-terms``. Their surname, their companies, their funds, a named
-     former role.
-   * ``weak_anchor``: first-person talk about running a show or a business
-     ("my podcast", "my company"). Only about half of these are the host, since
-     anyone speaking can have a podcast or a company. They are kept and LABELLED
-     rather than discarded, because dropping them was measured twice and was a
-     mistake both times: the judging step rejects the misattributed half
-     reliably, so the label loses nothing and the deletion lost real findings.
-   * ``in_sponsor_read``: falls inside a detected sponsored segment. Ad reads are
-     spoken by the host, never by a guest or by reacted material, so this is
-     close to proof in any format.
-   * ``recurrence_videos``: how many DIFFERENT videos share a distinctive phrase
-     with this passage. Whoever else is in the transcript changes between uploads
-     and the host does not, so a personal claim appearing in three uploads is not
-     three different visitors saying the same thing about themselves. A phrase
-     counts as distinctive only if at least one of its words is rare across the
-     corpus; without that test the signal returns conversational filler.
-The whole first job is plain pattern matching, with no model involved. Passages
-arrive carrying their video, timestamp and link, reusing
-``quote_timestamp.fetch_cues``, so nothing needs timestamping later.
+Deterministic attribution features are attached to every window as *model
+inputs, not verdicts*: ad-read overlap from sponsored ``brand_mentions``
+spans (near-proof of host voice, and simultaneously banned as a gem source —
+see references/evidence-rules.md), cross-video recurrence of rare phrases,
+and fuzzy host-anchor hits.
 
 Usage:
-    build_corpus.py --channel <id> | selftalk_scan.py \\
+    selftalk_scan.py --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl \\
         --host-terms "<surname>,<company>,<former role>"
-    build_corpus.py --channel <id> | selftalk_scan.py \\
-        --host-terms "<surname>" --domain-terms team,squad,roster
+    # after new entities surface ("my dog Luna"), re-scan locally — free:
+    selftalk_scan.py --corpus ... --host-terms ... --entity-terms "Luna"
 
-Output (stdout): one JSON object, passages ranked by attribution strength.
+Output: ``windows.jsonl`` (every kept window, ranked) and ``batches/*.json``
+(rank-ordered ~50-window batches ready to fan out to classifier agents) next
+to the corpus, plus one JSON summary on stdout. Raw transcript text stays in
+the files; only counts and paths reach the orchestrator.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import re
-import subprocess
 import sys
 from collections import defaultdict
 
-from quote_timestamp import fetch_cues  # sibling script, same directory
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_cli
 
-FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|myself|mine)\b", re.I)
+WINDOW_CHARS = 260
+BATCH_SIZE = 50
+SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
+IDS_CHUNK = 1000
 
-# Self-disclosure: a fact about the speaker that exists off camera.
+FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|myself|mine|we|our)\b",
+                          re.I)
+
+# Ranking features only. None of these gates anything.
 DISCLOSURE = [
     ("life_verb", re.compile(
         r"\b(founded|co-?founded|started (my|a|the)|built (my|a)|launched|"
         r"grew up|was raised|raised in|taught myself|self-?taught|studied|"
         r"majored|dropped out|graduated|got fired|was fired|quit|left school|"
-        r"moved to|grew my|used to (be|work|play|live|do)|worked (at|as|for)|"
-        r"trained as|apprenticed|my first job|when i was (a|\d)|"
-        r"i was born|i've always|i have always|i never went)\b", re.I)),
+        r"moved to|used to (be|work|play|live|do)|worked (at|as|for)|"
+        r"trained as|my first job|when i was (a|\d)|i was born|"
+        r"i('ve| have) always|i never went|allergic|diagnosed|obsessed with)\b",
+        re.I)),
     ("own_life", re.compile(
         r"\bmy (dad|mum|mom|father|mother|parents|wife|husband|partner|"
         r"girlfriend|boyfriend|kid|kids|son|daughter|child|children|brother|"
-        r"sister|family|dog|cat|pet|house|home|flat|hometown|village|school|"
-        r"university|college|degree|company|companies|business|businesses|"
-        r"agency|startup|team|staff|job|career|background|routine|morning|"
-        r"diet|training|therapist|doctor|accountant|co-?founder|investors|"
-        r"podcast|studio|office|book|friends|best friend)\b", re.I)),
+        r"sister|family|dog|cat|pet|house|home|flat|hometown|school|"
+        r"university|college|degree|company|business|agency|startup|team|"
+        r"job|career|routine|morning|diet|training|therapist|doctor|"
+        r"podcast|studio|office|book|friend|best friend|nursery|garden)\b",
+        re.I)),
     ("self_characterisation", re.compile(
         r"\b(i consider myself|i see myself|i'?m the kind of|i'?m the type of|"
-        r"i'?ve always been|i'?m not really a|i'?m quite|i tend to|"
-        r"my favou?rite|i'?m obsessed with|i'?m terrible at|i'?m useless at|"
-        r"i can'?t stand|i genuinely (love|hate)|i'?m a big fan of|"
-        r"personally i|for me personally)\b", re.I)),
+        r"i'?ve always been|i'?m not really a|i tend to|my favou?rite|"
+        r"i'?m terrible at|i can'?t stand|i genuinely (love|hate)|"
+        r"i'?m a big fan of|personally i|for me personally)\b", re.I)),
 ]
 
-# Both of these are first person and neither is a find.
-# Half-signals. First-person talk about running a show or a business: often the
-# host, frequently whoever else is in the transcript. Worth a look, never worth
-# trusting on its own.
-# A possessive is only self-disclosure if the thing possessed belongs to the
-# speaker's life. On a gaming channel "my team" is almost always the in-game team
-# for that match, and it was the single largest drop reason in a real run, roughly
-# 12 of every 41 passages judged. Pass --domain-terms team,squad,roster there to
-# stop it counting. Off by default, because on a business channel "my team" is a
-# real fact about the speaker. Suppression needs EVERY possessive in the passage
-# to be a domain object, so "my team and my wife" still counts.
+# First-person talk about running a show or a business: often the host,
+# frequently whoever else shares the transcript. A half-signal for ranking.
 WEAK_ANCHOR = re.compile(
-    r"\b(my|our) (podcast|show|channel|company|companies|business|businesses|"
-    r"agency|startup|fund|team|book|brand|investors|co-?founder|"
-    r"business partner)\b", re.I)
+    r"\b(my|our) (podcast|show|channel|company|business|agency|startup|fund|"
+    r"team|book|brand|investors|co-?founder|business partner)\b", re.I)
 
-EXCLUDE = re.compile(
-    r"\b(i'?ll show you|let me show|i want to (talk|show|tell you about)|"
-    r"i'?m going to (show|talk|explain|walk)|as i (said|mentioned)|"
-    r"i'?ll come back|i'?ll explain|coming up|in this video|in today'?s video|"
-    r"before we (start|begin|get into)|make sure you|don'?t forget to|"
-    r"let'?s (get|jump|dive|talk|look)|we'?ll (look|see|talk|cover)|"
-    r"stay tuned|link (in|below)|subscribe|"
-    r"i think you should|i believe you should|you should probably|if i were you|"
-    r"in my opinion|i would argue|i'?d argue|my point is|my argument)\b", re.I)
+# Stage directions and opinion framing: rank DOWN, never drop. "as I said, my
+# dad ran a bakery" must survive; the model sorts it out.
+STAGE = re.compile(
+    r"\b(i'?ll show you|let me show|i'?m going to (show|explain|walk)|"
+    r"in this video|in today'?s video|before we (start|begin|get into)|"
+    r"let'?s (get|jump|dive)|stay tuned|coming up)\b", re.I)
 
-WINDOW_CHARS = 260
+# The only hard drop, and only when nothing else in the window is first-person
+# beyond the boilerplate itself.
+BOILERPLATE = re.compile(
+    r"\b(subscribe|smash th(e|at) like|link (in|below)|link in the "
+    r"description|notification bell|comment below|patreon|join the channel)\b",
+    re.I)
 
-# An ad read runs well past the seconds the detector flags, so the window is
-# padded generously in both directions.
-SPONSOR_PAD = 75
+_STOP = set("""a an the and or but if of to in on at by for with from as is are
+was were be been being it its this that these those i me my myself we our you
+your he she they them his her their there here what which who when where how
+why not no so than then too very can will just don't should now do does did
+doing have has had having would could about up down out over under again know
+think like really thing things get got going gone one two three also because
+said say says see saw want way lot much many more most bit kind sort actually
+maybe probably always never often sometimes yeah okay right well even still
+back come came make made take took give gave put good bad great big small new
+old first last time year years day days people person life feel felt look
+talk tell told mean need guess quite pretty""".split())
 
-_STOP = set("""a an the and or but if of to in on at by for with from as is are was
-were be been being it its it's this that these those i me my myself we our you
-your he she they them his her their there here what which who whom when where
-how why not no nor so than then too very can will just don't should now do does
-did doing have has had having would could about up down out over under again
-know knew think thought like really thing things get got getting going gone one
-two three also because said say says saying see saw seen want wanted way ways
-lot lots much many more most little bit kind sort actually maybe probably
-always never often sometimes yeah okay right well even still back come came
-make made take took give gave put good bad great big small new old first last
-time times year years day days people person life live lived feel felt felt
-look looked looking talk talked talking tell told mean meant need needed
-wonder wondered wondering guess suppose reckon quite pretty very""".split())
+RARE_SHARE = 0.30     # a phrase is distinctive only if one word is this rare
 
 
-def _tl_es(body: dict) -> list[dict]:
-    proc = subprocess.run(["tl", "db", "es", json.dumps(body)],
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
-        return []
-    try:
-        return json.loads(proc.stdout).get("results") or []
-    except json.JSONDecodeError:
-        return []
+# --------------------------------------------------------------------------- #
+# token-bounded fuzzy matching
+# --------------------------------------------------------------------------- #
+def _soundex(word: str) -> str:
+    """Full-length soundex code, deliberately untruncated: the classic 4-char
+    cut makes "watson" equal "watching", which is exactly the kind of false
+    anchor this matcher must not produce."""
+    codes = {"b": "1", "f": "1", "p": "1", "v": "1",
+             "c": "2", "g": "2", "j": "2", "k": "2", "q": "2", "s": "2",
+             "x": "2", "z": "2", "d": "3", "t": "3", "l": "4",
+             "m": "5", "n": "5", "r": "6"}
+    word = word.lower()
+    out, prev = word[0], codes.get(word[0], "")
+    for ch in word[1:]:
+        code = codes.get(ch, "")
+        if code and code != prev:
+            out += code
+        if ch not in "hw":
+            prev = code
+    return out
+
+
+def _edit_distance(a: str, b: str, cap: int) -> int:
+    if abs(len(a) - len(b)) > cap:
+        return cap + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[-1]
+
+
+def _common_prefix(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+STRONG, PHONETIC = 2, 1
+
+
+def _tokens_match(term: str, token: str) -> int:
+    """Whole-token comparison only — 'lee' can never match 'sleep'.
+
+    Returns STRONG (exact / tight edit distance / long shared prefix),
+    PHONETIC (equal full soundex code only — plausible caption mangling like
+    "mates" for "Matiks", kept for recall but ranked low), or 0.
+    """
+    if term == token:
+        return STRONG
+    if len(term) < 4 or len(token) < 4:
+        return 0            # short tokens: exact or nothing
+    if term[0] != token[0]:
+        return 0            # caption mangling rarely changes the first letter
+    cap = 1 if len(term) < 8 else 2
+    if _edit_distance(term, token, cap) <= cap:
+        return STRONG
+    if min(len(term), len(token)) >= 5 and _common_prefix(term, token) >= 4:
+        return STRONG
+    # equal full phonetic code ("maddox"/"matiks", "matx"/"matiks")
+    if _soundex(term) == _soundex(token):
+        return PHONETIC
+    return 0
+
+
+def _tokens_match_loose(term: str, token: str) -> int:
+    """Rescue tier, used ONLY inside multi-word terms where every other word
+    already matched strictly ("chain"/"channel" after "social" hit exactly).
+    Alone it would drown a single-word term in near-misses."""
+    got = _tokens_match(term, token)
+    if got:
+        return got
+    if len(term) < 5 or len(token) < 5 or term[0] != token[0]:
+        return 0
+    if _common_prefix(term, token) >= 3 and _edit_distance(term, token, 3) <= 3:
+        return PHONETIC
+    return 0
+
+
+class FuzzyMatcher:
+    """Match multi-word terms against a token stream, token-bounded."""
+
+    def __init__(self, terms: list[str]):
+        self.terms = []
+        for t in terms:
+            words = [w for w in re.findall(r"[a-z0-9']+", t.lower()) if w]
+            if words:
+                self.terms.append((t, words))
+
+    def hits(self, tokens: list[str]) -> list[tuple[str, str]]:
+        """[(term, "strong" | "phonetic")], best strength per term."""
+        found = []
+        for original, words in self.terms:
+            n = len(words)
+            best = 0
+            for i in range(len(tokens) - n + 1):
+                strengths = [_tokens_match(w, tokens[i + k])
+                             for k, w in enumerate(words)]
+                if all(strengths):
+                    best = max(best, min(strengths))
+                elif n >= 2 and strengths.count(0) == 1:
+                    # multi-word rescue: one mangled word among strong matches
+                    k = strengths.index(0)
+                    if (all(s == STRONG for j, s in enumerate(strengths)
+                            if j != k)
+                            and _tokens_match_loose(words[k], tokens[i + k])):
+                        best = max(best, PHONETIC)
+                if best == STRONG:
+                    break
+            if best:
+                found.append((original,
+                              "strong" if best == STRONG else "phonetic"))
+        return found
+
+
+def _window_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+# --------------------------------------------------------------------------- #
+# corpus + sponsor spans
+# --------------------------------------------------------------------------- #
+def load_corpus(path: pathlib.Path) -> list[dict]:
+    videos = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                videos.append(json.loads(line))
+    if not videos:
+        sys.exit(f"empty corpus at {path}")
+    return videos
 
 
 def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
-    """Spoken sponsored segments per video, in one query for the whole corpus."""
-    if not refs:
-        return {}
+    """Spoken sponsored segments per video, batched over the whole corpus.
+
+    Every mention is re-checked individually: only ``type == "sponsored"`` AND
+    ``field == "transcript"`` counts, so an organic or description mention in
+    the same video never poisons the span list. A query failure raises — it is
+    never a silent empty span list.
+    """
     out: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    for row in _tl_es({
-        "size": len(refs),
-        "query": {"ids": {"values": refs}},
-        "_source": ["id", "brand_mentions"],
-    }):
-        mentions = row.get("brand_mentions") or []
-        if isinstance(mentions, dict):
-            mentions = [mentions]
-        for m in mentions:
-            if m.get("type") != "sponsored" or m.get("field") != "transcript":
-                continue
-            start, end = m.get("start_ts"), m.get("end_ts")
-            if not isinstance(start, (int, float)):
-                continue
-            if not isinstance(end, (int, float)) or end < start:
-                end = start
-            # A (0, 0) segment is a detection with no located position. Padded,
-            # it would wrongly claim the opening of the video as an ad read.
-            if start <= 0 and end <= 0:
-                continue
-            out[str(row.get("id"))].append((float(start), float(end)))
+    for i in range(0, len(refs), IDS_CHUNK):
+        chunk = refs[i:i + IDS_CHUNK]
+        rows = tl_cli.db_es({
+            "size": len(chunk),
+            "query": {"ids": {"values": chunk}},
+            "_source": ["id", "brand_mentions"],
+        })
+        for row in rows:
+            mentions = row.get("brand_mentions") or []
+            if isinstance(mentions, dict):
+                mentions = [mentions]
+            for m in mentions:
+                if m.get("type") != "sponsored" or m.get("field") != "transcript":
+                    continue
+                start, end = m.get("start_ts"), m.get("end_ts")
+                if not isinstance(start, (int, float)):
+                    continue
+                if not isinstance(end, (int, float)) or end < start:
+                    end = start
+                # (0, 0) is a detection with no located position; padded, it
+                # would wrongly claim the opening of the video as an ad read.
+                if start <= 0 and end <= 0:
+                    continue
+                out[str(row.get("id"))].append((float(start), float(end)))
     return dict(out)
 
 
+def windows(cues: list) -> list[tuple[int, str]]:
+    """Group cues into ~WINDOW_CHARS passages, keyed to the opening offset."""
+    out, buf, start = [], [], None
+    for cue in cues:
+        offset, text = cue[0], (cue[1] or "").strip()
+        if not text:
+            continue
+        if start is None:
+            start = int(offset)
+        buf.append(text)
+        if sum(len(x) + 1 for x in buf) >= WINDOW_CHARS:
+            out.append((start, " ".join(buf)))
+            # one cue of overlap, so a sentence split at a boundary survives
+            buf, start = [text], int(offset)
+    if buf and start is not None:
+        out.append((start, " ".join(buf)))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# recurrence (attribution feature: guests change between uploads, the host
+# does not — but recurrence alone must never confirm on a multi-host channel;
+# that rule lives with the model, in references/evidence-rules.md)
+# --------------------------------------------------------------------------- #
 def _content_words(text: str) -> list[str]:
-    words = re.findall(r"[a-z']+", text.lower())
-    return [w for w in words if w not in _STOP and len(w) > 2]
+    return [w for w in re.findall(r"[a-z']+", text.lower())
+            if w not in _STOP and len(w) > 2]
 
 
 def _phrases(text: str, n: int = 4) -> set[str]:
-    """n-grams of content words. Distinctiveness is applied later, in one pass
-    over the whole corpus, because it depends on how rare a word is here."""
     words = _content_words(text)
     return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
 
 
-# A phrase is distinctive only if one of its words appears in at most this share
-# of the corpus's videos. Filler vocabulary is everywhere; a real personal claim
-# carries at least one word that is not.
-RARE_SHARE = 0.30
-
-
 def add_recurrence(cands: list[dict]) -> None:
-    """How many different videos share a distinctive phrase with each passage.
-
-    Whoever else is in the transcript changes between uploads and the host does
-    not, so a personal claim
-    that turns up in several episodes belongs to the host.
-    """
     videos = {c["id"] for c in cands}
     word_videos: dict[str, set[str]] = defaultdict(set)
     for c in cands:
@@ -221,241 +352,146 @@ def add_recurrence(cands: list[dict]) -> None:
                 best, best_ph = n, ph
         c["recurrence_videos"] = best
         c["recurring_phrase"] = best_ph
+        del c["_phrases"]
 
 
-
-def windows(cues: list[dict]) -> list[tuple[int, str]]:
-    """Group cues into readable windows, each keyed to its opening offset."""
-    out, buf, start = [], [], None
-    for cue in cues:
-        text = (cue.get("text") or "").strip()
-        if not text:
-            continue
-        if start is None:
-            start = int(cue["start"])
-        buf.append(text)
-        if sum(len(x) + 1 for x in buf) >= WINDOW_CHARS:
-            out.append((start, " ".join(buf)))
-            # one cue of overlap, so a sentence split across a boundary survives
-            buf, start = [text], int(cue["start"])
-    if buf and start is not None:
-        out.append((start, " ".join(buf)))
-    return out
-
-
-def _possessive_nouns(rx: re.Pattern, text: str) -> list[str]:
-    """The possessive nouns a cue matched, lowercased. The noun is the last
-    capture group in both own_life and WEAK_ANCHOR."""
-    return [m.groups()[-1].lower().replace("-", "") for m in rx.finditer(text)]
-
-
-def _all_domain(nouns: list[str], domain: frozenset[str]) -> bool:
-    """True when every possessive in the passage is a domain object, so the cue
-    says nothing about the speaker's life."""
-    return bool(nouns) and all(n in domain for n in nouns)
-
-
-def judge(text: str, domain: frozenset[str] = frozenset()) -> list[str] | None:
-    """Return which disclosure cues fired, or None if the passage is rejected."""
-    if not FIRST_PERSON.search(text):
-        return None
-    if EXCLUDE.search(text):
-        return None
-    fired = []
-    for name, rx in DISCLOSURE:
-        if not rx.search(text):
-            continue
-        if domain and name == "own_life" \
-                and _all_domain(_possessive_nouns(rx, text), domain):
-            continue
-        fired.append(name)
-    return fired or None
-
-
-def weak_anchor(text: str, domain: frozenset[str] = frozenset()) -> bool:
-    if not WEAK_ANCHOR.search(text):
-        return False
-    if domain and _all_domain(_possessive_nouns(WEAK_ANCHOR, text), domain):
-        return False
-    return True
-
-
-def _in_sponsor(start: int, segments: list[tuple[float, float]]) -> bool:
-    return any(s - SPONSOR_PAD <= start <= e + SPONSOR_PAD for s, e in segments)
-
-
-def host_signal_count(c: dict) -> int:
-    """Strong signals score 2, the half-signal scores 1, so ranking prefers the
-    attributable material without discarding the rest."""
-    n = 0
+# --------------------------------------------------------------------------- #
+# ranking — features order the read, they reject nothing
+# --------------------------------------------------------------------------- #
+def rank_score(c: dict) -> int:
+    s = 2 * len(c["cues_fired"])
+    if any(st == "strong" for _, st in c["entity_hits"]):
+        s += 3
+    elif c["entity_hits"]:
+        s += 1              # phonetic-only: plausible mangling, ranked low
     if c["host_anchor"]:
-        n += 2
-    if c["in_sponsor_read"]:
-        n += 2
-    if c["recurrence_videos"] >= 3:
-        n += 2
+        s += 2
+    elif c["host_anchor_terms"]:
+        s += 1
     if c["weak_anchor"]:
-        n += 1
-    return n
-
-
-def _rank(c: dict) -> tuple:
-    """Best-attributed, most-disclosing passages first, so the caps bite last."""
-    return (-c["host_signals"], -len(c["cues_fired"]), c["start"])
-
-
-def scan_video(video: dict, host_rx,
-               segments: list[tuple[float, float]],
-               domain: frozenset[str] = frozenset()) -> dict:
-    ref = video["id"]
-    try:
-        cues = fetch_cues(ref)
-    except SystemExit:
-        # fetch_cues exits on a missing document; a coverage gap, not an error.
-        return {"id": ref, "transcript": False, "candidates": []}
-    if not cues:
-        return {"id": ref, "transcript": False, "candidates": []}
-
-    vid = video.get("video_id") or str(ref).split(":")[-1]
-    found = []
-    for start, text in windows(cues):
-        fired = judge(text, domain)
-        if not fired:
-            continue
-        found.append({
-            "id": ref,
-            "video_id": vid,
-            "title": video.get("title"),
-            "published": video.get("published"),
-            "format_hint": video.get("format_hint"),
-            "start": start,
-            "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
-            "cues_fired": fired,
-            "host_anchor": bool(host_rx and host_rx.search(text)),
-            "weak_anchor": weak_anchor(text, domain),
-            "in_sponsor_read": _in_sponsor(start, segments),
-            "text": text,
-            "_phrases": _phrases(text),
-        })
-    return {"id": ref, "transcript": True, "candidates": found}
+        s += 1
+    if c["recurrence_videos"] >= 3:
+        s += 1
+    if c["stage_direction"]:
+        s -= 2
+    if c["boilerplate"]:
+        s -= 3
+    return s
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ids", default=None,
-                    help="comma-separated <channel>:<video> refs, instead of stdin")
-    ap.add_argument("--host-terms", default=None,
-                    help="comma-separated facts distinctive to the host, from the "
-                         "identity step. Never generic possessives.")
-    ap.add_argument("--domain-terms", default=None,
-                    help="comma-separated possessive nouns that are objects in "
-                         "this channel's subject matter rather than facts about "
-                         "the speaker's life, for example team,squad,roster on a "
-                         "gaming or sport channel. A passage whose only "
-                         "possessive is one of these stops counting as "
-                         "self-disclosure. Off by default, because on a business "
-                         "channel \"my team\" is a real life fact.")
-    ap.add_argument("--max-per-video", type=int, default=30,
-                    help="ceiling per video (default 30). A two-hour episode "
-                         "yields about 30, so this protects against an outlier "
-                         "rather than routinely discarding material.")
-    ap.add_argument("--max-candidates", type=int, default=400)
-    ap.add_argument("--unsignalled", choices=["keep", "drop"], default="keep",
-                    help="'drop' returns only passages carrying at least one "
-                         "host signal; the count set aside is always reported. "
-                         "Default is keep: the signals are sparse, and the "
-                         "judging step rejects misattributed material reliably "
-                         "anyway. On a single-voice channel the signals barely "
-                         "fire at all, so dropping here empties the pool.")
+    ap.add_argument("--corpus", required=True,
+                    help="path to corpus.jsonl from fetch_corpus.py")
+    ap.add_argument("--host-terms", default="",
+                    help="comma-separated facts distinctive to the host: "
+                         "surname, companies, funds, a named former role. "
+                         "Matched fuzzily, token-bounded.")
+    ap.add_argument("--entity-terms", default="",
+                    help="comma-separated entities already surfaced (family "
+                         "names, pet names, brands) for the free local "
+                         "re-scan; matched the same fuzzy way")
+    ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     a = ap.parse_args()
 
-    if a.ids:
-        corpus = {"selected": [{"id": r.strip()} for r in a.ids.split(",")
-                               if r.strip()]}
-    else:
-        corpus = json.load(sys.stdin)
-    videos = corpus.get("selected") or []
-    if not videos:
-        sys.exit("no videos in input")
+    corpus_path = pathlib.Path(a.corpus)
+    out_dir = corpus_path.parent
+    videos = load_corpus(corpus_path)
 
-    host_terms = [t.strip() for t in (a.host_terms or "").split(",") if t.strip()]
-    host_rx = (re.compile("|".join(re.escape(t) for t in host_terms), re.I)
-               if host_terms else None)
-    domain = frozenset(w.strip().lower().replace("-", "")
-                       for w in (a.domain_terms or "").split(",") if w.strip())
-    segments = sponsor_segments([v["id"] for v in videos if v.get("id")])
+    host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
+    entity_terms = [t.strip() for t in a.entity_terms.split(",") if t.strip()]
+    host_m = FuzzyMatcher(host_terms)
+    entity_m = FuzzyMatcher(entity_terms)
 
-    all_cands, no_transcript, per_video_dropped = [], [], 0
-    for v in videos:
-        res = scan_video(v, host_rx, segments.get(v["id"], []), domain)
-        if not res["transcript"]:
-            no_transcript.append(res["id"])
-            continue
-        all_cands.extend(res["candidates"])
+    with_transcript = [v for v in videos if v.get("cues")]
+    segments = sponsor_segments([str(v["id"]) for v in with_transcript])
 
-    # Recurrence needs every passage in hand, so it runs after the per-video pass
-    # and before any capping.
-    add_recurrence(all_cands)
-    for c in all_cands:
-        c["host_signals"] = host_signal_count(c)
-        del c["_phrases"]
+    kept, dropped_boiler, dropped_no_signal, total_windows = [], 0, 0, 0
+    for v in with_transcript:
+        ref = str(v["id"])
+        vid = ref.split(":")[-1]
+        segs = segments.get(ref, [])
+        for start, text in windows(v["cues"]):
+            total_windows += 1
+            tokens = _window_tokens(text)
+            first_person = bool(FIRST_PERSON.search(text))
+            host_hits = host_m.hits(tokens)
+            ent_hits = entity_m.hits(tokens)
+            if not first_person and not host_hits and not ent_hits:
+                dropped_no_signal += 1
+                continue
+            cues_fired = [name for name, rx in DISCLOSURE if rx.search(text)]
+            boiler = bool(BOILERPLATE.search(text))
+            if boiler and not cues_fired and not host_hits and not ent_hits:
+                dropped_boiler += 1
+                continue
+            kept.append({
+                "id": ref,
+                "video_id": vid,
+                "title": v.get("title"),
+                "published": str(v.get("publication_date") or "")[:10],
+                "start": start,
+                "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
+                "text": text,
+                "cues_fired": cues_fired,
+                # host_anchor (the attribution signal) requires a STRONG hit;
+                # phonetic-only anchors stay visible in host_anchor_terms
+                "host_anchor": any(st == "strong" for _, st in host_hits),
+                "host_anchor_terms": host_hits,
+                "entity_hits": ent_hits,
+                "weak_anchor": bool(WEAK_ANCHOR.search(text)),
+                "stage_direction": bool(STAGE.search(text)),
+                "boilerplate": boiler,
+                "in_sponsor_read": any(s - SPONSOR_PAD <= start <= e + SPONSOR_PAD
+                                       for s, e in segs),
+                "_phrases": _phrases(text),
+            })
 
-    by_video: dict[str, list[dict]] = defaultdict(list)
-    for c in all_cands:
-        by_video[c["id"]].append(c)
-    kept = []
-    for ref, group in by_video.items():
-        group.sort(key=_rank)
-        per_video_dropped += max(0, len(group) - a.max_per_video)
-        kept.extend(group[:a.max_per_video])
+    add_recurrence(kept)
+    for c in kept:
+        c["rank_score"] = rank_score(c)
+    kept.sort(key=lambda c: (-c["rank_score"], c["id"], c["start"]))
 
-    signalled = [c for c in kept if c["host_signals"] > 0]
-    unsignalled_count = len(kept) - len(signalled)
-    pool = signalled if a.unsignalled == "drop" else kept
+    with open(out_dir / "windows.jsonl", "w", encoding="utf-8") as f:
+        for c in kept:
+            f.write(json.dumps(c, default=str) + "\n")
 
-    pool.sort(key=_rank)
-    dropped_by_cap = max(0, len(pool) - a.max_candidates)
-    pool = pool[:a.max_candidates]
+    batch_dir = out_dir / "batches"
+    batch_dir.mkdir(exist_ok=True)
+    for old in batch_dir.glob("batch-*.json"):
+        old.unlink()
+    batch_paths = []
+    for i in range(0, len(kept), a.batch_size):
+        p = batch_dir / f"batch-{i // a.batch_size:03d}.json"
+        p.write_text(json.dumps(kept[i:i + a.batch_size], default=str),
+                     encoding="utf-8")
+        batch_paths.append(str(p))
 
-    scanned = len(videos) - len(no_transcript)
     print(json.dumps({
-        "channel_id": corpus.get("channel_id"),
-        "videos_in_corpus": len(videos),
-        "videos_with_transcript": scanned,
-        "videos_without_transcript": len(no_transcript),
-        "transcript_coverage": round(scanned / len(videos), 2) if videos else None,
-        "missing_transcripts": no_transcript,
-        "passages_flagged": len(all_cands),
-        "dropped_by_per_video_cap": per_video_dropped,
-        "dropped_by_total_cap": dropped_by_cap,
-        "candidates_returned": len(pool),
-        "host_terms_used": host_terms,
-        "domain_terms_used": sorted(domain),
-        "signals": {
-            "host_anchor": sum(1 for c in pool if c["host_anchor"]),
-            "in_sponsor_read": sum(1 for c in pool if c["in_sponsor_read"]),
-            "recurring_3plus": sum(1 for c in pool
+        "corpus": str(corpus_path),
+        "videos": len(videos),
+        "videos_with_transcript": len(with_transcript),
+        "transcript_coverage": round(len(with_transcript) / len(videos), 2),
+        "windows_total": total_windows,
+        "windows_kept": len(kept),
+        "kept_share": round(len(kept) / max(total_windows, 1), 2),
+        "dropped_boilerplate_only": dropped_boiler,
+        "dropped_no_first_person_no_entity": dropped_no_signal,
+        "host_terms": host_terms,
+        "entity_terms": entity_terms,
+        "features": {
+            "disclosure_cue": sum(1 for c in kept if c["cues_fired"]),
+            "host_anchor": sum(1 for c in kept if c["host_anchor"]),
+            "entity_hit": sum(1 for c in kept if c["entity_hits"]),
+            "in_sponsor_read": sum(1 for c in kept if c["in_sponsor_read"]),
+            "recurring_3plus": sum(1 for c in kept
                                    if c["recurrence_videos"] >= 3),
-            "weak_anchor_only": sum(1 for c in pool if c["weak_anchor"]
-                                    and not (c["host_anchor"]
-                                             or c["in_sponsor_read"]
-                                             or c["recurrence_videos"] >= 3)),
-            "no_signal_at_all": unsignalled_count,
         },
-        "filter_note": ("coarse pattern filter, not a verdict; every passage "
-                        "still has to pass the three-part self-reference test "
-                        "in references/evidence-rules.md"),
-        "attribution_note": ("host_anchor, in_sponsor_read and recurrence are "
-                             "strong signals. weak_anchor is a half-signal: "
-                             "roughly half are whoever else is in the "
-                             "transcript, so keep those and LABEL them "
-                             "unconfirmed rather than dropping them. Where a "
-                             "second voice shares the transcript, a passage with "
-                             "no signal at all is not attributable from the "
-                             "transcript alone. Where only one voice is present "
-                             "there is nothing to separate and no signal is "
-                             "required, so the three-part test decides."),
-        "candidates": pool,
+        "windows_file": str(out_dir / "windows.jsonl"),
+        "batches": batch_paths,
+        "note": ("ranked recall pass, not a verdict; batches are rank-ordered "
+                 "so early stopping loses the least-promising windows. The "
+                 "features are model inputs, never gates."),
     }, indent=1, default=str))
 
 

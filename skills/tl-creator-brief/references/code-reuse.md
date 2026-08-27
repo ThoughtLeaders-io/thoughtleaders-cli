@@ -1,60 +1,48 @@
 # Reuse what exists
 
-Do not write new code for anything here. It exists, it is tested, and an agent
-that regenerates it is slower and less correct every run.
+Do not write new code for anything here. It exists, it is tested, and an
+agent that regenerates it is slower and less correct every run.
 
 | Need | Call |
 |---|---|
 | Resolve a channel or brand name to an ID | `tl channels find` / `tl brands find`, never `ILIKE` on a name |
-| Channel identity, format signals, recent titles | `scripts/channel_profile.py` (this skill) |
-| Pick a capped, spread sample of a channel's uploads | `scripts/build_corpus.py` (this skill) |
-| Transcripts filtered to self-reference candidates | `scripts/selftalk_scan.py` (this skill) |
+| All tl data access from scripts | `skills/_shared/tl_cli.py` — stdin-passed bodies, timeouts, loud failures |
+| Fetch a channel's whole transcript corpus | `scripts/fetch_corpus.py` (this skill) |
+| Rank corpus windows for the model layer | `scripts/selftalk_scan.py` (this skill) |
+| Channel identity + measured format stats | `scripts/channel_context.py` (this skill) |
 | A brand's past sponsorship reads | `scripts/brand_reads.py` (this skill) |
-| Timestamp for a quote that did not come from the scan | `scripts/quote_timestamp.py` (this skill) |
+| Verify + timestamp a quote | `scripts/quote_timestamp.py` (this skill) |
 | Transcript text around a keyword hit | `skills/tl-keyword-research/scripts/fetch_context.py` (already strips caption XML) |
-| Topic to validated keyword filter | `tl-keyword-research/scripts/expand_entities.py` to `probe.py` to `select_keywords.py` |
-| Any other TL data read | `tl db pg` / `tl db es` via the `tl` CLI |
+| Topic to validated keyword filter | the `tl-keyword-research` skill |
 | Schema and field names | `skills/tl/references/postgres-schema.md`, `elasticsearch-schema.md` |
 
 ## How this skill's scripts are built
 
-All five shell out to the `tl` CLI directly and import nothing but the standard
-library and each other. That is deliberate: the sibling skills' helpers
-(`tl_cli.py`, `resolve_channel.py`) import their own siblings, so they only run
-from their own `scripts/` directory and cannot be imported from here without a
-path hack. Two of them import a sibling: `selftalk_scan.py` takes
-`fetch_cues` from `quote_timestamp.py`, and `build_corpus.py` takes
-`title_format_hint` from `channel_profile.py`, so run these from this skill's
-`scripts/` directory.
+Every script imports the shared wrapper via a `sys.path` hook computed from
+its own `__file__` — **no `cd` into any skill directory, ever**. Outputs go
+under per-channel paths (`tl-creator-profiles/.corpus/<channel_id>/`), so
+many channels can run concurrently without colliding. Scripts never swallow a
+query failure into an empty result: errors abort loudly.
 
 ## Gotchas that will break a run
 
 - **`tl db es` returns `{"results": [...]}`**, not the native Elasticsearch
-  `hits.hits` shape. Read `results`.
-- **Channel documents are duplicated in Elasticsearch**, many copies under one
-  channel id. Every channel-document query needs
-  `"collapse": {"field": "id"}` or it returns all of them.
-- **The channel's raw `description` is usually not a description**, but
-  boilerplate about subscribing or socials. The platform's generated profile
-  (`ai.description`) is the field
-  worth reading for identity. `channel_profile.py` returns both, in that order
-  of preference.
-- **`query_string` is blocked** on Elasticsearch. Use `multi_match` for text
-  search. `match_phrase` on the transcript field does currently work, but the
-  schema reference's guidance is to prefer `multi_match`, so do.
-- **Detected sponsored mentions include affiliate reads.** Verify a mention is a
-  genuine sponsorship before treating it as the brand's own pitch. See
-  `brand-input.md`.
-- **`resolve_channel.py` in the authenticity skill is not usable for the
-  corpus.** It is hard-capped at the 30 newest uploads per format and carries no
-  channel description, so it can neither sample across a back catalogue nor do
-  the identity step. That is why `build_corpus.py` and `channel_profile.py`
-  exist.
-- **`fetch_context.py` searches `title,summary,transcript`.** A `summary` hit is
-  the video description, usually the affiliate link, not speech. See
-  `evidence-rules.md`.
-
-## Anything genuinely missing
-
-Write it once as a script in this skill's `scripts/`, never inline in a prompt
-where it is regenerated every run.
+  `hits.hits` shape. The shared wrapper unwraps it.
+- **Pass query bodies on stdin** (`tl db es -`), never argv — a big ids list
+  breaks the argv path. The shared wrapper does this.
+- **Channel documents are duplicated in Elasticsearch** — every
+  channel-document query needs `"collapse": {"field": "id"}`.
+- **The channel's raw `description` is usually boilerplate**; the generated
+  profile (`ai.description`) is the identity field worth reading.
+  `channel_context.py` returns both.
+- **`query_string` is blocked** on Elasticsearch; use `multi_match`.
+- **`brand_mentions` is nested**: query it with a `nested` query, and
+  re-check `type` and `field` on every element of the returned list — the
+  doc-level match does not mean each mention matched. A `(0,0)` span is a
+  detection with no position; never pad it into a claim about the video's
+  opening. A `description` hit is the affiliate link, not speech.
+- **Detected sponsored mentions include affiliate reads.** An affiliate read
+  that describes the product still describes the product; one that only drops
+  a link is visible from the absence of words.
+- **The ES highlight feature is stripped by the CLI** — timestamps never come
+  from highlights; they come from stored cue offsets in the local corpus.

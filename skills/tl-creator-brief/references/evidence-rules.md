@@ -1,156 +1,112 @@
 # Evidence rules
 
-The output is written to be forwarded. Every rule here exists to stop a wrong
-quote, or an invented one, reaching someone outside this session.
+The profile is written to be consumed by other skills and forwarded to real
+people. Every rule here exists to stop a wrong quote, or an invented one,
+leaving this session. This file is the single home of the attribution
+doctrine — nothing else restates it.
 
-## What counts as the creator talking about themselves
+## What counts as self-disclosure
 
-The whole first half of this skill rests on this distinction, so it is written
-down rather than left to judgement. **A first-person search is not the test.**
-"I think you should buy gold" and "I'll show you in a second" are both first
-person and neither is worth anything.
+A first-person search is not the test. A window is a gem only if all three
+hold:
 
-A line qualifies only if it passes **all three**:
+1. **The speaker is the subject** — their own life, work, history, habits,
+   relationships or tastes. Not the topic, not the audience, not the video.
+2. **It would still be true if the video did not exist.** "I founded a
+   marketing agency" is true off camera. "I'll show you in a second" exists
+   only because the video exists.
+3. **It discloses something the channel's premise does not already imply.**
+   A geography host loving maps is nothing. "I trained as an accountant" is a
+   find. A trivial personal taste ("I can't stand coffee") passes — that is
+   exactly the kind of find this skill exists for.
 
-1. **Is the speaker the subject?** The line is about their own life, work,
-   history, habits, relationships or tastes. Not about the topic, not about the
-   audience, not about what happens next in the video.
-2. **Would it still be true if the video did not exist?** "I founded a marketing
-   agency" is true off camera. "I'll show you in a second" exists only because
-   the video exists. "I think you should buy gold" is a claim about the world,
-   not a fact about the speaker.
-3. **Does it disclose something the channel's premise does not already imply?**
-   A geography host saying "I love maps" discloses nothing. "I trained as an
-   accountant" does.
+Cast wide. Material with no bearing on any brand belongs in the profile; the
+unrelated detail is where the good connections come from, and Mode B narrows
+later with its own inputs.
 
-Worked through:
+## Attribution
 
-| Line | Verdict |
+Captions carry no speaker labels, so whose mouth a line came out of is a
+judgement the classifier makes from the format and the deterministic features
+— which are inputs, never verdicts.
+
+- **Solo format**: one voice holds the transcript. A window that passes the
+  three-part test is the host's; no feature is required, and demanding one is
+  what turns a solo channel into an empty profile.
+- **Interview / multi-host / reaction**: most self-disclosure in the
+  transcript belongs to the other voice. `host_anchor` (a fuzzy hit on a fact
+  distinctive to the host) and `in_sponsor_read` argue host. Guest-ambiguous
+  windows drop; `speaker_guess: "unclear"` is an honest answer, and unclear
+  windows never publish as the host's.
+- **Recurrence** (the same rare phrase across several uploads) argues host on
+  an interview channel — guests change between uploads, the host does not.
+  **On a multi-host channel recurrence alone must never confirm**: both hosts
+  recur, so a recurring passage still needs another signal or an in-window
+  naming before it counts as one host's.
+- **Ad reads are dual-use.** A sponsored span is spoken by the host, never by
+  a guest or reacted material — the strongest single-voice signal there is.
+  Simultaneously, a "fact" inside an ad read is scripted, so it is banned as a
+  gem source: it only enters the profile if it recurs outside reads.
+
+Every fact carries a confidence bucket, and the bucket travels into the
+output:
+
+| Bucket | What puts it here |
 |---|---|
-| "I taught myself how to do this" | Passes. Speaker is the subject, true off camera, reveals a trait. |
-| "I founded a marketing agency because..." | Passes. |
-| "I consider myself an autodidact" | Passes. |
-| "I can't stand coffee" | Passes. A trivial personal taste is exactly the kind of find this skill exists for. |
-| "I think you should buy gold" | Fails 2. An opinion about the world. |
-| "I'll show you in a second" | Fails 2. A stage direction. |
-| "I love maps" on a geography channel | Fails 3. Implied by the premise. |
-
-**Cast wide at this stage.** Do not filter to what looks useful for the brand.
-The unrelated material is where the good connections come from, and narrowing to
-the brand is a later step with its own inputs.
-
-## Channel format decides how far to trust any of it
-
-Transcripts carry no speaker labels, and the signal is worth wildly different
-amounts depending on the format. Detect the format first, from the channel's
-profile text, its recent titles and their durations, then apply the matching
-rule.
-
-| Format | Confidence | Rule |
-|---|---|---|
-| **Interview show with a named host** | Usable, and the best case for finding gems, because host self-talk is rare and stands out. But most self-talk on the channel belongs to the **guest**, so the trap is large. Roughly half the machine-filtered candidates that match a host anchor are still the guest. Expect lower recall than a solo channel, and say so. | Every quote carries an attribution bucket, per the buckets below. A candidate `selftalk_scan.py` anchored to the host is confirmed; a half-signal is kept and labelled unconfirmed; a candidate with no signal and no naming in the surrounding lines is dropped. State the guest-attribution risk in the caveats. |
-| **Solo talking head** | Usable. No attribution risk, but first person is constant and mostly topic commentary. | All the weight sits on the three-part test. Expect a low survival rate and report it. |
-| **Faceless narrated or animated** | Not usable. | Return an empty profile. The narrator may be hired and "I" may be a scripted persona belonging to nobody, so no line can be tied to an identifiable creator. |
-| **Multi-host** | Barely usable. | Keep only lines where the speaker names themselves or is named in the surrounding context. Everything else is unattributable and gets dropped. |
-| **Reaction** | Usable with the tightest rule of the five. The creator's own speech and the narration of the material being reacted to sit in the **same transcript with no labels**, and the reacted material is often the more talkative of the two. | A finding from a reaction video is **Unconfirmed** unless `host_anchor` or `in_sponsor_read` is true. Nothing else promotes it, because the second voice is not a guest who can be reasoned about but arbitrary third-party narration. |
-
-**State the detected format and the confidence in the output**, every run.
-
-## Format is a property of the video, not only of the channel
-
-One channel routinely mixes formats: a solo channel runs reaction episodes, an
-interview show posts solo monologues. So detect the format per video as well as
-for the channel, and **the video's own format is what decides the bucket** for
-passages from it. The channel's dominant format is the fallback where a video's
-own format was not determined, never an override.
-
-Titles carry most of this. A title of the form "X Reacts to Y" marks a reaction
-episode whatever the channel usually does, and the reaction rule applies to
-every passage from it. Where a video's format is genuinely unclear, treat it as
-sharing the transcript with another voice, since that is the assumption that
-cannot invent a quote.
-
-## Attribution buckets
-
-Attribution is three buckets, not a yes or no, because the middle bucket is real
-and is where a measurable share of the findings live.
-
-| Bucket | What puts it here | What happens to it |
-|---|---|---|
-| **Confirmed** | `host_anchor`, `in_sponsor_read`, or `recurrence_videos` of 3 or more. | Usable as the host's own words. |
-| **Unconfirmed** | `weak_anchor`: first-person talk about running a show or a business. Where another voice shares the transcript, roughly half are that other voice. | **Kept, and labelled.** Never silently dropped, and never silently promoted. |
-| **Unattributable** | No signal, and nothing nearby names the speaker. | Dropped, and counted in the caveats. |
-
-On a **solo** video the buckets are not signal-driven at all: one voice holds the
-transcript, so a passage that passes the three-part test is Confirmed and the
-absence of `host_anchor` says nothing. Requiring a signal there is what turns a
-solo channel into an empty profile. On a **reaction** video the ceiling is
-Unconfirmed unless `host_anchor` or `in_sponsor_read` fires.
-
-The label travels with the quote all the way into the output. That is what makes
-the middle bucket safe to keep: the reader can see exactly which quotes are the
-host beyond doubt and which are probable, and can weigh a connection built on
-one differently from a connection built on the other.
-
-## An empty profile is a valid answer
-
-Where the format cannot support the analysis, return an empty creator profile
-naming the detected format and why it defeats the method, and do not proceed
-into the transcript steps to produce something anyway.
-
-This output can be forwarded to a brand. "This channel's format does not support
-self-reference profiling" is a correct and useful answer. A profile assembled
-from low-confidence guesses presented as findings is not, and is worse than
-nothing, because the reader cannot tell the difference.
-
-## Spoken versus written
-
-- Anything claimed as **spoken** must come from the transcript field. Discard
-  every snippet whose field is not the transcript.
-- Descriptions have one use: confirming a sponsorship happened and reading the
-  current call-to-action format. Separate call, labelled as such. Never merge
-  the two result sets.
+| **Confirmed** | Solo-format pass, a host-anchored window, or a fact corroborated across lanes (a transcript mention AND the creator's own social profile) — cross-lane corroboration is the top tier. |
+| **Unconfirmed** | The classifier believes it is the host but no rule above settles it (e.g. weak-anchor material on an interview channel). Kept, and labelled. Never silently dropped, never silently promoted. |
+| **Dropped** | Speaker unclear on a shared-voice format, or ad-read-only. Counted in the profile's caveats, never shown as a fact. |
 
 ## Quotes
 
-- Verbatim or not at all.
-- **Timestamp every quote.** `selftalk_scan.py` returns candidates already
-  carrying their offset, so a quote that came through it needs no extra pass.
-  For a quote from anywhere else:
-  ```bash
-  python3 scripts/quote_timestamp.py <channel_id>:<video_id> "the quote"
-  ```
-- `found: false` blocks publication. Retry with a spelling or phonetic variant;
-  if it still fails, drop the quote.
-- `cues: 0` on a miss means the video has no stored transcript at all. That is a
-  coverage gap, counts towards the reported coverage rate, and is not evidence
-  the creator never said it.
+- Verbatim or not at all. Bracketed proper-noun corrections are the only
+  permitted edit, with the raw caption text noted.
+- Every quote carries its `&t=` link. The scan attaches offsets at birth; a
+  quote from anywhere else goes through `scripts/quote_timestamp.py`.
+- **A partial match is never a verification.** `quote_timestamp.py` reports
+  `match: "exact" | "partial" | "none"`; only `exact` publishes. On
+  `partial`, fix the quote to what the captions actually hold or drop it —
+  never publish the original words against a partial match, because a shared
+  opening with a different tail is how a fabricated quote gets a real
+  timestamp.
+- `match: "none"`: retry with a spelling or phonetic variant; still none,
+  the quote does not publish. `cues: 0` means the video has no stored
+  transcript — a coverage gap, not evidence.
 
-## Captions
+## Provenance
 
-- Coverage is partial. Report the rate. Absence is not evidence of absence.
-- Auto-captions mangle proper nouns, and a short or unusual brand name may never
-  appear correctly spelled anywhere in a transcript. Search spelling and phonetic
-  variants before concluding zero hits.
-- Corrections are never silent: corrected proper noun in square brackets, raw
-  caption text noted in the caveats. Bracketed proper-noun fixes are the only
-  permitted edit.
-- **No speaker labels.** Verify from surrounding context who is speaking, and
-  sort the result into the three attribution buckets above. Ambiguous is a
-  bucket, not a delete: only a passage with no signal and no naming nearby is
-  dropped outright.
+Every fact names its lane, and lanes never masquerade as each other:
 
-## Figurative use
+- `transcript` — verbatim quote, `&t=` link, video date.
+- `social` — profile URL and seen-date. A fact read off Instagram is not a
+  quote and is never dressed as one.
+- `web` — source URL. Same rule.
 
-If Step 5's narrow probe searches the brand's problem space, a raw category
-search returns mostly metaphor. Judge each snippet individually before it
-becomes a connection, and **report the survival count**: how many hits were
-returned, and how many of those were literal rather than metaphor.
-That ratio is itself evidence of how close the creator is to the category.
+## Sensitive domains
 
-## The evidence decides the answer
+Health, beliefs, children, and precise location are collected, flagged
+`sensitive: true`, and **excluded from Mode B connections by default** — they
+appear in the profile so the human reading it knows they exist, never in a
+pitch angle unless a human deliberately opts one in. No protected-trait
+inference, ever: the profile records what the creator said, not what a model
+concludes about who they are.
 
-If the profile holds nothing that genuinely connects to the brand, say exactly
-that, show what was searched, and stop. Forcing a connection out of thin
-material is the one failure mode that loses the reader's trust in every other
-line of the output.
+## Contradictions and staleness
+
+Latest wins, with dates: "moved to Austin" (2024) supersedes "live in LA"
+(2021), and the superseded fact stays visible as history. Recurrence counts
+**distinct videos or sources, never snippet count** — one video windowed
+thrice is one occurrence.
+
+## Honesty rules
+
+- Transcript coverage is partial (~50–70% of uploads is normal). The profile
+  header prints the ratio and the line "absence is not evidence".
+- No diarization exists; interview-format confidence is capped and the
+  profile says so.
+- An empty result is a real answer. "No evidence found" — with the coverage
+  numbers that bound the claim — is correct and forwardable. A profile
+  assembled from unattributable guesses is worse than nothing.
+- If the profile holds nothing that honestly connects to a brand, Mode B says
+  exactly that, shows what was searched, and stops. A no-fit verdict is a
+  valid output.

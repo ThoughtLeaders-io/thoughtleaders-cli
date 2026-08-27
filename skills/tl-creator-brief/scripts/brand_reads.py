@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """A brand's past sponsorship reads: what creators have said about it on camera.
 
-Returns every read from two sources, each labelled:
+Returns reads from two sources, each labelled, **newest first** — a product
+changes, and the current description of it is the one being sold:
 
-* ``deal``: a sponsorship brokered through the platform.
+* ``deal``: a sponsorship brokered through the platform. A brokered deal whose
+  mention the detector missed still appears (with no words), because it is
+  still evidence of who the brand sponsors.
 * ``mention``: a sponsorship the platform detected out on YouTube, whoever
   brokered it, so a brand that never bought through us still returns reads.
 
-**Zero deals does not mean the brand has never sponsored anyone.** The two counts
-measure different things and the output labels them separately.
+**Zero deals does not mean the brand has never sponsored anyone.** The two
+counts measure different things and the output labels them separately.
 
-**Never returns price, cost, rate cards or performance grades.** None of them say
-what the product is, and the output can be forwarded.
+Every snippet is re-checked per mention: only ``type == "sponsored"`` AND
+``field == "transcript"`` counts, so an organic mention earlier in a video can
+never displace the real sponsored read.
 
-Why this exists and how to read the results: ``references/brand-input.md``.
+**Never returns price, cost, rate cards or performance grades.** None of them
+say what the product is, and the output can be forwarded.
 
 Usage:
     brand_reads.py --brand <id>
@@ -25,38 +30,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import re
-import subprocess
 import sys
 
-PAD = 25  # seconds either side of a detected mention, since the read is longer
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_cli
 
-# The detector sometimes records that a mention exists without capturing what was
-# said, as a bare placeholder like "(in transcript)". That is not a read, and
-# counting it as one would report a read that says nothing about the product.
+PAD = 25  # seconds before a detected mention, since the read starts earlier
+
+# The detector sometimes records that a mention exists without capturing what
+# was said, as a bare placeholder. That is not a read.
 PLACEHOLDER = re.compile(r"^\(?\s*(in|found in)\s+(the\s+)?"
                          r"(transcript|description|title)\s*\)?\.?$", re.I)
 
 
-def _tl(args: list[str]) -> str:
-    proc = subprocess.run(args, capture_output=True, text=True)
-    if proc.returncode != 0:
-        sys.exit(f"{' '.join(args[:3])} failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout
-
-
-def tl_es(body: dict) -> list[dict]:
-    return json.loads(_tl(["tl", "db", "es", json.dumps(body)])).get("results") or []
-
-
-def tl_pg(sql: str) -> list[dict]:
-    data = json.loads(_tl(["tl", "db", "pg", sql, "--json"]))
-    return data if isinstance(data, list) else data.get("results") or []
-
-
 def mention_videos(brand_ids: list[int], max_videos: int) -> list[dict]:
     """Videos carrying a sponsored mention of the brand, newest first."""
-    return tl_es({
+    return tl_cli.db_es({
         "size": max_videos,
         "query": {"bool": {"should": [
             {"term": {"sponsored_brand_mentions": str(b)}} for b in brand_ids
@@ -69,7 +60,7 @@ def mention_videos(brand_ids: list[int], max_videos: int) -> list[dict]:
 
 def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
     """The detected ad-read snippet per video, from the nested mention field."""
-    rows = tl_es({
+    rows = tl_cli.db_es({
         "size": max_videos,
         "query": {"nested": {"path": "brand_mentions", "query": {"bool": {
             "must": [
@@ -86,7 +77,12 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
         if isinstance(mentions, dict):
             mentions = [mentions]
         for m in mentions:
+            # Re-check every condition per mention: the video-level query
+            # matched the DOC, but this list holds ALL of the video's
+            # mentions — organic ones and other brands' included.
             if str(m.get("id")) not in wanted:
+                continue
+            if m.get("type") != "sponsored":
                 continue
             if m.get("field") != "transcript":
                 continue  # a description hit is the affiliate link, not speech
@@ -106,19 +102,18 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
 
 
 def channel_names(channel_ids: list[int]) -> dict[int, str]:
-    """Backfill names for detected mentions, where the index carries only an id."""
-    ids = [int(c) for c in channel_ids if c]
+    ids = sorted({int(c) for c in channel_ids if c})
     if not ids:
         return {}
-    rows = tl_pg("SELECT id, channel_name FROM thoughtleaders_channel "
-                 f"WHERE id IN ({','.join(str(i) for i in ids)})")
+    rows = tl_cli.db_pg("SELECT id, channel_name FROM thoughtleaders_channel "
+                        f"WHERE id IN ({','.join(str(i) for i in ids)})")
     return {int(r["id"]): r.get("channel_name") for r in rows if r.get("id")}
 
 
 def brokered_deals(brand_ids: list[int]) -> list[dict]:
     """Sponsorships brokered through the platform. No price or cost selected."""
     ids = ",".join(str(b) for b in brand_ids)
-    return tl_pg(
+    return tl_cli.db_pg(
         "SELECT a.id AS adlink_id, a.publish_date, a.article_id, "
         "ch.id AS channel_id, ch.channel_name "
         "FROM thoughtleaders_adlink a "
@@ -137,7 +132,7 @@ def main() -> None:
     ap.add_argument("--brand", type=int, action="append", required=True,
                     help="brand id from `tl brands find`; repeat for a rebrand")
     ap.add_argument("--max", type=int, default=10,
-                    help="reads returned, most descriptive first (default 10)")
+                    help="reads returned, newest descriptive first (default 10)")
     a = ap.parse_args()
 
     videos = mention_videos(a.brand, max(a.max * 3, 30))
@@ -154,14 +149,15 @@ def main() -> None:
             chan_ids.append(cid)
     names = channel_names(chan_ids)
 
-    reads = []
+    reads, seen = [], set()
     for v in videos:
         key = str(v.get("id") or "")
+        seen.add(key)
         snip = snippets.get(key) or {}
         vid = key.split(":")[-1]
         start = snip.get("start")
         url = f"https://www.youtube.com/watch?v={vid}"
-        if isinstance(start, (int, float)):
+        if isinstance(start, (int, float)) and start > 0:
             url += f"&t={max(int(start) - PAD, 0)}s"
         chan = v.get("channel") if isinstance(v.get("channel"), dict) else {}
         cid = chan.get("id") or v.get("channel.id")
@@ -172,8 +168,8 @@ def main() -> None:
             "published": str(v.get("publication_date") or "")[:10],
             "channel_id": cid,
             "channel_name": (chan.get("name") or v.get("channel.name")
-                             or names.get(int(cid)) if cid else None)
-                            or (deal_articles.get(key) or {}).get("channel_name"),
+                             or (names.get(int(cid)) if cid else None)
+                             or (deal_articles.get(key) or {}).get("channel_name")),
             "source": "deal" if key in deal_articles else "mention",
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
@@ -181,10 +177,29 @@ def main() -> None:
             "url": url,
         })
 
-    # A read whose words we actually have is worth more than a bare row.
-    reads.sort(key=lambda r: (0 if r["read_words"] else 1,
-                              0 if r["source"] == "deal" else 1,
-                              r["published"] or ""), reverse=False)
+    # Brokered deals whose mention the detector missed: still reads, no words.
+    for key, d in deal_articles.items():
+        if key in seen:
+            continue
+        vid = key.split(":")[-1]
+        reads.append({
+            "id": key,
+            "video_id": vid,
+            "title": None,
+            "published": str(d.get("publish_date") or "")[:10],
+            "channel_id": d.get("channel_id"),
+            "channel_name": d.get("channel_name"),
+            "source": "deal",
+            "read_words": None,
+            "entity_as_heard": None,
+            "start": None,
+            "url": f"https://www.youtube.com/watch?v={vid}",
+        })
+
+    # A read whose words we actually have outranks a bare row; newest first
+    # within each group.
+    reads.sort(key=lambda r: r["published"] or "", reverse=True)
+    reads.sort(key=lambda r: 0 if r["read_words"] else 1)
     kept = reads[:a.max]
     with_words = sum(1 for r in kept if r["read_words"])
 
@@ -192,15 +207,18 @@ def main() -> None:
         "brand_ids": a.brand,
         "mention_videos_found": len(videos),
         "brokered_deals_found": len(deals),
+        "brokered_without_detected_mention": sum(
+            1 for k in deal_articles if k not in seen),
         "reads_returned": len(kept),
         "reads_with_spoken_words": with_words,
-        "counts_note": ("brokered deals and detected mentions measure different "
-                        "things; zero deals does not mean the brand has never "
-                        "sponsored anyone"),
-        "usage_note": ("read the words to learn what the product is. A read with "
-                       "no words describes nothing and can be ignored. If no "
-                       "read has words at all, use the brand's website or a "
-                       "brief instead."),
+        "counts_note": ("brokered deals and detected mentions measure "
+                        "different things; zero deals does not mean the brand "
+                        "has never sponsored anyone"),
+        "usage_note": ("read the words to learn what the product is, newest "
+                       "first — an old read can describe a product that no "
+                       "longer exists. A read with no words describes nothing. "
+                       "If no read has words at all, use the brand's website "
+                       "or their own brief instead."),
         "excluded_by_design": ["price", "cost", "rate cards",
                                "performance grades"],
         "reads": kept,
