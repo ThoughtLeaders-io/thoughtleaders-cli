@@ -48,7 +48,9 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_cli
+from channel_context import TITLE_SECOND_VOICE  # sibling script
 
 WINDOW_CHARS = 260
 BATCH_SIZE = 50
@@ -96,12 +98,16 @@ STAGE = re.compile(
     r"in this video|in today'?s video|before we (start|begin|get into)|"
     r"let'?s (get|jump|dive)|stay tuned|coming up)\b", re.I)
 
-# The only hard drop, and only when nothing else in the window is first-person
-# beyond the boilerplate itself.
+# The only hard drop, and only when the window's first-person content IS the
+# boilerplate: both patterns are masked out and the remainder re-tested, so
+# "I live in London, and remember to subscribe" survives.
 BOILERPLATE = re.compile(
     r"\b(subscribe|smash th(e|at) like|link (in|below)|link in the "
     r"description|notification bell|comment below|patreon|join the channel)\b",
     re.I)
+BOILER_FP = re.compile(
+    r"\b(my|our) (channel|patreon|newsletter|merch|videos?|links?|discord|"
+    r"instagram|twitter)\b", re.I)
 
 _STOP = set("""a an the and or but if of to in on at by for with from as is are
 was were be been being it its this that these those i me my myself we our you
@@ -411,6 +417,10 @@ def main() -> None:
         ref = str(v["id"])
         vid = ref.split(":")[-1]
         segs = segments.get(ref, [])
+        # Per-VIDEO format hint: one channel mixes formats, and a reaction or
+        # collab upload on a solo channel must not inherit the solo rule.
+        title_hint = next((fmt for fmt, rx in TITLE_SECOND_VOICE.items()
+                           if v.get("title") and rx.search(v["title"])), None)
         for start, text in windows(v["cues"]):
             total_windows += 1
             tokens = _window_tokens(text)
@@ -422,13 +432,16 @@ def main() -> None:
                 continue
             cues_fired = [name for name, rx in DISCLOSURE if rx.search(text)]
             boiler = bool(BOILERPLATE.search(text))
-            if boiler and not cues_fired and not host_hits and not ent_hits:
-                dropped_boiler += 1
-                continue
+            if boiler and not host_hits and not ent_hits:
+                masked = BOILER_FP.sub(" ", BOILERPLATE.sub(" ", text))
+                if not FIRST_PERSON.search(masked):
+                    dropped_boiler += 1
+                    continue
             kept.append({
                 "id": ref,
                 "video_id": vid,
                 "title": v.get("title"),
+                "format_hint": title_hint,
                 "published": str(v.get("publication_date") or "")[:10],
                 "start": start,
                 "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",

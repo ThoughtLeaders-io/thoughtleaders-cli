@@ -75,7 +75,7 @@ def channel_doc(channel_id: int) -> dict:
             {"term": {"id": channel_id}},
         ]}},
         "_source": ["name", "description", "ai.description",
-                    "ai.topic_descriptions"],
+                    "ai.topic_descriptions", "social_links"],
         "collapse": {"field": "id"},
     })
     return rows[0] if rows else {}
@@ -163,6 +163,9 @@ def main() -> None:
         "last_published": str(row.get("last_published") or "")[:10] or None,
         "generated_profile": _nested(doc, "ai.description"),
         "about_text": doc.get("description"),
+        # the identity & socials lane opens these; a profile that cannot be
+        # read is reported "linked but unread", never silently skipped
+        "social_links": doc.get("social_links") or [],
         "topic_descriptions": _nested(doc, "ai.topic_descriptions"),
         "note": ("format label is called by a model read of a small sample "
                  "WITH these stats as evidence; the stats are inputs, not a "

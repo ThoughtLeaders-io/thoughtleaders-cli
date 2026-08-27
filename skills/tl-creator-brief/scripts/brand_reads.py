@@ -66,8 +66,13 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
             "must": [
                 {"terms": {"brand_mentions.id": [str(b) for b in brand_ids]}},
                 {"term": {"brand_mentions.type": "sponsored"}},
+                # constrain to spoken reads HERE, not only in Python after
+                # paging: otherwise description-only rows can fill the page
+                # and hide older videos whose read has words
+                {"term": {"brand_mentions.field": "transcript"}},
             ]}}}},
-        "_source": ["id", "title", "publication_date", "brand_mentions"],
+        "_source": ["id", "title", "publication_date", "channel.id",
+                    "channel.name", "brand_mentions"],
         "sort": [{"publication_date": "desc"}],
     })
     out: dict[str, dict] = {}
@@ -92,11 +97,18 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
             words = (m.get("snippet") or "").strip()
             if PLACEHOLDER.match(words):
                 words = ""
+            chan = r.get("channel") if isinstance(r.get("channel"), dict) else {}
             out[key] = {
                 "snippet": words,
                 "entity_as_heard": m.get("entity"),
                 "start": m.get("start_ts"),
                 "end": m.get("end_ts"),
+                # meta, so a spoken read whose video fell off the
+                # mention_videos page still becomes a full row
+                "title": r.get("title"),
+                "published": str(r.get("publication_date") or "")[:10],
+                "channel_id": chan.get("id") or r.get("channel.id"),
+                "channel_name": chan.get("name") or r.get("channel.name"),
             }
     return out
 
@@ -170,6 +182,30 @@ def main() -> None:
             "channel_name": (chan.get("name") or v.get("channel.name")
                              or (names.get(int(cid)) if cid else None)
                              or (deal_articles.get(key) or {}).get("channel_name")),
+            "source": "deal" if key in deal_articles else "mention",
+            "read_words": snip.get("snippet") or None,
+            "entity_as_heard": snip.get("entity_as_heard"),
+            "start": start,
+            "url": url,
+        })
+
+    # Spoken reads whose video fell off the mention_videos page still count.
+    for key, snip in snippets.items():
+        if key in seen:
+            continue
+        seen.add(key)
+        vid = key.split(":")[-1]
+        start = snip.get("start")
+        url = f"https://www.youtube.com/watch?v={vid}"
+        if isinstance(start, (int, float)) and start > 0:
+            url += f"&t={max(int(start) - PAD, 0)}s"
+        reads.append({
+            "id": key,
+            "video_id": vid,
+            "title": snip.get("title"),
+            "published": snip.get("published"),
+            "channel_id": snip.get("channel_id"),
+            "channel_name": snip.get("channel_name"),
             "source": "deal" if key in deal_articles else "mention",
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),

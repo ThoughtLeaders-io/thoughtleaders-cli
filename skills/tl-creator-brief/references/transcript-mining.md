@@ -61,14 +61,17 @@ windows first) and the model tiering below.
 
 ## Layer 3: the model layer — where the intelligence lives
 
-**Haiku screens.** Fan the batch files out to the `gem-classifier` agent
-(`agents/gem-classifier.md`), one agent per batch, **all batches in parallel**
-— they are independent, so none waits on another. Each agent gets the context
-block (channel, host names and known facts, format label with evidence) plus
-one batch file path, and returns strict JSON: self-disclosure verdict, life
-domain, speaker guess, sensitivity flag, caption-spelling corrections,
-one-line summary. Validate the JSON against the expected shape; a malformed
-return is re-run, never hand-patched.
+**Haiku screens.** The classifier's rules live in ONE place:
+`references/gem-classifier.md` (this skill), so every host runs the same
+classifier. Fan the batch files out to the `gem-classifier` agent
+(`agents/gem-classifier.md`, a thin shim over that spec), one agent per
+batch, **all batches in parallel** — they are independent, so none waits on
+another. Each agent gets the spec path, the context block (channel, host
+names and known facts, format label with evidence) plus one batch file
+path, and returns strict JSON: self-disclosure verdict, life domain,
+speaker guess, sensitivity flag, caption-spelling corrections, one-line
+summary. Validate the JSON against the expected shape; a malformed return
+is re-run, never hand-patched.
 
 The model catches what no lexicon can: "I'm allergic to peanuts", "we finally
 finished the nursery", proper nouns read through misspellings, sarcasm and
@@ -85,10 +88,10 @@ gem list that goes into the profile, each with claim, verbatim quote, video,
 start seconds, life domain, sensitivity flag, and confidence bucket.
 
 **If the host cannot spawn agents** (the skill is public; not every host is
-Claude Code): run the same batches sequentially with the prompt in
-`agents/gem-classifier.md` used inline — the agent file body IS the prompt —
-discarding each batch's raw text before the next. Same sweep, same rules,
-just slower.
+Claude Code): run the same batches sequentially with
+`references/gem-classifier.md` used inline as the prompt — it installs with
+the skill on every host — discarding each batch's raw text before the next.
+Same sweep, same rules, just slower.
 
 **The orchestrating context never sees raw transcripts.** It sees the scan
 summary, the classifier returns, and the profile. On a very large channel the
