@@ -31,36 +31,13 @@ Two jobs, and they are different questions:
      reliably, so the label loses nothing and the deletion lost real findings.
    * ``in_sponsor_read``: falls inside a detected sponsored segment. Ad reads are
      spoken by the host, never by a guest or by reacted material, so this is
-     close to proof in any format. Some of the best material sits here, because a
-     host explaining why they use a product talks about their own life to do it.
+     close to proof in any format.
    * ``recurrence_videos``: how many DIFFERENT videos share a distinctive phrase
-     with this passage. Whoever else is in the transcript changes between
-     uploads and the host does not, so a personal claim appearing in three
-     uploads cannot be three different visitors saying the same thing about
-     themselves. "Distinctive" has to be
-     enforced or this signal is worthless: a first attempt counted any four
-     content words and duly reported that "I've always wondered" and "little bit
-     more" recur, which says nothing about anybody. A phrase now qualifies only
-     if at least one of its words is rare across the corpus, which is what
-     separates "ten million subscribers on YouTube", said by the host in three
-     different episodes, from conversational filler.
-Two further signals were tried here and removed, and both are recorded so nobody
-spends the time again:
-
-* **Position in the video.** The theory was that a host speaks alone in the
-  opening minutes. Tested on a channel that cold-opens on a clip of the second
-  voice it did the exact opposite, so "early" reliably tagged the wrong speaker.
-* **Who is named.** The theory was that each speaker says the other's first
-  name. It failed twice over. The other speaker's name had to come from
-  the video title, and on a clickbait title the extractor reads "Cancer Expert"
-  and "Body Language" as names, whose words then match everywhere: 146 hits,
-  almost all false. And the host's own name is ambiguous evidence anyway, because
-  "I'm <host name> and this is <show>" is the host saying it about himself. The
-  captions also spell his first name differently from the real spelling, which is
-  the proper-noun mangling problem applied to the host.
-
-A heuristic that points the wrong way is worse than none.
-
+     with this passage. Whoever else is in the transcript changes between uploads
+     and the host does not, so a personal claim appearing in three uploads is not
+     three different visitors saying the same thing about themselves. A phrase
+     counts as distinctive only if at least one of its words is rare across the
+     corpus; without that test the signal returns conversational filler.
 The whole first job is plain pattern matching, with no model involved. Passages
 arrive carrying their video, timestamp and link, reusing
 ``quote_timestamp.fetch_cues``, so nothing needs timestamping later.
