@@ -85,15 +85,13 @@ tier names change.
    its summary reports `windows_over_cap` for the coverage header. The
    classifiers judge in the source language.
 4. **Model layer.** Fan ALL the batches out to the `gem-classifier` agent
-   (haiku) in ONE message — every Agent call a tool_use block in the same
-   assistant message, one spawn per message is a bug — then consume each
-   agent's returned JSON; results never go through the filesystem and
-   completion is never polled or slept on (hard rules:
-   `references/transcript-mining.md`, Layer 3). Sonnet confirms the gems
-   the same way (verbatim check, attribution reasoning, entity
-   corrections). New entities ("my dog Luna") trigger a free local re-scan
-   with `--entity-terms`. Raw transcripts never enter the orchestrating
-   context.
+   (haiku) in ONE message and consume each agent's returned JSON — the
+   fan-out mechanics and hard rules (no result files, no polling, no
+   sleeping) have one home: `references/transcript-mining.md`, Layer 3.
+   Sonnet confirms the gems the same way (verbatim check, attribution
+   reasoning, entity corrections). New entities ("my dog Luna") trigger a
+   free local re-scan with `--entity-terms`. Raw transcripts never enter
+   the orchestrating context.
 5. **Emit** the profile per `references/profile-spec.md`: versioned
    frontmatter, facts by life domain with provenance and confidence,
    sensitive flags, coverage header, "absence is not evidence".

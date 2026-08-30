@@ -110,7 +110,10 @@ def test_max_windows_caps_batches_but_not_the_recall_record(tmp_path):
          "cues": [[7, "i grew up in ohio and my dad ran a bakery"]]}
         for i in range(8)
     ] + [
-        {"id": f"1:es{i:02d}", "title": "Historia", "transcript_language": "es",
+        # ids run OPPOSITE to publication order: sampling must follow dates,
+        # not the arbitrary video-id sort.
+        {"id": f"1:es{11 - i:02d}", "title": "Historia",
+         "transcript_language": "es",
          "publication_date": f"2026-02-{i + 1:02d}",
          "cues": [[5, "crecí en madrid con toda la familia y estudié derecho"]]}
         for i in range(12)
@@ -133,11 +136,13 @@ def test_max_windows_caps_batches_but_not_the_recall_record(tmp_path):
     batched = [w for p in summary["batches"]
                for w in json.loads(Path(p).read_text())]
     assert len(batched) == 5
-    es_ids = [w["video_id"] for w in batched if w["language"] == "es"]
+    es_dates = sorted(w["published"] for w in batched
+                      if w["language"] == "es")
     en_ids = [w["video_id"] for w in batched if w["language"] == "en"]
-    assert en_ids and es_ids
-    # Stride sampling spans the unranked set's whole span, not just its head.
-    assert es_ids[0] == "es00" and es_ids[-1] > "es05"
+    assert en_ids and es_dates
+    # Stride sampling spans the channel's HISTORY (publication dates), not
+    # one end of it — and not the arbitrary video-id order.
+    assert es_dates[0] <= "2026-02-02" and es_dates[-1] >= "2026-02-08"
 
 
 def test_max_windows_zero_disables_the_cap(tmp_path):

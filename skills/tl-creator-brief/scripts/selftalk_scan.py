@@ -518,8 +518,13 @@ def main() -> None:
         q_ranked = min(len(ranked), a.max_windows - q_unranked)
         take_unranked = unranked
         if len(unranked) > q_unranked:
-            step = len(unranked) / max(q_unranked, 1)
-            take_unranked = [unranked[int(i * step)] for i in range(q_unranked)]
+            # Stride over publication order, not list order — the kept sort
+            # is (-rank_score, id, start) and video ids are arbitrary, so
+            # only a date-ordered pool actually spans the channel's history.
+            pool = sorted(unranked, key=lambda c: (c["published"], c["id"],
+                                                   c["start"]))
+            step = len(pool) / max(q_unranked, 1)
+            take_unranked = [pool[int(i * step)] for i in range(q_unranked)]
         batched = ranked[:q_ranked] + take_unranked
 
     batch_dir = out_dir / "batches"
