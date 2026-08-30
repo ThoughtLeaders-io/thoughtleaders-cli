@@ -326,3 +326,36 @@ class TestSetupCallSequence:
         monkeypatch.setattr(setup, "_find_claude_binary", lambda: None)
         setup._setup_noninteractive()
         assert (plugins / "tl-cli" / ".version").read_text() == setup.__version__
+
+
+class TestSharedSupportInstall:
+    def _plugin_with_shared(self, tmp_path: Path) -> Path:
+        plugin_root = tmp_path / "plugin"
+        skills = plugin_root / "skills"
+        _write_skill(skills, "tl", "---\nname: tl\n---\n")
+        shared = skills / "_shared"
+        shared.mkdir()
+        (shared / "tl_data.py").write_text("x = 1\n", encoding="utf-8")
+        return plugin_root
+
+    def test_skill_trees_carry_shared_dir(self, tmp_path):
+        plugin_root = self._plugin_with_shared(tmp_path)
+        target = tmp_path / "target"
+        assert setup._install_skill_trees(plugin_root, target) == 1
+        assert (target / "_shared" / "tl_data.py").read_text() == "x = 1\n"
+
+    def test_skill_trees_refresh_stale_shared_copy(self, tmp_path):
+        plugin_root = self._plugin_with_shared(tmp_path)
+        target = tmp_path / "target"
+        stale = target / "_shared"
+        stale.mkdir(parents=True)
+        (stale / "tl_data.py").write_text("old = 1\n", encoding="utf-8")
+        setup._install_skill_trees(plugin_root, target)
+        assert (target / "_shared" / "tl_data.py").read_text() == "x = 1\n"
+
+    def test_standalone_install_carries_shared_dir(self, tmp_path, monkeypatch):
+        plugin_root = self._plugin_with_shared(tmp_path)
+        monkeypatch.setattr(setup, "CLAUDE_SKILLS_DIR", tmp_path / "cs")
+        monkeypatch.setattr(setup, "CLAUDE_COMMANDS_DIR", tmp_path / "cc")
+        assert setup._install_standalone_skills(plugin_root) == 1
+        assert (tmp_path / "cs" / "_shared" / "tl_data.py").exists()
