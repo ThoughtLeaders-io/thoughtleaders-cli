@@ -55,7 +55,7 @@ from channel_context import TITLE_SECOND_VOICE  # sibling script
 
 WINDOW_CHARS = 260
 BATCH_SIZE = 50
-MAX_MODEL_WINDOWS = 1500   # ceiling on windows batched for the model layer
+MAX_MODEL_WINDOWS = 500    # ceiling on windows batched for the model layer
 SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
 IDS_CHUNK = 1000
 

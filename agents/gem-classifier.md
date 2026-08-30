@@ -2,8 +2,11 @@
 name: gem-classifier
 description: >
   Screens a batch of transcript windows from one YouTube channel for genuine
-  creator self-disclosure ("gems") for the tl-creator-brief skill. Use when
-  you have a batch file of ranked windows from selftalk_scan.py and need a
+  creator self-disclosure ("gems") for the tl-creator-brief skill. This is
+  the FALLBACK classification path — the primary path is the skill's
+  classify_gems.py script (used whenever CREATOR_BRIEF_LLM_API_KEY is
+  configured). Use when the script path is unavailable and you have a batch
+  file of ranked windows from selftalk_scan.py and need a
   fast, cheap per-window verdict: is this the creator disclosing something
   about their own life, whose voice is it, which life domain, is it
   sensitive. Returns strict JSON only.

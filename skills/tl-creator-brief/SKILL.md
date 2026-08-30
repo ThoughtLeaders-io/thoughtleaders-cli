@@ -14,10 +14,11 @@ description: >
 
 Two modes, one contract:
 
-- **PROFILE** (channel only, no brand needed): build
-  `tl-creator-profiles/<channel_id>-profile.md` — the stable contract other
-  skills and personas consume. Spec: `references/profile-spec.md`.
-- **CONNECT** (channel + brand): load (or build) the profile, do a
+- **PROFILE** (channel only, no brand needed): build the two-layer profile —
+  `tl-creator-profiles/<channel_id>-facts.jsonl` (the machine ledger other
+  skills and CONNECT consume) and `<channel_id>-profile.md` (a ~600–800-word
+  human one-pager). Spec: `references/profile-spec.md`.
+- **CONNECT** (channel + brand): load (or build) the facts ledger, do a
   deliberately light brand read, and write
   `<channel_id>-<brand_id>-connections.md`, a ranked connection map. A no-fit
   verdict is a valid output.
@@ -62,15 +63,13 @@ tier names change.
      `social`/`web` provenance and URLs, never dressed as quotes; a platform
      that blocks reading is reported "linked but unread". Names and handles
      found here feed the scan's `--host-terms`.
-   - **Second channels are part of this lane.** `channel_context.py` emits
-     `second_channel_candidates` (YouTube links and "my second channel"
-     phrasing from the channel's own pointers); also check the channel
-     page's featured/linked channels while reading it. When a personal,
-     vlog or podcast second channel surfaces, resolve it with
-     `tl channels find` and run the fetch + scan over it too — a smaller
-     second channel is often the densest self-disclosure source. Facts
-     mined there carry the second channel's provenance; a candidate that
-     can't be resolved or read is reported "linked but unread".
+   - **Second channels: report, don't mine.** `channel_context.py` emits
+     `second_channel_candidates`; the lane resolves each with
+     `tl channels find` and the profile's "Other channels" section lists
+     them (name, id, video count). Mining a second channel happens ONLY when
+     the user explicitly asks — it roughly doubles the run, so it is never
+     an automatic decision. A candidate that can't be resolved or read is
+     reported "linked but unread".
 2. **Channel context brief.** `channel_context.py --corpus ...` measures
    format from the transcripts (first-person density, interview markers); a
    model read of a small sample calls the label with evidence. Not a gate —
@@ -81,22 +80,44 @@ tier names change.
    lexicons are English, so on non-English videos they neither rank nor
    drop: every window is kept for the model layer (`--lexicon auto`, the
    default — only ~half the transcript corpus is English). The scan caps
-   the batched fan-out itself (`--max-windows`, default 1500 ≈ 30 batches);
-   its summary reports `windows_over_cap` for the coverage header. The
-   classifiers judge in the source language.
-4. **Model layer.** Fan ALL the batches out to the `gem-classifier` agent
-   (haiku) in ONE message and consume each agent's returned JSON — the
-   fan-out mechanics and hard rules (no result files, no polling, no
-   sleeping) have one home: `references/transcript-mining.md`, Layer 3.
-   Sonnet confirms the gems the same way (verbatim check, attribution
-   reasoning, entity corrections). New entities ("my dog Luna") trigger a
-   free local re-scan with `--entity-terms`. Raw transcripts never enter
-   the orchestrating context.
-5. **Emit** the profile per `references/profile-spec.md`: versioned
-   frontmatter, facts by life domain with provenance and confidence,
-   sensitive flags, coverage header, "absence is not evidence".
+   the batched windows itself (`--max-windows`, default 500); its summary
+   reports `windows_over_cap` for the coverage header. The classifiers
+   judge in the source language.
+4. **Classification — a script, not a fan-out.** Write the context block
+   (channel, host names, known facts, format label + evidence) to
+   `context.json`, then run `scripts/classify_gems.py --batches ...
+   --context context.json`. It calls an OpenAI-compatible endpoint (env:
+   `CREATOR_BRIEF_LLM_API_KEY`, `CREATOR_BRIEF_LLM_BASE_URL`,
+   `CREATOR_BRIEF_LLM_MODEL`; reference config: OpenRouter +
+   `deepseek/deepseek-v3.2`), resumable, JSON-mode enforced, and writes
+   `classified.jsonl` + `gems.jsonl`. **State which path the run is on**: no
+   API key configured → the script exits code 2 and the fallback is the
+   `gem-classifier` agent fan-out (~5–10× the model spend; rules in
+   `references/transcript-mining.md`, Layer 3). **Spot-check ~30 verdicts**
+   (a mix of accepted and rejected) before trusting a fresh channel's run;
+   systematic misses mean switch to the agent fallback.
+5. **Fact pass + verification.** ONE small Claude pass (≤2 agents, or the
+   main loop when the gem list is small) turns `gems.jsonl` + the identity
+   lane's findings into candidate facts — claims, verbatim quote excerpts,
+   attribution and sensitivity calls, superseded-fact resolution, the
+   `selected` picks (details: `references/transcript-mining.md`, Layer 4).
+   Then `scripts/verify_quotes.py --in candidates.jsonl --corpus ...`
+   verbatim-verifies every quote locally: exact matches publish (their
+   timestamps are authoritative), partial/none get fixed to the caption text
+   or dropped. New entities ("my dog Luna") trigger a free local re-scan
+   with `--entity-terms`; the classifier resumes over the new windows only.
+   Raw transcripts never enter the orchestrating context.
+6. **Emit** per `references/profile-spec.md`: the verified ledger
+   `<channel_id>-facts.jsonl`, the ~600–800-word one-pager
+   `<channel_id>-profile.md`, and the HTML view via
+   `scripts/build_html.py --in <profile.md> --facts <facts.jsonl>`. When
+   running in a host with an Artifact tool, publish the HTML so the user
+   gets a link; the files in `tl-creator-profiles/` are the durable copies.
 
 ## CONNECT pipeline
+
+Load `<channel_id>-facts.jsonl` (offer reuse per the spec's Reuse section;
+build PROFILE first when it is missing). Then:
 
 1. **Brand read — four lanes, all cheap subagents, all four spawned in ONE
    message, one-shot:**
@@ -114,12 +135,14 @@ tier names change.
    - **Brand social**: the brand's own Instagram/X/TikTok — campaign themes,
      how they use creators, and the brand's personal surface (founder story,
      office dog, a championed cause). Connections run both directions.
-2. **Connection pass.** Put the profile next to the brand read. Three types —
-   **direct** (fact ↔ product), **adjacent** (lifestyle fit), **category
-   precedent** (one channel-scoped probe of brand-category terms for moments
-   the creator already does what the product enables). Follow-up queries are
-   **confirm-only**: they deepen a candidate connection, never invent one.
-   Emit per `references/profile-spec.md`.
+2. **Connection pass.** Put the facts ledger next to the brand read. Three
+   types — **direct** (fact ↔ product), **adjacent** (lifestyle fit),
+   **category precedent** (one channel-scoped probe of brand-category terms
+   for moments the creator already does what the product enables). Follow-up
+   queries are **confirm-only**: they deepen a candidate connection, never
+   invent one. Emit per `references/profile-spec.md`, then render the HTML
+   view (`scripts/build_html.py --in <connections.md>`) and publish it as an
+   artifact where the host supports one.
 
 ## Guardrails
 

@@ -1,10 +1,12 @@
 # Transcript mining
 
-How a channel's transcripts become a profile. Three layers, in order: one
-deterministic fetch, one generous local recall pass, one model layer where the
-actual intelligence lives. Query credits are not a budget here; the only
-budgets are model tokens and tiers, which is why everything selective runs
-locally and everything intelligent runs on the cheapest model that can do it.
+How a channel's transcripts become a profile. Four layers, in order: one
+deterministic fetch, one generous local recall pass, one cheap-API
+classification pass, and one small model layer where the remaining judgment
+lives. Query credits are not a budget here; the budgets are model tokens and
+tiers — which is why everything selective runs locally, classification runs
+on a cheap API model, and Claude is spent only on judgment no script can
+encode.
 
 ## Layer 1: fetch everything, one query
 
@@ -37,7 +39,7 @@ python3 <skill>/scripts/selftalk_scan.py \
 
 Windows every transcript into ~260-char passages and keeps anything with a
 first-person marker or a fuzzy entity hit. This layer exists solely to cut
-model-token spend, so it is tuned for recall, never precision:
+model spend, so it is tuned for recall, never precision:
 
 - **Nothing with first-person content is hard-rejected.** The old disclosure
   and exclusion lexicons are ranking features: they order what the models read
@@ -53,92 +55,140 @@ model-token spend, so it is tuned for recall, never precision:
   rare phrases, fuzzy host-anchor hits. Nothing is silently discarded by them.
 
 Output: `windows.jsonl` (every kept window, ranked) plus
-`batches/batch-*.json`, rank-ordered ~50-window files ready to fan out and
-already capped at `--max-windows` (default 1500) for the model layer. The
-kept share varies hugely by format (measured: ~18% on a faceless narration
-channel, 60–85% on talk-heavy solo and interview channels) — which is why
-token control does NOT rely on this layer alone: it comes from the rank
-ordering, the batch cap, and the model tiering below.
+`batches/batch-*.json`, rank-ordered ~50-window files already capped at
+`--max-windows` (default 500) for the classification layer. The kept share
+varies hugely by format (measured: ~18% on a faceless narration channel,
+60–85% on talk-heavy solo and interview channels) — which is why cost control
+does NOT rely on this layer alone: it comes from the rank ordering, the
+window cap, and the cheap classifier below.
 
-## Layer 3: the model layer — where the intelligence lives
+**The cap is enforced by the scan, not by judgment.** Ranked windows keep
+their top scores, and unranked (non-English) windows are stride-sampled
+across the channel's whole history, so a giant back-catalogue costs the same
+as a mid-sized one. The summary's `windows_over_cap` reports what stayed
+local — carry that number into the profile's coverage header, because
+"absence is not evidence" needs it. Do not raise the cap on your own
+initiative; the corpus and `windows.jsonl` keep everything, so a deeper pass
+is one free re-scan away when a human asks for it. 500 top-ranked windows
+demonstrably covers the facts a brief actually uses; with the script
+classifier the cap is a latency/quality knob more than a cost knob.
 
-**Haiku screens.** The classifier's rules live in ONE place:
-`references/gem-classifier.md` (this skill), so every host runs the same
-classifier. Fan the batch files out to the `gem-classifier` agent type — the
-plugin registers it from `agents/gem-classifier.md` at the repo root
-(namespaced by the plugin, e.g. `tl-cli:gem-classifier` in Claude Code) — one
-agent per batch. "In parallel" is mechanical, not aspirational: **emit ALL
-the Agent calls as multiple tool_use blocks in ONE assistant message.** One
-spawn per message is a bug, not a slow success — each extra launch message
-re-reads the entire orchestrating context just to start an agent that
-returns ~1KB. The same one-message rule applies to every other fan-out in
-this skill (sonnet confirmation, the identity lane, the CONNECT brand
-lanes). Each agent gets the spec path, the context block (channel, host
-names and known facts, format label with evidence) plus one batch file
-path, and returns strict JSON: self-disclosure verdict, life domain,
-speaker guess, sensitivity flag, caption-spelling corrections, one-line
-summary. Validate the JSON against the expected shape; a malformed return
-is re-run, never hand-patched. Track which batches you have spawned —
-never spawn the same batch twice.
+## Layer 3: classification — a script, not a fan-out
 
-**Results come back as return values — never through the filesystem.** Each
-agent's final message IS its result; the harness delivers it to the
-orchestrator when the agent completes. Consequences, all hard rules:
+```bash
+python3 <skill>/scripts/classify_gems.py \
+  --batches tl-creator-profiles/.corpus/<channel_id>/batches \
+  --context context.json
+```
 
-- Never instruct an agent to write its results to a file. The shipped
-  `gem-classifier` can't anyway (`tools: Read` only); do not re-invent a
-  file contract when a general-purpose agent that could write happens to be
-  standing in.
-- Never poll for agent completion — no `ls`-and-count loops, no re-checking
-  a directory. There is nothing on disk to check.
-- Never use `sleep` to wait for an agent, and specifically never `sleep`
-  with `run_in_background: true` — a backgrounded sleep returns instantly,
-  so it waits for nothing while looking like a wait. If a genuine timed
-  wait on external state is ever needed, the supported mechanism is
-  `Monitor` with an until-condition, not `sleep`.
-- The positive rule: after emitting the fan-out message, stop the turn and
+`classify_gems.py` sends the batched windows to an OpenAI-compatible chat
+endpoint (JSON mode enforced, resumable, malformed responses retried and
+recorded rather than dropped). The rubric has ONE home —
+`references/gem-classifier.md`, which points to `evidence-rules.md` — and the
+script embeds both files in its prompt verbatim, so every path runs the same
+classifier. Configuration is env-only (nothing machine-specific lives in this
+skill):
+
+- `CREATOR_BRIEF_LLM_API_KEY` — required; no key means this layer falls back
+  to agents (below).
+- `CREATOR_BRIEF_LLM_BASE_URL` — default `https://openrouter.ai/api/v1`.
+- `CREATOR_BRIEF_LLM_MODEL` — default `deepseek/deepseek-v3.2`. The
+  reference config is OpenRouter with that model: roughly 5–10× cheaper than
+  a haiku agent fan-out and two orders of magnitude cheaper than doing it in
+  the orchestrating context.
+
+Write `context.json` first — the same context block the classifier contract
+requires: channel name, host name(s), known facts, format label with its
+evidence. The script writes `classified.jsonl` (every window + verdict, the
+resume record) and `gems.jsonl` (the self-disclosure subset with
+`speaker_guess` host or unclear).
+
+**Quality gate, mandatory on a fresh channel:** before trusting a full run,
+spot-check ~30 verdicts by hand — read a mix of accepted and rejected windows
+from `classified.jsonl` and confirm the calls against the rubric. Systematic
+misses (a domain always rejected, guest voices accepted as host) mean the
+cheap model is not holding the contract: switch to the agent fallback rather
+than patching verdicts by hand.
+
+**Fallback: the classifier agent fan-out.** When no API key is configured
+(the script exits with code 2 and says so), fan the batch files out to the
+`gem-classifier` agent type — the plugin registers it from
+`agents/gem-classifier.md` at the repo root (namespaced by the plugin, e.g.
+`tl-cli:gem-classifier` in Claude Code) — one agent per batch. Say clearly
+which path the run is on and that the agent path costs roughly 5–10× more in
+model spend. The fan-out's hard rules:
+
+- **Emit ALL the Agent calls as multiple tool_use blocks in ONE assistant
+  message.** One spawn per message is a bug, not a slow success. The same
+  one-message rule applies to every other fan-out in this skill (the identity
+  lane, the CONNECT brand lanes).
+- Each agent gets the spec path, the context block, and one batch file path,
+  and returns strict JSON per the spec. Validate the shape; a malformed
+  return is re-run, never hand-patched. Track which batches you have
+  spawned — never spawn the same batch twice.
+- **Results come back as return values — never through the filesystem.**
+  Never instruct an agent to write results to a file (the shipped
+  `gem-classifier` can't anyway — `tools: Read` only). Never poll for
+  completion — no `ls`-and-count loops. Never `sleep` to wait, and
+  specifically never `sleep` with `run_in_background: true` — a backgrounded
+  sleep returns instantly, so it waits for nothing while looking like a
+  wait; a genuine timed wait on external state uses `Monitor` with an
+  until-condition. After emitting the fan-out message, stop the turn and
   consume the agents' returned JSON as the completion notifications arrive.
-
-**If agents exist but this agent type doesn't resolve** (running from a
-checkout rather than an installed plugin): spawn the host's general-purpose
-agent with a haiku model override, hand it the same three inputs, and hold
-it to the same contract — return the JSON array as the final message, write
-nothing to disk. Everything above still applies.
+- **If agents exist but this agent type doesn't resolve** (running from a
+  checkout rather than an installed plugin): spawn the host's
+  general-purpose agent with a haiku model override, hand it the same three
+  inputs, and hold it to the same contract.
+- **If the host cannot spawn agents at all**: run the batches sequentially
+  with `references/gem-classifier.md` used inline as the prompt, discarding
+  each batch's raw text before the next.
 
 The model catches what no lexicon can: "I'm allergic to peanuts", "we finally
 finished the nursery", proper nouns read through misspellings, sarcasm and
 hypotheticals. That is why the recall pass gates nothing.
 
-**Sonnet confirms.** Windows haiku judged as gems (`self_disclosure: true`,
-`speaker_guess` host or unclear) get a sonnet confirmation pass, fanned out
-under the same one-message, return-value rules. Sonnet checks, per gem:
-verbatim fidelity against the window text, bracketed proper-noun
-corrections, and attribution reasoning over
-the deterministic features under the rules in `evidence-rules.md` — including
-the rules no feature can encode (recurrence never confirms on a multi-host
-channel; an ad-read fact must recur outside reads). Sonnet's output is the
-gem list that goes into the profile, each with claim, verbatim quote, video,
-start seconds, life domain, sensitivity flag, and confidence bucket.
+## Layer 4: code verifies, one model pass judges
 
-**If the host cannot spawn agents** (the skill is public; not every host is
-Claude Code): run the same batches sequentially with
-`references/gem-classifier.md` used inline as the prompt — it installs with
-the skill on every host — discarding each batch's raw text before the next.
-Same sweep, same rules, just slower.
+The old confirmation wave (a sonnet agent per gem cluster) is gone. Its
+mechanical bulk — verbatim checking — is code; its judgment slice is ONE
+small Claude pass.
+
+**One fact pass (≤2 agents, or the main loop when the gem list is small).**
+Hand `gems.jsonl` plus the identity lane's findings to a single pass that
+does only what a script cannot:
+
+- compose candidate facts: claim, the verbatim quote excerpt lifted from the
+  window text, life domain, recurrence (distinct videos), provenance;
+- attribution reasoning over the deterministic features under
+  `evidence-rules.md` — including the rules no feature can encode
+  (recurrence never confirms on a multi-host channel; an ad-read fact must
+  recur outside reads); resolve `speaker_guess: "unclear"` windows or drop
+  them;
+- sensitivity calls, superseded-fact resolution (latest wins, history kept),
+  confidence buckets, and the `selected` picks for the one-pager.
+
+It returns candidate facts as JSONL lines (the `facts.jsonl` shape in
+`references/profile-spec.md`), claims grounded in window text only — the
+verifier, not the model, is the verbatim authority.
+
+**Then verify in bulk, locally:**
+
+```bash
+python3 <skill>/scripts/verify_quotes.py --in candidates.jsonl \
+  --corpus tl-creator-profiles/.corpus/<channel_id>/corpus.jsonl
+```
+
+Every transcript-provenance quote is located in the stored captions. Only
+`match: "exact"` publishes, and its located timestamp is authoritative.
+`partial` and `none` are flagged, never accepted: fix the quote to the
+caption text the result shows, or drop the fact. A quote that needs more
+than a mechanical fix goes back through the fact pass, not past it. Verified
+facts become `<channel_id>-facts.jsonl`; the one-pager and HTML render from
+there per `references/profile-spec.md`.
 
 **The orchestrating context never sees raw transcripts.** It sees the scan
-summary, the classifier returns, and the profile.
-
-**The fan-out has a hard ceiling, enforced by the scan, not by judgment.**
-`selftalk_scan.py --max-windows` (default 1500, ≈30 batches) caps what gets
-batched for the model layer: ranked windows keep their top scores, and
-unranked (non-English) windows are stride-sampled across the channel's whole
-history, so a giant back-catalogue costs the same as a mid-sized one. The
-summary's `windows_over_cap` reports what stayed local — carry that number
-into the profile's coverage header, because "absence is not evidence" needs
-it. Do not raise the cap on your own initiative; the corpus and
-`windows.jsonl` keep everything, so a deeper pass is one free re-scan away
-when a human asks for it.
+summary, the classifier summary, the spot-check windows, the fact pass's
+returns, and the profile.
 
 ## Entity expansion, fuzzy and free
 
@@ -151,7 +201,8 @@ python3 <skill>/scripts/selftalk_scan.py --corpus ... \
 ```
 
 The corpus is on disk, so the re-scan costs nothing. New windows it surfaces
-go through the same model layer. Confirmed entities also feed Mode B's
+go through the same classification layer (`classify_gems.py` resumes: only
+the new windows get classified). Confirmed entities also feed Mode B's
 connection probes and improve attribution (a fact tied to a known family name
 anchors the host).
 
@@ -178,11 +229,11 @@ profile header.
 
 ## Speed
 
-Wall-clock is dominated by the model layer, and it is embarrassingly
-parallel: batches fan out simultaneously, sonnet confirmations fan out the
-same way, and the identity & socials lane runs alongside the whole sweep. The
-fetch is a few sequential paged requests (seconds); the recall pass is local
-(seconds). Done right, the whole model layer is roughly two orchestrator
-messages — one fanning out every haiku batch, one fanning out every sonnet
-confirmation — plus the turns that consume the returns. Target: a full
-profile in single-digit minutes on a large channel.
+Wall-clock is dominated by the classification layer, and it is concurrent by
+construction: `classify_gems.py` runs parallel requests, and the identity &
+socials lane runs alongside the whole sweep. The fetch is a few sequential
+paged requests (seconds); the recall pass is local (seconds); verification
+is local (seconds). Claude's share of a profile build is a handful of turns:
+the identity lane, the format call, the spot-check, and one fact pass —
+**≤5 subagents total**, not a fan-out per batch. Target: a full profile in
+single-digit minutes on a large channel.

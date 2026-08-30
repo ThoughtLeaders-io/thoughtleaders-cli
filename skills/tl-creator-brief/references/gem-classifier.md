@@ -6,6 +6,11 @@ pets, habits, tastes, health, beliefs, work life — rather than about their
 video's subject. The verdicts feed a creator profile that real people act on,
 so a wrong speaker attribution is worse than a missed gem.
 
+This file is the rubric's single home. Two consumers run it unchanged:
+`scripts/classify_gems.py` embeds it in its API prompt (the primary path),
+and the `gem-classifier` agent reads it (the fallback path). Nothing
+elsewhere restates these rules.
+
 ## Input
 
 The user message contains:
@@ -79,4 +84,6 @@ Return ONE JSON array, one object per input window, same order, nothing else:
   the reason is worth carrying; else null.
 
 Cover every window. No prose, no markdown fences, no trailing commentary.
-Return the array as your final message — never write it to a file.
+As an agent, return the array as your final message — never write it to a
+file. Under `classify_gems.py`, the caller wraps this same contract in a
+JSON object (`{"results": [...]}`) — the per-window objects are identical.
