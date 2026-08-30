@@ -34,9 +34,10 @@ Usage:
     selftalk_scan.py --corpus ... --host-terms ... --entity-terms "Luna"
 
 Output: ``windows.jsonl`` (every kept window, ranked) and ``batches/*.json``
-(rank-ordered ~50-window batches ready to fan out to classifier agents) next
-to the corpus, plus one JSON summary on stdout. Raw transcript text stays in
-the files; only counts and paths reach the orchestrator.
+(rank-ordered ~50-window batches, capped at ``--max-windows`` for the model
+layer, ready to fan out to classifier agents) next to the corpus, plus one
+JSON summary on stdout. Raw transcript text stays in the files; only counts
+and paths reach the orchestrator.
 """
 from __future__ import annotations
 
@@ -54,6 +55,7 @@ from channel_context import TITLE_SECOND_VOICE  # sibling script
 
 WINDOW_CHARS = 260
 BATCH_SIZE = 50
+MAX_MODEL_WINDOWS = 1500   # ceiling on windows batched for the model layer
 SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
 IDS_CHUNK = 1000
 
@@ -405,6 +407,13 @@ def main() -> None:
                          "names, pet names, brands) for the free local "
                          "re-scan; matched the same fuzzy way")
     ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    ap.add_argument("--max-windows", type=int, default=MAX_MODEL_WINDOWS,
+                    help="ceiling on windows written to batch files for the "
+                         "model layer (0 = uncapped). windows.jsonl always "
+                         "keeps everything; past the cap, ranked windows "
+                         "keep their top scores and unranked (non-English) "
+                         "windows are sampled evenly across the channel's "
+                         "history rather than truncated at one end")
     ap.add_argument("--lexicon", choices=["auto", "on", "off"], default="auto",
                     help="auto (default): apply the English recall lexicons "
                          "only to English-language videos and keep every "
@@ -493,14 +502,34 @@ def main() -> None:
         for c in kept:
             f.write(json.dumps(c, default=str) + "\n")
 
+    # Model-layer budget: windows.jsonl keeps the full recall record (free,
+    # local, re-scannable), but only up to --max-windows go out to classifier
+    # agents. Ranked (lexicon-scored) windows keep their best scores; the
+    # unranked remainder — chiefly non-English windows, which sort in
+    # chronological order — is sampled at an even stride so the batched set
+    # still spans the channel's whole history instead of one end of it.
+    batched = kept
+    if 0 < a.max_windows < len(kept):
+        ranked = [c for c in kept if c["rank_score"] > 0]
+        unranked = [c for c in kept if c["rank_score"] <= 0]
+        q_ranked = min(len(ranked),
+                       round(a.max_windows * len(ranked) / len(kept)))
+        q_unranked = min(len(unranked), a.max_windows - q_ranked)
+        q_ranked = min(len(ranked), a.max_windows - q_unranked)
+        take_unranked = unranked
+        if len(unranked) > q_unranked:
+            step = len(unranked) / max(q_unranked, 1)
+            take_unranked = [unranked[int(i * step)] for i in range(q_unranked)]
+        batched = ranked[:q_ranked] + take_unranked
+
     batch_dir = out_dir / "batches"
     batch_dir.mkdir(exist_ok=True)
     for old in batch_dir.glob("batch-*.json"):
         old.unlink()
     batch_paths = []
-    for i in range(0, len(kept), a.batch_size):
+    for i in range(0, len(batched), a.batch_size):
         p = batch_dir / f"batch-{i // a.batch_size:03d}.json"
-        p.write_text(json.dumps(kept[i:i + a.batch_size], default=str),
+        p.write_text(json.dumps(batched[i:i + a.batch_size], default=str),
                      encoding="utf-8")
         batch_paths.append(str(p))
 
@@ -512,6 +541,9 @@ def main() -> None:
         "windows_total": total_windows,
         "windows_kept": len(kept),
         "kept_share": round(len(kept) / max(total_windows, 1), 2),
+        "windows_batched": len(batched),
+        "windows_over_cap": len(kept) - len(batched),
+        "max_windows": a.max_windows,
         "dropped_boilerplate_only": dropped_boiler,
         "dropped_no_first_person_no_entity": dropped_no_signal,
         "lexicon_mode": a.lexicon,
@@ -534,10 +566,11 @@ def main() -> None:
         "batches": batch_paths,
         "note": ("ranked recall pass, not a verdict; batches are rank-ordered "
                  "so early stopping loses the least-promising windows. The "
-                 "features are model inputs, never gates. Non-English "
-                 "windows carry near-zero lexicon scores and sort in "
-                 "chronological order — expect more windows per channel and "
-                 "budget the model layer accordingly."),
+                 "features are model inputs, never gates. Batches are already "
+                 "capped at max_windows (ranked windows keep top scores, "
+                 "unranked non-English windows are stride-sampled across the "
+                 "channel's history); windows_over_cap says what stayed "
+                 "local, in windows.jsonl, uninspected."),
     }, indent=1, default=str))
 
 

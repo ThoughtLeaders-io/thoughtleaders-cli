@@ -49,8 +49,9 @@ tier names change.
 
 ## PROFILE pipeline
 
-1. **Fetch + identity, in parallel.** Two independent lanes run
-   simultaneously:
+1. **Fetch + identity, in parallel** — launch both lanes in the SAME
+   message (the fetch command and the identity subagent as tool calls in one
+   assistant message), so neither waits on the other:
    - `scripts/fetch_corpus.py --channel <id>` — one paged sweep brings every
      transcript home (details: `references/transcript-mining.md`).
    - **Identity & socials lane**, in a cheap subagent: (a) the channel's own
@@ -79,21 +80,28 @@ tier names change.
    with first-person content is hard-rejected; lexicons only rank. The
    lexicons are English, so on non-English videos they neither rank nor
    drop: every window is kept for the model layer (`--lexicon auto`, the
-   default — only ~half the transcript corpus is English). Expect more
-   windows and budget the classifier fan-out accordingly; the classifiers
-   judge in the source language.
-4. **Model layer.** Fan the batches out to the `gem-classifier` agent
-   (haiku) **in parallel**; sonnet confirms the gems (verbatim check,
-   attribution reasoning, entity corrections). New entities ("my dog Luna")
-   trigger a free local re-scan with `--entity-terms`. Raw transcripts never
-   enter the orchestrating context.
+   default — only ~half the transcript corpus is English). The scan caps
+   the batched fan-out itself (`--max-windows`, default 1500 ≈ 30 batches);
+   its summary reports `windows_over_cap` for the coverage header. The
+   classifiers judge in the source language.
+4. **Model layer.** Fan ALL the batches out to the `gem-classifier` agent
+   (haiku) in ONE message — every Agent call a tool_use block in the same
+   assistant message, one spawn per message is a bug — then consume each
+   agent's returned JSON; results never go through the filesystem and
+   completion is never polled or slept on (hard rules:
+   `references/transcript-mining.md`, Layer 3). Sonnet confirms the gems
+   the same way (verbatim check, attribution reasoning, entity
+   corrections). New entities ("my dog Luna") trigger a free local re-scan
+   with `--entity-terms`. Raw transcripts never enter the orchestrating
+   context.
 5. **Emit** the profile per `references/profile-spec.md`: versioned
    frontmatter, facts by life domain with provenance and confidence,
    sensitive flags, coverage header, "absence is not evidence".
 
 ## CONNECT pipeline
 
-1. **Brand read — four parallel lanes, all cheap subagents, one-shot:**
+1. **Brand read — four lanes, all cheap subagents, all four spawned in ONE
+   message, one-shot:**
    - **TL data**: `tl brands find` + category + product description, plus
      `scripts/brand_reads.py` — the recency-ordered ad-read sample (weight
      the newest era; an old read can describe a dead product or CTA). Search

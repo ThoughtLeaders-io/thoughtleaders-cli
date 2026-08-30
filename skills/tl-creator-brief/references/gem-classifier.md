@@ -79,3 +79,4 @@ Return ONE JSON array, one object per input window, same order, nothing else:
   the reason is worth carrying; else null.
 
 Cover every window. No prose, no markdown fences, no trailing commentary.
+Return the array as your final message — never write it to a file.
