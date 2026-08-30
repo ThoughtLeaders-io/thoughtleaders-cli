@@ -214,3 +214,60 @@ def test_prompt_embeds_both_rubric_files_and_the_context():
     assert '"channel_name": "Patterrz"' in prompt
     assert "my dad ran a bakery" in prompt
     assert '{"results": [...]}' in prompt
+
+
+# --------------------------------------------------------------------------- #
+# codex-review regression fixes
+# --------------------------------------------------------------------------- #
+def test_link_target_quote_cannot_break_out_of_href(tmp_path):
+    html = _render(tmp_path, (
+        '# T\n\n[click](https://x.com/a"onmouseover="alert(1))\n'))
+    assert 'onmouseover="alert' not in html
+    assert "&quot;onmouseover=&quot;" in html
+
+
+def test_markdown_h1_title_is_not_double_escaped(tmp_path):
+    html = _render(tmp_path, "# Rhett & Link\n\nhello\n")
+    assert "<title>Rhett &amp; Link</title>" in html
+    assert "&amp;amp;" not in html
+
+
+def test_locate_prefers_the_occurrence_nearest_the_hint():
+    sys.path.insert(0, str(_SCRIPTS))
+    from quote_timestamp import locate
+    cues = [(10.0, "I grew up in Ohio you know"),
+            (200.0, "and then she said I grew up in Ohio too")]
+    quote = "I grew up in Ohio"
+    assert locate(cues, quote)["start"] == 10
+    hit = locate(cues, quote, hint_start=190)
+    assert hit["start"] == 200 and hit["occurrences"] == 2
+
+
+def test_rows_raises_on_withheld_premium_fields():
+    shared = _SCRIPTS.parents[1] / "_shared"
+    sys.path.insert(0, str(shared))
+    import tl_data
+    import pytest
+    with pytest.raises(tl_data.DataError, match="premium"):
+        tl_data._rows({"results": [{"id": 1}],
+                       "_upgrade_required": {"message": "upgrade",
+                                             "fields": ["transcript"]}})
+    assert tl_data._rows({"results": [{"id": 1}]}) == [{"id": 1}]
+
+
+def test_youtu_be_shortlinks_are_not_second_channel_candidates():
+    sys.path.insert(0, str(_SCRIPTS))
+    import channel_context
+    row = {"external_channel_id": "UCmain", "url": "https://youtube.com/@main"}
+    doc = {"social_links": ["https://youtu.be/dQw4w9WgXcQ",
+                            "https://youtube.com/@mainVlogs"],
+           "description": "watch https://youtu.be/abc123 now"}
+    cands = channel_context.second_channel_candidates(row, doc)
+    assert [c["link"] for c in cands] == ["https://youtube.com/@mainVlogs"]
+
+
+def test_href_ampersands_escape_exactly_once(tmp_path):
+    html = _render(tmp_path,
+                   "[watch](https://www.youtube.com/watch?v=abc&t=90s)\n")
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=90s"' in html
+    assert "&amp;amp;" not in html

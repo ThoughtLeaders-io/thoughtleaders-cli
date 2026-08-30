@@ -99,7 +99,10 @@ def main() -> None:
                 elif not quote:
                     hit = {"match": "none", "error": "empty quote"}
                 else:
-                    hit = locate(cues, quote)
+                    hint = fact.get("start")
+                    hit = locate(cues, quote,
+                                 hint_start=float(hint)
+                                 if isinstance(hint, (int, float)) else None)
                 verify = {"match": hit["match"],
                           "found": hit["match"] == "exact"}
                 if hit["match"] != "none":
@@ -118,6 +121,8 @@ def main() -> None:
                     # the located timestamp is authoritative
                     fact["start"] = hit["start"]
                     fact["url"] = verify["url"]
+                    if hit.get("occurrences", 1) > 1:
+                        verify["occurrences"] = hit["occurrences"]
                 if "error" in hit:
                     verify["error"] = hit["error"]
                 fact["verify"] = verify

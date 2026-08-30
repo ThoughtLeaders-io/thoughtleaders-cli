@@ -62,8 +62,16 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", s.lower())).strip()
 
 
-def locate(cues: list[tuple[float, str]], quote: str) -> dict:
-    """Find the quote in the normalized cue stream; say how much matched."""
+def locate(cues: list[tuple[float, str]], quote: str,
+           hint_start: float | None = None) -> dict:
+    """Find the quote in the normalized cue stream; say how much matched.
+
+    A quote can occur more than once in a video (a catchphrase, a repeated
+    line on a multi-voice upload). With ``hint_start`` — the candidate's
+    claimed timestamp — the exact match nearest that time wins, so
+    verification never silently relocates a fact to an earlier occurrence
+    spoken by someone else. Without a hint, the first occurrence wins.
+    """
     parts, owner = [], []
     for i, (_, text) in enumerate(cues):
         n = _norm(text)
@@ -79,10 +87,18 @@ def locate(cues: list[tuple[float, str]], quote: str) -> dict:
     if not needle:
         return {"match": "none"}
 
+    starts = []
     pos = hay.find(needle)
-    if pos >= 0:
+    while pos >= 0:
         cue = cues[owner[pos]]
-        return {"match": "exact", "start": int(cue[0]), "cue": cue[1]}
+        starts.append((int(cue[0]), cue[1]))
+        pos = hay.find(needle, pos + 1)
+    if starts:
+        if hint_start is not None:
+            starts.sort(key=lambda s: abs(s[0] - hint_start))
+        start, cue_text = starts[0]
+        return {"match": "exact", "start": start, "cue": cue_text,
+                "occurrences": len(starts)}
 
     # Longest word-prefix of the quote that IS present, reported as partial —
     # never as a verification of the whole quote.

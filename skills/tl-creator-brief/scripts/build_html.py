@@ -130,8 +130,16 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 def inline(text: str) -> str:
     """Escaped text -> inline HTML: links, bold (with badges), italic, code."""
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
-    text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
-                  r'<a href="\2">\1</a>', text)
+    # the surrounding escape pass already entity-escaped the URL once
+    # (quote=False, so quotes survived): decode back to the raw URL, then
+    # escape once for attribute context — a quote in a crafted link target
+    # must not break out of href, and a & must not double-escape to &amp;amp;
+    text = re.sub(
+        r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
+        lambda m: ('<a href="'
+                   f'{html.escape(html.unescape(m.group(2)), quote=True)}">'
+                   f"{m.group(1)}</a>"),
+        text)
 
     def bold(m: re.Match) -> str:
         token = m.group(1)
@@ -279,7 +287,9 @@ def main() -> None:
     # the markdown's own H1 (if any) replaces the derived title
     m = re.search(r"<h1>(.*?)</h1>", body_html)
     if m:
-        title = re.sub(r"<[^>]+>", "", m.group(1))
+        # the rendered H1 is already entity-escaped; decode before the
+        # template escapes the title once more
+        title = html.unescape(re.sub(r"<[^>]+>", "", m.group(1)))
         body_html = body_html.replace(m.group(0), "", 1)
 
     ledger = ledger_strip(pathlib.Path(a.facts)) if a.facts else ""

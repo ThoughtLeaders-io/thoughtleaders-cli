@@ -96,9 +96,11 @@ def _nested(doc: dict, path: str):
 SECOND_CHANNEL_PHRASE = re.compile(
     r"(second channel|other channel|vlog channel|clips channel|gaming "
     r"channel|podcast channel|main channel)", re.I)
+# Channel URL forms only: a youtu.be shortlink identifies a VIDEO, so it
+# must never be surfaced as a second-channel candidate.
 YT_LINK = re.compile(
-    r"(?:youtube\.com/(?:@[\w.-]+|channel/UC[\w-]+|c/[\w.-]+|user/[\w.-]+)"
-    r"|youtu\.be/[\w-]+)", re.I)
+    r"youtube\.com/(?:@[\w.-]+|channel/UC[\w-]+|c/[\w.-]+|user/[\w.-]+)",
+    re.I)
 
 
 def second_channel_candidates(row: dict, doc: dict) -> list[dict]:

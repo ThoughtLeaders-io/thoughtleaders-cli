@@ -222,7 +222,16 @@ def main() -> None:
                 stats["completion_tokens"] += usage.get(
                     "completion_tokens") or 0
             if err is None:
-                verdicts = validate((parsed or {}).get("results"), len(chunk))
+                # the wrapper asks for {"results": [...]}, but the embedded
+                # rubric's own contract is a bare array — accept both; any
+                # other shape is a contract violation, not a crash
+                if isinstance(parsed, dict):
+                    results = parsed.get("results")
+                elif isinstance(parsed, list):
+                    results = parsed
+                else:
+                    results = None
+                verdicts = validate(results, len(chunk))
                 if verdicts is not None:
                     break
                 err = "contract_violation: results missing, wrong length, "\

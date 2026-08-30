@@ -125,6 +125,19 @@ def _rows(data) -> list[dict]:
     if data is None:
         return []
     if isinstance(data, dict):
+        # A 200 with premium fields withheld carries "_upgrade_required"
+        # next to the rows. Unwrapping past it would let a plan-gated run
+        # read the gaps as "no data exists" (e.g. a complete-looking corpus
+        # with no transcripts), so it fails loudly like any other denial.
+        notice = data.get("_upgrade_required")
+        if isinstance(notice, dict):
+            fields = ", ".join(str(f) for f in notice.get("fields") or [])
+            raise DataError(
+                "tl withheld premium field(s) from this response"
+                + (f" ({fields})" if fields else "") + ": "
+                + (notice.get("message")
+                   or "some fields are available on paid plans")
+            )
         for key in ("results", "rows", "data"):
             if isinstance(data.get(key), list):
                 return data[key]
