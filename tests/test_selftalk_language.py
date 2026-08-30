@@ -163,3 +163,33 @@ def test_max_windows_zero_disables_the_cap(tmp_path):
     summary = json.loads(proc.stdout)
     assert summary["windows_batched"] == summary["windows_kept"] == 4
     assert summary["windows_over_cap"] == 0
+
+
+def test_zero_score_english_windows_never_displace_ranked_ones(tmp_path):
+    # 6 high-signal English windows + 20 first-person-only English windows
+    # (rank_score 0). The zero-score windows are RANKED (low), not
+    # "unranked": with a cap of 6 the stride pool must stay empty and every
+    # slot must go to the disclosure windows, not to stride-sampled noise.
+    videos = [
+        {"id": f"1:hi{i:02d}", "title": "My story", "transcript_language": "en",
+         "publication_date": f"2026-01-{i + 1:02d}",
+         "cues": [[7, "i grew up in ohio and my dad ran a bakery"]]}
+        for i in range(6)
+    ] + [
+        {"id": f"1:lo{i:02d}", "title": "Gameplay", "transcript_language": "en",
+         "publication_date": f"2026-02-{i + 1:02d}",
+         "cues": [[3, "i think we should attack the boss now come on"]]}
+        for i in range(20)
+    ]
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text("\n".join(json.dumps(v) for v in videos) + "\n")
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "selftalk_scan.py"),
+         "--corpus", str(corpus), "--max-windows", "6"],
+        capture_output=True, text=True, check=True,
+        env={"PATH": "/usr/bin:/bin", "TL_CLI_BIN": str(_stub_tl(tmp_path))},
+    )
+    summary = json.loads(proc.stdout)
+    batched = [w for p in summary["batches"]
+               for w in json.loads(Path(p).read_text())]
+    assert [w["video_id"] for w in batched] == [f"hi{i:02d}" for i in range(6)]

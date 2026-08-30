@@ -503,15 +503,24 @@ def main() -> None:
             f.write(json.dumps(c, default=str) + "\n")
 
     # Model-layer budget: windows.jsonl keeps the full recall record (free,
-    # local, re-scannable), but only up to --max-windows go out to classifier
-    # agents. Ranked (lexicon-scored) windows keep their best scores; the
-    # unranked remainder — chiefly non-English windows, which sort in
-    # chronological order — is sampled at an even stride so the batched set
-    # still spans the channel's whole history instead of one end of it.
+    # local, re-scannable), but only up to --max-windows go out to the
+    # classifier. Lexicon-ranked windows compete on score; the unranked pool
+    # — windows the English lexicons never scored (non-English under auto,
+    # everything under --lexicon off), which sort in chronological order —
+    # is sampled at an even stride so the batched set still spans the
+    # channel's whole history instead of one end of it. The split is by
+    # lexical status, NOT by score sign: an English window scoring 0 was
+    # ranked (low) and must not displace top-scored windows via the stride.
+    def _lexical(c: dict) -> bool:
+        lang = c["language"] or ""
+        return (a.lexicon == "on"
+                or (a.lexicon == "auto"
+                    and (not lang or lang.startswith("en"))))
+
     batched = kept
     if 0 < a.max_windows < len(kept):
-        ranked = [c for c in kept if c["rank_score"] > 0]
-        unranked = [c for c in kept if c["rank_score"] <= 0]
+        ranked = [c for c in kept if _lexical(c)]
+        unranked = [c for c in kept if not _lexical(c)]
         q_ranked = min(len(ranked),
                        round(a.max_windows * len(ranked) / len(kept)))
         q_unranked = min(len(unranked), a.max_windows - q_ranked)
