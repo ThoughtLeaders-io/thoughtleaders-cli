@@ -59,7 +59,7 @@ Filter with `{"term": {"doc_type": "article"}}`. Coverage percentages are live `
 | `content_type` | keyword | `longform` / `short` / `live` — the complete value set. ~71% of docs; older docs have none (missing ≠ longform). Podcast/RSS docs have no `content_type`. |
 | `content_aspects` | keyword | Flags: `podcast`, `paid_promotion`, `unlisted` — the complete value set. Only ~2.6% of docs carry any. |
 | `hashtags` | keyword | Hashtags from the video description, stored **without the leading `#`** and lowercase (e.g. `marchmadness`); non-Latin tags appear percent-encoded (`%D0%B0…`) (~32%) |
-| `channel` | object | Embedded channel subset: `channel.id`, `channel.content_category`, `channel.format`, `channel.publication_id`, `channel.country`, `channel.language` — no text fields, no metrics. This is where a video's language/country/format/category live (top-level `language`, `country`, `format`, `content_category` exist only on channel docs). |
+| `channel` | object | Embedded channel subset: `channel.id`, `channel.content_category`, `channel.format`, `channel.country`, `channel.language` — no text fields, no metrics. This is where a video's language/country/format/category live (top-level `language`, `country`, `format`, `content_category` exist only on channel docs). |
 
 ⚠️ **Channel-doc fields that look like video fields but match 0 video docs:** `total_views`, `engagement`, `duration_live`/`duration_longform`/`duration_shorts`, `language`, `country`, `format`, `content_category`, `face_on_screen`. They live on channel docs (see below); on video docs use the embedded `channel.*` subset where available.
 
@@ -283,5 +283,4 @@ The `transcript` field's `_source` is **YouTube timed-text caption XML**, not pl
 - `sponsored_brand_mentions` and `organic_brand_mentions` are keyword arrays — use `term` queries.
 - For brand mention details (position, snippet, detection_tool), the data is in the `brand_mentions` nested field.
 - **Stored-only fields** — retrievable in `_source` but invisible to `exists`/`term`/`match` (queries on them silently match 0 docs): `url`, `image_url`, `es_index_tag`, `not_sponsored_by`.
-- **`publication_id` is deprecated** — don't use for joins.
 - No write access. The CLI only exposes `_search` against `tl-platform-*`.
