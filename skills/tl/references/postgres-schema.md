@@ -353,13 +353,18 @@ LIMIT 50 OFFSET 0
 
 ## `thoughtleaders_profile_channels` (Profile ↔ Channel M2M)
 
-| Column | Type |
-|--------|------|
-| `id` | int PK |
-| `profile_id` | int FK |
-| `channel_id` | int FK |
+Which channels a seller-side profile represents. One row per profile/channel pair.
 
-Note: separate from the adspot publisher relationship. Not always in sync.
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | int PK | |
+| `profile_id` | int FK | → `thoughtleaders_profile.id` |
+| `channel_id` | int FK | → `thoughtleaders_channel.id` |
+| `sees_all_deals` | boolean | When true, the profile's organization sees **every** deal on the channel, not only the deals it sold itself. Absent from the sandbox views, so only a full-access context can read it. |
+| `created_where` | varchar | What created the link. NULL on every link that predates the column. |
+| `created_at` | timestamptz | When the link was created. NULL on every link that predates the column — filtering or ordering on it silently drops that whole population. |
+
+⚠️ **Representation is not deal ownership.** A deal's seller is the adspot's own publisher (`thoughtleaders_adspot.publisher_id` → `auth_user`, then `thoughtleaders_profile.user_id` for the org). Joining sponsorships to an org through this table alone over-reports — only a `sees_all_deals = true` row widens the seller side to all of a channel's deals. `publisher_id` is scrubbed from the sandbox adspot view, so the seller-side hop is only queryable from a full-access role.
 
 ## Example queries
 
