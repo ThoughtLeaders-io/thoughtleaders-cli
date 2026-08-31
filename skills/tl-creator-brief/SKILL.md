@@ -16,7 +16,7 @@ Two modes, one contract:
 
 - **PROFILE** (channel only, no brand needed): build the two-layer profile —
   `tl-creator-profiles/<channel_id>-facts.jsonl` (the machine ledger other
-  skills and CONNECT consume) and `<channel_id>-profile.md` (a ~600–800-word
+  skills and CONNECT consume) and `<channel_id>-profile.md` (a ~300–450-word
   human one-pager). Spec: `references/profile-spec.md`.
 - **CONNECT** (channel + brand): load (or build) the facts ledger, do a
   deliberately light brand read, and write
@@ -62,7 +62,13 @@ tier names change.
      on a different platform than the content. Facts land with
      `social`/`web` provenance and URLs, never dressed as quotes; a platform
      that blocks reading is reported "linked but unread". Names and handles
-     found here feed the scan's `--host-terms`.
+     found here feed the scan's `--host-terms`. **Time-box this lane**: it
+     runs alongside fetch + scan + classification, and it must not outlive
+     them — cap it at ~8 web/social lookups (the channel's own metadata, one
+     name search, and the linked profiles), one pass each, no crawling
+     beyond a linked page. Whatever it has when classification finishes is
+     what the fact pass gets; anything unreached is reported "linked but
+     unread" rather than chased.
    - **Second channels: report, don't mine.** `channel_context.py` emits
      `second_channel_candidates`; the lane resolves each with
      `tl channels find` and the profile's "Other channels" section lists
@@ -73,7 +79,9 @@ tier names change.
 2. **Channel context brief.** `channel_context.py --corpus ...` measures
    format from the transcripts (first-person density, interview markers); a
    model read of a small sample calls the label with evidence. Not a gate —
-   nothing exits early.
+   nothing exits early. Its stdout is the summary only; the per-video stat
+   rows go to a file via `--per-video-out` (megabytes on a large channel —
+   never read them into the orchestrating context).
 3. **Recall pass.** `scripts/selftalk_scan.py --corpus ... --host-terms ...`
    ranks windows locally and writes rank-ordered ~50-window batches. Nothing
    with first-person content is hard-rejected; lexicons only rank. The
@@ -88,14 +96,21 @@ tier names change.
    `context.json`, then run `scripts/classify_gems.py --batches ...
    --context context.json`. It calls an OpenAI-compatible endpoint (env:
    `CREATOR_BRIEF_LLM_API_KEY`, `CREATOR_BRIEF_LLM_BASE_URL`,
-   `CREATOR_BRIEF_LLM_MODEL`; reference config: OpenRouter +
-   `deepseek/deepseek-v3.2`), resumable, JSON-mode enforced, and writes
-   `classified.jsonl` + `gems.jsonl`. **State which path the run is on**: no
-   API key configured → the script exits code 2 and the fallback is the
-   `gem-classifier` agent fan-out (~5–10× the model spend; rules in
-   `references/transcript-mining.md`, Layer 3). **Spot-check ~30 verdicts**
-   (a mix of accepted and rejected) before trusting a fresh channel's run;
-   systematic misses mean switch to the agent fallback.
+   `CREATOR_BRIEF_LLM_MODEL`, `CREATOR_BRIEF_LLM_CONCURRENCY` — default 16
+   parallel requests; reference config: OpenRouter + `deepseek/deepseek-v3.2`),
+   resumable, JSON-mode enforced, and writes `classified.jsonl` +
+   `gems.jsonl`. **Branch mechanically on the exit code**, never on the prose:
+
+   | exit | meaning | do |
+   |---|---|---|
+   | 0 | every window classified | continue to step 5 |
+   | 1 | finished, some windows errored | rerun the same command once (it resumes and retries only the errored windows), then continue |
+   | 20 | `FALLBACK_REQUIRED reason=missing_api_key batches_dir=<path>` on stderr | run the haiku fan-out: `references/transcript-mining.md`, Layer 3 |
+
+   **Spot-check ~30 verdicts** (a mix of accepted and rejected) before
+   trusting a fresh channel's run; systematic misses mean rerun with
+   `--full-spec` (the verbatim reference docs instead of the condensed wire
+   contract), and if they persist, switch to the agent fallback.
 5. **Fact pass + verification.** ONE small Claude pass (≤2 agents, or the
    main loop when the gem list is small) turns `gems.jsonl` + the identity
    lane's findings into candidate facts — claims, verbatim quote excerpts,
@@ -108,11 +123,62 @@ tier names change.
    with `--entity-terms`; the classifier resumes over the new windows only.
    Raw transcripts never enter the orchestrating context.
 6. **Emit** per `references/profile-spec.md`: the verified ledger
-   `<channel_id>-facts.jsonl`, the ~600–800-word one-pager
-   `<channel_id>-profile.md`, and the HTML view via
-   `scripts/build_html.py --in <profile.md> --facts <facts.jsonl>`. When
-   running in a host with an Artifact tool, publish the HTML so the user
-   gets a link; the files in `tl-creator-profiles/` are the durable copies.
+   `<channel_id>-facts.jsonl`, the ~300–450-word one-pager
+   `<channel_id>-profile.md`, and the two HTML views via
+   `scripts/build_html.py --in <profile.md> --facts <facts.jsonl>` — the
+   human page (no methodology, no source names) plus the machine ledger
+   view `<stem>-ledger.html` (meta chips, tallies, every fact with its full
+   citation). When running in a host with an Artifact tool, publish the
+   human HTML so the user gets a link; the files in `tl-creator-profiles/`
+   are the durable copies.
+
+## Run report — the funnel, every run
+
+Every PROFILE run ends with a funnel table in the **run report** (the CLI
+answer to the user), never in the profile itself. Each stage script prints one
+`FUNNEL stage=… key=value …` line to stderr; the fact pass is a Claude pass,
+so **it reports its own counts in the same format**. Echo all four lines, as
+they were emitted, plus the classification path:
+
+```
+FUNNEL stage=scan windows_total=… windows_kept=… windows_capped=… windows_over_cap=… batches=… elapsed_s=…
+FUNNEL stage=classify path=api windows_total=… classified=… errors=… gems=… elapsed_s=…
+   (no key → the script prints FUNNEL stage=classify path=fallback_required windows_total=… batch_files=…
+    gems=0 …; do NOT echo that as the classification result — after the agent fan-out completes, print
+    FUNNEL stage=classify path=haiku_fanout windows_total=… classified=… errors=… gems=… elapsed_s=…
+    yourself from the returned verdicts, and echo THAT line)
+FUNNEL stage=facts gems=… candidates=… selected=… elapsed_s=…      ← you print this one
+FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… elapsed_s=…
+```
+
+Then one line naming the classification path and its approximate cost:
+`classification: API (deepseek/deepseek-v3.2), ~$0.05` or
+`classification: haiku agent fan-out over N batches, ~5–10× the API path`.
+Cost and path belong in the run report **once, and never in the profile**.
+
+Why this is mandatory: the one-pager shows the `selected` subset (15–20
+facts), while the ledger holds every verified fact. A run that renders "9
+facts" is not a failed run until the funnel says which stage lost them —
+without the table the user cannot tell selection from yield.
+
+## Fast runs
+
+A "fast run" is a run shape, not a script flag (no script takes `--fast`):
+PROFILE only, the primary channel only (no second-channel mining), the scan's
+default 500-window cap, and a **≤2 minute wall-clock target for the
+model-bound stages** (classify + fact pass + verify). The local scan is
+CPU-bound and scales with transcript count, not the window cap — a
+5,000-video channel takes ~3 minutes in `selftalk_scan.py` alone — so total
+wall clock on a large channel is scan time plus the ~2-minute model budget,
+and the two fetch/identity lanes must overlap it (step 1's same-message rule
+is the single highest-leverage timing rule in the pipeline). Everything that
+could outrun the budget is bounded rather than skipped: classification runs
+at the default 16-way concurrency (500 windows / 25 per request ≈ 20 requests
+≈ 2 rounds), the identity lane is time-boxed as in step 1, and the fact pass
+stays at ≤2 agents. Report the per-stage `elapsed_s` from the funnel lines so
+a slow run says which stage was slow. A deeper pass (higher cap, second
+channel, `--full-spec`) is always one free re-scan away and is never taken on
+the skill's own initiative.
 
 ## CONNECT pipeline
 

@@ -242,6 +242,11 @@ def main() -> None:
     ap.add_argument("--corpus", default=None,
                     help="corpus.jsonl from fetch_corpus.py; adds measured "
                          "format stats")
+    ap.add_argument("--per-video-out", dest="per_video_out", default=None,
+                    help="write the per-video stat rows to this JSON file "
+                         "(they never go to stdout: on a large channel the "
+                         "array is megabytes, and stdout is read by the "
+                         "orchestrating session)")
     a = ap.parse_args()
 
     row = channel_row(a.channel)
@@ -270,7 +275,14 @@ def main() -> None:
                  "verdict, and nothing here exits the pipeline early"),
     }
     if a.corpus:
-        out["context_stats"] = corpus_stats(pathlib.Path(a.corpus))
+        stats = corpus_stats(pathlib.Path(a.corpus))
+        per_video = stats.pop("per_video", None)
+        if per_video is not None and a.per_video_out:
+            path = pathlib.Path(a.per_video_out)
+            path.write_text(json.dumps(per_video, default=str),
+                            encoding="utf-8")
+            stats["per_video_file"] = str(path)
+        out["context_stats"] = stats
     print(json.dumps(out, indent=1, default=str))
 
 

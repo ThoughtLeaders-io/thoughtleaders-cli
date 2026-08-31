@@ -10,8 +10,8 @@ own directory):
   This is **the stable interface** other skills, personas and CONNECT runs
   consume. Full thoroughness lives here; no human is expected to read it.
 - **`<channel_id>-profile.md`** — the human one-pager, hard-capped at
-  **~600–800 words**. A person forwards this; it never carries the evidence
-  ledger in its body.
+  **~300–450 words**. A person forwards this; it never carries the evidence
+  ledger in its body. It is bound by the style contract below.
 
 The connections document is a result, not a third contract. All outputs are
 files, never chat messages: chat scrolls away and these are made to be
@@ -56,7 +56,11 @@ One JSON object per line, only quote-verified and judgment-passed facts:
   superseded facts stay in the ledger as history.
 - `selected`: true on the 15–20 strongest facts — the ones the one-pager
   shows. Selection favors confirmed, recurring, cross-lane-corroborated and
-  connection-fertile facts.
+  connection-fertile facts. The cap is deliberate and stays at 15–20: the
+  one-pager's job is to be tight enough to forward, not to be complete. The
+  full ledger count is not hidden — it is surfaced in the CLI run report's
+  funnel line (`… verified=… selected=…`) and in the ledger HTML view, never
+  on the human page.
 
 CONNECT loads this file, not the markdown.
 
@@ -82,26 +86,62 @@ credits_spent: 1840
 ---
 ```
 
-Then the body, **~600–800 words total**:
+Then the body, **~300–450 words total**:
 
 1. **Who they are** — two or three lines from the identity lane, with the
    host name(s) that keyed attribution.
-2. **Channel format** — one line: the label and what it means for
-   attribution confidence.
-3. **The strongest facts** — the 15–20 `selected` facts, grouped by life
+2. **The strongest facts** — the 15–20 `selected` facts, grouped by life
    domain. Each is ONE line: the claim, plus a short verbatim quote with its
    `&t=` link when it earns its place; confidence and sensitive flags as
    bracketed tags. No per-fact evidence blocks — the ledger holds those.
-4. **Other channels** — sibling/second channels the identity lane surfaced:
-   name, id, video count, and "not mined" unless a human asked (see
-   SKILL.md). Each linked social platform: read, or "linked but unread" with
-   the reason.
-5. **Coverage & caveats** — read/available ratio, `windows_over_cap`, the
-   "absence is not evidence" line, dropped-as-unattributable count,
-   unconfirmed count, the format's confidence cap, caption corrections made.
+3. **Other channels** — sibling/second channels the identity lane surfaced:
+   name, id, and "not mined" unless a human asked (see SKILL.md). Each
+   linked social platform: read, or "linked but unread" with the reason.
 
-An empty profile still carries sections 1, 4 and 5 — "no evidence found",
-bounded by the numbers, is a complete forwardable answer.
+Everything else belongs elsewhere: the channel-format label, the
+read/available ratio, `windows_over_cap`, dropped-as-unattributable and
+unconfirmed counts, the format's confidence cap and caption corrections all
+live in the frontmatter, the CLI run report's funnel line, and the ledger
+HTML view — never in the body.
+
+An empty profile still carries sections 1 and 3 — "nothing they have said
+about themselves came through clearly enough to use" is a complete
+forwardable answer, in plain prose, without the numbers behind it.
+
+### Style contract (hard, for the one-pager only)
+
+The fact pass composes the one-pager against this contract; `build_html.py`
+stays deterministic and never rewrites prose — it only strips what this
+contract says must not reach the page. Violations are a rewrite, not a
+render-time patch.
+
+- **Length**: ~300–450 words for the whole body. Shorter is fine; over 450 is
+  a failed compose.
+- **Say each fact once.** No fact appears in two sections, and no fact is
+  restated in different words. A quote that repeats its own claim is one of
+  the two, not both.
+- **No meta-language.** Nothing about how the profile was made: no "we
+  found", "our scan", "the analysis shows", "across N videos", "N windows",
+  "N gems", "N facts", no generation date, no corpus window, no coverage
+  percentage, no confidence tallies. The page is about the creator, not
+  about the work.
+- **No source names.** Never name where a fact came from — not a reference
+  site, not a channel about page, not a social platform, not "transcript".
+  Provenance is a ledger field, not one-pager prose. One carve-out: the
+  "Other channels" section names the creator's own platforms as *subject
+  matter* (their Instagram, their Twitch exist and are theirs) — that is the
+  section's job and those names stay. What is banned everywhere, including
+  there, is naming a platform, site, or page as the *source* of a fact
+  ("per his Instagram bio", "a creator wiki page says"). When a source
+  annotation is nonetheless present in the markdown, it must be written in a
+  shape the renderer can remove structurally: a bracketed note
+  (`(source: …)`, `[src: …]`, `(via: …)`) or a bracketed provenance tag
+  (`[web]`, `[social: …]`, `[transcript]`). Those shapes are stripped from
+  the human page and preserved in full in the ledger view; a source name
+  written as bare prose cannot be stripped and is a compose error.
+- **Plain declarative prose.** One idea per line, present tense where it
+  reads naturally, no hedging stacks ("appears to possibly suggest"), no
+  section preambles that announce what the section is about.
 
 ## Mode B: `<channel_id>-<brand_id>-connections.md`
 
@@ -126,9 +166,18 @@ verdict is the deliverable, not a failure.
 
 Both human documents also render to self-contained HTML via
 `scripts/build_html.py` (deterministic template — never hand-written per
-run): `<channel_id>-profile.html` (pass `--facts` for the ledger strip) and
+run): `<channel_id>-profile.html` and
 `<channel_id>-<brand_id>-connections.html`. Markdown + JSONL remain
-canonical; the HTML is the human view. When the host supports publishing
+canonical; the HTML is the human view.
+
+The human page carries the creator name, the headline and the facts — and
+nothing else. Passing `--facts` writes a **second** file,
+`<channel_id>-profile-ledger.html` (override with `--ledger-out`), which is
+the machine/ledger surface: the meta chips (generation date, corpus window,
+transcripts-with-video counts, format label), the ledger strip (fact counts
+by confidence and domain), and every fact with its full citation. Publish
+the human page; keep the ledger view for whoever asks how the sausage was
+made. When the host supports publishing
 artifacts, publish the HTML so the user gets a link; the files in
 `tl-creator-profiles/` are the durable copies.
 

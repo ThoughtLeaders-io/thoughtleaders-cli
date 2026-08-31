@@ -46,6 +46,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 from collections import defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
@@ -394,7 +395,59 @@ def rank_score(c: dict) -> int:
     return s
 
 
+def is_lexical(window: dict, lexicon_mode: str) -> bool:
+    """Did the English recall lexicons rank (and gate) this window?"""
+    lang = window.get("language") or ""
+    return (lexicon_mode == "on"
+            or (lexicon_mode == "auto"
+                and (not lang or lang.startswith("en"))))
+
+
+def select_batched(kept: list[dict], max_windows: int,
+                   lexicon_mode: str) -> list[dict]:
+    """The model-layer budget, applied to a rank-sorted ``kept`` list.
+
+    ``windows.jsonl`` keeps the full recall record (free, local, re-scannable),
+    but only up to ``max_windows`` go out to the classifier. Lexicon-ranked
+    windows compete on score; the unranked pool — windows the English lexicons
+    never scored (non-English under auto, everything under ``--lexicon off``),
+    which sort in chronological order — is sampled at an even stride so the
+    batched set still spans the channel's whole history instead of one end of
+    it.
+
+    The split is by lexical status, NOT by score sign: an English window
+    scoring 0 was ranked (low) and must never displace top-scored windows via
+    the stride. Splitting on the sign is the regression this function exists
+    to hold — it let a flood of zero-score windows crowd the real gems out of
+    the batches.
+    """
+    if not 0 < max_windows < len(kept):
+        return kept
+    ranked = [c for c in kept if is_lexical(c, lexicon_mode)]
+    unranked = [c for c in kept if not is_lexical(c, lexicon_mode)]
+    q_ranked = min(len(ranked), round(max_windows * len(ranked) / len(kept)))
+    q_unranked = min(len(unranked), max_windows - q_ranked)
+    q_ranked = min(len(ranked), max_windows - q_unranked)
+    take_unranked = unranked
+    if len(unranked) > q_unranked:
+        # Stride over publication order, not list order — the kept sort is
+        # (-rank_score, id, start) and video ids are arbitrary, so only a
+        # date-ordered pool actually spans the channel's history.
+        pool = sorted(unranked, key=lambda c: (c["published"], c["id"],
+                                               c["start"]))
+        step = len(pool) / max(q_unranked, 1)
+        take_unranked = [pool[int(i * step)] for i in range(q_unranked)]
+    return ranked[:q_ranked] + take_unranked
+
+
+def funnel(**fields) -> None:
+    """One machine-parseable stage line for the run report (stderr)."""
+    print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
+          file=sys.stderr)
+
+
 def main() -> None:
+    started = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True,
                     help="path to corpus.jsonl from fetch_corpus.py")
@@ -502,39 +555,9 @@ def main() -> None:
         for c in kept:
             f.write(json.dumps(c, default=str) + "\n")
 
-    # Model-layer budget: windows.jsonl keeps the full recall record (free,
-    # local, re-scannable), but only up to --max-windows go out to the
-    # classifier. Lexicon-ranked windows compete on score; the unranked pool
-    # — windows the English lexicons never scored (non-English under auto,
-    # everything under --lexicon off), which sort in chronological order —
-    # is sampled at an even stride so the batched set still spans the
-    # channel's whole history instead of one end of it. The split is by
-    # lexical status, NOT by score sign: an English window scoring 0 was
-    # ranked (low) and must not displace top-scored windows via the stride.
-    def _lexical(c: dict) -> bool:
-        lang = c["language"] or ""
-        return (a.lexicon == "on"
-                or (a.lexicon == "auto"
-                    and (not lang or lang.startswith("en"))))
-
-    batched = kept
-    if 0 < a.max_windows < len(kept):
-        ranked = [c for c in kept if _lexical(c)]
-        unranked = [c for c in kept if not _lexical(c)]
-        q_ranked = min(len(ranked),
-                       round(a.max_windows * len(ranked) / len(kept)))
-        q_unranked = min(len(unranked), a.max_windows - q_ranked)
-        q_ranked = min(len(ranked), a.max_windows - q_unranked)
-        take_unranked = unranked
-        if len(unranked) > q_unranked:
-            # Stride over publication order, not list order — the kept sort
-            # is (-rank_score, id, start) and video ids are arbitrary, so
-            # only a date-ordered pool actually spans the channel's history.
-            pool = sorted(unranked, key=lambda c: (c["published"], c["id"],
-                                                   c["start"]))
-            step = len(pool) / max(q_unranked, 1)
-            take_unranked = [pool[int(i * step)] for i in range(q_unranked)]
-        batched = ranked[:q_ranked] + take_unranked
+    # Model-layer budget — see select_batched() for the rule and the
+    # score-sign regression it guards.
+    batched = select_batched(kept, a.max_windows, a.lexicon)
 
     batch_dir = out_dir / "batches"
     batch_dir.mkdir(exist_ok=True)
@@ -547,8 +570,10 @@ def main() -> None:
                      encoding="utf-8")
         batch_paths.append(str(p))
 
+    elapsed = round(time.monotonic() - started, 1)
     print(json.dumps({
         "corpus": str(corpus_path),
+        "elapsed_s": elapsed,
         "videos": len(videos),
         "videos_with_transcript": len(with_transcript),
         "transcript_coverage": round(len(with_transcript) / len(videos), 2),
@@ -586,6 +611,10 @@ def main() -> None:
                  "channel's history); windows_over_cap says what stayed "
                  "local, in windows.jsonl, uninspected."),
     }, indent=1, default=str))
+    funnel(stage="scan", windows_total=total_windows, windows_kept=len(kept),
+           windows_capped=len(batched),
+           windows_over_cap=len(kept) - len(batched),
+           batches=len(batch_paths), elapsed_s=elapsed)
 
 
 if __name__ == "__main__":

@@ -84,10 +84,13 @@ python3 <skill>/scripts/classify_gems.py \
 `classify_gems.py` sends the batched windows to an OpenAI-compatible chat
 endpoint (JSON mode enforced, resumable, malformed responses retried and
 recorded rather than dropped). The rubric has ONE home —
-`references/gem-classifier.md`, which points to `evidence-rules.md` — and the
-script embeds both files in its prompt verbatim, so every path runs the same
-classifier. Configuration is env-only (nothing machine-specific lives in this
-skill):
+`references/gem-classifier.md`, which points to `evidence-rules.md`. The
+script's wire prompt carries a condensed statement of that same contract (gem
+test, attribution, domain taxonomy, sensitivity, output schema) instead of the
+two docs verbatim, because they were resent on every chunk and that payload,
+not the windows, dominated the prompt bill and the latency. `--full-spec`
+sends the docs verbatim; the agent fallback below always reads them.
+Configuration is env-only (nothing machine-specific lives in this skill):
 
 - `CREATOR_BRIEF_LLM_API_KEY` — required; no key means this layer falls back
   to agents (below).
@@ -96,6 +99,9 @@ skill):
   reference config is OpenRouter with that model: roughly 5–10× cheaper than
   a haiku agent fan-out and two orders of magnitude cheaper than doing it in
   the orchestrating context.
+- `CREATOR_BRIEF_LLM_CONCURRENCY` — parallel requests, default 16 (bounded
+  1–64). At 25 windows per request a 500-window cap is ~20 requests, so the
+  default clears the whole cap in about two rounds.
 
 Write `context.json` first — the same context block the classifier contract
 requires: channel name, host name(s), known facts, format label with its
@@ -110,38 +116,72 @@ misses (a domain always rejected, guest voices accepted as host) mean the
 cheap model is not holding the contract: switch to the agent fallback rather
 than patching verdicts by hand.
 
-**Fallback: the classifier agent fan-out.** When no API key is configured
-(the script exits with code 2 and says so), fan the batch files out to the
-`gem-classifier` agent type — the plugin registers it from
-`agents/gem-classifier.md` at the repo root (namespaced by the plugin, e.g.
-`tl-cli:gem-classifier` in Claude Code) — one agent per batch. Say clearly
-which path the run is on and that the agent path costs roughly 5–10× more in
-model spend. The fan-out's hard rules:
+**Fallback: the classifier agent fan-out.** Triggered mechanically, not by
+judgment: `classify_gems.py` exits **20** and prints
 
-- **Emit ALL the Agent calls as multiple tool_use blocks in ONE assistant
-  message.** One spawn per message is a bug, not a slow success. The same
-  one-message rule applies to every other fan-out in this skill (the identity
-  lane, the CONNECT brand lanes).
-- Each agent gets the spec path, the context block, and one batch file path,
-  and returns strict JSON per the spec. Validate the shape; a malformed
-  return is re-run, never hand-patched. Track which batches you have
-  spawned — never spawn the same batch twice.
-- **Results come back as return values — never through the filesystem.**
-  Never instruct an agent to write results to a file (the shipped
-  `gem-classifier` can't anyway — `tools: Read` only). Never poll for
-  completion — no `ls`-and-count loops. Never `sleep` to wait, and
-  specifically never `sleep` with `run_in_background: true` — a backgrounded
-  sleep returns instantly, so it waits for nothing while looking like a
-  wait; a genuine timed wait on external state uses `Monitor` with an
-  until-condition. After emitting the fan-out message, stop the turn and
-  consume the agents' returned JSON as the completion notifications arrive.
-- **If agents exist but this agent type doesn't resolve** (running from a
-  checkout rather than an installed plugin): spawn the host's
-  general-purpose agent with a haiku model override, hand it the same three
-  inputs, and hold it to the same contract.
-- **If the host cannot spawn agents at all**: run the batches sequentially
-  with `references/gem-classifier.md` used inline as the prompt, discarding
-  each batch's raw text before the next.
+```
+FALLBACK_REQUIRED reason=missing_api_key batches_dir=<path> batch_files=<N> windows=<M>
+```
+
+to stderr. Exit 20 is the only signal to read — exit 1 means "finished with
+errors, rerun to resume", exit 2 is a usage error, and neither is a fallback.
+Run this checklist exactly:
+
+1. **The batch files already exist.** `selftalk_scan.py` wrote them and
+   `classify_gems.py` counted them (`batch_files=N` in the marker). Do not
+   re-run the scan, do not re-batch, do not read `windows.jsonl`.
+2. **`ls <batches_dir>/batch-*.json`** to get the N paths. That list is the
+   work queue; each path is claimed exactly once.
+3. **Spawn all N agents as N `Agent` tool_use blocks in ONE assistant
+   message.** Agent type `tl-cli:gem-classifier` (the plugin registers it
+   from `agents/gem-classifier.md` at the repo root). One spawn per message
+   is a bug, not a slow success — the same one-message rule governs every
+   fan-out in this skill (the identity lane, the CONNECT brand lanes).
+4. **Each agent gets exactly three inputs**: the path to
+   `references/gem-classifier.md`, the context block (verbatim, inline in the
+   prompt), and **one** batch file path. Windows only — never a transcript,
+   never `corpus.jsonl`, never a second batch.
+5. **Each agent returns the strict JSON array as its final message.** Then
+   stop the turn and consume the returns as the completion notifications
+   arrive.
+6. Validate every return's shape (one object per window, same order, valid
+   enums). A malformed return is re-spawned for that batch, never
+   hand-patched. Track claimed batches — never spawn the same batch twice.
+7. Concatenate the returns into `gems.jsonl` in the same shape the script
+   writes (`{"window": …, "verdict": …, "error": null}` lines, keeping only
+   `self_disclosure` verdicts whose `speaker_guess` is host or unclear), print
+   `FUNNEL stage=classify path=haiku_fanout windows_total=… classified=…
+   errors=… gems=… elapsed_s=…` from the returned verdicts (this — not the
+   script's `path=fallback_required` line — is the classification stage's
+   entry in the run report's funnel table), then continue at Layer 4
+   unchanged.
+
+**Forbidden in this fan-out, without exception:**
+
+- **No write-to-file-and-poll contract.** Never instruct an agent to write
+  its results anywhere (the shipped `gem-classifier` can't anyway — `tools:
+  Read` only). Results are return values.
+- **No polling.** No `ls`-and-count loops, no re-reading a directory to see
+  whether agents finished.
+- **No `sleep`**, and specifically never `sleep` with
+  `run_in_background: true` — a backgrounded sleep returns instantly, so it
+  waits for nothing while looking like a wait. A genuine timed wait on
+  external state uses `Monitor` with an until-condition.
+- **No sequential spawning**, no batching-of-batches, no "start with two and
+  see how it goes".
+- **No default-model stand-ins.** If `tl-cli:gem-classifier` does not resolve
+  (running from a checkout rather than an installed plugin), spawn
+  `general-purpose` with an explicit `model: haiku` override and the
+  `gem-classifier` rubric inlined in the prompt. A general-purpose agent on
+  the inherited (expensive) model is the failure mode this list exists to
+  prevent — it is how one past run reached 30M tokens.
+
+**If the host cannot spawn agents at all**: run the batches sequentially with
+`references/gem-classifier.md` used inline as the prompt, discarding each
+batch's raw text before the next.
+
+Report the path taken and its approximate cost once, in the run report: the
+agent path costs roughly 5–10× the API path.
 
 The model catches what no lexicon can: "I'm allergic to peanuts", "we finally
 finished the nursery", proper nouns read through misspellings, sarcasm and
@@ -209,7 +249,7 @@ anchors the host).
 ## The channel context brief
 
 ```bash
-python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus.jsonl>
+python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus.jsonl> --per-video-out <dir>/per_video.json
 ```
 
 After the corpus is local, format is measured, not guessed: first-person
@@ -235,5 +275,16 @@ socials lane runs alongside the whole sweep. The fetch is a few sequential
 paged requests (seconds); the recall pass is local (seconds); verification
 is local (seconds). Claude's share of a profile build is a handful of turns:
 the identity lane, the format call, the spot-check, and one fact pass —
-**≤5 subagents total**, not a fan-out per batch. Target: a full profile in
-single-digit minutes on a large channel.
+**≤5 subagents total**, not a fan-out per batch. Target: **≤2 minutes for
+the model-bound stages** (classify + fact pass + verify) of a PROFILE run
+(the old fan-out build took ~40). The local scan is CPU-bound and scales
+with transcript count, not the window cap — measured ~3 minutes over a
+5,000-video corpus — so total wall clock on a large channel is scan time
+plus the model budget, with the fetch and identity lanes overlapping it.
+
+Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
+is always answerable with a stage name. The classification barrier is
+deliberate: at the default 16-way concurrency a 500-window cap is ~20
+requests ≈ two rounds, so the fact pass waits well under a minute and
+streaming partial batches into it would buy noise, not time. Revisit only if
+a measured run shows classification dominating the wall clock.

@@ -32,7 +32,11 @@ judgement the classifier makes from the format and the deterministic features
 
 - **Solo format**: one voice holds the transcript. A window that passes the
   three-part test is the host's; no feature is required, and demanding one is
-  what turns a solo channel into an empty profile.
+  what turns a solo channel into an empty profile. A classifier verdict of
+  `speaker_guess: "unclear"` on a declared-solo channel therefore publishes
+  as the host — with confidence capped at `unconfirmed` — unless the window
+  text itself names or implies another voice (a guest, a quoted person, a
+  clip), in which case it is dropped as unattributable.
 - **Interview / multi-host / reaction**: most self-disclosure in the
   transcript belongs to the other voice. `host_anchor` (a fuzzy hit on a fact
   distinctive to the host) and `in_sponsor_read` argue host. Guest-ambiguous

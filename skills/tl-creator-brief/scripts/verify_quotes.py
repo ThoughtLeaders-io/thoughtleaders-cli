@@ -29,7 +29,8 @@ Output (``--out``, default ``<in>.verified.jsonl``): every input line with a
 * ``{"match": "n/a"}`` — non-transcript provenance, passed through.
 
 Exit 0 when every transcript quote matched exactly, 1 otherwise. Summary JSON
-on stdout; the verified file holds the detail.
+on stdout and one ``FUNNEL`` line on stderr for the run report; the verified
+file holds the detail.
 """
 from __future__ import annotations
 
@@ -37,9 +38,16 @@ import argparse
 import json
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from quote_timestamp import locate  # sibling script
+
+
+def funnel(**fields) -> None:
+    """One machine-parseable stage line for the run report (stderr)."""
+    print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
+          file=sys.stderr)
 
 
 def load_cues(corpus: pathlib.Path) -> dict[str, list[tuple[float, str]]]:
@@ -58,6 +66,7 @@ def load_cues(corpus: pathlib.Path) -> dict[str, list[tuple[float, str]]]:
 
 
 def main() -> None:
+    started = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="infile", required=True,
                     help="candidate facts, one JSON object per line")
@@ -131,8 +140,10 @@ def main() -> None:
                        + "\n")
 
     failed = counts["partial"] + counts["none"]
+    elapsed = round(time.monotonic() - started, 1)
     print(json.dumps({
         "candidates": sum(counts.values()),
+        "elapsed_s": elapsed,
         "exact": counts["exact"],
         "partial": counts["partial"],
         "none": counts["none"],
@@ -141,6 +152,9 @@ def main() -> None:
         "note": ("only exact matches publish as verbatim; partial/none must "
                  "be fixed to the caption text or dropped"),
     }, indent=1))
+    funnel(stage="verify", candidates=sum(counts.values()),
+           verified=counts["exact"], rejected=failed,
+           passed_through=counts["n/a"], elapsed_s=elapsed)
     sys.exit(1 if failed else 0)
 
 
