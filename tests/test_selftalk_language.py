@@ -6,7 +6,9 @@ Spanish has no pronoun for an English-shaped regex to find). Run as a
 subprocess against a stub `tl` binary, like the shared-wrapper tests.
 """
 
+import gzip
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -41,9 +43,13 @@ def _run_scan(tmp_path: Path, videos: list[dict]) -> tuple[dict, list[dict]]:
         env={"PATH": "/usr/bin:/bin", "TL_CLI_BIN": str(_stub_tl(tmp_path))},
     )
     summary = json.loads(proc.stdout)
-    windows = [json.loads(line) for line in
-               (tmp_path / "windows.jsonl").read_text().splitlines()]
-    return summary, windows
+    return summary, _windows(tmp_path)
+
+
+def _windows(out_dir: Path) -> list[dict]:
+    """The recall record, read back out of the gzipped windows file."""
+    with gzip.open(out_dir / "windows.jsonl.gz", "rt", encoding="utf-8") as f:
+        return [json.loads(line) for line in f]
 
 
 def test_non_english_windows_bypass_the_english_lexicon_gate(tmp_path):
@@ -131,8 +137,7 @@ def test_max_windows_caps_batches_but_not_the_recall_record(tmp_path):
     assert summary["windows_batched"] == 5
     assert summary["windows_over_cap"] == 15
     # The full recall record stays intact for free local re-scans.
-    record = (tmp_path / "windows.jsonl").read_text().splitlines()
-    assert len(record) == 20
+    assert len(_windows(tmp_path)) == 20
     batched = [w for p in summary["batches"]
                for w in json.loads(Path(p).read_text())]
     assert len(batched) == 5
@@ -193,3 +198,145 @@ def test_zero_score_english_windows_never_displace_ranked_ones(tmp_path):
     batched = [w for p in summary["batches"]
                for w in json.loads(Path(p).read_text())]
     assert [w["video_id"] for w in batched] == [f"hi{i:02d}" for i in range(6)]
+
+
+# --------------------------------------------------------------------------- #
+# performance rework: the fast paths must not move a single output byte
+# --------------------------------------------------------------------------- #
+def _scan_with_workers(tmp_path: Path, corpus: Path, workers: str,
+                       out: Path, env: dict | None = None
+                       ) -> tuple[dict, list[dict]]:
+    out.mkdir(exist_ok=True)
+    target = out / "corpus.jsonl"
+    target.write_text(corpus.read_text())
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "selftalk_scan.py"),
+         "--corpus", str(target), "--host-terms", "Patterrz,Social Chain"],
+        capture_output=True, text=True, check=True,
+        env={"PATH": "/usr/bin:/bin", "TL_CLI_BIN": str(_stub_tl(tmp_path)),
+             "CREATOR_BRIEF_SCAN_WORKERS": workers,
+             **(env or {})},
+    )
+    return json.loads(proc.stdout), _windows(out)
+
+
+def test_worker_pool_and_serial_path_agree_window_for_window(tmp_path):
+    """The multiprocessing scan splits by video and merges in submission
+    order, so it must reproduce the serial kept-window list exactly — same
+    windows, same field values, same order. A worker that saw a different
+    slice of the corpus, or a merge that reordered chunks, shows up here.
+    No hash seed is pinned: the output must be stable on its own.
+
+    The chunk floor is lowered through the environment so this 40-video
+    fixture really is split across processes — at the production floor it
+    would be one chunk and both runs would take the serial path, comparing
+    nothing. `parallel_chunks` in each summary says which path actually ran,
+    so the test fails loudly if the pool is ever skipped again."""
+    corpus = tmp_path / "src.jsonl"
+    videos = []
+    for i in range(40):
+        videos.append({
+            "id": f"1:vid{i:03d}",
+            "title": "My story" if i % 3 else "Interview with a guest",
+            "transcript_language": "en" if i % 7 else "es",
+            "publication_date": f"2026-01-{(i % 28) + 1:02d}",
+            "cues": [
+                [10 + j * 7,
+                 f"i grew up in ohio and my dad ran a bakery number {j} "
+                 f"and patterrz said remember to subscribe to my channel "
+                 f"while i was working at social chain in video {i}"]
+                for j in range(6)
+            ],
+        })
+    corpus.write_text("".join(json.dumps(v) + "\n" for v in videos))
+
+    small_chunks = {"CREATOR_BRIEF_SCAN_MIN_CHUNK": "10"}
+    serial_summary, serial = _scan_with_workers(
+        tmp_path, corpus, "1", tmp_path / "serial", small_chunks)
+    parallel_summary, parallel = _scan_with_workers(
+        tmp_path, corpus, "2", tmp_path / "parallel", small_chunks)
+
+    # the paths under comparison are really the two different paths
+    assert serial_summary["parallel_chunks"] == 0
+    assert parallel_summary["parallel_chunks"] == 4
+
+    assert serial, "the fixture produced no kept windows to compare"
+    assert parallel == serial
+    for key, value in serial_summary.items():
+        if key in ("elapsed_s", "corpus", "windows_file", "batches",
+                   "parallel_chunks"):
+            continue
+        assert parallel_summary[key] == value, key
+
+
+def test_lexicons_read_the_same_as_case_insensitive_matching():
+    """The lexicons are matched against pre-lower-cased text instead of
+    carrying re.IGNORECASE. That is only sound while every pattern is
+    all-lower-case ASCII, so assert the equivalence directly."""
+    samples = [
+        "I Grew Up In Ohio And MY DAD ran a bakery",
+        "SUBSCRIBE and smash that like, link in the description",
+        "In This Video I'm Going To Show you my channel",
+        "I CONSIDER MYSELF a big fan of My Favourite Show",
+        "Personally I moved to Berlin when I was 9 and got fired",
+        "nothing here at all, just weather and markets",
+        "MI FAMILIA Y YO CRECIMOS EN MADRID",
+        "私は日本に住んでいます I'm From Tokyo",
+    ]
+    patterns = [selftalk_scan.FIRST_PERSON, selftalk_scan.WEAK_ANCHOR,
+                selftalk_scan.STAGE, selftalk_scan.BOILERPLATE,
+                selftalk_scan.BOILER_FP]
+    patterns += [rx for _, rx in selftalk_scan.DISCLOSURE]
+    for rx in patterns:
+        assert not rx.flags & re.IGNORECASE, rx.pattern[:40]
+        insensitive = re.compile(rx.pattern, re.I)
+        for text in samples:
+            assert bool(rx.search(text.lower())) == \
+                bool(insensitive.search(text)), (rx.pattern[:40], text)
+
+
+def test_windows_carry_no_assembled_url(tmp_path):
+    """A window stores video_id + start; the watch URL is derived wherever a
+    window is shown, never written half a million times to disk."""
+    _, windows = _run_scan(tmp_path, [
+        {"id": "1:ccc", "title": "My story", "transcript_language": "en",
+         "publication_date": "2026-01-03",
+         "cues": [[7, "i grew up in ohio and my dad ran a bakery"]]},
+    ])
+    assert windows and all("url" not in w for w in windows)
+    w = windows[0]
+    assert (f"https://www.youtube.com/watch?v={w['video_id']}"
+            f"&t={w['start']}s") == "https://www.youtube.com/watch?v=ccc&t=7s"
+
+
+def test_recurring_phrase_does_not_depend_on_the_hash_seed(tmp_path):
+    """Several phrases can recur in exactly as many videos. The winner is the
+    lexicographically smallest, not whichever the phrase SET yielded first —
+    which used to make the same corpus scan two different ways."""
+    corpus = tmp_path / "src.jsonl"
+    # Three uploads repeat one distinctive sentence: every 4-gram in it
+    # recurs in exactly the same three videos, so they all tie on the count
+    # the winner is picked by. Seven filler uploads keep those words rare.
+    videos = [
+        {"id": f"1:rep{i:02d}", "title": "My story",
+         "transcript_language": "en",
+         "publication_date": f"2026-01-{i + 1:02d}",
+         "cues": [[10, "i grew up hunting zebra quartz beside vermilion "
+                       "obelisk juniper and my dad ran a bakery"]]}
+        for i in range(3)
+    ] + [
+        {"id": f"1:fil{i:02d}", "title": "My story",
+         "transcript_language": "en",
+         "publication_date": f"2026-02-{i + 1:02d}",
+         "cues": [[10, "i moved to ohio and my dad ran a bakery there"]]}
+        for i in range(7)
+    ]
+    corpus.write_text("".join(json.dumps(v) + "\n" for v in videos))
+
+    runs = [_scan_with_workers(tmp_path, corpus, "1", tmp_path / f"seed{seed}",
+                               {"PYTHONHASHSEED": seed})[1]
+            for seed in ("0", "1", "12345")]
+    phrases = {tuple(w["recurring_phrase"] for w in run) for run in runs}
+    assert len(phrases) == 1, phrases
+    assert runs[0] == runs[1] == runs[2]
+    assert any(w["recurring_phrase"] for w in runs[0]), "no phrase recurred"

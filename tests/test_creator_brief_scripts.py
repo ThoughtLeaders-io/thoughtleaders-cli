@@ -4,7 +4,9 @@ keying, loud no-key exit). No network anywhere — classify_gems' API surface
 is exercised only up to the point it would need a key.
 """
 
+import gzip
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -545,3 +547,60 @@ def test_full_spec_rerun_invalidates_condensed_verdicts(tmp_path):
     assert all(r.get("contract") == "full-spec" for r in rows)
     assert not any(r.get("error") is None and r.get("verdict") for r in rows)
     assert proc.returncode == 1      # ran (and errored), not skipped-as-done
+
+
+# --------------------------------------------------------------------------- #
+# end-to-end: the timestamped watch link survives the whole pipeline even
+# though no window on disk carries a url
+# --------------------------------------------------------------------------- #
+def _stub_tl(tmp_path: Path) -> Path:
+    """A fake `tl` whose every query returns zero rows (no sponsor spans)."""
+    script = tmp_path / "tl-stub.py"
+    script.write_text(
+        "#!/usr/bin/env python3\nimport sys\n"
+        "sys.stdin.read()\nprint('{\"results\": []}')\n"
+    )
+    runner = tmp_path / "tl"
+    runner.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n")
+    runner.chmod(runner.stat().st_mode | stat.S_IEXEC)
+    return runner
+
+
+def test_quote_urls_survive_scan_to_ledger_without_a_stored_window_url(
+        tmp_path):
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(json.dumps({
+        "id": "1:vid1", "title": "My story", "transcript_language": "en",
+        "publication_date": "2026-01-01",
+        "cues": [[10, "so before we start"],
+                 [14, "i grew up in a tiny town in ohio"],
+                 [19, "and my dad ran the bakery there"]]}) + "\n")
+    subprocess.run(
+        [sys.executable, str(_SCRIPTS / "selftalk_scan.py"),
+         "--corpus", str(corpus)],
+        capture_output=True, text=True, check=True,
+        env={"PATH": "/usr/bin:/bin", "TL_CLI_BIN": str(_stub_tl(tmp_path))})
+    with gzip.open(tmp_path / "windows.jsonl.gz", "rt", encoding="utf-8") as f:
+        window = json.loads(f.readline())
+    assert "url" not in window
+
+    # A candidate built off that window, carrying a WRONG timestamp: the
+    # ledger's link must come from where verification located the quote.
+    candidates = _write_jsonl(tmp_path / "candidates.jsonl", [{
+        "fact_id": "f001", "claim": "grew up in Ohio", "domain": "origin",
+        "provenance": "transcript", "video": window["id"],
+        "start": window["start"] + 900,
+        "quote": "i grew up in a tiny town in ohio",
+        "confidence": "confirmed", "sensitive": False, "selected": True}])
+    subprocess.run(
+        [sys.executable, str(_SCRIPTS / "verify_quotes.py"),
+         "--in", str(candidates), "--corpus", str(corpus)],
+        capture_output=True, text=True, check=True)
+    facts = [json.loads(line) for line in
+             (tmp_path / "candidates.jsonl.verified.jsonl")
+             .read_text().splitlines()]
+    assert facts[0]["start"] == 14                      # located, not claimed
+    assert facts[0]["url"] == "https://www.youtube.com/watch?v=vid1&t=14s"
+
+    ledger = _render_ledger(tmp_path, _PROFILE_MD, facts)
+    assert 'href="https://www.youtube.com/watch?v=vid1&amp;t=14s"' in ledger

@@ -51,7 +51,11 @@ One JSON object per line, only quote-verified and judgment-passed facts:
 - `recurrence`: distinct videos/sources, never snippet count.
 - `confidence`: `confirmed` | `unconfirmed`, per `evidence-rules.md`
   (dropped facts never enter the ledger; their count goes in the coverage
-  caveats).
+  caveats). When the opt-in socials lane did not run there are no
+  `social`/`web` facts, so cross-lane corroboration is unavailable: a fact
+  reaches `confirmed` only on a transcript-side rule (solo format, or a
+  host-anchored window), never by corroboration. That is a ceiling on the
+  evidence, not a defect in the run — note it in the coverage caveats.
 - `superseded_by`: the `fact_id` of the newer fact when latest-wins applies;
   superseded facts stay in the ledger as history.
 - `selected`: true on the 15–20 strongest facts — the ones the one-pager
@@ -89,14 +93,19 @@ credits_spent: 1840
 Then the body, **~300–450 words total**:
 
 1. **Who they are** — two or three lines from the identity lane, with the
-   host name(s) that keyed attribution.
+   host name(s) that keyed attribution. With the socials lane off, write it
+   from channel metadata and the transcripts themselves; never fill the gap
+   with background the run did not actually source.
 2. **The strongest facts** — the 15–20 `selected` facts, grouped by life
    domain. Each is ONE line: the claim, plus a short verbatim quote with its
    `&t=` link when it earns its place; confidence and sensitive flags as
    bracketed tags. No per-fact evidence blocks — the ledger holds those.
 3. **Other channels** — sibling/second channels the identity lane surfaced:
    name, id, and "not mined" unless a human asked (see SKILL.md). Each
-   linked social platform: read, or "linked but unread" with the reason.
+   linked social platform: read, or "linked but unread" with the reason —
+   and when the opt-in socials lane was not run, every linked platform the
+   channel metadata reports is listed there as "linked but unread (socials
+   lane not run)".
 
 Everything else belongs elsewhere: the channel-format label, the
 read/available ratio, `windows_over_cap`, dropped-as-unattributable and

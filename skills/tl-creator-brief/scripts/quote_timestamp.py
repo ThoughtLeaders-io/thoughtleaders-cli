@@ -18,7 +18,7 @@ present, contiguously, or the result says exactly what did and did not match:
 
 Usage:
     quote_timestamp.py <channel>:<video> "the quote, verbatim" \\
-        [--corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl]
+        [--corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz]
 
 Output (stdout): one JSON object. Exit 0 on exact match, 1 otherwise.
 """
@@ -34,12 +34,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
 from fetch_corpus import cues as parse_cues
+from fetch_corpus import open_corpus
 
 
 def fetch_cues(video_ref: str, corpus: str | None) -> list[tuple[float, str]]:
     """[(start_seconds, text)] from the local corpus, else one indexed fetch."""
     if corpus:
-        with open(corpus, encoding="utf-8") as f:
+        with open_corpus(corpus) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -121,7 +122,8 @@ def main() -> None:
     ap.add_argument("video_ref", help="<channel_id>:<video_id>")
     ap.add_argument("quote", nargs="*", help="the quote, verbatim (or stdin)")
     ap.add_argument("--corpus", default=None,
-                    help="corpus.jsonl from fetch_corpus.py; skips the "
+                    help="corpus.jsonl.gz from fetch_corpus.py (a plain "
+                         ".jsonl corpus is read too); skips the "
                          "indexed fetch")
     a = ap.parse_args()
     quote = " ".join(a.quote).strip() or sys.stdin.read().strip()

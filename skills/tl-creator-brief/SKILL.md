@@ -48,14 +48,45 @@ listed. Brand (CONNECT only): `tl brands find`; a rebrand returns several IDs
 corpus that cannot be read. An unrecognised value: name it and continue —
 tier names change.
 
+## Socials lane — ask up front, default OFF
+
+The identity & socials lane (web search on the creator, their linked
+Instagram/X/about pages actually opened and read) is **opt-in**. Ask once, at
+the start of the run — before any fetch — as a single question with the
+default first:
+
+> **Run the socials/web identity lane?**
+> - **No — transcripts only** (default): the creator's own videos are the
+>   only source. Faster, and every fact carries a timestamped quote.
+> - **Yes — add socials & web**: also search the web for the creator and read
+>   their linked profiles, for facts the videos never state and for cross-lane
+>   confirmation.
+
+Do not ask when the answer is already settled:
+
+- The initiating request states a preference ("include socials", "check their
+  Instagram", "transcripts only", "no web") — honor it, say which lane shape
+  you took, and move on.
+- The run is **autonomous / no-pause** (`autonomous`, `--auto`, a scheduled or
+  unattended run) or a **fast run** — the lane is OFF, no question asked.
+
+Everything below marked *(socials lane ON)* applies only when the answer was
+yes.
+
 ## PROFILE pipeline
 
-1. **Fetch + identity, in parallel** — launch both lanes in the SAME
-   message (the fetch command and the identity subagent as tool calls in one
-   assistant message), so neither waits on the other:
+1. **Fetch + identity, in parallel** — *(socials lane ON)* launch both lanes
+   in the SAME message (the fetch command and the identity subagent as tool
+   calls in one assistant message), so neither waits on the other. *(socials
+   lane OFF — the default)* only the fetch lane launches; no subagent, no web
+   search, no social profile is opened. Read **Lane OFF** below before
+   continuing:
    - `scripts/fetch_corpus.py --channel <id>` — one paged sweep brings every
-     transcript home (details: `references/transcript-mining.md`).
-   - **Identity & socials lane**, in a cheap subagent: (a) the channel's own
+     transcript home (details: `references/transcript-mining.md`). Rerunning
+     on a channel already fetched appends only its new uploads; pass `--full`
+     to refetch the whole catalogue.
+   - **Identity & socials lane** *(only when the lane is ON)*, in a cheap
+     subagent: (a) the channel's own
      metadata via `scripts/channel_context.py`; (b) a web search on the
      creator's and channel's names, top results actually read; (c) the
      channel's social links opened and read — the personal life often lives
@@ -76,6 +107,18 @@ tier names change.
      the user explicitly asks — it roughly doubles the run, so it is never
      an automatic decision. A candidate that can't be resolved or read is
      reported "linked but unread".
+   - **Lane OFF — what changes.** `channel_context.py` still runs (step 2)
+     and still reports `social_links` and `second_channel_candidates`: every
+     linked platform is listed in the profile's "Other channels" section as
+     **"linked but unread"** — the same phrasing a blocked profile gets, here
+     because the lane was not run, not because reading failed. No `social` or
+     `web` provenance fact exists, so the ledger is transcript-only and
+     cross-lane corroboration cannot raise anything (see
+     `references/profile-spec.md`). `--host-terms` for the scan come from
+     channel metadata instead of the web read: the channel and creator names
+     `channel_context.py` reports, the about text, and the host name(s) the
+     format call already keys attribution on. Say in the run report that the
+     lane was off, and that turning it on is one re-run away.
 2. **Channel context brief.** `channel_context.py --corpus ...` measures
    format from the transcripts (first-person density, interview markers); a
    model read of a small sample calls the label with evidence. Not a gate —
@@ -111,18 +154,28 @@ tier names change.
    trusting a fresh channel's run; systematic misses mean rerun with
    `--full-spec` (the verbatim reference docs instead of the condensed wire
    contract), and if they persist, switch to the agent fallback.
-5. **Fact pass + verification.** ONE small Claude pass (≤2 agents, or the
-   main loop when the gem list is small) turns `gems.jsonl` + the identity
-   lane's findings into candidate facts — claims, verbatim quote excerpts,
-   attribution and sensitivity calls, superseded-fact resolution, the
-   `selected` picks (details: `references/transcript-mining.md`, Layer 4).
+5. **Cluster the repeats — a script.** `scripts/cluster_gems.py --in
+   gems.jsonl` writes `gems-clustered.jsonl` beside it, so a back-catalogue
+   channel that has said "BioShock is my favorite game" in thirty videos
+   costs the fact pass one read instead of thirty. Output shape and merge
+   rules: `references/transcript-mining.md`, Layer 4. Do not hand-merge what
+   the script left apart.
+6. **Fact pass + verification.** ONE small Claude pass (≤2 agents, or the
+   main loop when the gem list is small) turns `gems-clustered.jsonl` + the
+   identity lane's findings (when that lane ran; otherwise the clusters
+   alone) into candidate facts — claims, verbatim quote
+   excerpts, attribution and sensitivity calls, superseded-fact resolution,
+   the `selected` picks (details: `references/transcript-mining.md`, Layer 4).
+   A cluster's `occurrences`/`members` are its recurrence evidence: count
+   **distinct videos** among the members, never member count
+   (`references/evidence-rules.md`).
    Then `scripts/verify_quotes.py --in candidates.jsonl --corpus ...`
    verbatim-verifies every quote locally: exact matches publish (their
    timestamps are authoritative), partial/none get fixed to the caption text
    or dropped. New entities ("my dog Luna") trigger a free local re-scan
    with `--entity-terms`; the classifier resumes over the new windows only.
    Raw transcripts never enter the orchestrating context.
-6. **Emit** per `references/profile-spec.md`: the verified ledger
+7. **Emit** per `references/profile-spec.md`: the verified ledger
    `<channel_id>-facts.jsonl`, the ~300–450-word one-pager
    `<channel_id>-profile.md`, and the two HTML views via
    `scripts/build_html.py --in <profile.md> --facts <facts.jsonl>` — the
@@ -137,7 +190,7 @@ tier names change.
 Every PROFILE run ends with a funnel table in the **run report** (the CLI
 answer to the user), never in the profile itself. Each stage script prints one
 `FUNNEL stage=… key=value …` line to stderr; the fact pass is a Claude pass,
-so **it reports its own counts in the same format**. Echo all four lines, as
+so **it reports its own counts in the same format**. Echo all five lines, as
 they were emitted, plus the classification path:
 
 ```
@@ -147,6 +200,7 @@ FUNNEL stage=classify path=api windows_total=… classified=… errors=… gems=
     gems=0 …; do NOT echo that as the classification result — after the agent fan-out completes, print
     FUNNEL stage=classify path=haiku_fanout windows_total=… classified=… errors=… gems=… elapsed_s=…
     yourself from the returned verdicts, and echo THAT line)
+FUNNEL stage=cluster gems=… clusters=… merged=… elapsed_s=…
 FUNNEL stage=facts gems=… candidates=… selected=… elapsed_s=…      ← you print this one
 FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… elapsed_s=…
 ```
@@ -156,6 +210,12 @@ Then one line naming the classification path and its approximate cost:
 `classification: haiku agent fan-out over N batches, ~5–10× the API path`.
 Cost and path belong in the run report **once, and never in the profile**.
 
+And one line saying whether the opt-in socials lane ran, always:
+`socials lane: off (transcripts only) — N linked platforms listed unread` or
+`socials lane: on — N sources read`. Off is the default, so it is never an
+error to report; say it plainly, with "re-run with socials on" as the fix
+when the user wants that coverage.
+
 Why this is mandatory: the one-pager shows the `selected` subset (15–20
 facts), while the ledger holds every verified fact. A run that renders "9
 facts" is not a failed run until the funnel says which stage lost them —
@@ -164,7 +224,8 @@ without the table the user cannot tell selection from yield.
 ## Fast runs
 
 A "fast run" is a run shape, not a script flag (no script takes `--fast`):
-PROFILE only, the primary channel only (no second-channel mining), the scan's
+PROFILE only, the primary channel only (no second-channel mining), **the
+socials lane off, without asking**, the scan's
 default 500-window cap, and a **≤2 minute wall-clock target for the
 model-bound stages** (classify + fact pass + verify). The local scan is
 CPU-bound and scales with transcript count, not the window cap — a
@@ -174,7 +235,8 @@ and the two fetch/identity lanes must overlap it (step 1's same-message rule
 is the single highest-leverage timing rule in the pipeline). Everything that
 could outrun the budget is bounded rather than skipped: classification runs
 at the default 16-way concurrency (500 windows / 25 per request ≈ 20 requests
-≈ 2 rounds), the identity lane is time-boxed as in step 1, and the fact pass
+≈ 2 rounds), the identity lane is time-boxed as in step 1 when the user
+turned it on, and the fact pass
 stays at ≤2 agents. Report the per-stage `elapsed_s` from the funnel lines so
 a slow run says which stage was slow. A deeper pass (higher cap, second
 channel, `--full-spec`) is always one free re-scan away and is never taken on

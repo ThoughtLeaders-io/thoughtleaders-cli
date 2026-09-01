@@ -11,7 +11,7 @@ superseded facts) stays with the single model pass; this script never judges.
 
 Usage:
     verify_quotes.py --in candidates.jsonl \\
-        --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl
+        --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz
 
 Input: one candidate per line. Lines with ``provenance: "transcript"`` (or no
 provenance but a ``video`` field) need ``quote`` and ``video`` (the corpus ref,
@@ -40,7 +40,9 @@ import pathlib
 import sys
 import time
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from fetch_corpus import open_corpus  # sibling script
 from quote_timestamp import locate  # sibling script
 
 
@@ -52,7 +54,7 @@ def funnel(**fields) -> None:
 
 def load_cues(corpus: pathlib.Path) -> dict[str, list[tuple[float, str]]]:
     out: dict[str, list[tuple[float, str]]] = {}
-    with open(corpus, encoding="utf-8") as f:
+    with open_corpus(corpus) as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -71,7 +73,8 @@ def main() -> None:
     ap.add_argument("--in", dest="infile", required=True,
                     help="candidate facts, one JSON object per line")
     ap.add_argument("--corpus", required=True,
-                    help="corpus.jsonl from fetch_corpus.py")
+                    help="corpus.jsonl.gz from fetch_corpus.py "
+                         "(a plain .jsonl corpus is read too)")
     ap.add_argument("--out", default=None,
                     help="default: <in>.verified.jsonl")
     a = ap.parse_args()

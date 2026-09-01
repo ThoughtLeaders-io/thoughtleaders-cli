@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generous local recall pass over a fetched corpus: rank windows, reject nothing.
 
-Reads the local ``corpus.jsonl`` written by ``fetch_corpus.py`` — never the
+Reads the local ``corpus.jsonl.gz`` written by ``fetch_corpus.py`` — never the
 index — windows every transcript into ~260-char passages (keeping cue start
 seconds, so every future quote is born with its ``&t=`` link), and keeps any
 window carrying a first-person marker or a fuzzy entity hit.
@@ -28,12 +28,12 @@ see references/evidence-rules.md), cross-video recurrence of rare phrases,
 and fuzzy host-anchor hits.
 
 Usage:
-    selftalk_scan.py --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl \\
+    selftalk_scan.py --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz \\
         --host-terms "<surname>,<company>,<former role>"
     # after new entities surface ("my dog Luna"), re-scan locally — free:
     selftalk_scan.py --corpus ... --host-terms ... --entity-terms "Luna"
 
-Output: ``windows.jsonl`` (every kept window, ranked) and ``batches/*.json``
+Output: ``windows.jsonl.gz`` (every kept window, ranked) and ``batches/*.json``
 (rank-ordered ~50-window batches, capped at ``--max-windows`` for the model
 layer, ready to fan out to classifier agents) next to the corpus, plus one
 JSON summary on stdout. Raw transcript text stays in the files; only counts
@@ -43,25 +43,43 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
+import os
 import pathlib
 import re
 import sys
+import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
 from channel_context import TITLE_SECOND_VOICE  # sibling script
+from fetch_corpus import open_corpus, open_corpus_write  # sibling script
 
 WINDOW_CHARS = 260
 BATCH_SIZE = 50
 MAX_MODEL_WINDOWS = 500    # ceiling on windows batched for the model layer
 SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
 IDS_CHUNK = 1000
+ES_CONCURRENCY = 4    # parallel id-chunk fetches for the sponsor-span lookup
+MAX_WORKERS = 8       # ceiling on scan processes; env var overrides
+WORKERS_ENV = "CREATOR_BRIEF_SCAN_WORKERS"
+MIN_CHUNK_VIDEOS = 100    # coarse tasks: per-window IPC would cost more than
+#                           the parallelism buys back
+MIN_CHUNK_ENV = "CREATOR_BRIEF_SCAN_MIN_CHUNK"   # lower it to exercise the pool
+#                                                  on a small corpus
 
-FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|myself|mine|we|our)\b",
-                          re.I)
+# Every lexicon pattern below is all-lower-case and is matched against the
+# window's lower-cased text, never the raw text — the same lower-casing the
+# tokenizer already does, done once per window and shared. Case-insensitive
+# matching over mixed-case text costs about twice as much for exactly the same
+# answers, so the fold happens once instead of inside every scan.
+TOKEN_RE = re.compile(r"[\w']+")
+
+FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|myself|mine|we|our)\b")
 
 # Ranking features only. None of these gates anything.
 DISCLOSURE = [
@@ -73,8 +91,7 @@ DISCLOSURE = [
         r"trained as|my first job|when i was (a|\d)|i was born|"
         r"as a kid|growing up|my childhood|back home( in)?|"
         r"i collect|i('m| am) (really |super |big )?into|my go-?to|"
-        r"i('ve| have) always|i never went|allergic|diagnosed|obsessed with)\b",
-        re.I)),
+        r"i('ve| have) always|i never went|allergic|diagnosed|obsessed with)\b")),
     ("own_life", re.compile(
         r"\bmy (dad|mum|mom|father|mother|parents|wife|husband|partner|"
         r"girlfriend|boyfriend|kid|kids|son|daughter|child|children|brother|"
@@ -84,38 +101,47 @@ DISCLOSURE = [
         r"podcast|studio|office|book|friend|best friend|nursery|garden|"
         r"hobby|hobbies|collection|setup|gym|workout|"
         r"favou?rite (food|meal|snack|dish|game|band|movie|show|team)|"
-        r"comfort food|go-?to (order|meal|snack)|guitar|piano)\b",
-        re.I)),
+        r"comfort food|go-?to (order|meal|snack)|guitar|piano)\b")),
     ("self_characterisation", re.compile(
         r"\b(i consider myself|i see myself|i'?m the kind of|i'?m the type of|"
         r"i'?ve always been|i'?m not really a|i tend to|my favou?rite|"
         r"i'?m terrible at|i can'?t stand|i genuinely (love|hate)|"
-        r"i'?m a big fan of|personally i|for me personally)\b", re.I)),
+        r"i'?m a big fan of|personally i|for me personally)\b")),
 ]
 
 # First-person talk about running a show or a business: often the host,
 # frequently whoever else shares the transcript. A half-signal for ranking.
 WEAK_ANCHOR = re.compile(
     r"\b(my|our) (podcast|show|channel|company|business|agency|startup|fund|"
-    r"team|book|brand|investors|co-?founder|business partner)\b", re.I)
+    r"team|book|brand|investors|co-?founder|business partner)\b")
 
 # Stage directions and opinion framing: rank DOWN, never drop. "as I said, my
 # dad ran a bakery" must survive; the model sorts it out.
 STAGE = re.compile(
     r"\b(i'?ll show you|let me show|i'?m going to (show|explain|walk)|"
     r"in this video|in today'?s video|before we (start|begin|get into)|"
-    r"let'?s (get|jump|dive)|stay tuned|coming up)\b", re.I)
+    r"let'?s (get|jump|dive)|stay tuned|coming up)\b")
 
 # The only hard drop, and only when the window's first-person content IS the
 # boilerplate: both patterns are masked out and the remainder re-tested, so
 # "I live in London, and remember to subscribe" survives.
 BOILERPLATE = re.compile(
     r"\b(subscribe|smash th(e|at) like|link (in|below)|link in the "
-    r"description|notification bell|comment below|patreon|join the channel)\b",
-    re.I)
+    r"description|notification bell|comment below|patreon|join the channel)\b")
 BOILER_FP = re.compile(
     r"\b(my|our) (channel|patreon|newsletter|merch|videos?|links?|discord|"
-    r"instagram|twitter)\b", re.I)
+    r"instagram|twitter)\b")
+
+# Cheap prefilters. Semantically pure "does ANY of the group fire?" unions of
+# the patterns above: the vast majority of windows fire none of them, so one
+# combined scan replaces five. When a union hits, the individual patterns are
+# re-run to get the exact per-feature answer — the features themselves are
+# unchanged.
+ANY_DISCLOSURE = re.compile(
+    "|".join(f"(?:{rx.pattern})" for _, rx in DISCLOSURE))
+ANY_MISC = re.compile(
+    "|".join(f"(?:{rx.pattern})"
+             for rx in (WEAK_ANCHOR, STAGE, BOILERPLATE)))
 
 _STOP = set("""a an the and or but if of to in on at by for with from as is are
 was were be been being it its this that these those i me my myself we our you
@@ -220,7 +246,14 @@ def _tokens_match_loose(term: str, token: str) -> int:
 
 
 class FuzzyMatcher:
-    """Match multi-word terms against a token stream, token-bounded."""
+    """Match multi-word terms against a token stream, token-bounded.
+
+    Every comparison is memoised per (term word, corpus token): the corpus
+    vocabulary is finite, so each distinct pair pays for the edit-distance /
+    soundex work exactly once, however many windows repeat it. Single-word
+    terms take a set-algebra fast path — after warm-up their answer is three
+    C-level set operations, no per-token Python loop and no n-gram slide.
+    """
 
     def __init__(self, terms: list[str]):
         self.terms = []
@@ -228,27 +261,85 @@ class FuzzyMatcher:
             words = [w for w in re.findall(r"[\w']+", t.lower()) if w]
             if words:
                 self.terms.append((t, words))
+        # single-word memo: word -> (tokens already judged, strong, phonetic)
+        self._seen: dict[str, set[str]] = {}
+        self._strong: dict[str, set[str]] = {}
+        self._phonetic: dict[str, set[str]] = {}
+        # multi-word memos: word -> {token: strength}
+        self._strict: dict[str, dict[str, int]] = {}
+        self._loose: dict[str, dict[str, int]] = {}
+        for _, words in self.terms:
+            for w in words:
+                self._seen.setdefault(w, set())
+                self._strong.setdefault(w, set())
+                self._phonetic.setdefault(w, set())
+                self._strict.setdefault(w, {})
+                self._loose.setdefault(w, {})
 
-    def hits(self, tokens: list[str]) -> list[tuple[str, str]]:
-        """[(term, "strong" | "phonetic")], best strength per term."""
+    def _strict_hit(self, word: str, token: str) -> int:
+        cache = self._strict[word]
+        got = cache.get(token, -1)
+        if got < 0:
+            got = cache[token] = _tokens_match(word, token)
+        return got
+
+    def _loose_hit(self, word: str, token: str) -> int:
+        cache = self._loose[word]
+        got = cache.get(token, -1)
+        if got < 0:
+            got = cache[token] = _tokens_match_loose(word, token)
+        return got
+
+    def _single(self, word: str, token_set: set[str]) -> int:
+        seen = self._seen[word]
+        fresh = token_set - seen
+        if fresh:
+            strong, phonetic = self._strong[word], self._phonetic[word]
+            for token in fresh:
+                got = _tokens_match(word, token)
+                if got == STRONG:
+                    strong.add(token)
+                elif got:
+                    phonetic.add(token)
+            seen |= fresh
+        if not token_set.isdisjoint(self._strong[word]):
+            return STRONG
+        if not token_set.isdisjoint(self._phonetic[word]):
+            return PHONETIC
+        return 0
+
+    def hits(self, tokens: list[str],
+             token_set: set[str] | None = None) -> list[tuple[str, str]]:
+        """[(term, "strong" | "phonetic")], best strength per term.
+
+        ``token_set`` is an optional caller-supplied ``set(tokens)``; passing
+        the set the caller already built avoids rebuilding it per matcher.
+        """
+        if not self.terms:
+            return []
+        if token_set is None:
+            token_set = set(tokens)
         found = []
         for original, words in self.terms:
             n = len(words)
-            best = 0
-            for i in range(len(tokens) - n + 1):
-                strengths = [_tokens_match(w, tokens[i + k])
-                             for k, w in enumerate(words)]
-                if all(strengths):
-                    best = max(best, min(strengths))
-                elif n >= 2 and strengths.count(0) == 1:
-                    # multi-word rescue: one mangled word among strong matches
-                    k = strengths.index(0)
-                    if (all(s == STRONG for j, s in enumerate(strengths)
-                            if j != k)
-                            and _tokens_match_loose(words[k], tokens[i + k])):
-                        best = max(best, PHONETIC)
-                if best == STRONG:
-                    break
+            if n == 1:
+                best = self._single(words[0], token_set)
+            else:
+                best = 0
+                for i in range(len(tokens) - n + 1):
+                    strengths = [self._strict_hit(w, tokens[i + k])
+                                 for k, w in enumerate(words)]
+                    if all(strengths):
+                        best = max(best, min(strengths))
+                    elif strengths.count(0) == 1:
+                        # multi-word rescue: one mangled word among strong ones
+                        k = strengths.index(0)
+                        if (all(s == STRONG for j, s in enumerate(strengths)
+                                if j != k)
+                                and self._loose_hit(words[k], tokens[i + k])):
+                            best = max(best, PHONETIC)
+                    if best == STRONG:
+                        break
             if best:
                 found.append((original,
                               "strong" if best == STRONG else "phonetic"))
@@ -258,7 +349,7 @@ class FuzzyMatcher:
 def _window_tokens(text: str) -> list[str]:
     # \w is Unicode-aware: accented names and non-Latin scripts tokenize
     # instead of being silently stripped.
-    return re.findall(r"[\w']+", text.lower())
+    return TOKEN_RE.findall(text.lower())
 
 
 # --------------------------------------------------------------------------- #
@@ -266,7 +357,7 @@ def _window_tokens(text: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 def load_corpus(path: pathlib.Path) -> list[dict]:
     videos = []
-    with open(path, encoding="utf-8") as f:
+    with open_corpus(path) as f:
         for line in f:
             line = line.strip()
             if line:
@@ -276,6 +367,34 @@ def load_corpus(path: pathlib.Path) -> list[dict]:
     return videos
 
 
+def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """One id-chunk's spans. Any query failure propagates to the caller."""
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "brand_mentions"],
+    })
+    out: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for row in rows:
+        mentions = row.get("brand_mentions") or []
+        if isinstance(mentions, dict):
+            mentions = [mentions]
+        for m in mentions:
+            if m.get("type") != "sponsored" or m.get("field") != "transcript":
+                continue
+            start, end = m.get("start_ts"), m.get("end_ts")
+            if not isinstance(start, (int, float)):
+                continue
+            if not isinstance(end, (int, float)) or end < start:
+                end = start
+            # (0, 0) is a detection with no located position; padded, it
+            # would wrongly claim the opening of the video as an ad read.
+            if start <= 0 and end <= 0:
+                continue
+            out[str(row.get("id"))].append((float(start), float(end)))
+    return out
+
+
 def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     """Spoken sponsored segments per video, batched over the whole corpus.
 
@@ -283,38 +402,58 @@ def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     ``field == "transcript"`` counts, so an organic or description mention in
     the same video never poisons the span list. A query failure raises — it is
     never a silent empty span list.
+
+    Id chunks are fetched concurrently, but merged strictly in chunk order and
+    a video's ids never straddle two chunks, so the resulting span lists are
+    the same lists in the same order as a serial fetch.
     """
+    chunks = [refs[i:i + IDS_CHUNK] for i in range(0, len(refs), IDS_CHUNK)]
+    if not chunks:
+        return {}
     out: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    for i in range(0, len(refs), IDS_CHUNK):
-        chunk = refs[i:i + IDS_CHUNK]
-        rows = tl_data.db_es({
-            "size": len(chunk),
-            "query": {"ids": {"values": chunk}},
-            "_source": ["id", "brand_mentions"],
-        })
-        for row in rows:
-            mentions = row.get("brand_mentions") or []
-            if isinstance(mentions, dict):
-                mentions = [mentions]
-            for m in mentions:
-                if m.get("type") != "sponsored" or m.get("field") != "transcript":
-                    continue
-                start, end = m.get("start_ts"), m.get("end_ts")
-                if not isinstance(start, (int, float)):
-                    continue
-                if not isinstance(end, (int, float)) or end < start:
-                    end = start
-                # (0, 0) is a detection with no located position; padded, it
-                # would wrongly claim the opening of the video as an ad read.
-                if start <= 0 and end <= 0:
-                    continue
-                out[str(row.get("id"))].append((float(start), float(end)))
+    with ThreadPoolExecutor(max_workers=min(ES_CONCURRENCY,
+                                            len(chunks))) as pool:
+        for part in pool.map(_sponsor_chunk, chunks):
+            for ref, spans in part.items():
+                out[ref].extend(spans)
     return dict(out)
+
+
+def _fetch_segments(refs: list[str], holder: dict) -> None:
+    """Thread body: stash the spans, or the failure, for the parent to see.
+
+    The parent re-raises whatever landed here, so an index failure is still
+    loud — it never degrades into a silently empty span list.
+    """
+    try:
+        holder["segments"] = sponsor_segments(refs)
+    except BaseException as exc:              # noqa: BLE001 — re-raised below
+        holder["error"] = exc
+
+
+def apply_sponsor_reads(
+        kept: list[dict],
+        segments: dict[str, list[tuple[float, float]]]) -> None:
+    """Fill in the per-window ``in_sponsor_read`` flag once spans have landed.
+
+    Windows are built with the flag already present (and False), so writing it
+    here overwrites in place and leaves the key order untouched.
+    """
+    if not segments:
+        return
+    for c in kept:
+        segs = segments.get(c["id"])
+        if not segs:
+            continue
+        start = c["start"]
+        c["in_sponsor_read"] = any(s - SPONSOR_PAD <= start <= e + SPONSOR_PAD
+                                   for s, e in segs)
 
 
 def windows(cues: list) -> list[tuple[int, str]]:
     """Group cues into ~WINDOW_CHARS passages, keyed to the opening offset."""
     out, buf, start = [], [], None
+    held = 0          # running sum(len(x) + 1 for x in buf), kept incremental
     for cue in cues:
         offset, text = cue[0], (cue[1] or "").strip()
         if not text:
@@ -322,10 +461,12 @@ def windows(cues: list) -> list[tuple[int, str]]:
         if start is None:
             start = int(offset)
         buf.append(text)
-        if sum(len(x) + 1 for x in buf) >= WINDOW_CHARS:
+        held += len(text) + 1
+        if held >= WINDOW_CHARS:
             out.append((start, " ".join(buf)))
             # one cue of overlap, so a sentence split at a boundary survives
             buf, start = [text], int(offset)
+            held = len(text) + 1
     if buf and start is not None:
         out.append((start, " ".join(buf)))
     return out
@@ -336,39 +477,270 @@ def windows(cues: list) -> list[tuple[int, str]]:
 # does not — but recurrence alone must never confirm on a multi-host channel;
 # that rule lives with the model, in references/evidence-rules.md)
 # --------------------------------------------------------------------------- #
-def _content_words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[\w']+", text.lower())
-            if w not in _STOP and len(w) > 2 and not w.isdigit()]
+def _filter_content(tokens: list[str]) -> list[str]:
+    """Content words, filtered out of a window's existing token list.
+
+    The tokenizer and this filter read the same lower-cased text through the
+    same regex, so a window's content words are just its tokens minus the
+    stop, short and numeric ones — there is never a second pass over the text.
+    """
+    return [w for w in tokens
+            if len(w) > 2 and w not in _STOP and not w.isdigit()]
 
 
-def _phrases(text: str, n: int = 4) -> set[str]:
-    words = _content_words(text)
-    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+def _phrase_list(words: list[str], n: int = 4) -> list[str]:
+    return [" ".join(words[i:i + n]) for i in range(len(words) - n + 1)]
 
 
 def add_recurrence(cands: list[dict]) -> None:
-    videos = {c["id"] for c in cands}
-    word_videos: dict[str, set[str]] = defaultdict(set)
-    for c in cands:
-        for w in set(_content_words(c["text"])):
-            word_videos[w].add(c["id"])
-    ceiling = max(1, int(len(videos) * RARE_SHARE))
-    rare = {w for w, vids in word_videos.items() if len(vids) <= ceiling}
+    """Attach cross-video phrase recurrence, from each window's cached tokens.
 
-    phrase_videos: dict[str, set[str]] = defaultdict(set)
+    Candidates arrive carrying ``_content`` (their content words, derived from
+    the tokens the scan already produced); this consumes and removes it. The
+    n-gram keys stay the same joined strings the phrase set has always used
+    and ``recurring_phrase`` is emitted verbatim; between phrases recurring in
+    equally many videos, the lexicographically smallest one wins — a fixed
+    rule, because set iteration order is hash-seed dependent.
+
+    This runs in the parent, over the merged candidate list, precisely because
+    it is the one cross-video step: a worker only ever sees its own slice.
+    """
+    # Both tallies are per VIDEO, so words and phrases are folded into one bag
+    # per video first and counted once each — a phrase repeated across fifty
+    # windows of the same upload is one video either way, and this way it costs
+    # one increment instead of fifty.
+    video_words: dict[str, set[str]] = {}
+    video_phrases: dict[str, set[str]] = {}
+    phrase_sets: list[set[str]] = []
     for c in cands:
-        for ph in c["_phrases"]:
-            if any(w in rare for w in ph.split()):
-                phrase_videos[ph].add(c["id"])
-    for c in cands:
+        words = c.pop("_content")
+        ref = c["id"]
+        bag = video_words.get(ref)
+        if bag is None:
+            bag = video_words[ref] = set()
+        bag.update(words)
+        unique = set()
+        for ph in _phrase_list(words):
+            unique.add(ph)
+        phrase_sets.append(unique)
+        bag = video_phrases.get(ref)
+        if bag is None:
+            bag = video_phrases[ref] = set()
+        bag |= unique
+
+    ceiling = max(1, int(len(video_words) * RARE_SHARE))
+    word_videos: dict[str, int] = defaultdict(int)
+    for bag in video_words.values():
+        for w in bag:
+            word_videos[w] += 1
+    rare = {w for w, seen in word_videos.items() if seen <= ceiling}
+
+    phrase_videos: dict[str, int] = defaultdict(int)
+    for bag in video_phrases.values():
+        for ph in bag:
+            phrase_videos[ph] += 1
+    # A phrase has to clear BOTH bars — seen in more than one video, and
+    # carrying a rare word — and the one-video majority fails the first bar,
+    # so the distinctiveness test only ever runs on the survivors. The
+    # surviving table is the only one the per-window loop consults.
+    recurring = {ph: seen for ph, seen in phrase_videos.items()
+                 if seen > 1 and not rare.isdisjoint(ph.split())}
+    recurring_keys = set(recurring)
+
+    for c, unique in zip(cands, phrase_sets):
         best, best_ph = 1, None
-        for ph in c["_phrases"]:
-            n = len(phrase_videos.get(ph, ()))
-            if n > best:
-                best, best_ph = n, ph
+        if not unique.isdisjoint(recurring_keys):
+            for ph in unique:
+                seen = recurring.get(ph)
+                if seen is None:
+                    continue
+                # Ties are broken lexicographically, NOT by whichever phrase
+                # the set happened to yield first: set iteration order depends
+                # on the hash seed, so the old "first one wins" made
+                # recurring_phrase differ between runs of the same corpus.
+                if seen > best or (seen == best and best_ph is not None
+                                   and ph < best_ph):
+                    best, best_ph = seen, ph
         c["recurrence_videos"] = best
         c["recurring_phrase"] = best_ph
-        del c["_phrases"]
+
+
+# --------------------------------------------------------------------------- #
+# the scan itself — pure per-video work, so it parallelises across processes
+# --------------------------------------------------------------------------- #
+def scan_videos(videos: list[dict], host_m: "FuzzyMatcher",
+                entity_m: "FuzzyMatcher", lexicon_mode: str) -> tuple:
+    """Window + feature one slice of the corpus.
+
+    Depends on nothing but its arguments, so the same slice always yields the
+    same windows in the same order whether it ran here or in a worker.
+    ``in_sponsor_read`` is left False and filled in by
+    ``apply_sponsor_reads`` once the sponsor-span fetch has landed.
+
+    Returns ``(kept, dropped_boilerplate, dropped_no_signal, windows_seen)``.
+    """
+    kept: list[dict] = []
+    dropped_boiler = dropped_no_signal = total_windows = 0
+    for v in videos:
+        ref = str(v["id"])
+        vid = ref.split(":")[-1]
+        # Per-VIDEO format hint: one channel mixes formats, and a reaction or
+        # collab upload on a solo channel must not inherit the solo rule.
+        title_hint = next((fmt for fmt, rx in TITLE_SECOND_VOICE.items()
+                           if v.get("title") and rx.search(v["title"])), None)
+        # The recall lexicons are English. A non-English video gets NO
+        # lexical gating — every window goes to the (multilingual) model
+        # layer, because Spanish pro-drop or Japanese subject omission means
+        # an English-shaped pronoun regex finds nothing to anchor on. An
+        # absent language (older corpus) keeps the English path.
+        lang = str(v.get("transcript_language") or "").lower()
+        lexical = (lexicon_mode == "on"
+                   or (lexicon_mode == "auto"
+                       and (not lang or lang.startswith("en"))))
+        title = v.get("title")
+        published = str(v.get("publication_date") or "")[:10]
+        for start, text in windows(v["cues"]):
+            total_windows += 1
+            # One lower-casing and one tokenisation per window, shared by the
+            # lexicons, both matchers, and the recurrence features.
+            low = text.lower()
+            tokens = TOKEN_RE.findall(low)
+            token_set = set(tokens)
+            first_person = bool(FIRST_PERSON.search(low))
+            host_hits = host_m.hits(tokens, token_set)
+            ent_hits = entity_m.hits(tokens, token_set)
+            if lexical and not first_person and not host_hits and not ent_hits:
+                dropped_no_signal += 1
+                continue
+            if ANY_DISCLOSURE.search(low):
+                cues_fired = [name for name, rx in DISCLOSURE
+                              if rx.search(low)]
+            else:
+                cues_fired = []
+            if ANY_MISC.search(low):
+                boiler = bool(BOILERPLATE.search(low))
+                weak = bool(WEAK_ANCHOR.search(low))
+                stage = bool(STAGE.search(low))
+            else:
+                boiler = weak = stage = False
+            if lexical and boiler and not host_hits and not ent_hits:
+                masked = BOILER_FP.sub(" ", BOILERPLATE.sub(" ", low))
+                if not FIRST_PERSON.search(masked):
+                    dropped_boiler += 1
+                    continue
+            kept.append({
+                "id": ref,
+                "video_id": vid,
+                "title": title,
+                "language": lang or None,
+                "format_hint": title_hint,
+                "published": published,
+                "start": start,
+                # No stored url: it is exactly f(video_id, start), and a big
+                # channel would carry half a million copies of a string every
+                # consumer can build. Whoever SHOWS a window builds the link
+                # then — and a verified quote builds it from the timestamp
+                # verification located, which is not always this one.
+                "text": text,
+                "cues_fired": cues_fired,
+                # host_anchor (the attribution signal) requires a STRONG hit;
+                # phonetic-only anchors stay visible in host_anchor_terms
+                "host_anchor": any(st == "strong" for _, st in host_hits),
+                "host_anchor_terms": host_hits,
+                "entity_hits": ent_hits,
+                "weak_anchor": weak,
+                "stage_direction": stage,
+                "boilerplate": boiler,
+                "in_sponsor_read": False,
+                "_content": _filter_content(tokens),
+            })
+    return kept, dropped_boiler, dropped_no_signal, total_windows
+
+
+_WORKER: dict = {}
+
+
+def _worker_init(host_terms: list[str], entity_terms: list[str],
+                 lexicon_mode: str) -> None:
+    _WORKER["host_m"] = FuzzyMatcher(host_terms)
+    _WORKER["entity_m"] = FuzzyMatcher(entity_terms)
+    _WORKER["lexicon"] = lexicon_mode
+
+
+def _scan_task(videos: list[dict]) -> tuple:
+    return scan_videos(videos, _WORKER["host_m"], _WORKER["entity_m"],
+                       _WORKER["lexicon"])
+
+
+def _env_int(name: str) -> int:
+    """A positive integer from the environment, or 0 when unset/unusable."""
+    raw = (os.environ.get(name) or "").strip()
+    if raw:
+        try:
+            asked = int(raw)
+        except ValueError:
+            return 0
+        if asked > 0:
+            return asked
+    return 0
+
+
+def worker_count() -> int:
+    """Scan processes to use. ``CREATOR_BRIEF_SCAN_WORKERS=1`` forces serial."""
+    return _env_int(WORKERS_ENV) or min(MAX_WORKERS, os.cpu_count() or 1)
+
+
+def min_chunk_videos() -> int:
+    """Videos per scan task floor. ``CREATOR_BRIEF_SCAN_MIN_CHUNK`` overrides
+    it, the same way ``CREATOR_BRIEF_SCAN_WORKERS`` overrides the worker
+    count, so a small corpus can still be run through the pool."""
+    return _env_int(MIN_CHUNK_ENV) or MIN_CHUNK_VIDEOS
+
+
+def _video_chunks(videos: list[dict], workers: int) -> list[list[dict]]:
+    """Coarse tasks: a few per worker, never fewer than MIN_CHUNK_VIDEOS
+    videos each, so pickling the results stays a small share of the work."""
+    per = max(min_chunk_videos(), -(-len(videos) // (workers * 4)))
+    return [videos[i:i + per] for i in range(0, len(videos), per)]
+
+
+def scan_corpus(videos: list[dict], host_terms: list[str],
+                entity_terms: list[str], lexicon_mode: str) -> tuple:
+    """Scan every video, in parallel when it is worth it.
+
+    Chunks are merged in submission order and each chunk is scanned exactly as
+    the serial path would scan it, so the parallel result is identical to the
+    serial one, window for window. If the pool cannot start, this falls back
+    to the serial path rather than failing the run.
+
+    Returns the four scan counters plus the number of chunks the pool actually
+    ran — 0 whenever the scan stayed serial, so the run summary (and the test
+    that compares the two paths) can tell which path produced the windows.
+    """
+    workers = worker_count()
+    chunks = _video_chunks(videos, workers) if workers > 1 else []
+    if len(chunks) > 1:
+        try:
+            ctx = multiprocessing.get_context("spawn")
+            with ctx.Pool(min(workers, len(chunks)), initializer=_worker_init,
+                          initargs=(host_terms, entity_terms,
+                                    lexicon_mode)) as pool:
+                parts = pool.map(_scan_task, chunks, chunksize=1)
+        except (OSError, ValueError, ImportError,
+                multiprocessing.ProcessError) as exc:
+            print(f"scan: worker pool unavailable ({exc}); running serially",
+                  file=sys.stderr)
+        else:
+            kept: list[dict] = []
+            boiler = no_signal = total = 0
+            for part_kept, part_boiler, part_no_signal, part_total in parts:
+                kept.extend(part_kept)
+                boiler += part_boiler
+                no_signal += part_no_signal
+                total += part_total
+            return kept, boiler, no_signal, total, len(chunks)
+    return scan_videos(videos, FuzzyMatcher(host_terms),
+                       FuzzyMatcher(entity_terms), lexicon_mode) + (0,)
 
 
 # --------------------------------------------------------------------------- #
@@ -407,7 +779,7 @@ def select_batched(kept: list[dict], max_windows: int,
                    lexicon_mode: str) -> list[dict]:
     """The model-layer budget, applied to a rank-sorted ``kept`` list.
 
-    ``windows.jsonl`` keeps the full recall record (free, local, re-scannable),
+    ``windows.jsonl.gz`` keeps the full recall record (free, local, re-scannable),
     but only up to ``max_windows`` go out to the classifier. Lexicon-ranked
     windows compete on score; the unranked pool — windows the English lexicons
     never scored (non-English under auto, everything under ``--lexicon off``),
@@ -450,7 +822,8 @@ def main() -> None:
     started = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True,
-                    help="path to corpus.jsonl from fetch_corpus.py")
+                    help="path to corpus.jsonl.gz from fetch_corpus.py "
+                         "(a plain .jsonl corpus is read too)")
     ap.add_argument("--host-terms", default="",
                     help="comma-separated facts distinctive to the host: "
                          "surname, companies, funds, a named former role. "
@@ -462,7 +835,7 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     ap.add_argument("--max-windows", type=int, default=MAX_MODEL_WINDOWS,
                     help="ceiling on windows written to batch files for the "
-                         "model layer (0 = uncapped). windows.jsonl always "
+                         "model layer (0 = uncapped). windows.jsonl.gz always "
                          "keeps everything; past the cap, ranked windows "
                          "keep their top scores and unranked (non-English) "
                          "windows are sampled evenly across the channel's "
@@ -480,78 +853,38 @@ def main() -> None:
 
     host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
     entity_terms = [t.strip() for t in a.entity_terms.split(",") if t.strip()]
-    host_m = FuzzyMatcher(host_terms)
-    entity_m = FuzzyMatcher(entity_terms)
-
     with_transcript = [v for v in videos if v.get("cues")]
-    segments = sponsor_segments([str(v["id"]) for v in with_transcript])
 
-    kept, dropped_boiler, dropped_no_signal, total_windows = [], 0, 0, 0
+    # The sponsor-span lookup is network-bound and the scan is CPU-bound, so
+    # the fetch runs alongside the scan and is joined before any window is
+    # finalised. A failure in there is re-raised here — never swallowed.
+    seg_holder: dict = {}
+    seg_thread = threading.Thread(
+        target=_fetch_segments,
+        args=([str(v["id"]) for v in with_transcript], seg_holder),
+        daemon=True)
+    seg_thread.start()
+
     lang_counts: dict[str, int] = defaultdict(int)
     for v in with_transcript:
-        ref = str(v["id"])
-        vid = ref.split(":")[-1]
-        segs = segments.get(ref, [])
         lang_counts[str(v.get("transcript_language") or "unknown").lower()] += 1
-        # Per-VIDEO format hint: one channel mixes formats, and a reaction or
-        # collab upload on a solo channel must not inherit the solo rule.
-        title_hint = next((fmt for fmt, rx in TITLE_SECOND_VOICE.items()
-                           if v.get("title") and rx.search(v["title"])), None)
-        # The recall lexicons are English. A non-English video gets NO
-        # lexical gating — every window goes to the (multilingual) model
-        # layer, because Spanish pro-drop or Japanese subject omission means
-        # an English-shaped pronoun regex finds nothing to anchor on. An
-        # absent language (older corpus) keeps the English path.
-        lang = str(v.get("transcript_language") or "").lower()
-        lexical = (a.lexicon == "on"
-                   or (a.lexicon == "auto"
-                       and (not lang or lang.startswith("en"))))
-        for start, text in windows(v["cues"]):
-            total_windows += 1
-            tokens = _window_tokens(text)
-            first_person = bool(FIRST_PERSON.search(text))
-            host_hits = host_m.hits(tokens)
-            ent_hits = entity_m.hits(tokens)
-            if lexical and not first_person and not host_hits and not ent_hits:
-                dropped_no_signal += 1
-                continue
-            cues_fired = [name for name, rx in DISCLOSURE if rx.search(text)]
-            boiler = bool(BOILERPLATE.search(text))
-            if lexical and boiler and not host_hits and not ent_hits:
-                masked = BOILER_FP.sub(" ", BOILERPLATE.sub(" ", text))
-                if not FIRST_PERSON.search(masked):
-                    dropped_boiler += 1
-                    continue
-            kept.append({
-                "id": ref,
-                "video_id": vid,
-                "title": v.get("title"),
-                "language": lang or None,
-                "format_hint": title_hint,
-                "published": str(v.get("publication_date") or "")[:10],
-                "start": start,
-                "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
-                "text": text,
-                "cues_fired": cues_fired,
-                # host_anchor (the attribution signal) requires a STRONG hit;
-                # phonetic-only anchors stay visible in host_anchor_terms
-                "host_anchor": any(st == "strong" for _, st in host_hits),
-                "host_anchor_terms": host_hits,
-                "entity_hits": ent_hits,
-                "weak_anchor": bool(WEAK_ANCHOR.search(text)),
-                "stage_direction": bool(STAGE.search(text)),
-                "boilerplate": boiler,
-                "in_sponsor_read": any(s - SPONSOR_PAD <= start <= e + SPONSOR_PAD
-                                       for s, e in segs),
-                "_phrases": _phrases(text),
-            })
+
+    (kept, dropped_boiler, dropped_no_signal, total_windows,
+     parallel_chunks) = scan_corpus(with_transcript, host_terms, entity_terms,
+                                    a.lexicon)
+
+    seg_thread.join()
+    if "error" in seg_holder:
+        raise seg_holder["error"]
+    apply_sponsor_reads(kept, seg_holder.get("segments") or {})
 
     add_recurrence(kept)
     for c in kept:
         c["rank_score"] = rank_score(c)
     kept.sort(key=lambda c: (-c["rank_score"], c["id"], c["start"]))
 
-    with open(out_dir / "windows.jsonl", "w", encoding="utf-8") as f:
+    windows_file = out_dir / "windows.jsonl.gz"
+    with open_corpus_write(windows_file) as f:
         for c in kept:
             f.write(json.dumps(c, default=str) + "\n")
 
@@ -601,15 +934,17 @@ def main() -> None:
             "recurring_3plus": sum(1 for c in kept
                                    if c["recurrence_videos"] >= 3),
         },
-        "windows_file": str(out_dir / "windows.jsonl"),
+        "windows_file": str(windows_file),
         "batches": batch_paths,
+        # how the scan ran, not what it found: 0 means the serial path
+        "parallel_chunks": parallel_chunks,
         "note": ("ranked recall pass, not a verdict; batches are rank-ordered "
                  "so early stopping loses the least-promising windows. The "
                  "features are model inputs, never gates. Batches are already "
                  "capped at max_windows (ranked windows keep top scores, "
                  "unranked non-English windows are stride-sampled across the "
                  "channel's history); windows_over_cap says what stayed "
-                 "local, in windows.jsonl, uninspected."),
+                 "local, in windows.jsonl.gz, uninspected."),
     }, indent=1, default=str))
     funnel(stage="scan", windows_total=total_windows, windows_kept=len(kept),
            windows_capped=len(batched),

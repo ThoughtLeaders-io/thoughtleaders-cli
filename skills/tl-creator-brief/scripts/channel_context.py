@@ -21,7 +21,7 @@ faceless channel with one personal Q&A upload still gets scanned.
 Usage:
     channel_context.py --channel <id>
     channel_context.py --channel <id> \\
-        --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl
+        --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz
 
 Output (stdout): one JSON object.
 """
@@ -35,7 +35,9 @@ import statistics
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
+from fetch_corpus import open_corpus  # sibling script
 
 FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'd|i'll|my|me|myself)\b", re.I)
 
@@ -157,7 +159,7 @@ def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
 
 def corpus_stats(corpus_path: pathlib.Path) -> dict:
     per_video = []
-    with open(corpus_path, encoding="utf-8") as f:
+    with open_corpus(corpus_path) as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -240,7 +242,8 @@ def main() -> None:
     ap.add_argument("--channel", type=int, required=True,
                     help="internal TL channel id, from `tl channels find`")
     ap.add_argument("--corpus", default=None,
-                    help="corpus.jsonl from fetch_corpus.py; adds measured "
+                    help="corpus.jsonl.gz from fetch_corpus.py (a plain "
+                         ".jsonl corpus is read too); adds measured "
                          "format stats")
     ap.add_argument("--per-video-out", dest="per_video_out", default=None,
                     help="write the per-video stat rows to this JSON file "
