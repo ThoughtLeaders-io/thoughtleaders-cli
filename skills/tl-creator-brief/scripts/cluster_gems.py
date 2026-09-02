@@ -266,6 +266,23 @@ def _coalesce(bucket: list[list[dict]]) -> list[list[dict]]:
     return bucket
 
 
+# the merge pass judges verdicts, not passages: the slim view keeps what it
+# needs and drops the window text, so one agent can read a whole channel's
+# clusters instead of a 400 KB file
+SLIM_WINDOW = ("id", "video_id", "title", "published", "start", "language",
+               "format_hint", "in_sponsor_read", "host_anchor", "recurrence_videos")
+SLIM_VERDICT_DROP = ("i", "anchor", "quote_span", "self_disclosure", "start")
+
+
+def slim_line(line: dict) -> dict:
+    w = line.get("window") or {}
+    v = line.get("verdict") or {}
+    return {"window": {k: w.get(k) for k in SLIM_WINDOW if k in w},
+            "verdict": {k: val for k, val in v.items() if k not in SLIM_VERDICT_DROP},
+            "occurrences": line.get("occurrences"),
+            "members": line.get("members")}
+
+
 def build_line(group: list[dict]) -> dict:
     ordered = sorted(group, key=representative_key)
     line = dict(ordered[0])
@@ -302,6 +319,10 @@ def main() -> None:
     with open(out_path, "w", encoding="utf-8") as fout:
         for ln in lines:
             fout.write(json.dumps(ln, ensure_ascii=False, default=str) + "\n")
+    slim_path = out_path.with_name(out_path.stem + ".slim.jsonl")
+    with open(slim_path, "w", encoding="utf-8") as fout:
+        for ln in lines:
+            fout.write(json.dumps(slim_line(ln), ensure_ascii=False, default=str) + "\n")
 
     merged = len(gems) - len(lines)
     largest = max((ln["occurrences"] for ln in lines), default=0)
@@ -315,6 +336,7 @@ def main() -> None:
         "largest_cluster": largest,
         "elapsed_s": elapsed,
         "clustered_file": str(out_path),
+        "slim_file": str(slim_path),
         "note": ("one line per claim; `occurrences` and `members` carry the "
                  "recurrence evidence — count distinct videos, not members"),
     }, indent=1))

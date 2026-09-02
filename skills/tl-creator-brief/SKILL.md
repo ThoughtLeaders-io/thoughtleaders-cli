@@ -190,8 +190,10 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
    the merge pass one read instead of thirty. Merge rules:
    `references/transcript-mining.md`, Layer 4. Do not hand-merge what the
    script left apart.
-6. **Merge pass + verification.** ONE agent reads `gems-clustered.jsonl`
-   (plus the identity lane's findings when that lane ran) — **never the
+6. **Merge pass + verification.** ONE agent reads
+   `gems-clustered.slim.jsonl` — the clusters without the window text, which
+   is all the judgment needs (plus the identity lane's findings when that
+   lane ran) — **never the
    windows, never a transcript** — and finalizes what a script cannot:
    recurrence from **distinct `video_id`s** among a cluster's members,
    deduplication across clusters, the sensitivity tier, superseded-fact

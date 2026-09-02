@@ -48,6 +48,20 @@ def test_clean_double_unescapes_caption_entities():
     assert pieces == [[10.0, "my 'dad' ran a bakery"]]
 
 
+@pytest.mark.parametrize("stub, fixed", [
+    ("amp;#39;s right there behind", "'s right there behind"),
+    (";#39;m big into health", "'m big into health"),
+    ("#39;ve got a dog", "'ve got a dog"),
+    ("amp;#34; quoted", "quoted"),
+])
+def test_clean_resolves_a_partial_entity_at_a_fragment_start(stub, fixed):
+    frag = f'<text start="10">{stub} and <em>my dad</em> ran the bakery there</text>'
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert text.startswith(fixed)
+    assert pieces[0][1] == text          # the cue store and the text agree
+    assert "my dad" in hits
+
+
 def test_clean_reports_em_hits_lowercased_and_deduped():
     frag = ('<text start="12"><em>I grew up</em> in ohio and '
             '<em>i grew up</em> poor, <em>my dad</em> worked nights</text>')

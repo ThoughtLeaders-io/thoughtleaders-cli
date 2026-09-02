@@ -158,6 +158,15 @@ no prose around it:
 `gems` or in `not_gems`, never both and never neither. A missing or duplicated
 index is not a partial success — those windows are re-run by a fresh agent.
 
+**Re-spawn of a subset.** When the caller's message names specific window
+indexes to re-judge (the ones an earlier agent skipped or failed the
+contract on), output ONLY those windows: keep each window's original `i`
+from the batch file and its own `start`, and the count contract becomes
+"every named index exactly once". Do not re-judge the rest of the batch —
+the assembler keeps the earlier verdicts and takes your file's verdicts for
+the indexes it carries. Write to the exact path the caller gives
+(`batch-NNN.extract.r2.json`, `.r3.json` …).
+
 **Exactly five tool calls, then stop:** Read the instructions, Read this
 rubric, Read `evidence-rules.md`, Read the batch file, Write the output file.
 No verification scripts, no Bash, no re-reads. Your final message is one line:

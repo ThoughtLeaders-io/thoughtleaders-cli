@@ -92,6 +92,22 @@ def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str]]:
     return out, recurring
 
 
+# a highlight fragment can start inside a doubly-escaped caption entity
+# ("&amp;#39;s" cut to "amp;#39;s" or ";#39;s"); the entity is unrecoverable
+# by unescaping, so the stub is resolved by hand — #39 is the apostrophe the
+# captions actually meant, anything else is dropped
+_PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
+
+
+def _fix_partial_entity(t: str) -> str:
+    m = _PARTIAL_ENTITY_RX.match(t)
+    if not m:
+        return t
+    code = int(m.group(1))
+    rest = t[m.end():]
+    return ("'" + rest) if code == 39 else rest.lstrip()
+
+
 def _tidy(t: str) -> str:
     t = TAG_RX.sub(" ", t)
     t = html.unescape(html.unescape(t))
@@ -119,6 +135,8 @@ def clean(frag: str) -> tuple[str, list[str], float | None, list[str], list[list
     pre = _tidy(parts[0]) if parts else ""
     if pre and pieces:
         pieces[0][1] = pre + " " + pieces[0][1]
+    if pieces:
+        pieces[0][1] = _fix_partial_entity(pieces[0][1])
     text = " ".join(pc[1] for pc in pieces)
     start = pieces[0][0] if pieces else None
     return text, sorted(set(h for h in hits if h)), start, hits, pieces

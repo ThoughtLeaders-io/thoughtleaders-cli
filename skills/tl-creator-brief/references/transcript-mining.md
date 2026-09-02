@@ -187,9 +187,11 @@ python3 <skill>/scripts/cluster_gems.py --in gems.jsonl
 ```
 
 A long back catalogue answers the same question hundreds of times: one
-channel's 172 gems held "BioShock is my favorite game" 29 times over. The
-script writes `gems-clustered.jsonl` beside the input — one line per claim, in
-the same shape as a gem line, so there is exactly one format downstream.
+channel's 172 gems held "BioShock is my favorite game" 29 times over. The script writes `gems-clustered.jsonl` beside the input — one line per claim, in
+the same shape as a gem line, so there is exactly one format downstream — and
+`gems-clustered.slim.jsonl`, the same lines without the window text (verdict,
+video, start, date, members), which is what the merge pass reads: a
+channel's clusters fit one agent's read that way.
 Singletons pass through as clusters of 1. Each line adds `occurrences` and
 `members` (`video_id`, `start`, `published` for every member, the
 representative included), and the representative is the cluster's
@@ -203,7 +205,7 @@ member must match every other member. Near-duplicates that fail any of those
 stay separate — a missed merge costs a few tokens, a false merge would delete
 a distinct fact. Do not hand-merge what the script left apart.
 
-**One merge pass — ONE agent.** It reads `gems-clustered.jsonl` plus the
+**One merge pass — ONE agent.** It reads `gems-clustered.slim.jsonl` plus the
 identity lane's findings (when that lane ran) and **never the windows, never a
 transcript**: the extractor already lifted the claim and the quote, so the
 merge pass only decides what a script cannot:

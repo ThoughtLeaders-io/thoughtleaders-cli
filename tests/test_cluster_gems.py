@@ -254,6 +254,20 @@ def test_run_over_a_gems_file(tmp_path):
                    for m in ln["members"])
         assert ln["window"] and ln["verdict"]
 
+    # the slim view beside it: same lines, no window text, verdicts intact
+    assert summary["slim_file"] == str(tmp_path / "gems-clustered.slim.jsonl")
+    slim = [json.loads(ln) for ln in
+            (tmp_path / "gems-clustered.slim.jsonl").read_text().splitlines()]
+    assert len(slim) == 4
+    for full, thin in zip(lines, slim):
+        assert "text" not in thin["window"]
+        assert thin["window"]["video_id"] == full["window"]["video_id"]
+        assert thin["window"]["start"] == full["window"]["start"]
+        assert thin["verdict"]["notable"] == full["verdict"]["notable"]
+        assert thin["members"] == full["members"]
+        assert thin["occurrences"] == full["occurrences"]
+    assert len((tmp_path / "gems-clustered.slim.jsonl").read_bytes()) < len(out.read_bytes())
+
     # rerunning is byte-identical
     subprocess.run([sys.executable, str(_SCRIPTS / "cluster_gems.py"),
                     "--in", str(gems_path), "--out", str(tmp_path / "again.jsonl")],
