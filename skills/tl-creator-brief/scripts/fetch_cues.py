@@ -97,9 +97,13 @@ def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str]]:
 # by unescaping, so the stub is resolved by hand — #39 is the apostrophe the
 # captions actually meant, anything else is dropped
 _PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
+# ... or inside a timed-text tag, leaving `start="138" dur="3.78">`,
+# `="664.399" dur="2.801">` or a bare `>` in front of the first words
+_PARTIAL_TAG_RX = re.compile(r'^\s*(?:(?:[\w-]*=)?"[^"]*"\s*)*>\s*')
 
 
 def _fix_partial_entity(t: str) -> str:
+    t = _PARTIAL_TAG_RX.sub("", t, count=1)
     m = _PARTIAL_ENTITY_RX.match(t)
     if not m:
         return t

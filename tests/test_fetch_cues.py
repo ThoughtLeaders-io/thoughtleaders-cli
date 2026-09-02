@@ -62,6 +62,20 @@ def test_clean_resolves_a_partial_entity_at_a_fragment_start(stub, fixed):
     assert "my dad" in hits
 
 
+@pytest.mark.parametrize("stub", [
+    'start="138" dur="3.78">',
+    '="664.399" dur="2.801">',
+    '> ',
+    'start="1.2" dur="2">amp;#39;',
+])
+def test_clean_drops_a_cut_timed_text_tag_at_a_fragment_start(stub):
+    frag = f'<text start="10">{stub}hey friends welcome back and <em>my dad</em> ran it</text>'
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert text.startswith("'hey friends" if "#39" in stub else "hey friends"), text
+    assert pieces[0][1] == text
+    assert start == 10.0
+
+
 def test_clean_reports_em_hits_lowercased_and_deduped():
     frag = ('<text start="12"><em>I grew up</em> in ohio and '
             '<em>i grew up</em> poor, <em>my dad</em> worked nights</text>')
