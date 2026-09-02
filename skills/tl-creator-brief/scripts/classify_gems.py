@@ -15,17 +15,22 @@ skipped unless ``--force``. A batch still malformed after the retries writes
 nothing and counts as an error, so the assembler sees a missing return file
 for it and lists its windows for a re-judge.
 
-Configuration comes from the environment (never hardcoded paths or keys):
+This is the fallback path: the default is the extractor agent fan-out (one
+agent per batch file); this script exists for hosts that cannot spawn agents.
+It talks to any OpenAI-compatible chat-completions endpoint, configured
+entirely by environment variables (never hardcoded paths, keys, or vendor
+names):
 
-* ``CREATOR_BRIEF_LLM_API_KEY`` — the key; falls back to ``OPENROUTER_API_KEY``
-  in the environment, then to the ``OPENROUTER_API_KEY=`` line of
-  ``--env-file`` (default ``~/.config/openrouter/.env``, read only if it
-  exists). With no key at all the script writes a ``FALLBACK_REQUIRED`` marker
-  line and exits with code 20, so the skill can branch to the extractor agent
-  fan-out mechanically.
-* ``CREATOR_BRIEF_LLM_BASE_URL`` — default ``https://openrouter.ai/api/v1``.
-* ``CREATOR_BRIEF_LLM_MODEL``    — default ``deepseek/deepseek-v3.2``.
-* ``CREATOR_BRIEF_LLM_CONCURRENCY`` — parallel requests, default 16 (1–64).
+* ``CREATOR_BRIEF_LLM_API_KEY``  — required. The bearer key for the endpoint.
+* ``CREATOR_BRIEF_LLM_BASE_URL`` — required. The endpoint's base URL (e.g.
+  the provider's ``/v1`` base).
+* ``CREATOR_BRIEF_LLM_MODEL``    — required. The model name to request.
+* ``CREATOR_BRIEF_LLM_CONCURRENCY`` — optional, parallel requests, default 16
+  (clamped 1-64).
+
+When any required variable is missing, the script writes a
+``FALLBACK_REQUIRED`` marker line naming which one(s) and exits with code 20,
+so the skill can branch to the extractor agent fan-out mechanically.
 
 Usage:
     classify_gems.py --batches tl-creator-profiles/.corpus/<id>/batches \\
@@ -54,9 +59,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import extractor_prompt
 
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "deepseek/deepseek-v3.2"
-DEFAULT_ENV_FILE = "~/.config/openrouter/.env"
+REQUIRED_ENV_VARS = ("CREATOR_BRIEF_LLM_API_KEY", "CREATOR_BRIEF_LLM_BASE_URL",
+                     "CREATOR_BRIEF_LLM_MODEL")
 CONCURRENCY = 16     # env-tunable: CREATOR_BRIEF_LLM_CONCURRENCY
 MIN_CONCURRENCY = 1
 MAX_CONCURRENCY = 64
@@ -73,28 +77,6 @@ def funnel(**fields) -> None:
     """One machine-parseable stage line for the run report (stderr)."""
     print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
           file=sys.stderr)
-
-
-def read_env_file(path: str | pathlib.Path) -> str | None:
-    """The ``OPENROUTER_API_KEY`` value from a KEY=VALUE file, if it exists."""
-    p = pathlib.Path(path).expanduser()
-    if not p.is_file():
-        return None
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        if k.strip() == "OPENROUTER_API_KEY":
-            return v.strip().strip('"').strip("'") or None
-    return None
-
-
-def resolve_key(env_file: str | pathlib.Path) -> str | None:
-    """CREATOR_BRIEF_LLM_API_KEY, else OPENROUTER_API_KEY, else the file."""
-    return (os.environ.get("CREATOR_BRIEF_LLM_API_KEY")
-            or os.environ.get("OPENROUTER_API_KEY")
-            or read_env_file(env_file))
 
 
 def parse_extract(content: str, batch: str, n: int) -> dict | None:
@@ -136,10 +118,7 @@ def call_api(base_url: str, key: str, model: str, prompt: str) -> tuple:
         base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}",
-                 "Content-Type": "application/json",
-                 # harmless attribution headers the endpoint may ignore
-                 "HTTP-Referer": "https://github.com/ThoughtLeaders-io/thoughtleaders-cli",
-                 "X-Title": "tl-creator-brief"},
+                 "Content-Type": "application/json"},
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -185,10 +164,6 @@ def main() -> None:
                          f"$CREATOR_BRIEF_LLM_CONCURRENCY or {CONCURRENCY})")
     ap.add_argument("--force", action="store_true",
                     help="re-send batches whose return file already exists")
-    ap.add_argument("--env-file", default=DEFAULT_ENV_FILE,
-                    help=f"file to read OPENROUTER_API_KEY from when neither "
-                         f"env var is set (default {DEFAULT_ENV_FILE}; read "
-                         f"only if it exists)")
     a = ap.parse_args()
     concurrency = (env_concurrency() if a.concurrency is None else
                    max(MIN_CONCURRENCY, min(MAX_CONCURRENCY, a.concurrency)))
@@ -204,24 +179,28 @@ def main() -> None:
     if not total_windows:
         sys.exit(f"no batch files in {batch_dir}")
 
-    key = resolve_key(a.env_file)
-    if not key:
+    key = os.environ.get("CREATOR_BRIEF_LLM_API_KEY")
+    base_url = os.environ.get("CREATOR_BRIEF_LLM_BASE_URL")
+    model = os.environ.get("CREATOR_BRIEF_LLM_MODEL")
+    missing = [v for v in REQUIRED_ENV_VARS if not os.environ.get(v)]
+    if missing:
         print(f"FALLBACK_REQUIRED reason=missing_api_key "
+              f"missing={','.join(missing)} "
               f"batches_dir={batch_dir} batch_files={len(batch_files)} "
               f"windows={total_windows}", file=sys.stderr)
-        print("No API key is configured (CREATOR_BRIEF_LLM_API_KEY, "
-              "OPENROUTER_API_KEY, or the --env-file). The batch files above "
-              "are already written and unjudged: fall back to the extractor "
-              "agent fan-out (one agent per batch file, ALL spawned in one "
-              "message) per references/transcript-mining.md, Layer 3.",
+        print(f"Missing required environment variable(s): "
+              f"{', '.join(missing)}. The extractor agent fan-out (one agent "
+              f"per batch file, ALL spawned in one message) is the default "
+              f"path; this script is the fallback for hosts that cannot "
+              f"spawn agents. The batch files above are already written and "
+              f"unjudged: fall back to the extractor agent fan-out per "
+              f"references/transcript-mining.md, Layer 3.",
               file=sys.stderr)
         funnel(stage="extract", path="fallback_required",
                windows=total_windows, batches=len(batch_files),
                written=0, errors=0,
                elapsed_s=round(time.monotonic() - started, 1))
         sys.exit(EXIT_FALLBACK_REQUIRED)
-    base_url = os.environ.get("CREATOR_BRIEF_LLM_BASE_URL", DEFAULT_BASE_URL)
-    model = os.environ.get("CREATOR_BRIEF_LLM_MODEL", DEFAULT_MODEL)
 
     returns = (pathlib.Path(a.returns) if a.returns
                else batch_dir.parent / "returns")

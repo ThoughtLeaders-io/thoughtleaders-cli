@@ -19,8 +19,8 @@ even stride over the sorted keys, each entry carrying the window text and
 both sides' whole verdicts under the two labels.
 
 Usage:
-    compare_extracts.py --a <dirA> --b <dirB> --label-a sonnet
-                        --label-b deepseek --out report.json
+    compare_extracts.py --a <dirA> --b <dirB> --label-a agents
+                        --label-b api --out report.json
                         --sample sample.json [--sample-size 60]
 
 The report JSON also goes to stdout.

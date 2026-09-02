@@ -48,7 +48,7 @@ def test_matrix_counts_each_cell_and_the_one_sided_windows(tmp_path):
                               5: _gem()})
     b = _side(tmp_path, "b", {1: _gem(), 2: _not(), 3: _gem(), 4: _not(),
                               6: _gem()})
-    report, _ = ce.compare(ce.load(a), ce.load(b), "sonnet", "deepseek", 60)
+    report, _ = ce.compare(ce.load(a), ce.load(b), "agents", "api", 60)
     assert report["matrix"] == {"a_gem_b_gem": 1, "a_gem_b_not": 1,
                                 "a_not_b_gem": 1, "a_not_b_not": 1}
     assert report["windows_a"] == 5 and report["windows_b"] == 5
@@ -113,7 +113,7 @@ def test_sample_is_all_disagreements_then_strided_agreements(tmp_path):
     for n in range(200, 230):
         av[n], bv[n] = _not(), _not()
     a, b = _side(tmp_path, "a", av), _side(tmp_path, "b", bv)
-    report, sample = ce.compare(ce.load(a), ce.load(b), "sonnet", "deepseek",
+    report, sample = ce.compare(ce.load(a), ce.load(b), "agents", "api",
                                 60)
     kinds = [e["kind"] for e in sample]
     assert kinds[:4] == ["a_gem_b_not"] * 4          # disagreements first
@@ -127,7 +127,7 @@ def test_sample_is_all_disagreements_then_strided_agreements(tmp_path):
     e = sample[0]
     assert e["video_id"] == "1:vid" and "my dad ran a bakery" in e["text"]
     assert e["title"] == "t" and e["in_sponsor_read"] is False
-    assert e["sonnet"]["self_disclosure"] and not e["deepseek"][
+    assert e["agents"]["self_disclosure"] and not e["api"][
         "self_disclosure"]
 
 
@@ -145,18 +145,18 @@ def test_cli_writes_the_report_and_the_sample(tmp_path):
     out, sample = tmp_path / "report.json", tmp_path / "sample.json"
     proc = subprocess.run(
         [sys.executable, str(_SCRIPTS / "compare_extracts.py"),
-         "--a", str(a), "--b", str(b), "--label-a", "sonnet",
-         "--label-b", "deepseek", "--out", str(out), "--sample", str(sample),
+         "--a", str(a), "--b", str(b), "--label-a", "agents",
+         "--label-b", "api", "--out", str(out), "--sample", str(sample),
          "--sample-size", "30"],
         capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     report = json.loads(out.read_text())
     assert json.loads(proc.stdout)["matrix"] == report["matrix"]
-    assert report["label_a"] == "sonnet" and report["label_b"] == "deepseek"
+    assert report["label_a"] == "agents" and report["label_b"] == "api"
     assert report["matrix"]["a_gem_b_gem"] == 1
     entries = json.loads(sample.read_text())
     assert {e["kind"] for e in entries} == {"agree_gem", "agree_not_gem"}
-    assert all("sonnet" in e and "deepseek" in e for e in entries)
+    assert all("agents" in e and "api" in e for e in entries)
 
 
 def test_stride_pick_with_nothing_to_pick_is_empty():

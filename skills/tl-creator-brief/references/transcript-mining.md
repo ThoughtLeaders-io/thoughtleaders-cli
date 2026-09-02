@@ -159,32 +159,39 @@ verification scripts, no Bash, no other Reads, no second Write.
 - **No sequential spawning**, no batching-of-batches, no "start with two and
   see how it goes".
 - **No default-model stand-ins.** If `tl-cli:gem-classifier` does not resolve
-  (running from a checkout rather than an installed plugin), spawn
-  `general-purpose` with an explicit `model: sonnet` override and the same
-  two-line prompt — the rendered message already carries the whole rubric.
+  (running from a checkout rather than an installed plugin), copy
+  `agents/gem-classifier.md` into `~/.claude/agents/` before the session
+  starts and spawn `gem-classifier`; failing that, spawn `general-purpose`
+  with an explicit `model: sonnet` override and the same two-line prompt —
+  the rendered message already carries the whole rubric.
   A general-purpose agent on the inherited (expensive) model is the failure
   mode this list exists to prevent — it is how one past run reached 30M
   tokens.
 
 **Concurrency.** The host runs at most `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`
-agents at once (20 when unset). Set it to 40 in the host's settings `env`
-when the host honours it, and `fetch_cues.py` sizes the batches to fill one
-wave (Layer 1+2). Smaller batches also drop fewer windows: an 8-window batch
+agents at once (20 when unset; Claude Code 2.1.x reads the variable though
+it is not documented). Set it to 40 in the host's settings `env`, confirm
+the agents start together, and `fetch_cues.py` sizes the batches to fill
+one wave (Layer 1+2). Smaller batches also drop fewer windows: an 8-window batch
 was clean live where 25-window batches lost one or two.
 
 **The scripted extractor is the fallback, not the default.**
-`scripts/classify_gems.py` sends the same rendered message to an
-OpenAI-compatible endpoint (one request per batch, returns written where the
+`scripts/classify_gems.py` sends the same rendered message to any
+OpenAI-compatible chat-completions endpoint, configured entirely by
+`CREATOR_BRIEF_LLM_API_KEY`, `CREATOR_BRIEF_LLM_BASE_URL` and
+`CREATOR_BRIEF_LLM_MODEL` (one request per batch, returns written where the
 agents write theirs, `assemble_extracts.py` validates both alike). Measured
-on the same 500 windows against the sonnet agents (2026-09-02, opus-judged
-against the rubric): it ran in 91 s for a few cents, but 41 of 500 windows
+on the same 500 windows against the sonnet agents with one inexpensive
+hosted model (2026-09-02, opus-judged against the rubric): it ran in 91 s
+for a few cents, but 41 of 500 windows
 (8 %) failed the span contract (spans of 48–87 words, reversed spans), and
 on 60 disagreement windows the judge sided with sonnet 45 times and with
 the script 9, with 12 speaker misattributions on the script's side (clip
 voices logged as the host — the failure the rubric ranks worst) against 4.
 So the agents stay the default; use the script only when the host cannot
 spawn agents at all, and expect a below-threshold assemble that needs a
-subset re-judge. With no key configured it exits 20 and says so.
+subset re-judge. With any of the three variables unset it exits 20 and
+names the missing one.
 
 Print the stage's own funnel line from the returned receipts:
 `FUNNEL stage=extract batches=… agents=… windows=… gems=… elapsed_s=…`.

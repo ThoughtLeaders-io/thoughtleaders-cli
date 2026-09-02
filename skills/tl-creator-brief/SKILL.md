@@ -181,15 +181,21 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
    prompt, never hand an agent two batches, never a transcript, never spawn
    one at a time. Batches are sized by `fetch_cues.py` to fill one wave of
    the host's agent cap (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, 20 when
-   unset; set it to 40 in the host settings `env` when the host honours it —
-   every running agent counts against it, so launch the round alone).
-   If the agent type does not resolve (a checkout rather than the installed
-   plugin), spawn `general-purpose` with `model: sonnet` and the same prompt,
-   and say so in the run report. The scripted extractor
-   (`scripts/classify_gems.py`, same message to an OpenAI-compatible
-   endpoint) is the fallback for a host that cannot spawn agents at all —
-   measured worse on speaker attribution and span discipline
-   (`references/transcript-mining.md`, Layer 3), never the default.
+   unset — the variable is read by Claude Code 2.1.x but not documented; set
+   it to 40 in the host settings `env` and check the agents start together
+   before relying on it. Every running agent counts against the cap, so
+   launch the round alone).
+   If `tl-cli:gem-classifier` does not resolve (a checkout rather than the
+   installed plugin), either copy `agents/gem-classifier.md` into
+   `~/.claude/agents/` (or the project's `.claude/agents/`) before the
+   session starts and spawn it as `gem-classifier`, or spawn
+   `general-purpose` with `model: sonnet` and the same prompt; say which in
+   the run report. The scripted extractor (`scripts/classify_gems.py`, the
+   same message sent to any OpenAI-compatible chat-completions endpoint,
+   configured by three environment variables) is the fallback for a host
+   that cannot spawn agents at all — measured worse on speaker attribution
+   and span discipline (`references/transcript-mining.md`, Layer 3), never
+   the default.
    - **3a. A deeper round is additive, not a re-run.** When 500 windows is not
      enough, or the socials lane turned up new host terms, run
      `fetch_cues.py --channel <id> --host-terms "…" --exclude

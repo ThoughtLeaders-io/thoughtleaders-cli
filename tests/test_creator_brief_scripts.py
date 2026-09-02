@@ -457,8 +457,7 @@ def _run_extract(batch_dir, ctx, *extra, env=None):
     e.update(env or {})
     return subprocess.run(
         [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-         "--batches", str(batch_dir), "--context", str(ctx),
-         "--env-file", str(batch_dir.parent / "nonexistent.env"), *extra],
+         "--batches", str(batch_dir), "--context", str(ctx), *extra],
         capture_output=True, text=True, env=e)
 
 
@@ -468,7 +467,8 @@ def test_scripted_extractor_writes_one_return_file_per_batch(tmp_path):
     try:
         proc = _run_extract(batches, ctx, env={
             "CREATOR_BRIEF_LLM_API_KEY": "k",
-            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url,
+            "CREATOR_BRIEF_LLM_MODEL": "test-model"})
     finally:
         fake.stop()
     assert proc.returncode == 0, proc.stderr
@@ -501,7 +501,8 @@ def test_existing_return_files_are_skipped_unless_forced(tmp_path):
                                                     '"not_gems": []}')
     fake = _FakeLLM(lambda p: json.dumps(_extract_for(p)))
     env = {"CREATOR_BRIEF_LLM_API_KEY": "k",
-           "CREATOR_BRIEF_LLM_BASE_URL": fake.url}
+           "CREATOR_BRIEF_LLM_BASE_URL": fake.url,
+           "CREATOR_BRIEF_LLM_MODEL": "test-model"}
     try:
         first = _run_extract(batches, ctx, env=env)
         assert json.loads(first.stdout)["skipped_existing"] == 1
@@ -524,7 +525,8 @@ def test_malformed_content_is_retried_then_counted_as_an_error(tmp_path):
     try:
         proc = _run_extract(batches, ctx, env={
             "CREATOR_BRIEF_LLM_API_KEY": "k",
-            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url,
+            "CREATOR_BRIEF_LLM_MODEL": "test-model"})
         attempts = len(fake.requests)
     finally:
         fake.stop()
@@ -543,7 +545,8 @@ def test_a_fenced_object_is_accepted(tmp_path):
     try:
         proc = _run_extract(batches, ctx, env={
             "CREATOR_BRIEF_LLM_API_KEY": "k",
-            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url,
+            "CREATOR_BRIEF_LLM_MODEL": "test-model"})
     finally:
         fake.stop()
     assert proc.returncode == 0, proc.stderr
@@ -552,43 +555,19 @@ def test_a_fenced_object_is_accepted(tmp_path):
     assert obj["batch"] == "001" and len(obj["gems"]) == 1
 
 
-def test_the_key_can_come_from_the_env_file(tmp_path):
-    batches, ctx = _corpus(tmp_path, batches=1)
-    envfile = tmp_path / "or.env"
-    envfile.write_text('# a comment\n\nOTHER=x\nOPENROUTER_API_KEY="from-file"\n')
-    assert classify_gems.read_env_file(envfile) == "from-file"
-    assert classify_gems.read_env_file(tmp_path / "missing.env") is None
-    fake = _FakeLLM(lambda p: json.dumps(_extract_for(p)))
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-             "--batches", str(batches), "--context", str(ctx),
-             "--env-file", str(envfile), "--returns", str(tmp_path / "r")],
-            capture_output=True, text=True,
-            env={"PATH": "/usr/bin:/bin",
-                 "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
-        sent = fake.requests[0]
-    finally:
-        fake.stop()
-    assert proc.returncode == 0, proc.stderr
-    assert sent["response_format"] == {"type": "json_object"}
-    assert sent["temperature"] == 0
-    assert (tmp_path / "r" / "batch-001.extract.json").is_file()
-
-
-def _run_no_key(tmp_path: Path, windows: list[dict]):
+def _run_no_key(tmp_path: Path, windows: list[dict], env: dict | None = None):
     batches = tmp_path / "batches"
     batches.mkdir()
     (batches / "batch-000.json").write_text(json.dumps(windows))
     ctx = tmp_path / "context.json"
     ctx.write_text("{}")
+    e = {"PATH": "/usr/bin:/bin"}
+    e.update(env or {})
     return subprocess.run(
         [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-         "--batches", str(batches), "--context", str(ctx),
-         # never the developer's real key file
-         "--env-file", str(tmp_path / "nonexistent.env")],
+         "--batches", str(batches), "--context", str(ctx)],
         capture_output=True, text=True,
-        env={"PATH": "/usr/bin:/bin"}), batches
+        env=e), batches
 
 
 def test_no_api_key_emits_the_fallback_marker_and_its_own_exit_code(tmp_path):
@@ -604,7 +583,22 @@ def test_no_api_key_emits_the_fallback_marker_and_its_own_exit_code(tmp_path):
     assert Path(fields["batches_dir"]) == batches.resolve()
     assert fields["batch_files"] == "1" and fields["windows"] == "1"
     assert "CREATOR_BRIEF_LLM_API_KEY" in proc.stderr
+    assert "CREATOR_BRIEF_LLM_BASE_URL" in proc.stderr
+    assert "CREATOR_BRIEF_LLM_MODEL" in proc.stderr
     assert "fall back" in proc.stderr
+
+
+def test_missing_model_alone_also_exits_fallback_required(tmp_path):
+    proc, _ = _run_no_key(
+        tmp_path, [{"id": "1:aaa", "start": 5, "text": "my dad ran a bakery"}],
+        env={"CREATOR_BRIEF_LLM_API_KEY": "k",
+             "CREATOR_BRIEF_LLM_BASE_URL": "http://127.0.0.1:1"})
+    assert proc.returncode == classify_gems.EXIT_FALLBACK_REQUIRED == 20
+    marker = next(ln for ln in proc.stderr.splitlines()
+                  if ln.startswith("FALLBACK_REQUIRED"))
+    fields = dict(kv.split("=", 1) for kv in marker.split()[1:])
+    assert fields["missing"] == "CREATOR_BRIEF_LLM_MODEL"
+    assert "CREATOR_BRIEF_LLM_MODEL" in proc.stderr
 
 
 def test_no_api_key_still_prints_its_funnel_line(tmp_path):
