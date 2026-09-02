@@ -14,6 +14,7 @@ lookup is stubbed too.
 
 import gzip
 import json
+import pathlib
 import sys
 import time
 from pathlib import Path
@@ -457,6 +458,59 @@ def test_summary_reports_round_census_and_returns_dir(tmp_path, monkeypatch):
     assert summary["languages"] == {"en": 77}
     assert summary["non_english_videos_sampled"] == 0
     assert summary["returns_dir"].endswith("returns")
+
+
+def test_run_persists_its_summary_for_the_meta_record(tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch,
+                      [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      census_total=5, langs={"en": 5})
+    path = pathlib.Path(summary["summary_file"])
+    assert path.name == "fetch.json" and path.parent.name == "7"
+    on_disk = json.loads(path.read_text())
+    assert on_disk["videos_with_transcript"] == 5
+    # the census stub answers every count call, so no newest-upload row came back
+    assert on_disk["latest_video_date"] is None
+    summary2, _ = _run(tmp_path, monkeypatch,
+                       [_doc("7:vid1", [_frag("i grew up", 100)])],
+                       argv=("--round", "2"), census_total=5, langs={"en": 5})
+    assert pathlib.Path(summary2["summary_file"]).name == "fetch-r2.json"
+    assert path.exists()                       # round 1's summary survives round 2
+
+
+def test_a_round_1_fetch_clears_an_earlier_builds_round_artifacts(tmp_path, monkeypatch):
+    out = tmp_path / "corpus" / "7"
+    out.mkdir(parents=True)
+    (out / "fetch-r2.json").write_text("{}")
+    (out / "windows-r2.jsonl.gz").write_bytes(b"")
+    (out / "classified.jsonl").write_text("{}\n")
+    (out / "batches-r2").mkdir(); (out / "batches-r2" / "batch-000.json").write_text("[]")
+    with gzip.open(out / "corpus.jsonl.gz", "wt") as f:
+        f.write(json.dumps({"id": "7:old", "publication_date": "2001-01-01", "cues": []}) + "\n")
+    summary, _ = _run(tmp_path, monkeypatch, [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      census_total=1, langs={"en": 1})
+    assert not (out / "fetch-r2.json").exists()
+    assert not (out / "windows-r2.jsonl.gz").exists()
+    assert not (out / "classified.jsonl").exists()
+    assert not (out / "batches-r2").exists()
+    with gzip.open(summary["corpus"], "rt") as f:
+        ids = [json.loads(l)["id"] for l in f]
+    assert ids == ["7:vid1"]                   # the old build's passages are gone too
+
+
+def test_latest_upload_is_one_sorted_single_hit_query(monkeypatch):
+    seen = []
+
+    def fake(args, input_text=None, timeout=None):
+        seen.append(json.loads(input_text))
+        return {"results": [{"id": "7:new", "publication_date": "2026-08-29T00:00:00"}],
+                "total": 867}
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", fake)
+    assert fetch_cues.latest_upload(7) == "2026-08-29"
+    body = seen[0]
+    assert body["size"] == 1 and body["sort"] == [{"publication_date": "desc"}]
+    assert {"term": {"channel.id": 7}} in body["query"]["bool"]["filter"]
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", lambda *a, **k: {"results": []})
+    assert fetch_cues.latest_upload(7) is None
 
 
 def test_phrase_file_marks_recurring_bits_with_a_tilde(tmp_path):

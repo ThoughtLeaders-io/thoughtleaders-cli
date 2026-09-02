@@ -162,6 +162,20 @@ def census(channel: int) -> tuple[int, dict[str, int]]:
     return total, langs
 
 
+def latest_upload(channel: int) -> str | None:
+    """Date of the channel's newest upload at fetch time. The meta record
+    keeps it so a later run can count uploads since with one query."""
+    body = {"size": 1, "_source": ["id", "publication_date"],
+            "sort": [{"publication_date": "desc"}],
+            "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
+                                          {"term": {"channel.id": channel}}]}}}
+    data = tl_data._tl_json(["db", "es", "-", "--json"], input_text=json.dumps(body))
+    rows = (data or {}).get("results") or []
+    if not rows:
+        return None
+    return (rows[0].get("publication_date") or "")[:10] or None
+
+
 def fetch_non_english(channel: int, size: int = 40) -> list[dict]:
     """Uploads whose captions are not English carry no English cue phrase, so
     the cue query cannot see them. Pull their transcripts and stride-sample a
@@ -325,6 +339,11 @@ def main() -> int:
     except Exception as exc:  # census is reporting, never a gate
         videos_with_transcript, langs = 0, {}
         print(f"census failed: {exc}", file=sys.stderr)
+    try:
+        latest_video_date = latest_upload(a.channel)
+    except Exception as exc:  # reporting, never a gate
+        latest_video_date = None
+        print(f"latest-upload lookup failed: {exc}", file=sys.stderr)
     non_en_docs: list[dict] = []
     non_en_total = sum(n for k, n in langs.items() if not is_english(k))
     if non_en_total:
@@ -458,6 +477,20 @@ def main() -> int:
     suffix = "" if a.round <= 1 else f"-r{a.round}"
     bdir = out / f"batches{suffix}"; rdir = out / f"returns{suffix}"
     bdir.mkdir(parents=True, exist_ok=True)
+    if a.round <= 1:
+        # a first round is a fresh build: nothing from an earlier build's
+        # later rounds may leak into this one's counts or its passage store
+        for stale in list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz")) + [
+                out / n for n in ("classified.jsonl", "gems.jsonl", "gems-clustered.jsonl",
+                                  "candidates.jsonl", "respawn.json")]:
+            if stale.exists():
+                stale.unlink()
+        for d in list(out.glob("batches-r*")) + list(out.glob("returns-r*")):
+            for f in d.glob("*"):
+                f.unlink()
+            d.rmdir()
+        if (out / "corpus.jsonl.gz").exists():
+            (out / "corpus.jsonl.gz").unlink()
     for old in bdir.glob("batch-*.json"):
         old.unlink()
     if rdir.exists():                      # a return for a batch that no longer exists is stale
@@ -499,8 +532,12 @@ def main() -> int:
         "sponsor_source": sponsor_source,
         "batches": batches, "returns_dir": str(rdir),
         "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
-        "corpus": str(corpus_path), "elapsed_s": elapsed,
+        "corpus": str(corpus_path), "latest_video_date": latest_video_date,
+        "elapsed_s": elapsed,
     }
+    summary_path = out / f"fetch{suffix}.json"   # ledger_meta.py reads these per round
+    summary["summary_file"] = str(summary_path)
+    summary_path.write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))
     print(f"FUNNEL stage=fetch_cues round={a.round} videos_with_transcript={videos_with_transcript} "
           f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} passages={len(windows)} "

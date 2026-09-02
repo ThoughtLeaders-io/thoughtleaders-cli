@@ -1,23 +1,37 @@
 # Output specification
 
-## Two layers, one contract
+## One ledger, one meta record, one designed page
 
-A profile build emits two files into `tl-creator-profiles/` under the
-invocation directory (create it if missing; never write inside the skill's
-own directory):
+A profile build leaves two durable files per creator in
+`tl-creator-profiles/` under the invocation directory (create it if missing;
+never write inside the skill's own directory):
 
 - **`<channel_id>-facts.jsonl`** — the machine ledger, one fact per line.
   This is **the stable interface** other skills, personas and CONNECT runs
-  consume. Full thoroughness lives here; no human is expected to read it.
-- **`<channel_id>-profile.md`** — the human one-pager, hard-capped at
-  **~300–450 words**. A person forwards this; it never carries the evidence
-  ledger in its body. It is bound by the style contract below.
+  consume. Full thoroughness lives here.
+- **`<channel_id>-meta.json`** — what the build was: when, over which
+  videos, how much it read, what it found. Written by
+  `scripts/ledger_meta.py write`, never by hand. It is what a later run
+  reads to decide whether the ledger is fresh enough to reuse.
 
-The connections document is a result, not a third contract. All outputs are
-files, never chat messages: chat scrolls away and these are made to be
-picked up later. Return the paths, and name files from resolved IDs only —
-IDs are exact, names are fuzzy and change on rebrands, and deterministic
-names let a re-run overwrite its own output.
+The human surfaces are rendered from those two files by
+`scripts/build_html.py` and are never the source of anything:
+
+- **PROFILE** hands the user `<channel_id>-profile-ledger.html`, the ledger
+  view — every verified fact with its citation and sensitivity tier, under
+  the meta strip and the tallies. There is no prose one-pager any more:
+  the thing a second brand reuses is the ledger, and a page that holds
+  every fact is more useful to the person asking "what do we know about
+  them" than a 400-word summary was.
+- **CONNECT** hands the user `<channel_id>-<brand_id>-connections.html`, the
+  only designed deliverable. Its source is `<channel_id>-<brand_id>-connections.md`
+  (the ranked connection map), and its "who they are" section is rendered
+  from the ledger at render time, never written by a model.
+
+All outputs are files, never chat messages: chat scrolls away and these are
+made to be picked up later. Return the paths, and name files from resolved
+IDs only — IDs are exact, names are fuzzy and change on rebrands, and
+deterministic names let a re-run overwrite its own output.
 
 ## The machine ledger: `<channel_id>-facts.jsonl`
 
@@ -51,162 +65,190 @@ One JSON object per line, only quote-verified and judgment-passed facts:
   carry a `gloss` (English translation, labelled — never the quote itself).
 - `recurrence`: distinct videos/sources, never snippet count.
 - `confidence`: `confirmed` | `unconfirmed`, per `evidence-rules.md`
-  (dropped facts never enter the ledger; their count goes in the coverage
-  caveats). When the opt-in socials lane did not run there are no
+  (dropped facts never enter the ledger; their count goes in the run
+  report). When the opt-in socials lane did not run there are no
   `social`/`web` facts, so cross-lane corroboration is unavailable: a fact
   reaches `confirmed` only on a transcript-side rule (solo format, or a
   host-anchored window), never by corroboration. That is a ceiling on the
-  evidence, not a defect in the run — note it in the coverage caveats.
+  evidence, not a defect in the run — say so in the run report.
 - `sensitivity`: `none` | `lifestyle` | `clinical` | `children` | `location`,
   per `evidence-rules.md`. `sensitive` is the **derived** boolean — true
   exactly for the withheld tiers (`clinical`, `children`, `location`) — kept
   so readers written against the old flag keep working. The tier is the fact;
-  never set the boolean independently of it.
+  never set the boolean independently of it. Every fact carries the tier;
+  the ledger view renders it as a badge and tallies it.
 - `superseded_by`: the `fact_id` of the newer fact when latest-wins applies;
   superseded facts stay in the ledger as history.
-- `selected`: true on the 15–20 strongest facts — the ones the one-pager
-  shows. Selection favors confirmed, recurring, cross-lane-corroborated and
-  connection-fertile facts. The cap is deliberate and stays at 15–20: the
-  one-pager's job is to be tight enough to forward, not to be complete. The
-  full ledger count is not hidden — it is surfaced in the CLI run report's
-  funnel line (`… verified=… selected=…`) and in the ledger HTML view, never
-  on the human page.
+- `selected`: true on the 15–20 strongest facts. Selection favors confirmed,
+  recurring, cross-lane-corroborated and connection-fertile facts. The
+  connections page's "who they are" section takes `selected` facts first,
+  then the most recurring, so the pick still shapes what a brand-facing
+  reader sees first.
 
-CONNECT loads this file, not the markdown.
+CONNECT loads this file, not any markdown.
 
-## The human one-pager: `<channel_id>-profile.md`
+## The meta record: `<channel_id>-meta.json`
 
-Versioned YAML frontmatter, so machines can still index it:
-
-```yaml
----
-schema: tl-creator-profile/v2
-channel_id: 123456
-channel_name: "..."
-generated_at: 2026-08-31
-corpus_window: [2016-03-01, 2026-08-20]
-videos_total: 412
-videos_with_transcript: 287
-transcript_coverage: 0.70
-format: solo            # solo | interview | multi_host | faceless_scripted
-format_evidence: "fp density 41/1k words median; 2 videos with interview markers"
-facts_file: 123456-facts.jsonl
-facts_total: 291
-credits_spent: 1840
----
+```json
+{"schema": "tl-creator-meta/v1",
+ "channel_id": 123456,
+ "channel_name": "…",
+ "generated_at": "2026-09-02",
+ "corpus_window": ["2016-03-01", "2026-08-20"],
+ "coverage": {"videos_with_transcript": 287, "videos_matched": 141,
+              "passages": 2252, "windows_judged": 500, "gems": 310,
+              "facts": 91},
+ "format": "solo",
+ "format_evidence": "fp density 41/1k words median; 2 videos with interview markers",
+ "lanes": "transcripts",
+ "context": {"social_links": ["https://instagram.com/…"],
+             "second_channel_candidates": [{"name": "… Clips", "id": 123457}]},
+ "latest_video_date": "2026-08-29",
+ "rounds": 1,
+ "facts_file": "123456-facts.jsonl",
+ "credits_spent": 1840}
 ```
 
-Then the body, **~300–450 words total**:
+- `corpus_window`: earliest and latest publication date among the videos
+  whose passages were stored — the span the ledger can speak for.
+- `coverage`: `videos_with_transcript` (the channel's transcript-bearing
+  uploads at fetch time), `videos_matched` (videos a cue passage came from),
+  `passages` (windows fetched across all rounds), `windows_judged` (windows
+  an extractor gave a verdict on), `gems`, `facts` (lines in the ledger).
+  Every number is counted from the build's own files by
+  `scripts/ledger_meta.py write`; a count it could not derive is 0 and the
+  file it needed is named in `missing`.
+- `format`: `solo` | `interview` | `multi_host` | `faceless_scripted`, with
+  its evidence — the label the format call produced, passed in on `write`.
+- `lanes`: `transcripts` or `transcripts+socials` — which creator-source
+  lanes built the ledger. The reuse check compares it with what the current
+  run asks for.
+- `context`: the linked platforms and sibling-channel candidates from
+  `channel_context.py` (`write --context <file>`), so the ledger view can
+  list them: each platform as read or "linked but unread", each sibling as
+  "not mined".
+- `latest_video_date`: the channel's newest upload when the build fetched.
+  The reuse check counts uploads after it.
+- On a refresh, `write` carries `channel_name`, `format`, `format_evidence`,
+  `lanes`, `context` and `credits_spent` over from the existing record unless
+  they are passed again; only the counts are recomputed.
+- `rounds`: extraction rounds so far (default: one per fetch summary in the
+  corpus directory). An incremental refresh is round `rounds + 1`.
+- `credits_spent`: optional, when the run tallied it.
 
-1. **Who they are** — two or three lines from the identity lane, with the
-   host name(s) that keyed attribution. With the socials lane off, write it
-   from channel metadata and the transcripts themselves; never fill the gap
-   with background the run did not actually source.
-2. **The strongest facts** — the 15–20 `selected` facts, grouped by life
-   domain. Each is ONE line: the claim, plus a short verbatim quote with its
-   `&t=` link when it earns its place; confidence and the sensitivity tier as
-   bracketed tags. No per-fact evidence blocks — the ledger holds those.
-3. **Other channels** — sibling/second channels the identity lane surfaced:
-   name, id, and "not mined" unless a human asked (see SKILL.md). Each
-   linked social platform: read, or "linked but unread" with the reason —
-   and when the opt-in socials lane was not run, every linked platform the
-   channel metadata reports is listed there as "linked but unread (socials
-   lane not run)".
+## Reuse — a found ledger wins, with a freshness check
 
-Everything else belongs elsewhere: the channel-format label, the
-read/available ratio, the passages left out of this round, dropped-as-unattributable and
-unconfirmed counts, the format's confidence cap and caption corrections all
-live in the frontmatter, the CLI run report's funnel line, and the ledger
-HTML view — never in the body.
+Every run, PROFILE or CONNECT, starts with one command:
 
-An empty profile still carries sections 1 and 3 — "nothing they have said
-about themselves came through clearly enough to use" is a complete
-forwardable answer, in plain prose, without the numbers behind it.
+```bash
+python3 scripts/ledger_meta.py check --channel <id> [--lanes transcripts+socials] \
+  [--rebuild] [--no-refresh] [--max-new-videos 5] [--max-age-days 60]
+```
 
-### Style contract (hard, for the one-pager only)
+When `<channel_id>-facts.jsonl` + `<channel_id>-meta.json` exist it prints
+one announcement line, which the run report repeats verbatim —
 
-The merge pass composes the one-pager against this contract; `build_html.py`
-stays deterministic and never rewrites prose — it only strips what this
-contract says must not reach the page. Violations are a rewrite, not a
-render-time patch.
+> Found a ledger for Sydney Watson built 2026-09-01 over 2016-03 → 2026-08-20,
+> 91 facts. 3 videos uploaded since.
 
-- **Length**: ~300–450 words for the whole body. Shorter is fine; over 450 is
-  a failed compose.
-- **Say each fact once.** No fact appears in two sections, and no fact is
-  restated in different words. A quote that repeats its own claim is one of
-  the two, not both.
-- **No meta-language.** Nothing about how the profile was made: no "we
-  found", "our scan", "the analysis shows", "across N videos", "N windows",
-  "N gems", "N facts", no generation date, no corpus window, no coverage
-  percentage, no confidence tallies. The page is about the creator, not
-  about the work.
-- **No source names.** Never name where a fact came from — not a reference
-  site, not a channel about page, not a social platform, not "transcript".
-  Provenance is a ledger field, not one-pager prose. One carve-out: the
-  "Other channels" section names the creator's own platforms as *subject
-  matter* (their Instagram, their Twitch exist and are theirs) — that is the
-  section's job and those names stay. What is banned everywhere, including
-  there, is naming a platform, site, or page as the *source* of a fact
-  ("per his Instagram bio", "a creator wiki page says"). When a source
-  annotation is nonetheless present in the markdown, it must be written in a
-  shape the renderer can remove structurally: a bracketed note
-  (`(source: …)`, `[src: …]`, `(via: …)`) or a bracketed provenance tag
-  (`[web]`, `[social: …]`, `[transcript]`). Those shapes are stripped from
-  the human page and preserved in full in the ledger view; a source name
-  written as bare prose cannot be stripped and is a compose error.
-- **Plain declarative prose.** One idea per line, present tense where it
-  reads naturally, no hedging stacks ("appears to possibly suggest"), no
-  section preambles that announce what the section is about.
+— and a JSON decision. The uploads count is one cheap index count after
+`meta.latest_video_date`. The rule:
+
+- **`reuse`** — at most 5 uploads since and the ledger is at most 60 days
+  old (`--max-new-videos`, `--max-age-days`): use the ledger as is. CONNECT
+  goes straight to the brand read; PROFILE re-renders the ledger view.
+- **`refresh`** — more uploads than that, or an older ledger, or the count
+  failed, or the run asks for the socials lane and the ledger was built from
+  transcripts only (a ledger that read socials covers a transcripts-only
+  request; the reverse does not): run ONE incremental round (SKILL.md, "Incremental refresh") —
+  fetch with `--round N --exclude classified.jsonl`, extract only the new
+  batches, assemble with `--append`, re-cluster, merge, verify, rewrite the
+  ledger and the meta record. Cost scales with the new uploads, not the
+  corpus.
+- **`build`** — no ledger, an incomplete pair (facts without meta, or a v1
+  or v2 profile that predates the meta record), or `--rebuild`: full build.
+
+`--rebuild` forces a full build; `--no-refresh` forces reuse as is, whatever
+is new. Never reuse silently — the announcement line is the user's notice
+that the ledger predates today's uploads — and never refuse to rebuild.
 
 ## Mode B: `<channel_id>-<brand_id>-connections.md`
 
-A ranked connection map. Header: both IDs, the facts file it was built from,
-brand-read date. Then each connection, strongest first:
+A ranked connection map, the source the connections page renders from.
+Frontmatter:
 
-1. **The creator's own words** (or social/web fact, labelled as such) —
-   verbatim, timestamped, from the ledger.
+```yaml
+---
+schema: tl-creator-connections/v2
+channel_id: 123456
+channel_name: "…"
+brand_id: 50485
+brand_name: "…"
+facts_file: 123456-facts.jsonl
+brand_read_date: 2026-09-02
+---
+```
+
+Then one `## ` section per connection, strongest first — the section order
+IS the ranking and the page numbers them — with the type as a bold tag on
+the heading line: `## Runs on four hours of sleep — **direct**`. Each
+section holds, in this order:
+
+1. **The creator's own words** (or the social/web fact, labelled as such) —
+   verbatim, timestamped, from the ledger, as a `>` quote with its `&t=`
+   link.
 2. **What the brand offers that meets it**, and which brand-read lane that
-   came from.
+   came from (`[web]`, `[social: instagram]`, ad-read sample, sponsorship
+   patterns).
 3. **How this could be used** — one neutral line. Connection material, not ad
    copy; nobody is handed words to read aloud.
 
-Type each connection: **direct** (fact ↔ product), **adjacent**
-(lifestyle/context fit), or **category precedent** (the creator already does
-what the product enables, from the confirm-only probe). Facts at sensitivity
-tier `children` or `location` do not appear unless a human opted one in;
-`clinical` facts appear only when the creator discusses them repeatedly
-(three or more videos) or frames them as part of their own story, otherwise
-they too wait for a human opt-in (`evidence-rules.md`). If nothing honestly
-connects, the document says so, lists what was searched, and stops — a no-fit
+Types: **direct** (fact ↔ product), **adjacent** (lifestyle/context fit),
+**category precedent** (the creator already does what the product enables,
+from the confirm-only probe). Facts at sensitivity tier `children` or
+`location` do not appear unless a human opted one in; `clinical` facts
+appear only when the creator discusses them repeatedly (three or more
+videos) or frames them as part of their own story, otherwise they too wait
+for a human opt-in (`evidence-rules.md`). Beliefs are ordinary material.
+
+If nothing honestly connects, the document has no `## ` sections: a
+**no fit** verdict in prose, what was searched, and it stops — a no-fit
 verdict is the deliverable, not a failure.
 
 ## HTML views
 
-Both human documents also render to self-contained HTML via
-`scripts/build_html.py` (deterministic template — never hand-written per
-run): `<channel_id>-profile.html` and
-`<channel_id>-<brand_id>-connections.html`. Markdown + JSONL remain
-canonical; the HTML is the human view.
+Both surfaces render via `scripts/build_html.py` — a deterministic template,
+never hand-written per run. Markdown + JSONL remain canonical.
 
-The human page carries the creator name, the headline and the facts — and
-nothing else. Passing `--facts` writes a **second** file,
-`<channel_id>-profile-ledger.html` (override with `--ledger-out`), which is
-the machine/ledger surface: the meta chips (generation date, corpus window,
-transcripts-with-video counts, format label), the ledger strip (fact counts
-by confidence and domain), and every fact with its full citation. Publish
-the human page; keep the ledger view for whoever asks how the sausage was
-made. When the host supports publishing
-artifacts, publish the HTML so the user gets a link; the files in
+```bash
+# PROFILE — the ledger view (paths as ledger_meta.py write printed them)
+python3 scripts/build_html.py --facts tl-creator-profiles/<id>-facts.jsonl \
+  --meta tl-creator-profiles/<id>-meta.json
+# CONNECT — the connections page
+python3 scripts/build_html.py --in tl-creator-profiles/<id>-<brand>-connections.md \
+  --facts tl-creator-profiles/<id>-facts.jsonl --meta tl-creator-profiles/<id>-meta.json
+```
+
+- **`<channel_id>-profile-ledger.html`** (override `--ledger-out`): the
+  meta strip (build date, corpus window, matched/transcript videos, passages
+  judged, fact count, format, rounds), the tallies (confidence, sensitivity
+  tiers with the withheld count — `clinical` counts as withheld only below
+  three videos, per `evidence-rules.md` — and domains), every fact — claim,
+  tier badge, quote, full citation, link; superseded facts say which fact
+  replaced them — and then the other channels and platforms from `context`.
+- **`<channel_id>-<brand_id>-connections.html`** (override `--out`): a
+  **who they are** section — the top recurring facts by life domain (the
+  `selected` facts first, then by recurrence; at most three per domain and
+  twelve in all), each with a short verbatim quote and its link, the format
+  label and the corpus window — above the ranked **connections**, one card
+  per `## ` section with its type badge. Facts at tier `children` or
+  `location` never enter the who-they-are section; `clinical` and
+  `lifestyle` facts appear with their tier badge. Provenance labels in the
+  markdown are kept: a connection map names its lanes.
+
+When the host supports publishing artifacts, publish the connections page
+(or, in PROFILE mode, the ledger view) so the user gets a link; the files in
 `tl-creator-profiles/` are the durable copies.
-
-## Reuse
-
-Before Mode A, look for an existing `<channel_id>-facts.jsonl` +
-`<channel_id>-profile.md` pair. Offer it — when it was generated, its corpus
-window — and ask whether to reuse or rebuild. Never reuse silently (it has
-missed everything uploaded since); never refuse to rebuild. A v1 profile
-(`schema: tl-creator-profile/v1`, no facts file) predates the ledger split:
-offer it as context but a CONNECT run needs a rebuild to get its ledger.
 
 ## Never in any file
 

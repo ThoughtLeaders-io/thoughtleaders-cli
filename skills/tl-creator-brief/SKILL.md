@@ -14,14 +14,20 @@ description: >
 
 Two modes, one contract:
 
-- **PROFILE** (channel only, no brand needed): build the two-layer profile —
+- **PROFILE** (channel only, no brand needed): build the reusable ledger —
   `tl-creator-profiles/<channel_id>-facts.jsonl` (the machine ledger other
-  skills and CONNECT consume) and `<channel_id>-profile.md` (a ~300–450-word
-  human one-pager). Spec: `references/profile-spec.md`.
-- **CONNECT** (channel + brand): load (or build) the facts ledger, do a
-  deliberately light brand read, and write
-  `<channel_id>-<brand_id>-connections.md`, a ranked connection map. A no-fit
-  verdict is a valid output.
+  skills and CONNECT consume) plus `<channel_id>-meta.json` (when it was
+  built, over which videos, what it found) — and hand the user its rendered
+  view, `<channel_id>-profile-ledger.html`. Spec: `references/profile-spec.md`.
+- **CONNECT** (channel + brand): reuse (or build) the ledger, do a
+  deliberately light brand read, write `<channel_id>-<brand_id>-connections.md`
+  (a ranked connection map) and render the one designed deliverable,
+  `<channel_id>-<brand_id>-connections.html`, with a "who they are" section
+  drawn from the ledger. A no-fit verdict is a valid output.
+
+Every run starts the same way, whichever mode: **look for the ledger**
+(`## Reuse` below). A found ledger is used and announced; it is rebuilt
+only when it is stale or the user says `--rebuild`.
 
 Two standing rules: all data access from scripts goes through the shared
 wrapper (`skills/_shared/tl_data.py` — stdin-passed bodies, timeouts, loud
@@ -73,6 +79,34 @@ Do not ask when the answer is already settled:
 Everything below marked *(socials lane ON)* applies only when the answer was
 yes.
 
+## Reuse — the found ledger wins
+
+Before any fetch, one command:
+
+```bash
+python3 scripts/ledger_meta.py check --channel <id> [--rebuild] [--no-refresh]
+```
+
+Pass `--lanes transcripts+socials` when the socials lane is on. Found: it
+prints ONE announcement line, which you repeat to the user verbatim, plus a
+JSON `decision` — `reuse` (CONNECT skips fetch → extract → merge and lands at
+the brand read; PROFILE re-renders the ledger view), `refresh` (run ONE
+incremental round, below, then continue) or `build` (run the full PROFILE
+pipeline). The thresholds, the flags and the announcement contract live in
+`references/profile-spec.md`, "Reuse"; never reuse silently.
+
+**Incremental refresh** (decision `refresh`, round `N` = the JSON's
+`next_round`): `fetch_cues.py --channel <id> --host-terms "…" --round N
+--exclude <corpus>/<id>/classified.jsonl` (only passages not yet judged are
+batched, into `batches-rN/`); fan out extractors over those batches only;
+`assemble_extracts.py --batches <corpus>/<id>/batches-rN --returns
+<corpus>/<id>/returns-rN --out <corpus>/<id> --append`; re-cluster the whole
+`gems.jsonl`; run the merge pass with the existing `<channel_id>-facts.jsonl`
+as its starting ledger (keep fact_ids, add, supersede); verify; rewrite the
+ledger; `ledger_meta.py write … --rounds N` (descriptive fields not passed
+again are carried over from the record). Cost scales with the new uploads,
+not the corpus.
+
 ## PROFILE pipeline
 
 One retrieval flow, one extraction fan-out, then judgment. Every stage below
@@ -104,8 +138,8 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
      unreached is reported "linked but unread".
    - **Second channels: report, don't mine.** `channel_context.py` emits
      `second_channel_candidates`; each is resolved with `tl channels find`
-     and listed in the profile's "Other channels" section (name, id, video
-     count). Mining one happens ONLY when the user asks — it roughly doubles
+     and listed in the ledger view's "Other channels and platforms" section
+     (name, id). Mining one happens ONLY when the user asks — it roughly doubles
      the run.
    - **Lane OFF — what changes.** `channel_context.py` still runs and still
      reports `social_links` and `second_channel_candidates`: every linked
@@ -169,13 +203,25 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
    transcript quote against the stored passages: exact matches publish (their
    timestamps are authoritative), partial/none get fixed to the caption text
    or dropped.
-7. **Emit** per `references/profile-spec.md`: the verified ledger
-   `<channel_id>-facts.jsonl`, the ~300–450-word one-pager
-   `<channel_id>-profile.md`, and the two HTML views via
-   `scripts/build_html.py --in <profile.md> --facts <facts.jsonl>` — the
-   human page (no methodology, no source names) plus the machine ledger view
-   `<stem>-ledger.html`. When running in a host with an Artifact tool,
-   publish the human HTML so the user gets a link; the files in
+7. **Emit** per `references/profile-spec.md`: copy the verified facts to
+   `tl-creator-profiles/<channel_id>-facts.jsonl`, then
+
+   ```bash
+   python3 scripts/ledger_meta.py write --channel <id> --channel-name "…" \
+     --format <label> --format-evidence "…" --context <channel_context.json> \
+     [--lanes transcripts+socials]
+   python3 scripts/build_html.py --facts tl-creator-profiles/<id>-facts.jsonl \
+     --meta tl-creator-profiles/<id>-meta.json
+   ```
+
+   The meta record is counted from the build's files, never typed in;
+   `--context` is `channel_context.py`'s output saved to a file, so the
+   linked platforms ("linked but unread" when the lane was off) and sibling
+   channels ("not mined") still reach the page. The ledger view
+   `<channel_id>-profile-ledger.html` is PROFILE's human surface — every
+   fact, its citation, its sensitivity tier, then the other channels and
+   platforms. There is no prose one-pager. When running in a host with an Artifact tool, publish
+   the ledger view so the user gets a link; the files in
    `tl-creator-profiles/` are the durable copies.
 
 ## Run report — the funnel, every run
@@ -207,10 +253,14 @@ And one line saying whether the opt-in socials lane ran, always:
 error to report; say it plainly, with "re-run with socials on" as the fix
 when the user wants that coverage.
 
-Why this is mandatory: the one-pager shows the `selected` subset (15–20
-facts), while the ledger holds every verified fact. A run that renders "9
-facts" is not a failed run until the funnel says which stage lost them —
-without the table the user cannot tell selection from yield.
+And, when a ledger was found, the reuse announcement line exactly as
+`ledger_meta.py check` printed it, plus the decision it took (`reuse`,
+`refresh` round N, or `build`).
+
+Why this is mandatory: the connections page shows a dozen facts, while the
+ledger holds every verified fact. A run that renders "9 facts" is not a
+failed run until the funnel says which stage lost them — without the table
+the user cannot tell selection from yield.
 
 ## Fast runs
 
@@ -229,8 +279,9 @@ one re-run away and is never taken on the skill's own initiative.
 
 ## CONNECT pipeline
 
-Load `<channel_id>-facts.jsonl` (offer reuse per the spec's Reuse section;
-build PROFILE first when it is missing). Then:
+Run the `## Reuse` check first: `reuse` loads `<channel_id>-facts.jsonl` +
+`<channel_id>-meta.json` as they are, `refresh` runs one incremental round,
+`build` runs the PROFILE pipeline. Then:
 
 1. **Brand read — four lanes, all cheap subagents, all four spawned in ONE
    message, one-shot:**
@@ -253,9 +304,21 @@ build PROFILE first when it is missing). Then:
    **category precedent** (one channel-scoped probe of brand-category terms
    for moments the creator already does what the product enables). Follow-up
    queries are **confirm-only**: they deepen a candidate connection, never
-   invent one. Emit per `references/profile-spec.md`, then render the HTML
-   view (`scripts/build_html.py --in <connections.md>`) and publish it as an
-   artifact where the host supports one.
+   invent one. Write `<channel_id>-<brand_id>-connections.md` per
+   `references/profile-spec.md` (one `## ` section per connection, strongest
+   first, the type as a bold tag on the heading), then render the deliverable:
+
+   ```bash
+   python3 scripts/build_html.py \
+     --in tl-creator-profiles/<id>-<brand>-connections.md \
+     --facts tl-creator-profiles/<id>-facts.jsonl \
+     --meta tl-creator-profiles/<id>-meta.json
+   ```
+
+   The page opens with **who they are** — the top recurring facts by domain
+   and the format label, rendered from the ledger, never written by hand —
+   above the ranked connection cards. Publish it as an artifact where the
+   host supports one; it is the only page most users see.
 
 ## Guardrails
 

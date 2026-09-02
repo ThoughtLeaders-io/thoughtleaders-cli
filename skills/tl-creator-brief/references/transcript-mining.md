@@ -226,12 +226,15 @@ merge pass only decides what a script cannot:
   where that is enforced against the assembled record. Narrow the claim to
   what the quote says, or drop the fact — never publish the wider claim.
 - superseded-fact resolution (latest wins, history kept), confidence buckets,
-  and the `selected` picks for the one-pager.
+  and the `selected` picks (the facts the connections page leads with).
 
 It writes `facts.jsonl` (the shape in `references/profile-spec.md`), claims
 grounded in the assembled quotes only — the verifier, not the model, is the
 verbatim authority — and prints
 `FUNNEL stage=merge clusters=… facts=… selected=… dropped=… elapsed_s=…`.
+On an incremental round it starts from the existing `<channel_id>-facts.jsonl`
+rather than a blank page: fact_ids are kept, new facts are added, and a fact
+the new material supersedes is marked, never deleted.
 
 **Then verify in bulk, locally:**
 
@@ -244,13 +247,12 @@ Every transcript-provenance quote is located in the stored passages. Only
 `match: "exact"` publishes, and its located timestamp is authoritative.
 `partial` and `none` are flagged, never accepted: fix the quote to the
 caption text the result shows, or drop the fact. A quote that needs more
-than a mechanical fix goes back through the merge pass, not past it. Verified
-facts become `<channel_id>-facts.jsonl`; the one-pager and HTML render from
-there per `references/profile-spec.md`.
+than a mechanical fix goes back through the merge pass, not past it. Verified facts become `<channel_id>-facts.jsonl`; `ledger_meta.py write`
+records the build's meta beside it and `build_html.py` renders the ledger
+view from those two files per `references/profile-spec.md`.
 
 **The orchestrating context never sees raw transcripts.** It sees the fetch
-summary, the extractors' receipt lines, the assemble summary, the merge pass's
-returns, and the profile.
+summary, the extractors' receipt lines, the assemble summary, the merge pass's returns, and the rendered pages.
 
 ## Entity expansion: a second round, not a re-scan
 

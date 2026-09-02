@@ -89,120 +89,216 @@ def test_social_and_web_facts_pass_through_unverified(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# build_html.py
+# build_html.py — the ledger view and the connections page, from facts + meta
 # --------------------------------------------------------------------------- #
-def _render(tmp_path: Path, md: str, facts: list[dict] | None = None) -> str:
-    src = tmp_path / "doc.md"
-    src.write_text(md)
-    cmd = [sys.executable, str(_SCRIPTS / "build_html.py"),
-           "--in", str(src)]
-    if facts is not None:
-        cmd += ["--facts", str(_write_jsonl(tmp_path / "facts.jsonl", facts))]
-    subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return (tmp_path / "doc.html").read_text()
-
-
-def _render_ledger(tmp_path: Path, md: str, facts: list[dict]) -> str:
-    _render(tmp_path, md, facts)
-    return (tmp_path / "doc-ledger.html").read_text()
-
-
-_PROFILE_MD = (
-    "---\n"
-    'schema: tl-creator-profile/v2\n'
-    'channel_name: "Patterrz"\n'
-    "generated_at: 2026-08-31\n"
-    "videos_total: 412\n"
-    "videos_with_transcript: 287\n"
-    "format: solo\n"
-    "---\n\n"
-    "## Facts\n\n"
-    "- **Confirmed** grew up in Ohio [watch](https://youtube.com/w?t=1)\n"
-    "- This one is **direct** and *notable*\n\n"
-    "> we finally adopted luna\n"
-)
+_META = {"schema": "tl-creator-meta/v1", "channel_id": 42, "channel_name": "Patterrz",
+         "generated_at": "2026-08-31", "corpus_window": ["2019-04-02", "2026-08-20"],
+         "coverage": {"videos_with_transcript": 412, "videos_matched": 287,
+                      "passages": 2252, "windows_judged": 500, "gems": 310, "facts": 6},
+         "format": "solo", "latest_video_date": "2026-08-29", "rounds": 2}
 
 _FACTS = [
-    {"claim": "has a dog", "domain": "pets", "confidence": "confirmed",
-     "sensitive": False, "source_url": "https://example.com/about"},
-    {"claim": "born 1998", "domain": "family", "confidence": "unconfirmed",
-     "sensitive": True},
+    {"fact_id": "f1", "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
+     "sensitivity": "none", "sensitive": False, "recurrence": 4, "selected": True,
+     "quote": "we finally adopted luna from the shelter last spring and she",
+     "url": "https://www.youtube.com/watch?v=abc&t=12s"},
+    {"fact_id": "f2", "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
+     "sensitivity": "lifestyle", "sensitive": False, "recurrence": 2},
+    {"fact_id": "f3", "claim": "was diagnosed with ADHD", "domain": "health",
+     "confidence": "confirmed", "sensitivity": "clinical", "sensitive": True, "recurrence": 3},
+    {"fact_id": "f4", "claim": "daughter is named Maple", "domain": "family",
+     "confidence": "confirmed", "sensitivity": "children", "sensitive": True, "recurrence": 5},
+    {"fact_id": "f5", "claim": "lives on Elm Street", "domain": "home",
+     "confidence": "unconfirmed", "sensitivity": "location", "sensitive": True},
+    {"fact_id": "f6", "claim": "lived in LA", "domain": "home", "confidence": "confirmed",
+     "sensitivity": "none", "sensitive": False, "superseded_by": "f7",
+     "source_url": "https://example.com/about"},
 ]
 
+_CONN_MD = (
+    "---\n"
+    "schema: tl-creator-connections/v2\n"
+    'channel_name: "Patterrz"\n'
+    "brand_name: Acme\n"
+    "facts_file: 42-facts.jsonl\n"
+    "brand_read_date: 2026-09-02\n"
+    "---\n\n"
+    "Built from 6 facts.\n\n"
+    "## 1. Adopted a rescue dog — **direct**\n\n"
+    "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n"
+    "Acme sells dog food [web]\n\n"
+    "## Streams on Sundays — **category precedent**\n\n"
+    "Bakes sourdough weekly [social: instagram]\n"
+)
 
-def test_html_is_self_contained_with_badges_quotes_and_meta(tmp_path):
-    html = _render(tmp_path, (
-        "---\n"
-        'schema: tl-creator-profile/v2\n'
-        'channel_name: "Patterrz"\n'
-        "generated_at: 2026-08-31\n"
-        "videos_total: 412\n"
-        "videos_with_transcript: 287\n"
-        "format: solo\n"
-        "---\n\n"
-        "## Facts\n\n"
-        "- **Confirmed** grew up in Ohio [watch](https://youtube.com/w?t=1)\n"
-        "- This one is **direct** and *notable*\n\n"
-        "> we finally adopted luna\n"
-    ), facts=[
-        {"domain": "pets", "confidence": "confirmed", "sensitive": False},
-        {"domain": "family", "confidence": "unconfirmed", "sensitive": True},
-    ])
-    assert "<title>Patterrz</title>" in html
-    assert 'class="badge badge-confirmed"' in html
-    assert 'class="badge badge-direct"' in html
-    assert "<blockquote>" in html
-    # the human page carries no methodology, corpus stats or ledger tallies
-    assert "videos with transcript" not in html
-    assert "generated" not in html
-    assert "format:" not in html
-    assert "Full ledger" not in html
-    # self-contained: no external fetches of any kind
-    assert "http" not in html.split("</head>")[0].replace(
-        "http-equiv", "")
+
+def _write_ledger(tmp_path: Path, facts=None, meta=None) -> tuple[Path, Path]:
+    facts_path = _write_jsonl(tmp_path / "42-facts.jsonl",
+                              _FACTS if facts is None else facts)
+    meta_path = tmp_path / "42-meta.json"
+    meta_path.write_text(json.dumps(_META if meta is None else meta))
+    return facts_path, meta_path
+
+
+def _render_ledger(tmp_path: Path, facts=None, meta=None) -> str:
+    facts_path, meta_path = _write_ledger(tmp_path, facts, meta)
+    subprocess.run([sys.executable, str(_SCRIPTS / "build_html.py"),
+                    "--facts", str(facts_path), "--meta", str(meta_path)],
+                   capture_output=True, text=True, check=True)
+    return (tmp_path / "42-profile-ledger.html").read_text()
+
+
+def _render_conn(tmp_path: Path, md: str, facts=None, meta=None,
+                 with_ledger: bool = True) -> str:
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(md)
+    cmd = [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src)]
+    if with_ledger:
+        facts_path, meta_path = _write_ledger(tmp_path, facts, meta)
+        cmd += ["--facts", str(facts_path), "--meta", str(meta_path)]
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return (tmp_path / "42-7-connections.html").read_text()
+
+
+def test_ledger_view_renders_meta_tiers_and_citations(tmp_path):
+    html = _render_ledger(tmp_path)
+    assert "<title>Patterrz — ledger</title>" in html
+    assert "built 2026-08-31" in html
+    assert "corpus 2019-04-02 → 2026-08-20" in html
+    assert "287/412 transcript videos matched" in html
+    assert "500 passages judged" in html and "format: solo" in html and "2 rounds" in html
+    # every fact, its tier as a badge, and the tier tallies
+    assert "6 facts: 5 confirmed, 1 unconfirmed" in html
+    # f3 is clinical but discussed in 3 videos, so it is usable in angles and
+    # not counted as withheld; children + location are
+    assert "1 lifestyle, 1 clinical, 1 children, 1 location — 2 withheld from angles" in html
+    assert 'class="badge badge-lifestyle">lifestyle</span>' in html
+    assert 'class="badge badge-clinical">clinical</span>' in html
+    assert html.count('class="badge badge-withheld"') == 2
+    assert "sensitivity: none" in html and "superseded by f7" in html
+    assert "daughter is named Maple" in html      # the ledger holds everything
+    assert "https://example.com/about" in html
     assert "<script" not in html
     assert "@media (prefers-color-scheme: dark)" in html
+    assert ':root[data-theme="dark"]' in html
 
 
-def test_ledger_view_keeps_meta_tallies_and_citations(tmp_path):
-    html = _render_ledger(tmp_path, _PROFILE_MD, _FACTS)
-    assert "287/412 videos with transcript" in html
-    assert "generated 2026-08-31" in html
-    assert "format: solo" in html
-    assert "Full ledger: 2 facts" in html and "1 sensitive" in html
-    assert "https://example.com/about" in html
-    assert "has a dog" in html and "born 1998" in html
+def test_a_passing_clinical_mention_counts_as_withheld(tmp_path):
+    html = _render_ledger(tmp_path, facts=[
+        {"claim": "takes medication", "domain": "health", "sensitivity": "clinical",
+         "recurrence": 1}])
+    assert "1 clinical — 1 withheld from angles" in html
 
 
-def test_human_page_strips_source_names_ledger_keeps_them(tmp_path):
-    md = (
-        "---\n"
-        'channel_name: "Patterrz"\n'
-        "---\n\n"
-        "## Facts\n\n"
-        "- grew up in Ohio (source: Famous Birthdays)\n"
-        "- has two cats [src: channel about page]\n"
-        "- streams on Sundays [social: instagram]\n"
-        "- born in 1998 — source: Famous Birthdays\n"
-        "- keeps a garden (via: the channel about page)\n"
-    )
-    html = _render(tmp_path, md, _FACTS)
-    assert "Famous Birthdays" not in html
-    assert "about page" not in html
-    assert "source" not in html.split("</head>")[1]
-    # the claims themselves survive, sans annotation
-    assert "grew up in Ohio" in html
-    assert "<li>has two cats</li>" in html
-    assert "<li>born in 1998</li>" in html
-    assert "<li>keeps a garden</li>" in html
-    # and the ledger view still carries the citations
-    assert "https://example.com/about" in _render_ledger(tmp_path, md, _FACTS)
+def test_ledger_view_lists_linked_platforms_and_sibling_channels(tmp_path):
+    meta = dict(_META, lanes="transcripts",
+                context={"social_links": ["https://instagram.com/patterrz", "javascript:x"],
+                         "second_channel_candidates": [{"name": "Patterrz Clips", "id": 43}]})
+    html = _render_ledger(tmp_path, meta=meta)
+    assert "lanes: transcripts" in html
+    assert "<h2>Other channels and platforms</h2>" in html
+    assert 'href="https://instagram.com/patterrz"' in html
+    assert "linked but unread (socials lane not run)" in html
+    assert 'href="javascript' not in html and "javascript:x" in html
+    assert "Patterrz Clips (id 43) — not mined" in html
+    read = _render_ledger(tmp_path, meta=dict(meta, lanes="transcripts+socials"))
+    assert "read (socials lane)" in read and "unread" not in read
+
+
+def test_old_boolean_ledgers_render_as_withheld(tmp_path):
+    html = _render_ledger(tmp_path, facts=[
+        {"claim": "born 1998", "domain": "family", "sensitive": True},
+        {"claim": "has a cat", "domain": "pets", "sensitive": False}])
+    assert "1 withheld (untiered)" in html
+    assert 'badge-withheld">withheld</span>' in html
+
+
+def test_connections_page_leads_with_who_they_are_then_ranked_cards(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD)
+    assert "<title>Patterrz × Acme</title>" in html
+    who, conn = html.split("<h2>Connections</h2>")
+    assert "<h2>Who they are</h2>" in who
+    assert "format: solo" in who and "videos 2019-04 → 2026-08" in who
+    assert "6 facts in the ledger" in who
+    # top facts by domain, with a short quote and its link
+    assert "has a dog" in who and "we finally adopted luna" in who
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s">watch</a>' in who
+    assert "wears glasses" in who and 'badge-lifestyle' in who
+    assert "was diagnosed with ADHD" in who and "badge-clinical" in who
+    # withheld tiers and superseded facts never reach the brand-facing section
+    assert "Maple" not in who and "Elm Street" not in who and "lived in LA" not in who
+    # the cards: numbered by order, type badge, provenance labels kept
+    assert '<ol class="conn">' in conn and conn.count("<li><div class=\"body\">") == 2
+    assert "<h3>Adopted a rescue dog — " in conn      # the "1." is the card's numeral
+    assert 'class="badge badge-direct">direct</span>' in conn
+    assert 'class="badge badge-precedent">category precedent</span>' in conn
+    assert "[web]" in conn and "social: instagram" in conn
+    assert "brand read 2026-09-02" in html and "from 42-facts.jsonl" in html
+    # the only external reference is the font stylesheet; no script anywhere
+    head = html.split("</head>")[0]
+    assert head.count("http") == 1 and "fonts.googleapis.com" in head
+    assert "<script" not in html
+
+
+def test_no_fit_verdict_renders_as_prose_without_cards(tmp_path):
+    md = ("---\nchannel_name: Patterrz\nbrand_name: Acme\n---\n\n"
+          "**No fit**: nothing in the ledger meets Acme. Searched: 3 category terms.\n")
+    html = _render_conn(tmp_path, md)
+    assert '<ol class="conn">' not in html
+    assert 'class="badge badge-nofit">No fit</span>' in html
+    assert "Searched: 3 category terms" in html
+
+
+def test_connections_page_without_a_ledger_has_no_who_section(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD, with_ledger=False)
+    assert "Who they are" not in html and '<ol class="conn">' in html
 
 
 def test_html_escapes_untrusted_markdown_text(tmp_path):
-    html = _render(tmp_path, "# T\n\nquote says <script>alert(1)</script>\n")
+    html = _render_conn(tmp_path, "# T\n\nquote says <script>alert(1)</script>\n",
+                        with_ledger=False)
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_link_target_quote_cannot_break_out_of_href(tmp_path):
+    html = _render_conn(tmp_path, (
+        '# T\n\n[click](https://x.com/a"onmouseover="alert(1))\n'), with_ledger=False)
+    assert 'onmouseover="alert' not in html
+    assert "&quot;onmouseover=&quot;" in html
+
+
+def test_markdown_h1_title_is_not_double_escaped(tmp_path):
+    html = _render_conn(tmp_path, "# Rhett & Link\n\nhello\n", with_ledger=False)
+    assert "<title>Rhett &amp; Link</title>" in html
+    assert "&amp;amp;" not in html
+
+
+def test_href_ampersands_escape_exactly_once(tmp_path):
+    html = _render_conn(tmp_path,
+                        "[watch](https://www.youtube.com/watch?v=abc&t=90s)\n",
+                        with_ledger=False)
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=90s"' in html
+    assert "&amp;amp;" not in html
+
+
+def test_ledger_links_only_http_schemes(tmp_path):
+    facts = [{"fact_id": "f1", "claim": "grew up in Ohio",
+              "url": "javascript:alert(1)",
+              "source_url": "https://example.com/about"}]
+    ledger = _render_ledger(tmp_path, facts=facts)
+    assert 'href="javascript' not in ledger
+    assert "javascript:alert(1)" in ledger          # still visible as text
+    assert 'href="https://example.com/about"' in ledger
+
+
+def test_who_they_are_link_only_http_schemes(tmp_path):
+    facts = [{"fact_id": "f1", "claim": "grew up in Ohio", "domain": "origin",
+              "quote": "I grew up in Ohio", "url": "javascript:alert(1)",
+              "sensitivity": "none"}]
+    html = _render_conn(tmp_path, _CONN_MD, facts=facts)
+    who = html.split("<h2>Connections</h2>")[0]
+    assert 'href="javascript' not in who and "grew up in Ohio" in who
 
 
 # --------------------------------------------------------------------------- #
@@ -336,22 +432,6 @@ def test_condensed_wire_contract_is_small_and_keeps_the_contract():
     assert "untrusted" in classify_gems.build_prompt(condensed, {}, [])
 
 
-# --------------------------------------------------------------------------- #
-# codex-review regression fixes
-# --------------------------------------------------------------------------- #
-def test_link_target_quote_cannot_break_out_of_href(tmp_path):
-    html = _render(tmp_path, (
-        '# T\n\n[click](https://x.com/a"onmouseover="alert(1))\n'))
-    assert 'onmouseover="alert' not in html
-    assert "&quot;onmouseover=&quot;" in html
-
-
-def test_markdown_h1_title_is_not_double_escaped(tmp_path):
-    html = _render(tmp_path, "# Rhett & Link\n\nhello\n")
-    assert "<title>Rhett &amp; Link</title>" in html
-    assert "&amp;amp;" not in html
-
-
 def test_locate_prefers_the_occurrence_nearest_the_hint():
     sys.path.insert(0, str(_SCRIPTS))
     from quote_timestamp import locate
@@ -386,13 +466,6 @@ def test_youtu_be_shortlinks_are_not_second_channel_candidates():
     assert [c["link"] for c in cands] == ["https://youtube.com/@mainVlogs"]
 
 
-def test_href_ampersands_escape_exactly_once(tmp_path):
-    html = _render(tmp_path,
-                   "[watch](https://www.youtube.com/watch?v=abc&t=90s)\n")
-    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=90s"' in html
-    assert "&amp;amp;" not in html
-
-
 # --------------------------------------------------------------------------- #
 # classify_gems.py — the legacy cheap-API path (no longer in the pipeline)
 # --------------------------------------------------------------------------- #
@@ -422,37 +495,6 @@ def test_limit_bounds_the_fallback_batch_set(tmp_path):
     files = sorted(limited.glob("batch-*.json"))
     assert len(files) == 1
     assert len(json.loads(files[0].read_text())) == 2
-
-
-def test_connect_documents_keep_provenance_labels(tmp_path):
-    md = ("---\n"
-          "channel_name: Test Channel\n"
-          "brand_name: Acme\n"
-          "---\n"
-          "\n"
-          "- Bakes sourdough weekly [social: instagram]\n")
-    page = _render(tmp_path, md)
-    # connection maps require their provenance labels; only the PROFILE
-    # one-pager is source-stripped
-    assert "social: instagram" in page
-
-
-def test_ledger_links_only_http_schemes(tmp_path):
-    facts = [{"fact_id": "f1", "claim": "grew up in Ohio",
-              "url": "javascript:alert(1)",
-              "source_url": "https://example.com/about"}]
-    ledger = _render_ledger(tmp_path, _PROFILE_MD, facts)
-    assert 'href="javascript' not in ledger
-    assert "javascript:alert(1)" in ledger          # still visible as text
-    assert 'href="https://example.com/about"' in ledger
-
-
-def test_via_parenthetical_prose_survives_the_strip(tmp_path):
-    md = ("---\nchannel_name: T\n---\n\n"
-          "- Traveled across Europe (via train) (source: Famous Birthdays)\n")
-    page = _render(tmp_path, md)
-    assert "via train" in page
-    assert "Famous Birthdays" not in page
 
 
 def test_full_spec_rerun_invalidates_condensed_verdicts(tmp_path):
