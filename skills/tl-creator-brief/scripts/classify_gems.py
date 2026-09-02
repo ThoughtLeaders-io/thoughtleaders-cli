@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Classify ranked windows for self-disclosure via an OpenAI-compatible API.
+"""LEGACY. Classify ranked windows for self-disclosure via an OpenAI-compatible API.
 
-The primary classifier for the model layer: reads the rank-ordered batch files
-written by ``selftalk_scan.py``, sends chunks of windows to an OpenAI-compatible
-chat endpoint (JSON mode enforced), and writes one verdict per window.
+**Not part of the pipeline any more.** The model layer is one merged
+extraction fan-out over ``fetch_cues.py``'s batches (classify + extract in the
+same pass), assembled by ``assemble_extracts.py``; this script's classify-only
+verdicts do not carry the claim, quote span or sensitivity tier that pass
+produces. It is kept because its API path still runs against a batch directory
+of the same window shape, and because nothing else exercises the cheap-endpoint
+route; no skill step invokes it. Do not extend it — extend the extractor rubric
+(``references/gem-classifier.md``) and ``assemble_extracts.py`` instead.
+
+Reads rank-ordered batch files of windows, sends chunks of them to an
+OpenAI-compatible chat endpoint (JSON mode enforced), and writes one verdict
+per window.
 
 The wire prompt carries a **condensed** statement of the classifier contract
 (``CONDENSED_SPEC`` below, ~1.6K chars) rather than the two reference docs
@@ -241,7 +250,7 @@ def main() -> None:
     started = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--batches", required=True,
-                    help="batches/ directory from selftalk_scan.py")
+                    help="batches/ directory of window files")
     ap.add_argument("--context", required=True,
                     help="JSON file with the classifier context block: "
                          "channel_name, host_names, known_facts, "

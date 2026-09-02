@@ -35,6 +35,7 @@ One JSON object per line, only quote-verified and judgment-passed facts:
  "published": "2024-05-01",
  "recurrence": 3,
  "confidence": "confirmed",
+ "sensitivity": "none",
  "sensitive": false,
  "superseded_by": null,
  "selected": true}
@@ -56,6 +57,11 @@ One JSON object per line, only quote-verified and judgment-passed facts:
   reaches `confirmed` only on a transcript-side rule (solo format, or a
   host-anchored window), never by corroboration. That is a ceiling on the
   evidence, not a defect in the run — note it in the coverage caveats.
+- `sensitivity`: `none` | `lifestyle` | `clinical` | `children` | `location`,
+  per `evidence-rules.md`. `sensitive` is the **derived** boolean — true
+  exactly for the withheld tiers (`clinical`, `children`, `location`) — kept
+  so readers written against the old flag keep working. The tier is the fact;
+  never set the boolean independently of it.
 - `superseded_by`: the `fact_id` of the newer fact when latest-wins applies;
   superseded facts stay in the ledger as history.
 - `selected`: true on the 15–20 strongest facts — the ones the one-pager
@@ -98,7 +104,7 @@ Then the body, **~300–450 words total**:
    with background the run did not actually source.
 2. **The strongest facts** — the 15–20 `selected` facts, grouped by life
    domain. Each is ONE line: the claim, plus a short verbatim quote with its
-   `&t=` link when it earns its place; confidence and sensitive flags as
+   `&t=` link when it earns its place; confidence and the sensitivity tier as
    bracketed tags. No per-fact evidence blocks — the ledger holds those.
 3. **Other channels** — sibling/second channels the identity lane surfaced:
    name, id, and "not mined" unless a human asked (see SKILL.md). Each
@@ -108,7 +114,7 @@ Then the body, **~300–450 words total**:
    lane not run)".
 
 Everything else belongs elsewhere: the channel-format label, the
-read/available ratio, `windows_over_cap`, dropped-as-unattributable and
+read/available ratio, the passages left out of this round, dropped-as-unattributable and
 unconfirmed counts, the format's confidence cap and caption corrections all
 live in the frontmatter, the CLI run report's funnel line, and the ledger
 HTML view — never in the body.
@@ -119,7 +125,7 @@ forwardable answer, in plain prose, without the numbers behind it.
 
 ### Style contract (hard, for the one-pager only)
 
-The fact pass composes the one-pager against this contract; `build_html.py`
+The merge pass composes the one-pager against this contract; `build_html.py`
 stays deterministic and never rewrites prose — it only strips what this
 contract says must not reach the page. Violations are a rewrite, not a
 render-time patch.
@@ -166,8 +172,11 @@ brand-read date. Then each connection, strongest first:
 
 Type each connection: **direct** (fact ↔ product), **adjacent**
 (lifestyle/context fit), or **category precedent** (the creator already does
-what the product enables, from the confirm-only probe). Sensitive-flagged
-facts do not appear unless a human opted one in. If nothing honestly
+what the product enables, from the confirm-only probe). Facts at sensitivity
+tier `children` or `location` do not appear unless a human opted one in;
+`clinical` facts appear only when the creator discusses them repeatedly
+(three or more videos) or frames them as part of their own story, otherwise
+they too wait for a human opt-in (`evidence-rules.md`). If nothing honestly
 connects, the document says so, lists what was searched, and stops — a no-fit
 verdict is the deliverable, not a failure.
 

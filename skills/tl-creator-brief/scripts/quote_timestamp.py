@@ -33,8 +33,8 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
-from fetch_corpus import cues as parse_cues
-from fetch_corpus import open_corpus
+from corpus_io import cues as parse_cues  # sibling script
+from corpus_io import open_corpus
 
 
 def fetch_cues(video_ref: str, corpus: str | None) -> list[tuple[float, str]]:
@@ -122,7 +122,7 @@ def main() -> None:
     ap.add_argument("video_ref", help="<channel_id>:<video_id>")
     ap.add_argument("quote", nargs="*", help="the quote, verbatim (or stdin)")
     ap.add_argument("--corpus", default=None,
-                    help="corpus.jsonl.gz from fetch_corpus.py (a plain "
+                    help="corpus.jsonl.gz from fetch_cues.py (a plain "
                          ".jsonl corpus is read too); skips the "
                          "indexed fetch")
     a = ap.parse_args()

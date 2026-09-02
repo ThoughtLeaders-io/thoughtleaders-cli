@@ -37,7 +37,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
-from fetch_corpus import open_corpus  # sibling script
+from corpus_io import open_corpus  # sibling script
 
 FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'd|i'll|my|me|myself)\b", re.I)
 
@@ -242,7 +242,7 @@ def main() -> None:
     ap.add_argument("--channel", type=int, required=True,
                     help="internal TL channel id, from `tl channels find`")
     ap.add_argument("--corpus", default=None,
-                    help="corpus.jsonl.gz from fetch_corpus.py (a plain "
+                    help="corpus.jsonl.gz from fetch_cues.py (a plain "
                          ".jsonl corpus is read too); adds measured "
                          "format stats")
     ap.add_argument("--per-video-out", dest="per_video_out", default=None,

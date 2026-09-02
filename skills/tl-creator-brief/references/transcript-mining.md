@@ -1,195 +1,130 @@
 # Transcript mining
 
-How a channel's transcripts become a profile. Four layers, in order: one
-deterministic fetch, one generous local recall pass, one cheap-API
-classification pass, and one small model layer where the remaining judgment
-lives. Query credits are not a budget here; the budgets are model tokens and
-tiers — which is why everything selective runs locally, classification runs
-on a cheap API model, and Claude is spent only on judgment no script can
+How a channel's transcripts become a profile. One retrieval flow, one
+extraction fan-out, then judgment. Query credits are not a budget here; the
+budgets are model tokens and tiers — which is why retrieval is a single
+script, extraction runs on sonnet agents that each see 25 windows and nothing
+else, and the expensive context is spent only on judgment no script can
 encode.
 
-## Layer 1: fetch everything, one query
+Measured end to end on three channels (Sydney Watson 20107, Alex Hormozi
+253904 = 4,205 videos, Emma Chamberlain 3268): fetch 7–21 s regardless of
+channel size; 310 gems / 500 windows, 405 / 497, 432 / 500; every quote exact
+by construction; extractor agents 2.3–8 minutes each, gem-dense channels at
+the long end.
+
+## Layer 1+2: fetch the cue passages, one script
 
 ```bash
-python3 <skill>/scripts/fetch_corpus.py --channel <channel_id>
-```
-
-A single paged sweep (`search_after`, transcript in `_source`) walks the
-channel's whole history into a local store,
-`tl-creator-profiles/.corpus/<channel_id>/corpus.jsonl.gz` — caption XML
-stripped, cue start-seconds kept, so every future quote is born with its
-`&t=` link. The store is gzipped (captions compress ~8x); every script that
-reads a corpus takes either the `.gz` or a plain `corpus.jsonl` from an older
-run, so nothing already on disk goes stale. Videos without transcripts come back from the same sweep without
-the field: coverage census for free, no second query.
-
-- **No per-video fetch loops, anywhere.** One video = one line in a store the
-  sweep already wrote.
-- **No sampling, no read cap, no probe battery.** The whole catalogue comes
-  home.
-- **Failures abort loudly.** An auth, credit or network error stops the run
-  with the error in hand. It is never recorded as "video had no transcript" —
-  an outage must not produce a confident empty profile.
-- **Reruns are incremental.** With a corpus already on disk the sweep resumes
-  from its last stored upload and appends only what is newer, so a second run
-  on a 5,000-video channel costs seconds instead of a full re-download. The
-  summary says which path ran: `"mode": "incremental" | "full"`, with
-  `new_videos` (appended now) beside `stored_videos` (already on disk) and the
-  usual whole-corpus `videos` / `with_transcript` / `coverage`.
-- **Incremental sees new uploads only.** A video already stored is never
-  revisited, so an edited title or a transcript added/redone after the first
-  run is not picked up. `--full` forces the from-scratch sweep and is the
-  refresh path for that. A corpus whose last line is unreadable (a killed run)
-  is refetched in full automatically, with a note on stderr.
-- **Appending keeps the same all-or-nothing write.** The existing corpus is
-  copied to the temp file first and renamed over only after the last page
-  lands, so a failure mid-sweep leaves the previous complete corpus intact.
-
-## Layer 2: generous local recall pass
-
-```bash
-python3 <skill>/scripts/selftalk_scan.py \
-  --corpus tl-creator-profiles/.corpus/<channel_id>/corpus.jsonl.gz \
+python3 <skill>/scripts/fetch_cues.py --channel <channel_id> \
   --host-terms "<surname>,<company>,<former role>"
 ```
 
-`--host-terms` come from the identity & socials lane when the user opted into
-it. **With that lane off (the default), source them from channel metadata
-instead**: the channel and creator names `channel_context.py` reports, names
-and handles in the about text, and the host name(s) the format call keys
-attribution on — plus any name the user supplied in the request. A thinner
-term list costs recall on entity hits only; first-person windows are kept
-regardless, so the scan still runs at full coverage.
+Retrieval and selection are the same query. A boolean `should` of
+`match_phrase` clauses over the cue phrases selects the videos, and the
+index's `highlight` returns the passages around each hit with the timed-text
+`start` attributes intact — so a 5,000-video channel costs a few dozen small
+queries instead of a full transcript download, and every passage is born with
+its `&t=` link. There is no local full-transcript scan any more; nothing is
+downloaded that the model layer will not read.
 
-Windows every transcript into ~260-char passages and keeps anything with a
-first-person marker or a fuzzy entity hit. This layer exists solely to cut
-model spend, so it is tuned for recall, never precision:
+**Flags:**
 
-- **Nothing with first-person content is hard-rejected.** The old disclosure
-  and exclusion lexicons are ranking features: they order what the models read
-  first, they reject nothing. The only hard drop is provable boilerplate
-  ("subscribe", "link in the description") with no other first-person content.
-- **Fuzzy means token-bounded edit-distance + phonetic matching** on host
-  terms, family and pet names, and later brand names — the layer that survives
-  caption mangling ("Maddox" for Matiks, "social channel" for Social Chain).
-  Token-bounded: a term matches whole tokens only, so a surname "Lee" can
-  never match "sleep".
-- Deterministic attribution features are attached to every window as **model
-  inputs, not verdicts**: sponsored-span overlap, cross-video recurrence of
-  rare phrases, fuzzy host-anchor hits. Nothing is silently discarded by them.
+| flag | default | what it does |
+|---|---|---|
+| `--channel` | required | internal TL channel id, from `tl channels find` |
+| `--host-terms` | none | comma-separated names/companies; a hit on one is a strong host anchor and scores double |
+| `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
+| `--phrases` | `references/cue-phrases.txt` | the cue list |
+| `--max-windows` | 500 | the cap on what reaches the model layer (20 agents × 25) |
+| `--batch-size` | 25 | windows per batch file, one per extractor agent |
+| `--per-video-cap` | 8 | no single video may own the batch set |
+| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | passage width and how many per video |
+| `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
+| `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
 
-Output: `windows.jsonl.gz` (every kept window, ranked; gzipped, and a
-window carries `video_id` + `start` rather than an assembled watch URL —
-whoever shows one builds `…watch?v=<video_id>&t=<start>s` at that point) plus
-`batches/batch-*.json`, rank-ordered ~50-window files already capped at
-`--max-windows` (default 500) for the classification layer. The kept share
-varies hugely by format (measured: ~18% on a faceless narration channel,
-60–85% on talk-heavy solo and interview channels) — which is why cost control
-does NOT rely on this layer alone: it comes from the rank ordering, the
-window cap, and the cheap classifier below.
+**`cue-phrases.txt`** is one phrase per line, `#` for comments. A leading
+`~` marks a **recurring bit** — a greeting, a sign-off, a channel catchphrase
+that fires in nearly every upload ("~welcome back to", "~my name is"). Those
+still score, but they are capped hard, so a channel's fixed intro can seed a
+few windows and never fill the batch set. Ordinary phrases are capped at the
+larger of 12 windows or 8% of the cap; no single video passes
+`--per-video-cap`; ties are spread across the channel's years, so a profile
+spans the back catalogue rather than the last twelve months.
 
-**The cap is enforced by the scan, not by judgment.** Ranked windows keep
-their top scores, and unranked (non-English) windows are stride-sampled
-across the channel's whole history, so a giant back-catalogue costs the same
-as a mid-sized one. The summary's `windows_over_cap` reports what stayed
-local — carry that number into the profile's coverage header, because
-"absence is not evidence" needs it. Do not raise the cap on your own
-initiative; the corpus and `windows.jsonl.gz` keep everything, so a deeper pass
-is one free re-scan away when a human asks for it. 500 top-ranked windows
-demonstrably covers the facts a brief actually uses; with the script
-classifier the cap is a latency/quality knob more than a cost knob.
+**Ad reads.** Windows are built with a regex heuristic in `in_sponsor_read`,
+and once the cap is taken the kept windows' real sponsored spans are looked up
+by video id (`scripts/sponsor_spans.py`) and the flag is decided from them —
+a window overlaps a read when `[start, start+30]` meets a sponsored span
+padded 75 s either side. The lookup is authoritative when it succeeds; the
+heuristic stays when it fails. The summary's `sponsor_source` says which one
+decided, and it belongs in the run report whenever it reads `regex_fallback`.
 
-## Layer 3: classification — a script, not a fan-out
+**Output**, under `<out>/<channel_id>/`:
 
-```bash
-python3 <skill>/scripts/classify_gems.py \
-  --batches tl-creator-profiles/.corpus/<channel_id>/batches \
-  --context context.json
-```
+- `windows.jsonl.gz` — every passage found, ranked (a window carries
+  `video_id` + `start`, not an assembled watch URL; whoever shows one builds
+  `…watch?v=<video_id>&t=<start>s` at that point).
+- `batches/batch-NNN.json` — the capped set, 25 windows per file, one file per
+  extractor agent.
+- `corpus.jsonl.gz` — the same store shape the verifiers read, holding the
+  fetched passages as cues, so `verify_quotes.py` and `quote_timestamp.py` run
+  unchanged. It is **passages, not transcripts**: `channel_context.py`'s
+  corpus stats over it are a format hint, not a coverage census.
 
-`classify_gems.py` sends the batched windows to an OpenAI-compatible chat
-endpoint (JSON mode enforced, resumable, malformed responses retried and
-recorded rather than dropped). The rubric has ONE home —
-`references/gem-classifier.md`, which points to `evidence-rules.md`. The
-script's wire prompt carries a condensed statement of that same contract (gem
-test, attribution, domain taxonomy, sensitivity, output schema) instead of the
-two docs verbatim, because they were resent on every chunk and that payload,
-not the windows, dominated the prompt bill and the latency. `--full-spec`
-sends the docs verbatim; the agent fallback below always reads them.
-Configuration is env-only (nothing machine-specific lives in this skill):
+The summary (stdout) and one `FUNNEL stage=fetch_cues …` line (stderr) carry
+`videos_matched`, `passages`, `windows_capped`, `batches`, `sponsor_source`
+and `elapsed_s`. `passages` minus `windows_capped` is what stayed out of this
+round — carry it into the profile's coverage header, because "absence is not
+evidence" needs it.
 
-- `CREATOR_BRIEF_LLM_API_KEY` — required; no key means this layer falls back
-  to agents (below).
-- `CREATOR_BRIEF_LLM_BASE_URL` — default `https://openrouter.ai/api/v1`.
-- `CREATOR_BRIEF_LLM_MODEL` — default `deepseek/deepseek-v3.2`. The
-  reference config is OpenRouter with that model: roughly 5–10× cheaper than
-  a haiku agent fan-out and two orders of magnitude cheaper than doing it in
-  the orchestrating context.
-- `CREATOR_BRIEF_LLM_CONCURRENCY` — parallel requests, default 16 (bounded
-  1–64). At 25 windows per request a 500-window cap is ~20 requests, so the
-  default clears the whole cap in about two rounds.
+**A second round is additive, never a re-run.** The harness runs at most 20
+subagents concurrently, so one round is 20 × 25 = 500 windows. To go deeper —
+or to use host terms the socials lane turned up after the fetch — run
+`fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
+are skipped, so the new batches are new material and the ledger grows instead
+of repeating. Do not raise `--max-windows` past what one round can extract.
 
-Write `context.json` first — the same context block the classifier contract
-requires: channel name, host name(s), known facts, format label with its
-evidence. The script writes `classified.jsonl` (every window + verdict, the
-resume record) and `gems.jsonl` (the self-disclosure subset with
-`speaker_guess` host or unclear).
+## Layer 3: extraction — one fan-out, classify and extract together
 
-**Quality gate, mandatory on a fresh channel:** before trusting a full run,
-spot-check ~30 verdicts by hand — read a mix of accepted and rejected windows
-from `classified.jsonl` and confirm the calls against the rubric. Systematic
-misses (a domain always rejected, guest voices accepted as host) mean the
-cheap model is not holding the contract: switch to the agent fallback rather
-than patching verdicts by hand.
+Every batch file is read by exactly one `tl-cli:gem-classifier` agent (the
+file name is historical; the role is a **gem extractor**, `model: sonnet` —
+haiku truncated its output at this size in testing). One pass decides whether
+the window is self-disclosure AND writes what it says: the third-person claim,
+the span of the window that proves it, the life domain, the speaker guess and
+the sensitivity tier. The rubric has ONE home:
+`references/gem-classifier.md`, which points to `evidence-rules.md`.
 
-**Fallback: the classifier agent fan-out.** Triggered mechanically, not by
-judgment: `classify_gems.py` exits **20** and prints
+Run the fan-out exactly like this:
 
-```
-FALLBACK_REQUIRED reason=missing_api_key batches_dir=<path> batch_files=<N> windows=<M>
-```
-
-to stderr. Exit 20 is the only signal to read — exit 1 means "finished with
-errors, rerun to resume", exit 2 is a usage error, and neither is a fallback.
-Run this checklist exactly:
-
-1. **The batch files already exist.** `selftalk_scan.py` wrote them and
-   `classify_gems.py` counted them (`batch_files=N` in the marker). Do not
-   re-run the scan, do not re-batch, do not read `windows.jsonl.gz`.
-2. **`ls <batches_dir>/batch-*.json`** to get the N paths. That list is the
-   work queue; each path is claimed exactly once.
+1. **The batch files already exist.** `fetch_cues.py` wrote them. Do not
+   re-fetch, do not re-batch, do not read `windows.jsonl.gz`.
+2. **`ls <batches_dir>/batch-*.json`** for the N paths. That list is the work
+   queue; each path is claimed exactly once.
 3. **Spawn all N agents as N `Agent` tool_use blocks in ONE assistant
-   message.** Agent type `tl-cli:gem-classifier` (the plugin registers it
-   from `agents/gem-classifier.md` at the repo root). One spawn per message
-   is a bug, not a slow success — the same one-message rule governs every
-   fan-out in this skill (the identity lane, the CONNECT brand lanes).
-4. **Each agent gets exactly three inputs**: the path to
+   message.** One spawn per message is a bug, not a slow success — the same
+   one-message rule governs every fan-out in this skill.
+4. **Each agent gets exactly four things**: the path to
    `references/gem-classifier.md`, the context block (verbatim, inline in the
-   prompt), and **one** batch file path. Windows only — never a transcript,
-   never `corpus.jsonl.gz`, never a second batch.
-5. **Each agent returns the strict JSON array as its final message.** Then
-   stop the turn and consume the returns as the completion notifications
-   arrive.
-6. Validate every return's shape (one object per window, same order, valid
-   enums). A malformed return is re-spawned for that batch, never
-   hand-patched. Track claimed batches — never spawn the same batch twice.
-7. Concatenate the returns into `gems.jsonl` in the same shape the script
-   writes (`{"window": …, "verdict": …, "error": null}` lines, keeping only
-   `self_disclosure` verdicts whose `speaker_guess` is host or unclear), print
-   `FUNNEL stage=classify path=haiku_fanout windows_total=… classified=…
-   errors=… gems=… elapsed_s=…` from the returned verdicts (this — not the
-   script's `path=fallback_required` line — is the classification stage's
-   entry in the run report's funnel table), then continue at Layer 4
-   unchanged — including the clustering step, which is a local script over
-   the assembled `gems.jsonl` and does not care which path produced it.
+   prompt), ONE batch file path, and the path to write
+   `returns/batch-NNN.extract.json`. Windows only — never a transcript, never
+   `corpus.jsonl.gz`, never a second batch.
+5. **Each agent writes its file and returns one line**
+   (`batch=NNN windows=<n> gems=<n>`). Results live in the file; the return
+   line is a receipt. Then stop the turn and consume the completion
+   notifications as they arrive.
+6. **Never validate returns by hand** — `assemble_extracts.py` does it
+   mechanically (Layer 3b). Track claimed batches; never spawn the same batch
+   twice.
+
+Each agent is held to **exactly five tool calls** (four Reads, one Write) so a
+batch cannot turn into an open-ended session: no verification scripts, no
+Bash, no re-reads.
 
 **Forbidden in this fan-out, without exception:**
 
-- **No write-to-file-and-poll contract.** Never instruct an agent to write
-  its results anywhere (the shipped `gem-classifier` can't anyway — `tools:
-  Read` only). Results are return values.
-- **No polling.** No `ls`-and-count loops, no re-reading a directory to see
-  whether agents finished.
+- **No polling.** No `ls`-and-count loops, no re-reading the returns directory
+  to see whether agents finished.
 - **No `sleep`**, and specifically never `sleep` with
   `run_in_background: true` — a backgrounded sleep returns instantly, so it
   waits for nothing while looking like a wait. A genuine timed wait on
@@ -198,27 +133,52 @@ Run this checklist exactly:
   see how it goes".
 - **No default-model stand-ins.** If `tl-cli:gem-classifier` does not resolve
   (running from a checkout rather than an installed plugin), spawn
-  `general-purpose` with an explicit `model: haiku` override and the
-  `gem-classifier` rubric inlined in the prompt. A general-purpose agent on
-  the inherited (expensive) model is the failure mode this list exists to
-  prevent — it is how one past run reached 30M tokens.
+  `general-purpose` with an explicit `model: sonnet` override and the
+  extractor rubric inlined in the prompt. A general-purpose agent on the
+  inherited (expensive) model is the failure mode this list exists to prevent
+  — it is how one past run reached 30M tokens.
 
 **If the host cannot spawn agents at all**: run the batches sequentially with
 `references/gem-classifier.md` used inline as the prompt, discarding each
 batch's raw text before the next.
 
-Report the path taken and its approximate cost once, in the run report: the
-agent path costs roughly 5–10× the API path.
+Print the stage's own funnel line from the returned receipts:
+`FUNNEL stage=extract batches=… agents=… windows=… gems=… respawned=… elapsed_s=…`.
 
-The model catches what no lexicon can: "I'm allergic to peanuts", "we finally
+The model catches what no cue list can: "I'm allergic to peanuts", "we finally
 finished the nursery", proper nouns read through misspellings, sarcasm and
-hypotheticals. That is why the recall pass gates nothing.
+hypotheticals. That is why the fetch layer gates nothing beyond the cap.
 
-## Layer 4: code verifies, one model pass judges
+## Layer 3b: assemble — the contract is checked, not trusted
 
-The old confirmation wave (a sonnet agent per gem cluster) is gone. Its
-mechanical bulk — verbatim checking — is code; its judgment slice is ONE
-small Claude pass.
+```bash
+python3 <skill>/scripts/assemble_extracts.py \
+  --batches <corpus>/<channel_id>/batches \
+  --returns <corpus>/<channel_id>/returns \
+  --out <corpus>/<channel_id>
+```
+
+Per batch it checks that every index `0 … N-1` appears exactly once across
+`gems` and `not_gems`; that each verdict's echoed `start` matches the window
+it claims (a hard check — a verdict about a different window is not a
+verdict); that the enums are valid; and that the `quote_span` resolves to a
+contiguous substring of the window text, which it **cuts mechanically**, so
+every published quote is verbatim by construction rather than by trust. The
+five-word `anchor` is advisory — agents normalise punctuation — and mismatches
+are only counted.
+
+It writes `classified.jsonl` (every judged window, and the `--exclude` input
+for a later round), `gems.jsonl` (the cluster step's input), `candidates.jsonl`
+and `respawn.json`, and exits **3** when any window needs re-running.
+`respawn.json` maps batch → the window indexes that failed or were skipped:
+re-spawn exactly those as one mini-batch of extractor agents and re-run
+assemble. **Nothing is hand-patched** — a hand-edited return is an
+unverifiable quote.
+
+## Layer 4: cluster, then one merge pass judges
+
+The mechanical bulk — verbatim checking — is code; the judgment slice is ONE
+small Claude pass over the clustered candidates.
 
 **First collapse the repeats, locally:**
 
@@ -233,7 +193,7 @@ the same shape as a gem line, so there is exactly one format downstream.
 Singletons pass through as clusters of 1. Each line adds `occurrences` and
 `members` (`video_id`, `start`, `published` for every member, the
 representative included), and the representative is the cluster's
-highest-information member, so nothing the fact pass needs is left behind.
+highest-information member, so nothing the merge pass needs is left behind.
 
 Merging is conservative on purpose: gems must share a life domain, a speaker
 guess and a sensitivity call, their one-line claims must agree — including on
@@ -243,60 +203,71 @@ member must match every other member. Near-duplicates that fail any of those
 stay separate — a missed merge costs a few tokens, a false merge would delete
 a distinct fact. Do not hand-merge what the script left apart.
 
-**One fact pass (≤2 agents, or the main loop when the gem list is small).**
-Hand `gems-clustered.jsonl` plus the identity lane's findings to a single pass
-that does only what a script cannot:
+**One merge pass — ONE agent.** It reads `gems-clustered.jsonl` plus the
+identity lane's findings (when that lane ran) and **never the windows, never a
+transcript**: the extractor already lifted the claim and the quote, so the
+merge pass only decides what a script cannot:
 
-- compose candidate facts: claim, the verbatim quote excerpt lifted from the
-  window text, life domain, recurrence, provenance — recurrence is the count
-  of **distinct `video_id`s among the cluster's `members`**, never
+- finalize recurrence and provenance on each candidate — recurrence is the
+  count of **distinct `video_id`s among the cluster's `members`**, never
   `occurrences` itself (`evidence-rules.md`);
 - attribution reasoning over the deterministic features under
   `evidence-rules.md` — including the rules no feature can encode
   (recurrence never confirms on a multi-host channel; an ad-read fact must
   recur outside reads); resolve `speaker_guess: "unclear"` windows or drop
   them;
-- sensitivity calls, superseded-fact resolution (latest wins, history kept),
-  confidence buckets, and the `selected` picks for the one-pager.
+- deduplication across clusters the script left apart for good reason but
+  which say the same thing about the same fact;
+- the sensitivity tier (`evidence-rules.md`), including **re-tiering where the
+  extractor missed an obvious case** — a stated allergy is `lifestyle`, not
+  `none` and not `clinical`;
+- **dropping any candidate whose claim asserts more than its quote supports.**
+  The extractor is told the claim must stand on the span alone; this pass is
+  where that is enforced against the assembled record. Narrow the claim to
+  what the quote says, or drop the fact — never publish the wider claim.
+- superseded-fact resolution (latest wins, history kept), confidence buckets,
+  and the `selected` picks for the one-pager.
 
-It returns candidate facts as JSONL lines (the `facts.jsonl` shape in
-`references/profile-spec.md`), claims grounded in window text only — the
-verifier, not the model, is the verbatim authority.
+It writes `facts.jsonl` (the shape in `references/profile-spec.md`), claims
+grounded in the assembled quotes only — the verifier, not the model, is the
+verbatim authority — and prints
+`FUNNEL stage=merge clusters=… facts=… selected=… dropped=… elapsed_s=…`.
 
 **Then verify in bulk, locally:**
 
 ```bash
-python3 <skill>/scripts/verify_quotes.py --in candidates.jsonl \
+python3 <skill>/scripts/verify_quotes.py --in facts.jsonl \
   --corpus tl-creator-profiles/.corpus/<channel_id>/corpus.jsonl.gz
 ```
 
-Every transcript-provenance quote is located in the stored captions. Only
+Every transcript-provenance quote is located in the stored passages. Only
 `match: "exact"` publishes, and its located timestamp is authoritative.
 `partial` and `none` are flagged, never accepted: fix the quote to the
 caption text the result shows, or drop the fact. A quote that needs more
-than a mechanical fix goes back through the fact pass, not past it. Verified
+than a mechanical fix goes back through the merge pass, not past it. Verified
 facts become `<channel_id>-facts.jsonl`; the one-pager and HTML render from
 there per `references/profile-spec.md`.
 
-**The orchestrating context never sees raw transcripts.** It sees the scan
-summary, the classifier summary, the spot-check windows, the fact pass's
+**The orchestrating context never sees raw transcripts.** It sees the fetch
+summary, the extractors' receipt lines, the assemble summary, the merge pass's
 returns, and the profile.
 
-## Entity expansion, fuzzy and free
+## Entity expansion: a second round, not a re-scan
 
-When a gem surfaces a new entity — "my dog Luna", a spouse's name, a company
-— re-scan the local corpus for it and its neighbours:
+When a gem surfaces a new entity — "my dog Luna", a spouse's name, a company —
+or the socials lane returns a name the first fetch did not have, deepen the
+ledger with another additive round:
 
 ```bash
-python3 <skill>/scripts/selftalk_scan.py --corpus ... \
-  --host-terms "..." --entity-terms "Luna,<other new entities>"
+python3 <skill>/scripts/fetch_cues.py --channel <id> \
+  --host-terms "…,Luna,<other new entities>" \
+  --exclude <corpus>/<channel_id>/classified.jsonl
 ```
 
-The corpus is on disk, so the re-scan costs nothing. New windows it surfaces
-go through the same classification layer (`classify_gems.py` resumes: only
-the new windows get classified). Confirmed entities also feed Mode B's
-connection probes and improve attribution (a fact tied to a known family name
-anchors the host).
+Passages already judged are skipped, so the round costs one fetch (seconds)
+plus one extraction fan-out over genuinely new material. Confirmed entities
+also feed Mode B's connection probes and improve attribution (a fact tied to a
+known family name anchors the host).
 
 ## The channel context brief
 
@@ -304,8 +275,11 @@ anchors the host).
 python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus.jsonl.gz> --per-video-out <dir>/per_video.json
 ```
 
-After the corpus is local, format is measured, not guessed: first-person
-density per video, interview markers, question density, title hints. A model
+After the fetch, format is measured rather than guessed: first-person
+density, interview markers, question density, title hints. The corpus it reads
+is now the fetched **passages**, not whole transcripts, so the densities are a
+format hint on the material the profile is actually built from, never a
+coverage census. A model
 read of a small sample (3–5 videos' worth of windows) plus these stats calls
 the label — solo / interview / multi-host / faceless-scripted — **with
 evidence**. The label exists for two reasons only:
@@ -321,23 +295,16 @@ profile header.
 
 ## Speed
 
-Wall-clock is dominated by the classification layer, and it is concurrent by
-construction: `classify_gems.py` runs parallel requests, and the identity &
-socials lane, when the user opted into it, runs alongside the whole sweep
-(off by default, in which case it costs nothing). The fetch is a few sequential
-paged requests (seconds); the recall pass is local (seconds); verification
-is local (seconds). Claude's share of a profile build is a handful of turns:
-the identity lane, the format call, the spot-check, and one fact pass —
-**≤5 subagents total**, not a fan-out per batch. Target: **≤2 minutes for
-the model-bound stages** (classify + fact pass + verify) of a PROFILE run
-(the old fan-out build took ~40). The local scan is CPU-bound and scales
-with transcript count, not the window cap — measured ~3 minutes over a
-5,000-video corpus — so total wall clock on a large channel is scan time
-plus the model budget, with the fetch and identity lanes overlapping it.
+Wall clock is the extraction fan-out and nothing else. Measured: the fetch is
+**7–21 s for any channel size**, the local scripts (assemble, cluster, verify)
+are seconds, and the extractor agents run **2.3–8 minutes each** in parallel —
+gem-dense channels at the long end, because a batch with 20 gems in it is
+simply more writing. Claude's share of a profile build is the fan-out plus a
+handful of turns: the identity lane, the format call, one merge pass —
+**≤22 subagents total** (up to 20 extractors, one merge, one socials lane),
+not one per window and not one per fact.
 
 Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
-is always answerable with a stage name. The classification barrier is
-deliberate: at the default 16-way concurrency a 500-window cap is ~20
-requests ≈ two rounds, so the fact pass waits well under a minute and
-streaming partial batches into it would buy noise, not time. Revisit only if
-a measured run shows classification dominating the wall clock.
+is always answerable with a stage name. Rounds are the knob that matters: one
+round is 500 windows because the harness runs at most 20 subagents at once,
+and going deeper means another `--exclude` round rather than a bigger cap.

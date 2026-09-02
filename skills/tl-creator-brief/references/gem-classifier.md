@@ -1,15 +1,18 @@
-# Gem Classifier
+# Gem Extractor
 
-You screen transcript windows from one YouTube channel for **self-disclosure
-gems**: places the creator talks about THEMSELVES — their history, family,
-pets, habits, tastes, health, beliefs, work life — rather than about their
-video's subject. The verdicts feed a creator profile that real people act on,
-so a wrong speaker attribution is worse than a missed gem.
+You read transcript windows from one YouTube channel and, in ONE pass, decide
+which are **self-disclosure gems** — places the creator talks about THEMSELVES
+(history, family, pets, habits, tastes, health, beliefs, work life, opinions)
+rather than about the video's subject — and write out what each gem says: the
+claim, the span of the window that proves it, and how sensitive it is. Your
+output feeds a creator profile that real people act on, so a wrong speaker
+attribution is worse than a missed gem, and a claim its quote does not support
+is worse than either.
 
-This file is the rubric's single home. Two consumers run it unchanged:
-`scripts/classify_gems.py` embeds it in its API prompt (the primary path),
-and the `gem-classifier` agent reads it (the fallback path). Nothing
-elsewhere restates these rules.
+This file is the rubric's single home. The `gem-classifier` agent (whose file
+name is historical — the role is the extractor) reads it, and
+`scripts/assemble_extracts.py` validates every rule here that a script can
+check. Nothing elsewhere restates these rules.
 
 ## Input
 
@@ -18,8 +21,9 @@ The user message contains:
 1. A context block: the channel name, the host's name(s), known facts about
    the host, the channel's format label with its evidence (solo / interview /
    multi-host / faceless-scripted), and how many windows follow.
-2. A JSON array of windows (or a file path to Read). Each window has `text`
-   (the passage), `start`, `video_id`, `title`, a per-video `format_hint`
+2. The path to ONE batch file — a JSON array of windows — and the path to
+   write your output to. Each window has `text` (the passage), `start`,
+   `video_id`, `title`, `published`, `language`, a per-video `format_hint`
    (`interview_or_collab`, `reaction`, or null), and deterministic feature
    flags: `cues_fired`, `host_anchor`, `entity_hits`, `weak_anchor`,
    `in_sponsor_read`, `recurrence_videos`, `stage_direction`, `boilerplate`.
@@ -44,46 +48,117 @@ Applying them to a window batch:
   a reaction or collab upload on an otherwise solo channel gets the
   shared-voice rules, not the solo rule; the channel label is the fallback
   for windows with no hint.
-- `in_sponsor_read` proves host voice AND disqualifies the window as a gem
-  source (the doctrine's ad-read rule). Report it as
-  `speaker_guess: "host"`, `self_disclosure: false`, `notable: "ad-read"`
-  so the recurrence check can use it.
+- `in_sponsor_read` proves host voice. What it disqualifies is narrower than
+  the whole window — see the ad-read rule below.
 - When genuinely unsure whose voice it is, say `speaker_guess: "unclear"` —
   never guess "host" to save a gem.
-- **Windows come in any language** (each carries a `language` code, and a
-  non-English channel's batches arrive unranked and larger — the lexical
-  pre-ranking only exists for English). Judge the window in its source
-  language; write `notable` in English; report `entity_corrections` the
-  same way. Quotes downstream stay verbatim in the original language, so
-  never translate the window text itself.
+- **Windows come in any language** (each carries a `language` code). Judge
+  the window in its source language; write `notable` and `claim` in English;
+  report `entity_corrections` the same way. The quote span is cut from the
+  window verbatim, in the original language, so never translate the window
+  text itself and never re-spell what it holds.
 
-## Output — strict JSON only
+## Standing rules
 
-Return ONE JSON array, one object per input window, same order, nothing else:
+**Opinions in the host's own voice are disclosure.** Political and social
+opinions the host states as their own ARE self-disclosure — `life_domain:
+"beliefs"`. On a political, news or commentary channel they are core profile
+material, not "opinion on the video topic": never omit or downgrade them for
+being about the subject of the video. Exclude only opinions that are quoted,
+role-played, sarcastic or hypothetical — someone else's position being read
+out, or a position the host is arguing against.
+
+**An ad read disqualifies the sponsored claim, not the window.**
+`in_sponsor_read` bars only the claims about the sponsored product or offer.
+A personal aside inside a read — a trip, a family visit, a childhood story, a
+merch line, why they use the thing in their own life — stays eligible, with
+`confidence: "likely"`. When the sponsor is the host's own company or product,
+the window is work disclosure, not an ad-read exclusion, and confidence is
+unaffected. Only when the window is nothing but the sponsored pitch is it a
+`not_gems` entry with `reason: "ad-read"`.
+
+**Style and habits are disclosure.** Recurring bits and catchphrases, the
+fixed greeting, what they call their audience, on-camera habits, stated
+tastes and preferences all count — `life_domain: "habits"`, `"tastes"`, or
+`"other"`. They are how a real profile reads like a person rather than a CV.
+
+**Health is graded, never withheld.** Collect it and tier it:
+- `sensitivity: "lifestyle"` — glasses or contacts, diet, fitness, weight
+  change discussed openly, sleep, skincare, casual allergies, supplements.
+  Ordinary disclosure.
+- `sensitivity: "clinical"` — diagnoses, mental-health conditions, medication,
+  surgery, disability, fertility or pregnancy. Still collected, tiered
+  `clinical`.
+- Being a parent is `life_domain: "family"` at `sensitivity: "none"`;
+  a child's name, age or school is `sensitivity: "children"`.
+- City or country of residence is `sensitivity: "none"`; a street,
+  neighbourhood or building is `sensitivity: "location"`.
+
+**Durable facts over momentary states.** "Hasn't showered yet today", "has no
+plans tonight", and day-of production notes ("didn't like my makeup in this
+video", "cut my hair yesterday", "dad texted me today") are not gems — unless
+the creator names the thing as a recurring trait of theirs. Prefer what will
+still be true next year.
+
+**The claim must be fully supported by the quoted span alone.** If the fact
+needs more of the window than the span carries, widen the span (up to 45
+words) or narrow the claim. Never state in the claim what the span does not
+say: "was 27 and broke, now runs a $85M company" over a span that only says
+"I was 27 years old" is a failed verdict. Every number, name and title in the
+claim must appear in the span.
+
+## Output — one JSON file
+
+Write ONE JSON object to the output file the caller names — nothing else,
+no prose around it:
 
 ```json
-[{"i": 0,
-  "self_disclosure": true,
-  "life_domain": "family",
-  "speaker_guess": "host",
-  "sensitive": false,
-  "entity_corrections": {"maddox": "Matiks"},
-  "notable": "adopted a rescue dog named Luna"}]
+{"batch": "007",
+ "windows": 25,
+ "gems": [
+   {"i": 3,
+    "start": 412,
+    "anchor": "so my dad ran a",
+    "life_domain": "family",
+    "speaker_guess": "host",
+    "sensitivity": "none",
+    "entity_corrections": {"maddox": "Matiks"},
+    "notable": "father ran a bakery",
+    "claim": "father ran a bakery in Ohio",
+    "quote_span": {"first": "my dad ran a", "last": "town in ohio"},
+    "confidence": "confirmed"}],
+ "not_gems": [
+   {"i": 4, "speaker_guess": "guest", "reason": "third-party"}]}
 ```
 
-- `i`: the window's index in the input array.
+- `i`: the window's index in the batch file.
+- `start`: the window's own `start`, echoed unchanged. A mismatch means the
+  verdict is about a different window and the whole verdict is thrown away.
+- `anchor`: the window text's first five words, verbatim.
 - `life_domain`: one of `origin`, `family`, `pets`, `home`, `work`, `money`,
-  `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`; null
-  when `self_disclosure` is false.
+  `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`.
 - `speaker_guess`: `host`, `guest`, `cohost`, `narration`, or `unclear`.
-- `sensitive`: true for health, beliefs, children, or precise location.
+- `sensitivity`: `none`, `lifestyle`, `clinical`, `children`, or `location`,
+  per the health rule above.
 - `entity_corrections`: caption-misspelled proper nouns you corrected from
   context, `{as_heard: corrected}`; `{}` when none.
-- `notable`: ≤12 words on what it reveals, or a reason tag (`"ad-read"`,
-  `"hypothetical"`, `"quoted-speech"`) when `self_disclosure` is false and
-  the reason is worth carrying; else null.
+- `notable`: ≤12 words on what it reveals.
+- `claim`: the fact in the third person, ≤15 words, fully supported by the
+  span.
+- `quote_span`: `first` = the first four words of the passage you are
+  quoting, `last` = its last four words — a **contiguous 8–30-word passage
+  inside the window text**, copied exactly as the window spells it. A script
+  cuts the verbatim text between them, so the quote is verbatim by
+  construction; a span it cannot find sends the window back for a re-run.
+- `confidence`: `confirmed` or `likely`.
+- `not_gems[].reason`: one of `ad-read`, `not-disclosure`, `quoted-speech`,
+  `hypothetical`, `sarcasm`, `third-party`, `unclear-voice`.
 
-Cover every window. No prose, no markdown fences, no trailing commentary.
-As an agent, return the array as your final message — never write it to a
-file. Under `classify_gems.py`, the caller wraps this same contract in a
-JSON object (`{"results": [...]}`) — the per-window objects are identical.
+**Count contract:** every index `0 … windows-1` appears exactly once, in
+`gems` or in `not_gems`, never both and never neither. A missing or duplicated
+index is not a partial success — those windows are re-run by a fresh agent.
+
+**Exactly five tool calls, then stop:** Read the instructions, Read this
+rubric, Read `evidence-rules.md`, Read the batch file, Write the output file.
+No verification scripts, no Bash, no re-reads. Your final message is one line:
+`batch=NNN windows=<n> gems=<n>`.

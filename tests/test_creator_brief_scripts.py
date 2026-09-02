@@ -1,12 +1,12 @@
-"""The creator-brief slim-rework scripts: local verification, deterministic
-HTML, and the classifier's mechanical guarantees (contract validation, resume
-keying, loud no-key exit). No network anywhere — classify_gems' API surface
-is exercised only up to the point it would need a key.
+"""The creator-brief scripts: local verification, deterministic HTML, and the
+legacy classifier's mechanical guarantees (contract validation, resume keying,
+loud no-key exit). The live retrieval and extraction flow has its own files —
+``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No network anywhere:
+classify_gems' API surface is exercised only up to the point it would need a
+key.
 """
 
-import gzip
 import json
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +15,6 @@ _SCRIPTS = (Path(__file__).resolve().parents[1]
             / "skills" / "tl-creator-brief" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 import classify_gems  # noqa: E402
-import selftalk_scan  # noqa: E402
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> Path:
@@ -395,69 +394,8 @@ def test_href_ampersands_escape_exactly_once(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# selftalk_scan.py — the model-layer budget (stride-sampler regression)
+# classify_gems.py — the legacy cheap-API path (no longer in the pipeline)
 # --------------------------------------------------------------------------- #
-def _win(i: int, score: int, lang: str, day: int = 1) -> dict:
-    return {"id": f"1:vid{i:04d}", "start": i, "language": lang,
-            "rank_score": score, "published": f"2024-01-{day:02d}"}
-
-
-def _kept(windows: list[dict]) -> list[dict]:
-    """The sort main() applies before the cap: (-rank_score, id, start)."""
-    return sorted(windows, key=lambda c: (-c["rank_score"], c["id"],
-                                          c["start"]))
-
-
-def test_zero_score_windows_cannot_displace_ranked_ones():
-    """The pre-fix sampler split the pool by score SIGN, so a flood of
-    zero-score English windows was treated as 'unranked' and stride-sampled
-    over the handful of high-scoring ones. Split is by lexical status."""
-    gems = [_win(i, 9 - i % 3, "en") for i in range(20)]
-    flood = [_win(1000 + i, 0, "en", day=(i % 28) + 1) for i in range(3000)]
-    batched = selftalk_scan.select_batched(_kept(gems + flood), 500, "auto")
-
-    assert len(batched) == 500
-    ids = {w["id"] for w in batched}
-    assert all(g["id"] in ids for g in gems), "top-ranked windows were dropped"
-    # everything English is ranked, so the batch is the top 500 by score —
-    # a zero-score window only appears after every scored one is in
-    scores = [w["rank_score"] for w in batched]
-    assert scores == sorted(scores, reverse=True)
-    assert scores[:20] == [9, 9, 9, 9, 9, 9, 9, 8, 8, 8, 8, 8, 8, 8,
-                           7, 7, 7, 7, 7, 7]
-
-
-def test_unranked_pool_is_strided_across_history_not_truncated():
-    """Non-English windows are never scored, so they are sampled evenly over
-    publication order rather than taken from one end of the channel."""
-    ranked = [_win(i, 5, "en") for i in range(100)]
-    unranked = [_win(1000 + i, 0, "es", day=(i % 28) + 1) for i in range(900)]
-    batched = selftalk_scan.select_batched(_kept(ranked + unranked), 200,
-                                           "auto")
-
-    assert len(batched) == 200
-    kept_ranked = [w for w in batched if w["language"] == "en"]
-    kept_unranked = [w for w in batched if w["language"] == "es"]
-    # proportional split (100/1000 of 200), and every ranked window survives
-    assert len(kept_ranked) == 20 and len(kept_unranked) == 180
-    days = {w["published"] for w in kept_unranked}
-    assert len(days) >= 20, "the stride collapsed onto one end of history"
-
-
-def test_cap_is_a_no_op_below_the_ceiling():
-    kept = _kept([_win(i, i % 4, "en") for i in range(50)])
-    assert selftalk_scan.select_batched(kept, 500, "auto") == kept
-    assert selftalk_scan.select_batched(kept, 0, "auto") == kept   # uncapped
-
-
-def test_lexicon_off_makes_every_window_unranked():
-    kept = _kept([_win(i, 5, "en", day=(i % 28) + 1) for i in range(100)])
-    assert all(not selftalk_scan.is_lexical(w, "off") for w in kept)
-    batched = selftalk_scan.select_batched(kept, 10, "off")
-    assert len(batched) == 10
-    assert len({w["published"] for w in batched}) >= 8   # strided, not sliced
-
-
 def test_limit_bounds_the_fallback_batch_set(tmp_path):
     # a --limit spot-check with no key must not hand the fan-out the full
     # batch set: the marker points at a re-batched dir of just N windows
@@ -547,60 +485,3 @@ def test_full_spec_rerun_invalidates_condensed_verdicts(tmp_path):
     assert all(r.get("contract") == "full-spec" for r in rows)
     assert not any(r.get("error") is None and r.get("verdict") for r in rows)
     assert proc.returncode == 1      # ran (and errored), not skipped-as-done
-
-
-# --------------------------------------------------------------------------- #
-# end-to-end: the timestamped watch link survives the whole pipeline even
-# though no window on disk carries a url
-# --------------------------------------------------------------------------- #
-def _stub_tl(tmp_path: Path) -> Path:
-    """A fake `tl` whose every query returns zero rows (no sponsor spans)."""
-    script = tmp_path / "tl-stub.py"
-    script.write_text(
-        "#!/usr/bin/env python3\nimport sys\n"
-        "sys.stdin.read()\nprint('{\"results\": []}')\n"
-    )
-    runner = tmp_path / "tl"
-    runner.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n")
-    runner.chmod(runner.stat().st_mode | stat.S_IEXEC)
-    return runner
-
-
-def test_quote_urls_survive_scan_to_ledger_without_a_stored_window_url(
-        tmp_path):
-    corpus = tmp_path / "corpus.jsonl"
-    corpus.write_text(json.dumps({
-        "id": "1:vid1", "title": "My story", "transcript_language": "en",
-        "publication_date": "2026-01-01",
-        "cues": [[10, "so before we start"],
-                 [14, "i grew up in a tiny town in ohio"],
-                 [19, "and my dad ran the bakery there"]]}) + "\n")
-    subprocess.run(
-        [sys.executable, str(_SCRIPTS / "selftalk_scan.py"),
-         "--corpus", str(corpus)],
-        capture_output=True, text=True, check=True,
-        env={"PATH": "/usr/bin:/bin", "TL_CLI_BIN": str(_stub_tl(tmp_path))})
-    with gzip.open(tmp_path / "windows.jsonl.gz", "rt", encoding="utf-8") as f:
-        window = json.loads(f.readline())
-    assert "url" not in window
-
-    # A candidate built off that window, carrying a WRONG timestamp: the
-    # ledger's link must come from where verification located the quote.
-    candidates = _write_jsonl(tmp_path / "candidates.jsonl", [{
-        "fact_id": "f001", "claim": "grew up in Ohio", "domain": "origin",
-        "provenance": "transcript", "video": window["id"],
-        "start": window["start"] + 900,
-        "quote": "i grew up in a tiny town in ohio",
-        "confidence": "confirmed", "sensitive": False, "selected": True}])
-    subprocess.run(
-        [sys.executable, str(_SCRIPTS / "verify_quotes.py"),
-         "--in", str(candidates), "--corpus", str(corpus)],
-        capture_output=True, text=True, check=True)
-    facts = [json.loads(line) for line in
-             (tmp_path / "candidates.jsonl.verified.jsonl")
-             .read_text().splitlines()]
-    assert facts[0]["start"] == 14                      # located, not claimed
-    assert facts[0]["url"] == "https://www.youtube.com/watch?v=vid1&t=14s"
-
-    ledger = _render_ledger(tmp_path, _PROFILE_MD, facts)
-    assert 'href="https://www.youtube.com/watch?v=vid1&amp;t=14s"' in ledger

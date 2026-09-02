@@ -49,8 +49,11 @@ judgement the classifier makes from the format and the deterministic features
   naming before it counts as one host's.
 - **Ad reads are dual-use.** A sponsored span is spoken by the host, never by
   a guest or reacted material — the strongest single-voice signal there is.
-  Simultaneously, a "fact" inside an ad read is scripted, so it is banned as a
-  gem source: it only enters the profile if it recurs outside reads.
+  Simultaneously, the *sponsored-product claims* inside a read are scripted
+  and are banned as a gem source. A personal aside inside a read (a trip, a
+  family visit, a childhood story, a merch line) stays eligible at confidence
+  `likely`, and when the sponsor is the host's own company the read is work
+  disclosure, not an exclusion. `confirmed` still needs the fact outside reads.
 
 - **Detector output is evidence about detection, not about the video.** A
   detected mention with a `(0,0)` span has no position — never pad it into a
@@ -86,7 +89,7 @@ output:
   English gloss alongside labelled as a translation. The gloss is never the
   quote: verification (`quote_timestamp.py`) always runs against the
   original words.
-- Every quote carries its `&t=` link. The scan attaches offsets at birth; a
+- Every quote carries its `&t=` link. The fetch attaches offsets at birth; a
   quote from anywhere else goes through `scripts/quote_timestamp.py`.
 - **A partial match is never a verification.** `quote_timestamp.py` reports
   `match: "exact" | "partial" | "none"`; only `exact` publishes. On
@@ -107,14 +110,38 @@ Every fact names its lane, and lanes never masquerade as each other:
   quote and is never dressed as one.
 - `web` — source URL. Same rule.
 
-## Sensitive domains
+## Sensitivity — a tier, not a flag
 
-Health, beliefs, children, and precise location are collected, flagged
-`sensitive: true`, and **excluded from Mode B connections by default** — they
-appear in the profile so the human reading it knows they exist, never in a
-pitch angle unless a human deliberately opts one in. No protected-trait
-inference, ever: the profile records what the creator said, not what a model
-concludes about who they are.
+Every fact carries a `sensitivity` tier. The binary "sensitive" flag it
+replaces threw away the difference between "wears contacts" and "was
+diagnosed with X", and that difference is the whole judgment:
+
+| tier | what it holds | in Mode B connection angles |
+|---|---|---|
+| `none` | ordinary disclosure, including beliefs, being a parent, city/country | yes |
+| `lifestyle` | glasses/contacts, diet, fitness, weight change discussed openly, sleep, skincare, casual allergies, supplements | yes |
+| `clinical` | diagnoses, mental-health conditions, medication, surgery, disability, fertility/pregnancy | only under the repetition rule below |
+| `children` | a child's name, age, school | no, by default |
+| `location` | street, neighbourhood, building | no, by default |
+
+- **Beliefs are NOT sensitive.** Political and social opinions the creator
+  states in their own voice are ordinary self-disclosure at tier `none` —
+  on a commentary channel they are the profile's core. What they are not is
+  an inference: record the stated opinion, never a conclusion about who the
+  person is.
+- **Only `clinical`, `children` and `location` are withheld from connection
+  angles by default.** They still appear in the profile, so the human reading
+  it knows they exist.
+- **`clinical` is usable when the creator made it public themselves**: when
+  they discuss it repeatedly (3+ distinct videos) or frame it as part of
+  their story, it may be used in an angle. One passing mention never is.
+  A human can always opt a withheld fact in deliberately; nothing opts itself
+  in.
+- **No protected-trait inference, ever**: the profile records what the
+  creator said, not what a model concludes about who they are.
+
+`sensitive: true` survives in the ledger as the derived boolean (true exactly
+for the withheld tiers) so older readers keep working; the tier is the fact.
 
 ## Contradictions and staleness
 

@@ -42,7 +42,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from fetch_corpus import open_corpus  # sibling script
+from corpus_io import open_corpus  # sibling script
 from quote_timestamp import locate  # sibling script
 
 
@@ -73,7 +73,7 @@ def main() -> None:
     ap.add_argument("--in", dest="infile", required=True,
                     help="candidate facts, one JSON object per line")
     ap.add_argument("--corpus", required=True,
-                    help="corpus.jsonl.gz from fetch_corpus.py "
+                    help="corpus.jsonl.gz from fetch_cues.py "
                          "(a plain .jsonl corpus is read too)")
     ap.add_argument("--out", default=None,
                     help="default: <in>.verified.jsonl")
