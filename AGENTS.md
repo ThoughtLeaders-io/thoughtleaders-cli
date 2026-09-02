@@ -88,9 +88,11 @@ The version string is defined in three files and all three must be updated toget
 
 ## Creating a release
 
-A "release" means using the `gh` command to create a release on GitHub, named like the current package version number.
+A "release" means using the `gh` command to create a release on GitHub, tagged and titled `v<version>` (e.g. `v0.9.11`). The `v` prefix is mandatory: the PyPI publish workflow only runs for `v*` tags, and a release without it fails with an environment protection rule error.
 
 Warn the user if they are creating a release and the latest commit didn't bump the version number, and ask for confirmation before releasing.
+
+Release notes are written by hand for the user, never with `--generate-notes` (that yields only a compare link). Follow the style of previous releases: a `##` heading naming the change from the user's perspective, a short prose explanation of what changed and why it matters, a usage example where one helps, and a closing line on what the user has to do (e.g. `tl setup claude` to pick up skill changes, or nothing). Describe user-visible behaviour only — same rules as commit messages and skills apply, so no internal architecture or server details.
 
 ## Coding
 

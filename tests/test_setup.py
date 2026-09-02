@@ -1,5 +1,6 @@
 """Tests for `tl setup` helpers."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -8,8 +9,10 @@ from tl_cli.commands.setup import (
     _bundled_skill_blurbs,
     _find_claude_binary,
     _install_command_shim,
+    _installed_plugin_version,
     _remove_matching_standalone_skills,
     _trees_identical,
+    _update_plugin,
 )
 
 
@@ -224,3 +227,135 @@ class TestSharedSupportInstall:
         monkeypatch.setattr(setup, "CLAUDE_COMMANDS_DIR", tmp_path / "cc")
         assert setup._install_standalone_skills(plugin_root) == 1
         assert (tmp_path / "cs" / "_shared" / "tl_data.py").exists()
+
+
+class TestInstalledPluginVersion:
+    def _record(self, tmp_path, monkeypatch, payload):
+        plugins = tmp_path / "plugins"
+        plugins.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", plugins)
+        (plugins / "installed_plugins.json").write_text(json.dumps(payload), encoding="utf-8")
+        return plugins
+
+    def test_reads_version_from_install_record(self, tmp_path, monkeypatch):
+        self._record(tmp_path, monkeypatch, {"version": 2, "plugins": {setup.PLUGIN_KEY: [{"scope": "user", "version": "0.7.2"}]}})
+        assert _installed_plugin_version() == "0.7.2"
+
+    def test_prefers_user_scope(self, tmp_path, monkeypatch):
+        self._record(
+            tmp_path,
+            monkeypatch,
+            {"plugins": {setup.PLUGIN_KEY: [{"scope": "project", "version": "0.1.0"}, {"scope": "user", "version": "0.9.9"}]}},
+        )
+        assert _installed_plugin_version() == "0.9.9"
+
+    def test_ignores_unknown_version(self, tmp_path, monkeypatch):
+        self._record(tmp_path, monkeypatch, {"plugins": {setup.PLUGIN_KEY: [{"scope": "user", "version": "unknown"}]}})
+        assert _installed_plugin_version() is None
+
+    def test_missing_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", tmp_path / "plugins")
+        assert _installed_plugin_version() is None
+
+    def test_unreadable_record_is_unknown_not_outdated(self, tmp_path, monkeypatch):
+        plugins = tmp_path / "plugins"
+        plugins.mkdir(parents=True)
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", plugins)
+        (plugins / "installed_plugins.json").write_text("{not json", encoding="utf-8")
+        assert _installed_plugin_version() is None
+        assert not [w for w in setup.check_plugin_version() if "Claude Code plugin" in w]
+
+    def test_unexpected_shape_is_unknown(self, tmp_path, monkeypatch):
+        self._record(tmp_path, monkeypatch, {"plugins": {setup.PLUGIN_KEY: {"scope": "user", "version": "0.7.2"}}})
+        assert _installed_plugin_version() is None
+
+
+class TestCheckPluginVersion:
+    def test_warns_on_record_behind_cli(self, tmp_path, monkeypatch):
+        plugins = tmp_path / "plugins"
+        plugins.mkdir(parents=True)
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", plugins)
+        monkeypatch.setattr(setup, "OPENCODE_SKILLS_DIR", tmp_path / "opencode")
+        monkeypatch.setattr(setup, "AGENTS_SKILLS_DIR", tmp_path / "agents")
+        (plugins / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {setup.PLUGIN_KEY: [{"scope": "user", "version": "0.7.2"}]}}), encoding="utf-8"
+        )
+        # A stamp claiming the current version must not mask the real one.
+        (plugins / "tl-cli").mkdir()
+        (plugins / "tl-cli" / ".version").write_text(setup.__version__)
+
+        warnings = setup.check_plugin_version()
+        assert any("0.7.2" in w for w in warnings)
+
+    def test_falls_back_to_stamp_without_record(self, tmp_path, monkeypatch):
+        plugins = tmp_path / "plugins"
+        (plugins / "tl-cli").mkdir(parents=True)
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", plugins)
+        monkeypatch.setattr(setup, "OPENCODE_SKILLS_DIR", tmp_path / "opencode")
+        monkeypatch.setattr(setup, "AGENTS_SKILLS_DIR", tmp_path / "agents")
+        (plugins / "tl-cli" / ".version").write_text("0.1.0")
+
+        assert any("0.1.0" in w for w in setup.check_plugin_version())
+
+    def test_silent_when_nothing_installed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", tmp_path / "plugins")
+        monkeypatch.setattr(setup, "OPENCODE_SKILLS_DIR", tmp_path / "opencode")
+        monkeypatch.setattr(setup, "AGENTS_SKILLS_DIR", tmp_path / "agents")
+        assert setup.check_plugin_version() == []
+
+
+class TestUpdatePlugin:
+    def test_already_latest_is_not_a_change(self, monkeypatch):
+        monkeypatch.setattr(setup, "_run_claude", lambda args, b: (True, 'tl-cli is already at the latest version (0.9.9).'))
+        assert _update_plugin("claude") == (True, False, 'tl-cli is already at the latest version (0.9.9).')
+
+    def test_version_advance_is_a_change(self, monkeypatch):
+        monkeypatch.setattr(setup, "_run_claude", lambda args, b: (True, 'Plugin "tl-cli" updated from 0.7.2 to 0.9.9.'))
+        ok, changed, _ = _update_plugin("claude")
+        assert (ok, changed) == (True, True)
+
+    def test_failure_is_not_a_change(self, monkeypatch):
+        monkeypatch.setattr(setup, "_run_claude", lambda args, b: (False, "boom"))
+        assert _update_plugin("claude") == (False, False, "boom")
+
+
+class TestSetupCallSequence:
+    def _stub_env(self, tmp_path, monkeypatch, record=None):
+        plugin_root = tmp_path / "plugin"
+        (plugin_root / "skills").mkdir(parents=True)
+        plugins = tmp_path / "plugins"
+        plugins.mkdir()
+        if record is not None:
+            (plugins / "installed_plugins.json").write_text(json.dumps(record), encoding="utf-8")
+        monkeypatch.setattr(setup, "_find_plugin_root", lambda: plugin_root)
+        monkeypatch.setattr(setup, "_find_claude_binary", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(setup, "CLAUDE_PLUGINS_DIR", plugins)
+        monkeypatch.setattr(setup, "CLAUDE_SKILLS_DIR", tmp_path / "skills")
+        monkeypatch.setattr(setup, "CLAUDE_COMMANDS_DIR", tmp_path / "commands")
+        calls = []
+        monkeypatch.setattr(setup, "_run_claude", lambda args, b: (calls.append(args), (True, "ok"))[1])
+        return calls, plugins
+
+    def test_interactive_updates_after_install(self, tmp_path, monkeypatch):
+        calls, _ = self._stub_env(tmp_path, monkeypatch)
+        setup.setup_claude(json_output=False, toon_output=False)
+        assert calls.index(["plugin", "update", setup.PLUGIN_KEY]) > calls.index(["plugin", "install", setup.PLUGIN_KEY])
+
+    def test_noninteractive_updates_after_install(self, tmp_path, monkeypatch, capsys):
+        calls, _ = self._stub_env(tmp_path, monkeypatch)
+        setup._setup_noninteractive()
+        assert calls.index(["plugin", "update", setup.PLUGIN_KEY]) > calls.index(["plugin", "install", setup.PLUGIN_KEY])
+        assert json.loads(capsys.readouterr().out)["plugin_updated"] is True
+
+    def test_stamp_records_installed_version_not_cli_version(self, tmp_path, monkeypatch, capsys):
+        record = {"plugins": {setup.PLUGIN_KEY: [{"scope": "user", "version": "0.7.2"}]}}
+        _, plugins = self._stub_env(tmp_path, monkeypatch, record=record)
+        setup._setup_noninteractive()
+        assert (plugins / "tl-cli" / ".version").read_text() == "0.7.2"
+        assert json.loads(capsys.readouterr().out)["plugin_version"] == "0.7.2"
+
+    def test_standalone_fallback_stamps_cli_version(self, tmp_path, monkeypatch, capsys):
+        _, plugins = self._stub_env(tmp_path, monkeypatch)
+        monkeypatch.setattr(setup, "_find_claude_binary", lambda: None)
+        setup._setup_noninteractive()
+        assert (plugins / "tl-cli" / ".version").read_text() == setup.__version__
