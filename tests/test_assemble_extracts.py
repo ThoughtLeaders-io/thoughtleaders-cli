@@ -71,7 +71,7 @@ def test_a_complete_batch_assembles_and_exits_clean(tmp_path):
         "not_gems": [{"i": 1, "speaker_guess": "guest", "reason": "third-party"}]})
     assert proc.returncode == 0
     assert summary["windows_expected"] == 2 and summary["windows_assembled"] == 2
-    assert respawn == {} and summary["respawn_windows"] == 0
+    assert respawn == {} and summary["unjudged_windows"] == 0 and summary["coverage"] == 1.0
     assert len(gems) == 1 and len(cands) == 1
     assert [r["verdict"]["self_disclosure"] for r in rows].count(False) == 1
 
@@ -109,8 +109,10 @@ def test_a_missing_or_unparseable_return_respawns_the_whole_batch(tmp_path):
 
 def test_multiple_return_files_merge_and_a_later_file_overrides(tmp_path):
     wins = [_window(0), _window(1)]
-    batches = tmp_path / "batches"; returns = tmp_path / "returns"
-    batches.mkdir(); returns.mkdir()
+    batches = tmp_path / "batches"
+    returns = tmp_path / "returns"
+    batches.mkdir()
+    returns.mkdir()
     (batches / "batch-000.json").write_text(json.dumps(wins))
     # original: 0 is a gem, 1 is a not-gem
     (returns / "batch-000.extract.json").write_text(json.dumps({
@@ -135,8 +137,10 @@ def test_multiple_return_files_merge_and_a_later_file_overrides(tmp_path):
 def test_a_duplicate_within_one_file_stays_invalid_even_if_a_later_file_is_clean(
         tmp_path):
     wins = [_window(0), _window(1)]
-    batches = tmp_path / "batches"; returns = tmp_path / "returns"
-    batches.mkdir(); returns.mkdir()
+    batches = tmp_path / "batches"
+    returns = tmp_path / "returns"
+    batches.mkdir()
+    returns.mkdir()
     (batches / "batch-000.json").write_text(json.dumps(wins))
     # index 0 appears twice WITHIN this one file: invalid, and that taint is
     # per-index for the whole batch, not undone by a later file's clean entry
@@ -161,7 +165,8 @@ def test_append_adds_a_later_rounds_rows_to_the_existing_outputs(tmp_path):
     out = tmp_path / "out"
     wins1 = [_window(0)]
     b1, r1 = tmp_path / "batches1", tmp_path / "returns1"
-    b1.mkdir(); r1.mkdir()
+    b1.mkdir()
+    r1.mkdir()
     (b1 / "batch-000.json").write_text(json.dumps(wins1))
     (r1 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins1[0])], "not_gems": []}))
@@ -173,7 +178,8 @@ def test_append_adds_a_later_rounds_rows_to_the_existing_outputs(tmp_path):
 
     wins2 = [_window(1)]
     b2, r2 = tmp_path / "batches2", tmp_path / "returns2"
-    b2.mkdir(); r2.mkdir()
+    b2.mkdir()
+    r2.mkdir()
     (b2 / "batch-000.json").write_text(json.dumps(wins2))
     (r2 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins2[0])], "not_gems": []}))
@@ -193,7 +199,8 @@ def test_without_append_a_second_run_replaces_the_output_files(tmp_path):
     out = tmp_path / "out"
     wins1 = [_window(0)]
     b1, r1 = tmp_path / "batches1", tmp_path / "returns1"
-    b1.mkdir(); r1.mkdir()
+    b1.mkdir()
+    r1.mkdir()
     (b1 / "batch-000.json").write_text(json.dumps(wins1))
     (r1 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins1[0])], "not_gems": []}))
@@ -203,7 +210,8 @@ def test_without_append_a_second_run_replaces_the_output_files(tmp_path):
 
     wins2 = [_window(1)]
     b2, r2 = tmp_path / "batches2", tmp_path / "returns2"
-    b2.mkdir(); r2.mkdir()
+    b2.mkdir()
+    r2.mkdir()
     (b2 / "batch-000.json").write_text(json.dumps(wins2))
     (r2 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins2[0])], "not_gems": []}))
@@ -367,7 +375,8 @@ def test_append_replaces_the_same_rounds_earlier_rows_instead_of_stacking_them(t
     out = tmp_path / "out"
     wins1 = [_window(0)]
     b1, r1 = tmp_path / "batches1", tmp_path / "returns1"
-    b1.mkdir(); r1.mkdir()
+    b1.mkdir()
+    r1.mkdir()
     (b1 / "batch-000.json").write_text(json.dumps(wins1))
     (r1 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins1[0])], "not_gems": []}))
@@ -376,7 +385,8 @@ def test_append_replaces_the_same_rounds_earlier_rows_instead_of_stacking_them(t
                    capture_output=True, text=True, check=True)
     wins2 = [_window(1)]
     b2, r2 = tmp_path / "batches2", tmp_path / "returns2"
-    b2.mkdir(); r2.mkdir()
+    b2.mkdir()
+    r2.mkdir()
     (b2 / "batch-000.json").write_text(json.dumps(wins2))
     (r2 / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 1, "gems": [_gem(0, wins2[0])], "not_gems": []}))
@@ -390,3 +400,85 @@ def test_append_replaces_the_same_rounds_earlier_rows_instead_of_stacking_them(t
         assert len(rows) == 2, name
     cands = [json.loads(x) for x in (out / "candidates.jsonl").read_text().splitlines()]
     assert [c["video"] for c in cands] == [wins1[0]["id"], wins2[0]["id"]]   # round 1 stays first
+
+
+# --------------------------------------------------------------------------- #
+# the coverage threshold: a few unjudged windows are accepted and reported
+# --------------------------------------------------------------------------- #
+def _run_many(tmp_path, n_windows: int, bad: list[int], *, extra_args=(), drop_file=False):
+    wins = [_window(i) for i in range(n_windows)]
+    batches = tmp_path / "batches"
+    returns = tmp_path / "returns"
+    batches.mkdir(exist_ok=True)
+    returns.mkdir(exist_ok=True)
+    (batches / "batch-000.json").write_text(json.dumps(wins))
+    if drop_file:
+        (batches / "batch-001.json").write_text(json.dumps([_window(0)]))
+    gems = [_gem(i, wins[i]) for i in range(n_windows) if i not in bad]
+    (returns / "batch-000.extract.json").write_text(json.dumps(
+        {"batch": "000", "windows": n_windows, "gems": gems, "not_gems": []}))
+    out = tmp_path / "out"
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "assemble_extracts.py"),
+         "--batches", str(batches), "--returns", str(returns),
+         "--out", str(out), *extra_args], capture_output=True, text=True)
+    summary = json.loads(proc.stdout)
+    rows = [json.loads(x) for x in (out / "classified.jsonl").read_text().splitlines() if x.strip()]
+    return proc, summary, rows
+
+
+def test_unjudged_windows_above_the_threshold_exit_clean_and_are_reported(tmp_path):
+    proc, summary, rows = _run_many(tmp_path, 100, bad=[3, 41, 99])
+    assert proc.returncode == 0
+    assert summary["unjudged_windows"] == 3 and summary["coverage"] == 0.97
+    assert summary["respawn"] == {"000": [3, 41, 99]}      # still reachable for a re-judge
+    assert {r["verdict"]["i"] for r in rows} == set(range(100)) - {3, 41, 99}
+    line = next(x for x in proc.stderr.splitlines() if x.startswith("FUNNEL"))
+    assert "unjudged=3" in line and "coverage=0.97" in line and "respawn_windows" not in line
+
+
+def test_below_the_threshold_is_still_exit_3(tmp_path):
+    proc, summary, _ = _run_many(tmp_path, 100, bad=list(range(6)))
+    assert proc.returncode == 3 and summary["coverage"] == 0.94 and summary["exit"] == 3
+
+
+def test_min_coverage_1_restores_every_window_or_nothing(tmp_path):
+    proc, summary, _ = _run_many(tmp_path, 100, bad=[7], extra_args=("--min-coverage", "1.0"))
+    assert proc.returncode == 3 and summary["unjudged_windows"] == 1
+
+
+def test_a_batch_with_no_return_file_is_exit_3_whatever_the_coverage(tmp_path):
+    proc, summary, _ = _run_many(tmp_path, 100, bad=[], drop_file=True)
+    assert proc.returncode == 3
+    assert summary["missing_batches"] == ["001"] and summary["coverage"] == 0.99
+
+
+def test_an_out_of_range_threshold_is_a_usage_error(tmp_path):
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "assemble_extracts.py"), "--batches", str(tmp_path),
+         "--returns", str(tmp_path), "--out", str(tmp_path / "out"), "--min-coverage", "1.5"],
+        capture_output=True, text=True)
+    assert proc.returncode == 2 and "between 0 and 1" in proc.stderr
+
+
+def test_a_span_with_added_punctuation_still_cuts_the_verbatim_text():
+    from assemble_extracts import extract_span
+    text = "so my dad ran a bakery in a small town in ohio and we all worked there"
+    q = extract_span(text, {"first": "My dad ran a", "last": "town in Ohio."})
+    assert q == "my dad ran a bakery in a small town in ohio"
+    assert extract_span(text, {"first": "my dad, ran a", "last": "in ohio"}) == "my dad ran a bakery in a small town in ohio"
+    assert extract_span(text, {"first": "town in ohio", "last": "my dad ran a"}) is None   # reversed
+    assert extract_span(text, {"first": "my dad ran a", "last": "not in the text"}) is None
+
+
+def test_non_latin_spans_match_by_unicode_words():
+    from assemble_extracts import extract_span
+    text = "и вот мой папа держал пекарню в маленьком городе под Москвой и мы все там работали"
+    q = extract_span(text, {"first": "мой папа держал пекарню", "last": "городе под Москвой."})
+    assert q == "мой папа держал пекарню в маленьком городе под Москвой"
+
+
+def test_coverage_is_compared_unrounded(tmp_path):
+    # 474/499 = 0.94990 rounds to 0.950 but is below the 0.95 threshold
+    proc, summary, _ = _run_many(tmp_path, 499, bad=list(range(25)))
+    assert summary["coverage"] == 0.95 and proc.returncode == 3

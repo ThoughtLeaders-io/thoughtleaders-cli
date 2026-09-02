@@ -511,7 +511,8 @@ def test_a_round_1_fetch_clears_an_earlier_builds_round_artifacts(tmp_path, monk
     (out / "fetch-r2.json").write_text("{}")
     (out / "windows-r2.jsonl.gz").write_bytes(b"")
     (out / "classified.jsonl").write_text("{}\n")
-    (out / "batches-r2").mkdir(); (out / "batches-r2" / "batch-000.json").write_text("[]")
+    (out / "batches-r2").mkdir()
+    (out / "batches-r2" / "batch-000.json").write_text("[]")
     with gzip.open(out / "corpus.jsonl.gz", "wt") as f:
         f.write(json.dumps({"id": "7:old", "publication_date": "2001-01-01", "cues": []}) + "\n")
     summary, _ = _run(tmp_path, monkeypatch, [_doc("7:vid1", [_frag("i grew up", 100)])],
@@ -521,7 +522,7 @@ def test_a_round_1_fetch_clears_an_earlier_builds_round_artifacts(tmp_path, monk
     assert not (out / "classified.jsonl").exists()
     assert not (out / "batches-r2").exists()
     with gzip.open(summary["corpus"], "rt") as f:
-        ids = [json.loads(l)["id"] for l in f]
+        ids = [json.loads(line)["id"] for line in f]
     assert ids == ["7:vid1"]                   # the old build's passages are gone too
 
 
@@ -613,3 +614,38 @@ def test_query_body_carries_since_into_the_filter():
     body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None)
     assert {"range": {"publication_date": {"gte": "2026-01-01", "lt": "2027-01-01"}}} in \
         body["query"]["bool"]["filter"]
+
+
+# --------------------------------------------------------------------------- #
+# batch size follows the host's concurrent-agent cap
+# --------------------------------------------------------------------------- #
+def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
+    assert fetch_cues.derived_batch_size(500, 20) == 25
+    assert fetch_cues.derived_batch_size(500, 40) == 13        # 39 batches, one wave of 40
+    assert fetch_cues.derived_batch_size(300, 40) == 8         # from the windows kept, not the cap
+    assert fetch_cues.derived_batch_size(30, 40) == fetch_cues.MIN_BATCH_SIZE
+    assert fetch_cues.derived_batch_size(0, 40) == fetch_cues.MIN_BATCH_SIZE
+
+
+def test_agent_cap_comes_from_the_environment_or_defaults_to_20(monkeypatch, capsys):
+    monkeypatch.delenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", raising=False)
+    assert fetch_cues.env_agent_cap() == fetch_cues.DEFAULT_AGENT_CAP == 20
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "40")
+    assert fetch_cues.env_agent_cap() == 40
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "lots")
+    assert fetch_cues.env_agent_cap() == 20
+    assert "not an integer" in capsys.readouterr().err
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "0")
+    assert fetch_cues.env_agent_cap() == 20
+
+
+def test_run_derives_the_batch_size_from_the_cap_unless_the_flag_is_given(tmp_path, monkeypatch):
+    docs = [_doc(f"7:v{i}", [_frag("i grew up", 100), _frag("my dad", 400)])
+            for i in range(6)]                                   # 12 windows
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "2")
+    summary, kept = _run(tmp_path, monkeypatch, docs, census_total=6, langs={"en": 6})
+    assert len(kept) == 12 and summary["batch_size"] == 6 and summary["agent_cap"] == 2
+    assert len(summary["batches"]) == 2
+    summary, _ = _run(tmp_path, monkeypatch, docs, argv=("--batch-size", "5"),
+                      census_total=6, langs={"en": 6})
+    assert summary["batch_size"] == 5 and len(summary["batches"]) == 3

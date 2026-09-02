@@ -32,6 +32,7 @@ import concurrent.futures as cf
 import gzip
 import html
 import json
+import os
 import pathlib
 import re
 import sys
@@ -232,11 +233,15 @@ def sample_windows(cue_list: list, per_video: int = NON_EN_WINDOWS_PER_VIDEO,
                    words: int = NON_EN_WINDOW_WORDS) -> list[list[list]]:
     """Evenly spaced runs of consecutive cues, each about ``words`` long."""
     runs: list[list[list]] = []
-    cur: list[list] = []; n = 0
+    cur: list[list] = []
+    n = 0
     for st, t in cue_list:
-        cur.append([round(float(st), 2), t]); n += len(t.split())
+        cur.append([round(float(st), 2), t])
+        n += len(t.split())
         if n >= words:
-            runs.append(cur); cur = []; n = 0
+            runs.append(cur)
+            cur = []
+            n = 0
     if cur and n >= 8:
         runs.append(cur)
     if len(runs) <= per_video:
@@ -333,6 +338,33 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     return "brand_mentions"
 
 
+DEFAULT_AGENT_CAP = 20      # concurrent subagents the host runs when nothing says otherwise
+MIN_BATCH_SIZE = 5          # below this the per-agent overhead outweighs the parallelism
+
+
+def env_agent_cap() -> int:
+    """How many extractor agents can run at once: $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
+    when the host sets it, else the default of 20. Garbage falls back with a note."""
+    raw = os.environ.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "").strip()
+    if not raw:
+        return DEFAULT_AGENT_CAP
+    try:
+        n = int(raw)
+    except ValueError:
+        print(f"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS={raw!r} is not an integer; "
+              f"using {DEFAULT_AGENT_CAP}", file=sys.stderr)
+        return DEFAULT_AGENT_CAP
+    return n if n >= 1 else DEFAULT_AGENT_CAP
+
+
+def derived_batch_size(windows: int, agent_cap: int) -> int:
+    """The batch size that spreads the kept windows over every agent the host
+    allows in one wave: ceil(windows / cap), never below MIN_BATCH_SIZE."""
+    if windows <= 0:
+        return MIN_BATCH_SIZE
+    return max(MIN_BATCH_SIZE, -(-windows // max(1, agent_cap)))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", type=int, required=True)
@@ -340,7 +372,10 @@ def main() -> int:
     ap.add_argument("--phrases", default=str(DEFAULT_PHRASES))
     ap.add_argument("--host-terms", default="")
     ap.add_argument("--max-windows", type=int, default=500)
-    ap.add_argument("--batch-size", type=int, default=25)
+    ap.add_argument("--batch-size", type=int, default=None,
+                    help="windows per batch file (one extractor each); default: enough batches "
+                         "to use every concurrent agent the host allows, "
+                         "ceil(windows / $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS), cap 20 when unset")
     ap.add_argument("--fragment-size", type=int, default=900)
     ap.add_argument("--fragments-per-doc", type=int, default=10)
     ap.add_argument("--per-video-cap", type=int, default=8)
@@ -516,12 +551,14 @@ def main() -> int:
         if len(kept) >= a.max_windows:
             break
     for w in windows:
-        w.pop("_specific", None); w.pop("_recurring", None)
+        w.pop("_specific", None)
+        w.pop("_recurring", None)
     sponsor_source = apply_sponsor_spans(kept)
 
     out = pathlib.Path(a.out) / str(a.channel)
     suffix = "" if a.round <= 1 else f"-r{a.round}"
-    bdir = out / f"batches{suffix}"; rdir = out / f"returns{suffix}"
+    bdir = out / f"batches{suffix}"
+    rdir = out / f"returns{suffix}"
     bdir.mkdir(parents=True, exist_ok=True)
     if a.round <= 1:
         # a first round is a fresh build: nothing from an earlier build's
@@ -562,10 +599,12 @@ def main() -> int:
         for e in corpus.values():
             e["cues"].sort(key=lambda c: c[0])
             fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+    agent_cap = env_agent_cap()
+    batch_size = a.batch_size or derived_batch_size(len(kept), agent_cap)
     batches = []
-    for i in range(0, len(kept), a.batch_size):
-        p = bdir / f"batch-{i // a.batch_size:03d}.json"
-        p.write_text(json.dumps(kept[i:i + a.batch_size], ensure_ascii=False))
+    for i in range(0, len(kept), batch_size):
+        p = bdir / f"batch-{i // batch_size:03d}.json"
+        p.write_text(json.dumps(kept[i:i + batch_size], ensure_ascii=False))
         batches.append(str(p))
     elapsed = round(time.monotonic() - t0, 1)
     summary = {
@@ -574,6 +613,7 @@ def main() -> int:
         "non_english_videos_sampled": len(non_en_docs),
         "videos_matched": len(corpus), "passages": len(windows),
         "windows_batched": len(kept), "videos_in_batches": len(per_video),
+        "batch_size": batch_size, "agent_cap": agent_cap,
         "sponsor_flagged": sum(1 for w in kept if w["in_sponsor_read"]),
         "sponsor_source": sponsor_source,
         "batches": batches, "returns_dir": str(rdir),
@@ -588,8 +628,8 @@ def main() -> int:
     print(json.dumps(summary, indent=1))
     print(f"FUNNEL stage=fetch_cues round={a.round} videos_with_transcript={videos_with_transcript} "
           f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} passages={len(windows)} "
-          f"windows_capped={len(kept)} batches={len(batches)} "
-          f"sponsor_source={sponsor_source} elapsed_s={elapsed}",
+          f"windows_capped={len(kept)} batches={len(batches)} batch_size={batch_size} "
+          f"agent_cap={agent_cap} sponsor_source={sponsor_source} elapsed_s={elapsed}",
           file=sys.stderr)
     return 0
 

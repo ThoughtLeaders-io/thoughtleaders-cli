@@ -3,18 +3,20 @@
 How a channel's transcripts become a profile. One retrieval flow, one
 extraction fan-out, then judgment. Query credits are not a budget here; the
 budgets are model tokens and tiers — which is why retrieval is a single
-script, extraction runs on sonnet agents that each see 25 windows and nothing
-else, and the expensive context is spent only on judgment no script can
-encode.
+script, extraction runs on sonnet agents that each see one batch of windows
+and nothing else, and the expensive context is spent only on judgment no
+script can encode.
 
 Measured end to end on five channels (Sydney Watson 20107, Alex Hormozi
 253904 = 4,205 videos, Emma Chamberlain 3268, Professor G 1069544, Ali Abdaal
 31792): fetch 7–21 s on the first three and 36–54 s on the two channels with
 700–1,200 cue-matched videos — the clock follows the number of matched videos
 whose passages come back, not the upload count; 310 gems / 500 windows, 405 /
-497, 432 / 500; every quote exact by construction; extractor agents 2.3–8
-minutes each, gem-dense channels at the long end, and a 20-agent round lands
-at 5.6–6.3 minutes of wall clock including the subset re-spawn.
+497, 432 / 500; every quote exact by construction. The five-turn extractor
+of those runs took 2.3–8 minutes per agent and 5.6–6.3 minutes per 20-agent
+round plus re-spawns (10.7 minutes of extraction on Sydney Watson); the
+single-message extractor below replaces it (262 s per 500-window round,
+no re-spawns — see Speed).
 
 ## Layer 1+2: fetch the cue passages, one script
 
@@ -39,8 +41,8 @@ downloaded that the model layer will not read.
 | `--host-terms` | none | comma-separated names/companies; a hit on one is a strong host anchor and scores double |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
-| `--max-windows` | 500 | the cap on what reaches the model layer (20 agents × 25) |
-| `--batch-size` | 25 | windows per batch file, one per extractor agent |
+| `--max-windows` | 500 | the cap on what reaches the model layer in one round |
+| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5 — 500 windows make 20 × 25 on a 20-agent host and 39 × 13 on a 40-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
 | `--fragment-size` / `--fragments-per-doc` | 900 / 10 | passage width and how many per video |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
@@ -81,37 +83,59 @@ and `elapsed_s`. `passages` minus `windows_capped` is what stayed out of this
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
 
-**A second round is additive, never a re-run.** The harness runs at most 20
-subagents concurrently, so one round is 20 × 25 = 500 windows. To go deeper —
+**A second round is additive, never a re-run.** One round is the 500-window
+cap spread over every agent the host runs at once. To go deeper —
 or to use host terms the socials lane turned up after the fetch — run
 `fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
 are skipped, so the new batches are new material and the ledger grows instead
 of repeating. Do not raise `--max-windows` past what one round can extract.
 
-## Layer 3: extraction — one fan-out, classify and extract together
+## Layer 3: extraction — one fan-out, one message per agent
 
-Every batch file is read by exactly one `tl-cli:gem-classifier` agent (the
-file name is historical; the role is a **gem extractor**, `model: sonnet` —
-haiku truncated its output at this size in testing). One pass decides whether
-the window is self-disclosure AND writes what it says: the third-person claim,
-the span of the window that proves it, the life domain, the speaker guess and
-the sensitivity tier. The rubric has ONE home:
-`references/gem-classifier.md`, which points to `evidence-rules.md`.
+Every batch file is judged by exactly one extractor: the `tl-cli:gem-classifier`
+agent (the file name is historical; the role is a **gem extractor**,
+`model: sonnet` — haiku truncated its output at this size in testing). One
+pass decides whether the window is self-disclosure AND writes what it says:
+the third-person claim, the span of the window that proves it, the life
+domain, the speaker guess and the sensitivity tier. The rubric has ONE home:
+`references/gem-classifier.md`, which names the two `evidence-rules.md`
+sections it applies.
+
+The extractor never assembles its own input. `scripts/extractor_prompt.py`
+renders ONE self-contained message per batch — the rubric, those two
+evidence sections, the context block and the batch's windows as JSON, plus
+where to write the output — so the agent reads exactly one file and has
+nothing else to fetch:
+
+```bash
+python3 <skill>/scripts/extractor_prompt.py \
+  --batch <corpus>/<channel_id>/batches/batch-007.json \
+  --context <corpus>/<channel_id>/context.json \
+  --write-to <corpus>/<channel_id>/returns/batch-007.extract.json \
+  --out <corpus>/<channel_id>/prompts/batch-007.md
+```
+
+`context.json` is written once after the channel context brief:
+`{"channel_name", "host_names", "known_facts", "format_label",
+"format_evidence"}`. Render every batch in one shell loop (a fraction of a
+second each); the rendered message is ~35 KB for 25 windows.
 
 Run the fan-out exactly like this:
 
 1. **The batch files already exist.** `fetch_cues.py` wrote them. Do not
    re-fetch, do not re-batch, do not read `windows.jsonl.gz`.
-2. **`ls <batches_dir>/batch-*.json`** for the N paths. That list is the work
-   queue; each path is claimed exactly once.
+2. **Render all prompts in one command**, then `ls <prompts_dir>/batch-*.md`
+   is the work queue; each path is claimed exactly once.
 3. **Spawn all N agents as N `Agent` tool_use blocks in ONE assistant
-   message.** One spawn per message is a bug, not a slow success — the same
-   one-message rule governs every fan-out in this skill.
-4. **Each agent gets exactly four things**: the path to
-   `references/gem-classifier.md`, the context block (verbatim, inline in the
-   prompt), ONE batch file path, and the path to write
-   `returns/batch-NNN.extract.json`. Windows only — never a transcript, never
-   `corpus.jsonl.gz`, never a second batch.
+   message**, with nothing else in flight — every running agent counts
+   against the host's concurrency cap, and an agent that queues behind the
+   cap starts minutes late. One spawn per message is a bug, not a slow
+   success — the same one-message rule governs every fan-out in this skill.
+4. **Each agent's prompt is two lines**: read this one file
+   (`<prompts_dir>/batch-NNN.md`) and follow it exactly; it is
+   self-contained, read nothing else, run nothing, one Write, then the
+   one-line receipt. Never paste the rendered message into the prompt, never
+   a transcript, never a second batch.
 5. **Each agent writes its file and returns one line**
    (`batch=NNN windows=<n> gems=<n>`). Results live in the file; the return
    line is a receipt. Then stop the turn and consume the completion
@@ -120,9 +144,9 @@ Run the fan-out exactly like this:
    mechanically (Layer 3b). Track claimed batches; never spawn the same batch
    twice.
 
-Each agent is held to **exactly five tool calls** (four Reads, one Write) so a
-batch cannot turn into an open-ended session: no verification scripts, no
-Bash, no re-reads.
+Each agent is three turns — Read the message, Write the JSON, reply the
+receipt — so a batch cannot turn into an open-ended session: no
+verification scripts, no Bash, no other Reads, no second Write.
 
 **Forbidden in this fan-out, without exception:**
 
@@ -136,17 +160,34 @@ Bash, no re-reads.
   see how it goes".
 - **No default-model stand-ins.** If `tl-cli:gem-classifier` does not resolve
   (running from a checkout rather than an installed plugin), spawn
-  `general-purpose` with an explicit `model: sonnet` override and the
-  extractor rubric inlined in the prompt. A general-purpose agent on the
-  inherited (expensive) model is the failure mode this list exists to prevent
-  — it is how one past run reached 30M tokens.
+  `general-purpose` with an explicit `model: sonnet` override and the same
+  two-line prompt — the rendered message already carries the whole rubric.
+  A general-purpose agent on the inherited (expensive) model is the failure
+  mode this list exists to prevent — it is how one past run reached 30M
+  tokens.
 
-**If the host cannot spawn agents at all**: run the batches sequentially with
-`references/gem-classifier.md` used inline as the prompt, discarding each
-batch's raw text before the next.
+**Concurrency.** The host runs at most `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`
+agents at once (20 when unset). Set it to 40 in the host's settings `env`
+when the host honours it, and `fetch_cues.py` sizes the batches to fill one
+wave (Layer 1+2). Smaller batches also drop fewer windows: an 8-window batch
+was clean live where 25-window batches lost one or two.
+
+**The scripted extractor is the fallback, not the default.**
+`scripts/classify_gems.py` sends the same rendered message to an
+OpenAI-compatible endpoint (one request per batch, returns written where the
+agents write theirs, `assemble_extracts.py` validates both alike). Measured
+on the same 500 windows against the sonnet agents (2026-09-02, opus-judged
+against the rubric): it ran in 91 s for a few cents, but 41 of 500 windows
+(8 %) failed the span contract (spans of 48–87 words, reversed spans), and
+on 60 disagreement windows the judge sided with sonnet 45 times and with
+the script 9, with 12 speaker misattributions on the script's side (clip
+voices logged as the host — the failure the rubric ranks worst) against 4.
+So the agents stay the default; use the script only when the host cannot
+spawn agents at all, and expect a below-threshold assemble that needs a
+subset re-judge. With no key configured it exits 20 and says so.
 
 Print the stage's own funnel line from the returned receipts:
-`FUNNEL stage=extract batches=… agents=… windows=… gems=… respawned=… elapsed_s=…`.
+`FUNNEL stage=extract batches=… agents=… windows=… gems=… elapsed_s=…`.
 
 The model catches what no cue list can: "I'm allergic to peanuts", "we finally
 finished the nursery", proper nouns read through misspellings, sarcasm and
@@ -158,7 +199,7 @@ hypotheticals. That is why the fetch layer gates nothing beyond the cap.
 python3 <skill>/scripts/assemble_extracts.py \
   --batches <corpus>/<channel_id>/batches \
   --returns <corpus>/<channel_id>/returns \
-  --out <corpus>/<channel_id>
+  --out <corpus>/<channel_id> [--min-coverage 0.95]
 ```
 
 Per batch it checks that every index `0 … N-1` appears exactly once across
@@ -172,13 +213,29 @@ are only counted.
 
 It writes `classified.jsonl` (every judged window, and the `--exclude` input
 for a later round), `gems.jsonl` (the cluster step's input), `candidates.jsonl`
-and `respawn.json`, and exits **3** when any window needs re-running.
-`respawn.json` maps batch → the window indexes that failed or were skipped:
-re-spawn exactly those as one mini-batch of extractor agents and re-run
-assemble (with `--append` on a later round: it replaces that round's earlier
-rows for the same windows, so a re-assembly after a re-spawn never stacks a
-second copy of the round's gems). **Nothing is hand-patched** — a hand-edited
-return is an unverifiable quote.
+and `respawn.json`. Windows that failed a check or were skipped are
+**unjudged**: they stay out of all three files and are listed in
+`respawn.json`. **Coverage decides the exit code**, not perfection: with
+`unjudged / expected` within the `--min-coverage` threshold (default 0.95,
+so up to 25 of 500 windows) it exits **0** and the run continues — a few
+lost windows may not even be gems, and they remain reachable through a later
+`--exclude` round (unjudged passages are not in `classified.jsonl`, so the
+next fetch offers them again). It exits **3** only below the threshold, or
+when a batch file has no return file at all (an extractor that never ran);
+then re-judge exactly the listed windows — `extractor_prompt.py --indexes
+3,7 --write-to …/batch-NNN.extract.r2.json`, one agent per batch — and
+re-run assemble (with `--append` on a later round: it replaces that round's
+earlier rows for the same windows, so a re-assembly after a re-judge never
+stacks a second copy of the round's gems). **Nothing is hand-patched** — a
+hand-edited return is an unverifiable quote.
+
+Assemble, cluster and merge-prepare are three quick scripts with no
+judgment between them: run them as ONE `&&`-chained shell command as soon
+as the fan-out's receipts are in, with each stage's JSON summary redirected
+to a file and only the FUNNEL lines on stderr reaching you; exit 3 from
+assemble stops the chain by design. Spawn the merge agent in the same
+assistant message that reads that command's result — every notify-then-act
+gap between stages costs 20–60 s.
 
 ## Layer 4: cluster, then one merge pass judges
 
@@ -411,18 +468,24 @@ profile header.
 Wall clock is the extraction fan-out plus the merge pass. Measured: the fetch
 is **7–21 s on small channels and 36–54 s on channels with 700–1,200
 cue-matched videos**, the local scripts (assemble, cluster, expand, verify)
-are seconds, the extractor agents run **2.3–8 minutes each** in parallel (a
-20-agent round is 5.6–6.3 minutes with its re-spawn) — gem-dense channels at
-the long end, because a batch with 20 gems in it is simply more writing — and
-the merge pass is one agent returning a few kilobytes of decisions. The old
-merge pass, which wrote every ledger record itself, took 21–23 minutes on a
-220-fact channel; that is what the decision contract exists to cut. Claude's
-share of a profile build is the fan-out plus a handful of turns: the identity
-lane, the format call, one merge pass — **≤22 subagents total** (up to 20
-extractors, one merge, one socials lane), not one per window and not one per
-fact.
+are seconds, and the merge pass is one agent returning a few kilobytes of
+decisions (260 s on a 273-cluster channel). The old five-turn extractor —
+four Reads and a Write, each turn re-processing a growing context, ~115K
+input tokens per agent — ran 2.3–8 minutes per agent and 10.7 minutes per
+round with its re-spawns on Sydney Watson. The single-message extractor
+(Layer 3) is one Read, one Write and a receipt: measured on the same channel
+(2026-09-02, 20 agents × 25 windows, nothing else in flight) **262 s of wall
+clock** with agents at 119–218 s each, 497/500 windows assembled, and the
+coverage threshold (Layer 3b) let the run continue past the 3 unjudged
+windows with no re-spawn round. The whole fresh PROFILE run was 706 s
+(fetch 27 s, context brief 19 s, extraction 262 s, assemble→cluster→prepare
+1 s, merge agent 280 s, expand→verify→write 16 s), 206 facts, every quote
+exact — against 1,201 s before the change. Claude's share of a profile build is the fan-out
+plus a handful of turns: the identity lane, the format call, one merge pass —
+**one extractor per batch, one merge agent, one optional socials lane**, not
+one per window and not one per fact.
 
 Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
 is always answerable with a stage name. Rounds are the knob that matters: one
-round is 500 windows because the harness runs at most 20 subagents at once,
-and going deeper means another `--exclude` round rather than a bigger cap.
+round is 500 windows spread over every agent the host runs at once, and going
+deeper means another `--exclude` round rather than a bigger cap.

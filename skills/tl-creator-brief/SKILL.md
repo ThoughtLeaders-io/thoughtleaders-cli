@@ -167,49 +167,67 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
    **passages**, not whole transcripts, so read them as a format hint, not a
    census. Not a gate — nothing exits early. Its stdout is the summary only;
    per-video stat rows go to a file via `--per-video-out`.
-3. **Extraction fan-out — ~20 agents, one message.** Classification and
-   extraction are the same pass. `ls <corpus>/<id>/batches/batch-*.json` is
-   the work queue; spawn ONE `tl-cli:gem-classifier` agent per batch file, all
-   of them as tool calls in a **single assistant message** (the harness runs
-   at most 20 concurrently, so one round is 20 × 25 = 500 windows). Each agent
-   gets: the path to `references/gem-classifier.md`, the context block
-   verbatim, ONE batch path, and the path to write
-   `returns/batch-NNN.extract.json`. It writes that file and returns one line.
-   Agents take 2.3–8 minutes each; gem-dense channels run longer. Never spawn
-   one at a time, never hand an agent two batches, never a transcript.
+3. **Extraction fan-out — one agent per batch, one message.** Classification
+   and extraction are the same pass. Write the context block once
+   (`context.json`: `channel_name`, `host_names`, `known_facts`,
+   `format_label`, `format_evidence`), render every batch's message in one
+   shell loop with `scripts/extractor_prompt.py --batch … --context … 
+   --write-to <…>/returns/batch-NNN.extract.json --out <…>/prompts/batch-NNN.md`,
+   then spawn ONE `tl-cli:gem-classifier` agent per rendered message, all of
+   them as tool calls in a **single assistant message** with nothing else in
+   flight. The agent's prompt is two lines — read that one file, follow it,
+   one Write, one-line receipt; the file carries the rubric, the evidence
+   rules, the context and the windows. Never paste the message into the
+   prompt, never hand an agent two batches, never a transcript, never spawn
+   one at a time. Batches are sized by `fetch_cues.py` to fill one wave of
+   the host's agent cap (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, 20 when
+   unset; set it to 40 in the host settings `env` when the host honours it —
+   every running agent counts against it, so launch the round alone).
+   If the agent type does not resolve (a checkout rather than the installed
+   plugin), spawn `general-purpose` with `model: sonnet` and the same prompt,
+   and say so in the run report. The scripted extractor
+   (`scripts/classify_gems.py`, same message to an OpenAI-compatible
+   endpoint) is the fallback for a host that cannot spawn agents at all —
+   measured worse on speaker attribution and span discipline
+   (`references/transcript-mining.md`, Layer 3), never the default.
    - **3a. A deeper round is additive, not a re-run.** When 500 windows is not
      enough, or the socials lane turned up new host terms, run
      `fetch_cues.py --channel <id> --host-terms "…" --exclude
      <out>/classified.jsonl`: passages already judged are skipped, so the new
      batches are new material, and the round costs another fetch plus another
      fan-out.
-4. **Assemble — a script, never a hand patch.**
+4. **Assemble, cluster, prepare — one command, never a hand patch.** As soon
+   as the receipts are in:
 
    ```bash
    python3 scripts/assemble_extracts.py --batches <…>/batches \
-     --returns <…>/returns --out <…>
+     --returns <…>/returns --out <…> > <…>/assemble.json && \
+   python3 scripts/cluster_gems.py --in <…>/gems.jsonl > <…>/cluster.json && \
+   python3 scripts/merge_pass.py prepare --clustered <…>/gems-clustered.jsonl \
+     --format <label> --out <…> > <…>/prepare.json
    ```
 
-   It validates the count contract, the echoed `start`, the enums, and cuts
-   each quote out of the window text so every quote is verbatim by
+   Assemble validates the count contract, the echoed `start`, the enums, and
+   cuts each quote out of the window text so every quote is verbatim by
    construction. It writes `classified.jsonl`, `gems.jsonl`,
-   `candidates.jsonl` and `respawn.json`. **Branch on the exit code**: `0` =
-   continue; `3` = `respawn.json` lists the windows that failed or were
-   skipped — re-spawn exactly those as one mini-batch of extractor agents,
-   re-run assemble, then continue. Never edit a return file by hand.
-5. **Cluster the repeats — a script.** `scripts/cluster_gems.py --in
-   gems.jsonl` writes `gems-clustered.jsonl` beside it, so a back-catalogue
-   channel that has said "BioShock is my favorite game" in thirty videos costs
-   the merge pass one read instead of thirty. Merge rules:
+   `candidates.jsonl` and `respawn.json`, and **coverage decides its exit
+   code**: unjudged windows within `--min-coverage` (default 0.95) are
+   reported on the funnel line as `unjudged=N` and the chain continues —
+   they stay out of `classified.jsonl`, so a later `--exclude` round can
+   still pick them up. Exit `3` (below the threshold, or a batch with no
+   return file at all) stops the chain: re-judge exactly the windows in
+   `respawn.json` with `extractor_prompt.py --indexes … --write-to
+   …/batch-NNN.extract.r2.json`, one agent per batch, then re-run the
+   command. Never edit a return file by hand. Read the three FUNNEL lines
+   from stderr and spawn the merge agent (step 6) **in the same message**.
+5. **Cluster the repeats — in the command above.** `cluster_gems.py` writes
+   `gems-clustered.jsonl` beside `gems.jsonl`, so a back-catalogue channel
+   that has said "BioShock is my favorite game" in thirty videos costs the
+   merge pass one read instead of thirty. Merge rules:
    `references/transcript-mining.md`, Layer 4. Do not hand-merge what the
    script left apart.
 6. **Merge pass — decisions from one agent, the ledger from a script.**
-
-   ```bash
-   python3 scripts/merge_pass.py prepare --clustered <…>/gems-clustered.jsonl \
-     --format <label> --out <…>            # writes merge-input.jsonl
-   ```
-
+   `merge_pass.py prepare` (already run in step 4) writes `merge-input.jsonl`.
    The script applies the deterministic parts of `evidence-rules.md` itself
    (guest and co-host voices dropped; unclear voices dropped on shared-voice
    formats; solo-format `unclear`/narration kept as host, capped
@@ -272,16 +290,16 @@ lines, as they were emitted:
 
 ```
 FUNNEL stage=fetch_cues videos_matched=… passages=… windows_capped=… batches=… sponsor_source=… elapsed_s=…
-FUNNEL stage=extract batches=… agents=… windows=… gems=… respawned=… elapsed_s=…   ← you print this one
-FUNNEL stage=assemble windows_expected=… windows_assembled=… gems=… respawn_windows=… elapsed_s=…
+FUNNEL stage=extract batches=… agents=… windows=… gems=… elapsed_s=…   ← you print this one
+FUNNEL stage=assemble windows_expected=… windows_assembled=… gems=… unjudged=… coverage=… elapsed_s=…
 FUNNEL stage=cluster gems=… clusters=… merged=… elapsed_s=…
 FUNNEL stage=merge clusters=… judged=… auto_dropped=… facts=… folded=… dropped=… selected=… elapsed_s=…
 FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… elapsed_s=…
 ```
 
 Then one line naming the extraction shape and its cost:
-`extraction: 20 sonnet agents × 25 windows, one round; merge: 1 agent,
-<N> decisions`. A second `--exclude`
+`extraction: <N> sonnet agents × <M> windows, one round, <U> unjudged;
+merge: 1 agent, <N> decisions`. A second `--exclude`
 round adds its own fetch/extract/assemble lines rather than replacing the
 first round's. Cost and path belong in the run report **once, and never in the
 profile**.
@@ -310,11 +328,15 @@ the user cannot tell selection from yield.
 A "fast run" is a run shape, not a script flag (no script takes `--fast`):
 PROFILE only, the primary channel only (no second-channel mining), **the
 socials lane off, without asking**, the default 500-window cap, and ONE
-extraction round — no `--exclude` deepening. Wall clock is the fan-out: the
-fetch is under a minute and the local scripts are seconds, so a run is
-roughly one agent generation (2.3–8 minutes, longer on gem-dense channels)
-plus the merge pass (one agent returning decisions, minutes not tens of them). Everything that could outrun that is bounded rather than skipped: the
-20-agent round is the cap, the identity lane is time-boxed as in step 1 when
+extraction round — no `--exclude` deepening. Wall clock is the fan-out plus
+the merge pass: the fetch is under a minute and the local scripts are
+seconds, so a run is roughly one extractor generation (one wave of agents,
+each one Read, one Write and a receipt) plus the merge pass (one agent
+returning decisions, minutes not tens of them), with assemble → cluster →
+prepare and expand → verify → write each run as one command so no
+notify-then-act gap sits between scripts. Everything that could outrun that
+is bounded rather than skipped: one wave of the host's agent cap is the
+round, the identity lane is time-boxed as in step 1 when
 the user turned it on, and the merge pass stays at one agent returning
 decisions (`--shards N` on `merge_pass.py prepare` splits the input by life
 domain across N agents when one is still slow; folds never cross domains). Report the

@@ -1,14 +1,16 @@
 """The creator-brief scripts: local verification, the deterministic
-connections page, and the legacy classifier's mechanical guarantees (contract
-validation, resume keying, loud no-key exit). The live retrieval and extraction flow has its own files —
-``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No network anywhere:
-classify_gems' API surface is exercised only up to the point it would need a
-key.
+connections page, and the scripted extractor's mechanical guarantees (return
+files, resume, retry, key resolution, loud no-key exit). The retrieval and
+assembly stages have their own files — ``test_fetch_cues.py`` and
+``test_assemble_extracts.py``. No real network anywhere: the scripted
+extractor talks to a fake OpenAI-compatible endpoint on 127.0.0.1.
 """
 
+import http.server
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 _SCRIPTS = (Path(__file__).resolve().parents[1]
@@ -360,31 +362,218 @@ def test_who_they_are_link_only_http_schemes(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# classify_gems.py — mechanical guarantees, no network
+# classify_gems.py — the scripted extractor, against a local fake endpoint
 # --------------------------------------------------------------------------- #
-def _verdict(i, **kw):
-    v = {"i": i, "self_disclosure": False, "life_domain": None,
-         "speaker_guess": "host", "sensitive": False,
-         "entity_corrections": {}, "notable": None}
-    v.update(kw)
-    return v
+def _windows_in(prompt: str) -> list[dict]:
+    """The window array the rendered extractor message carries."""
+    tail = prompt.split("=== WINDOWS", 1)[1].split("===\n", 1)[1]
+    return json.loads(tail.splitlines()[0])
 
 
-def test_validate_accepts_the_contract_and_reorders_by_index():
-    got = classify_gems.validate(
-        [_verdict(1), _verdict(0, self_disclosure=True, life_domain="pets")],
-        2)
-    assert got is not None and got[0]["life_domain"] == "pets"
+def _extract_for(prompt: str, **over) -> dict:
+    """A contract-shaped extract for the batch in this prompt: every other
+    window a gem, each verdict echoing its own window's `start`."""
+    gems, not_gems = [], []
+    for w in _windows_in(prompt):
+        if w["i"] % 2 == 0:
+            text = w["text"]
+            ws = text.split()
+            gems.append({"i": w["i"], "start": w["start"],
+                         "anchor": " ".join(ws[:5]),
+                         "life_domain": "family", "speaker_guess": "host",
+                         "sensitivity": "none", "entity_corrections": {},
+                         "notable": "father ran a bakery",
+                         "claim": "father ran a bakery",
+                         "quote_span": {"first": " ".join(ws[:4]),
+                                        "last": " ".join(ws[-4:])},
+                         "confidence": "confirmed"})
+        else:
+            not_gems.append({"i": w["i"], "speaker_guess": "guest",
+                             "reason": "third-party"})
+    out = {"gems": gems, "not_gems": not_gems}
+    out.update(over)
+    return out
 
 
-def test_validate_rejects_gaps_duplicates_and_bad_enums():
-    assert classify_gems.validate([_verdict(0)], 2) is None
-    assert classify_gems.validate([_verdict(0), _verdict(0)], 2) is None
-    assert classify_gems.validate(
-        [_verdict(0, self_disclosure=True, life_domain="astrology")], 1) is None
-    assert classify_gems.validate(
-        [_verdict(0, speaker_guess="someone")], 1) is None
-    assert classify_gems.validate({"not": "a list"}, 1) is None
+class _FakeLLM:
+    """An OpenAI-compatible /chat/completions endpoint on 127.0.0.1."""
+
+    def __init__(self, content):
+        self.content = content       # callable(prompt) -> response content
+        self.requests = []
+        handler = self._handler()
+        self.httpd = http.server.HTTPServer(("127.0.0.1", 0), handler)
+        self.thread = threading.Thread(target=self.httpd.serve_forever,
+                                       daemon=True)
+        self.thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.httpd.server_address[1]}/v1"
+
+    def _handler(server_self):
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(
+                    int(self.headers["Content-Length"])).decode())
+                prompt = body["messages"][0]["content"]
+                server_self.requests.append(body)
+                content = server_self.content(prompt)
+                payload = json.dumps({
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 3},
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+        return H
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _corpus(tmp_path: Path, batches: int = 2, per: int = 2):
+    root = tmp_path / "batches"
+    root.mkdir()
+    for n in range(1, batches + 1):
+        root.joinpath(f"batch-{n:03d}.json").write_text(json.dumps([
+            {"id": f"1:vid{n}", "start": 10 * n + i,
+             "text": f"my dad ran a bakery in a tiny town number {n}{i}",
+             "title": "t", "format_hint": None, "in_sponsor_read": False}
+            for i in range(per)]))
+    ctx = tmp_path / "context.json"
+    ctx.write_text(json.dumps({"channel_name": "Patterrz"}))
+    return root, ctx
+
+
+def _run_extract(batch_dir, ctx, *extra, env=None):
+    e = {"PATH": "/usr/bin:/bin"}
+    e.update(env or {})
+    return subprocess.run(
+        [sys.executable, str(_SCRIPTS / "classify_gems.py"),
+         "--batches", str(batch_dir), "--context", str(ctx),
+         "--env-file", str(batch_dir.parent / "nonexistent.env"), *extra],
+        capture_output=True, text=True, env=e)
+
+
+def test_scripted_extractor_writes_one_return_file_per_batch(tmp_path):
+    batches, ctx = _corpus(tmp_path)
+    fake = _FakeLLM(lambda p: json.dumps(_extract_for(p)))
+    try:
+        proc = _run_extract(batches, ctx, env={
+            "CREATOR_BRIEF_LLM_API_KEY": "k",
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+    finally:
+        fake.stop()
+    assert proc.returncode == 0, proc.stderr
+    returns = tmp_path / "returns"
+    files = sorted(p.name for p in returns.glob("*.json"))
+    assert files == ["batch-001.extract.json", "batch-002.extract.json"]
+    obj = json.loads((returns / "batch-002.extract.json").read_text())
+    # the response carried neither key; both are filled in from the batch
+    assert obj["batch"] == "002" and obj["windows"] == 2
+    assert [g["start"] for g in obj["gems"]] == [20]     # echoed, assemblable
+    assert [x["i"] for x in obj["not_gems"]] == [1]
+    summary = json.loads(proc.stdout)
+    assert summary["batches"] == 2 and summary["batches_written"] == 2
+    assert summary["errors"] == 0 and summary["windows"] == 4
+    assert summary["skipped_existing"] == 0
+    assert summary["prompt_tokens"] == 22 and summary["completion_tokens"] == 6
+    assert summary["largest_return_chars"] > 100
+    line = next(ln for ln in proc.stderr.splitlines()
+                if ln.startswith("FUNNEL stage=extract"))
+    f = dict(kv.split("=", 1) for kv in line.split()[1:])
+    assert f["path"] == "api" and f["batches"] == "2" and f["windows"] == "4"
+    assert f["written"] == "2" and f["errors"] == "0"
+
+
+def test_existing_return_files_are_skipped_unless_forced(tmp_path):
+    batches, ctx = _corpus(tmp_path, batches=2)
+    returns = tmp_path / "returns"
+    returns.mkdir()
+    (returns / "batch-001.extract.json").write_text('{"gems": [], '
+                                                    '"not_gems": []}')
+    fake = _FakeLLM(lambda p: json.dumps(_extract_for(p)))
+    env = {"CREATOR_BRIEF_LLM_API_KEY": "k",
+           "CREATOR_BRIEF_LLM_BASE_URL": fake.url}
+    try:
+        first = _run_extract(batches, ctx, env=env)
+        assert json.loads(first.stdout)["skipped_existing"] == 1
+        assert json.loads(first.stdout)["batches_written"] == 1
+        assert len(fake.requests) == 1
+        forced = _run_extract(batches, ctx, "--force", env=env)
+    finally:
+        fake.stop()
+    assert json.loads(forced.stdout)["skipped_existing"] == 0
+    assert json.loads(forced.stdout)["batches_written"] == 2
+    assert len(fake.requests) == 3
+    # --force actually replaced the stub
+    assert json.loads(
+        (returns / "batch-001.extract.json").read_text())["gems"]
+
+
+def test_malformed_content_is_retried_then_counted_as_an_error(tmp_path):
+    batches, ctx = _corpus(tmp_path, batches=1)
+    fake = _FakeLLM(lambda p: json.dumps(["not", "an", "object"]))
+    try:
+        proc = _run_extract(batches, ctx, env={
+            "CREATOR_BRIEF_LLM_API_KEY": "k",
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+        attempts = len(fake.requests)
+    finally:
+        fake.stop()
+    assert attempts == 1 + classify_gems.RETRIES == 3
+    assert proc.returncode == 1
+    summary = json.loads(proc.stdout)
+    assert summary["errors"] == 1 and summary["batches_written"] == 0
+    # nothing written: the assembler sees a missing return file for the batch
+    assert not list((tmp_path / "returns").glob("*.json"))
+
+
+def test_a_fenced_object_is_accepted(tmp_path):
+    batches, ctx = _corpus(tmp_path, batches=1)
+    fake = _FakeLLM(
+        lambda p: "```json\n" + json.dumps(_extract_for(p)) + "\n```")
+    try:
+        proc = _run_extract(batches, ctx, env={
+            "CREATOR_BRIEF_LLM_API_KEY": "k",
+            "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+    finally:
+        fake.stop()
+    assert proc.returncode == 0, proc.stderr
+    obj = json.loads(
+        (tmp_path / "returns" / "batch-001.extract.json").read_text())
+    assert obj["batch"] == "001" and len(obj["gems"]) == 1
+
+
+def test_the_key_can_come_from_the_env_file(tmp_path):
+    batches, ctx = _corpus(tmp_path, batches=1)
+    envfile = tmp_path / "or.env"
+    envfile.write_text('# a comment\n\nOTHER=x\nOPENROUTER_API_KEY="from-file"\n')
+    assert classify_gems.read_env_file(envfile) == "from-file"
+    assert classify_gems.read_env_file(tmp_path / "missing.env") is None
+    fake = _FakeLLM(lambda p: json.dumps(_extract_for(p)))
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_SCRIPTS / "classify_gems.py"),
+             "--batches", str(batches), "--context", str(ctx),
+             "--env-file", str(envfile), "--returns", str(tmp_path / "r")],
+            capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin",
+                 "CREATOR_BRIEF_LLM_BASE_URL": fake.url})
+        sent = fake.requests[0]
+    finally:
+        fake.stop()
+    assert proc.returncode == 0, proc.stderr
+    assert sent["response_format"] == {"type": "json_object"}
+    assert sent["temperature"] == 0
+    assert (tmp_path / "r" / "batch-001.extract.json").is_file()
 
 
 def _run_no_key(tmp_path: Path, windows: list[dict]):
@@ -395,7 +584,9 @@ def _run_no_key(tmp_path: Path, windows: list[dict]):
     ctx.write_text("{}")
     return subprocess.run(
         [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-         "--batches", str(batches), "--context", str(ctx)],
+         "--batches", str(batches), "--context", str(ctx),
+         # never the developer's real key file
+         "--env-file", str(tmp_path / "nonexistent.env")],
         capture_output=True, text=True,
         env={"PATH": "/usr/bin:/bin"}), batches
 
@@ -405,8 +596,8 @@ def test_no_api_key_emits_the_fallback_marker_and_its_own_exit_code(tmp_path):
                                             "text": "my dad ran a bakery"}])
     # a code of its own: not argparse's usage 2, not the "errors" 1
     assert proc.returncode == classify_gems.EXIT_FALLBACK_REQUIRED == 20
-    marker = next(l for l in proc.stderr.splitlines()
-                  if l.startswith("FALLBACK_REQUIRED"))
+    marker = next(ln for ln in proc.stderr.splitlines()
+                  if ln.startswith("FALLBACK_REQUIRED"))
     fields = dict(kv.split("=", 1) for kv in marker.split()[1:])
     assert fields["reason"] == "missing_api_key"
     # the fallback consumes exactly these files, so the path must resolve
@@ -419,11 +610,11 @@ def test_no_api_key_emits_the_fallback_marker_and_its_own_exit_code(tmp_path):
 def test_no_api_key_still_prints_its_funnel_line(tmp_path):
     proc, _ = _run_no_key(tmp_path, [{"id": "1:aaa", "start": 5, "text": "x"},
                                      {"id": "1:bbb", "start": 9, "text": "y"}])
-    line = next(l for l in proc.stderr.splitlines()
-                if l.startswith("FUNNEL stage=classify"))
+    line = next(ln for ln in proc.stderr.splitlines()
+                if ln.startswith("FUNNEL stage=extract"))
     fields = dict(kv.split("=", 1) for kv in line.split()[1:])
     assert fields["path"] == "fallback_required"
-    assert fields["windows_total"] == "2" and fields["gems"] == "0"
+    assert fields["windows"] == "2" and fields["written"] == "0"
     assert float(fields["elapsed_s"]) >= 0
 
 
@@ -440,54 +631,14 @@ def test_concurrency_comes_from_the_env_within_bounds(monkeypatch):
     assert classify_gems.env_concurrency() == classify_gems.CONCURRENCY
 
 
-def test_resume_skips_clean_verdicts_and_retries_errored_lines(tmp_path):
-    out = tmp_path / "classified.jsonl"
-    w_done = {"id": "1:aaa", "start": 5, "text": "x"}
-    w_err = {"id": "1:bbb", "start": 9, "text": "y"}
-    _write_jsonl(out, [
-        {"window": w_done, "verdict": _verdict(0), "error": None},
-        {"window": w_err, "verdict": None, "error": "json_parse_failed"},
-    ])
-    done = set()
-    kept = []
-    for line in out.read_text().splitlines():
-        row = json.loads(line)
-        if row.get("error") is None and row.get("verdict") is not None:
-            done.add(classify_gems.window_key(row["window"]))
-            kept.append(line)
-    assert classify_gems.window_key(w_done) in done
-    assert classify_gems.window_key(w_err) not in done
-    assert len(kept) == 1
-
-
-def test_full_spec_prompt_embeds_both_rubric_files_and_the_context():
-    prompt = classify_gems.build_prompt(
-        classify_gems.load_rubric(full_spec=True), {"channel_name": "Patterrz"},
-        [{"id": "1:aaa", "start": 5, "text": "my dad ran a bakery"}])
-    flat = " ".join(prompt.split())
-    assert "single home of the attribution doctrine" in flat  # rules text
-    assert "self-disclosure" in prompt                   # spec text
-    assert '"channel_name": "Patterrz"' in prompt
-    assert "my dad ran a bakery" in prompt
-    assert '{"results": [...]}' in prompt
-
-
-def test_condensed_wire_contract_is_small_and_keeps_the_contract():
-    condensed = classify_gems.load_rubric(full_spec=False)
-    full = classify_gems.load_rubric(full_spec=True)
-    # the payload trim is the point: the docs were resent on every chunk
-    assert len(condensed) < 2500 < len(full)
-    # ...but every clause the verdicts are validated against survives
-    for domain in classify_gems.LIFE_DOMAINS:
-        assert domain in condensed
-    for speaker in classify_gems.SPEAKERS:
-        assert speaker in condensed
-    for field in ("self_disclosure", "life_domain", "speaker_guess",
-                  "sensitive", "entity_corrections", "notable"):
-        assert field in condensed
-    assert "in_sponsor_read" in condensed        # voice attribution
-    assert "format_hint" in condensed            # per-window beats the label
-    assert "untrusted" in classify_gems.build_prompt(condensed, {}, [])
+def test_the_extract_parser_fills_in_batch_and_windows_only_when_missing():
+    got = classify_gems.parse_extract('{"gems": [], "not_gems": []}', "007", 25)
+    assert got == {"batch": "007", "windows": 25, "gems": [], "not_gems": []}
+    kept = classify_gems.parse_extract(
+        '{"batch": "003", "windows": 4, "gems": [], "not_gems": []}', "007", 25)
+    assert kept["batch"] == "003" and kept["windows"] == 4
+    for bad in ('[]', 'not json', '{"gems": []}', '{"gems": {}, "not_gems": []}'):
+        assert classify_gems.parse_extract(bad, "007", 25) is None
 
 
 def test_locate_prefers_the_occurrence_nearest_the_hint():
@@ -522,66 +673,3 @@ def test_youtu_be_shortlinks_are_not_second_channel_candidates():
            "description": "watch https://youtu.be/abc123 now"}
     cands = channel_context.second_channel_candidates(row, doc)
     assert [c["link"] for c in cands] == ["https://youtube.com/@mainVlogs"]
-
-
-# --------------------------------------------------------------------------- #
-# classify_gems.py — the legacy cheap-API path (no longer in the pipeline)
-# --------------------------------------------------------------------------- #
-def test_limit_bounds_the_fallback_batch_set(tmp_path):
-    # a --limit spot-check with no key must not hand the fan-out the full
-    # batch set: the marker points at a re-batched dir of just N windows
-    batches = tmp_path / "batches"
-    batches.mkdir()
-    for n in (1, 2):
-        (batches / f"batch-00{n}.json").write_text(json.dumps(
-            [{"id": f"{n}:{i}", "start": i, "text": "my dad ran a bakery"}
-             for i in range(3)]))
-    ctx = tmp_path / "context.json"
-    ctx.write_text("{}")
-    proc = subprocess.run(
-        [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-         "--batches", str(batches), "--context", str(ctx),
-         "--limit", "2", "--chunk-size", "2"],
-        capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
-    assert proc.returncode == classify_gems.EXIT_FALLBACK_REQUIRED
-    marker = next(l for l in proc.stderr.splitlines()
-                  if l.startswith("FALLBACK_REQUIRED"))
-    fields = dict(kv.split("=", 1) for kv in marker.split()[1:])
-    limited = Path(fields["batches_dir"])
-    assert limited.name == "batches-limit2"
-    assert fields["batch_files"] == "1" and fields["windows"] == "2"
-    files = sorted(limited.glob("batch-*.json"))
-    assert len(files) == 1
-    assert len(json.loads(files[0].read_text())) == 2
-
-
-def test_full_spec_rerun_invalidates_condensed_verdicts(tmp_path):
-    # resume skips by window; verdicts from the OTHER prompt contract must be
-    # discarded, or a --full-spec rerun would be a no-op
-    out = tmp_path / "classified.jsonl"
-    window = {"id": "1:aaa", "start": 5, "text": "my dad ran a bakery"}
-    out.write_text(json.dumps({
-        "window": window, "error": None, "contract": "condensed",
-        "verdict": {"i": 0, "self_disclosure": True,
-                    "speaker_guess": "host"}}) + "\n")
-    batches = tmp_path / "batches"
-    batches.mkdir()
-    (batches / "batch-001.json").write_text(json.dumps([window]))
-    ctx = tmp_path / "context.json"
-    ctx.write_text("{}")
-    # a key is set (resume pruning runs on the API path) but the endpoint is
-    # unreachable, so the re-classification attempt errors fast
-    proc = subprocess.run(
-        [sys.executable, str(_SCRIPTS / "classify_gems.py"),
-         "--batches", str(batches), "--context", str(ctx),
-         "--out", str(out), "--full-spec"],
-        capture_output=True, text=True,
-        env={"PATH": "/usr/bin:/bin",
-             "CREATOR_BRIEF_LLM_API_KEY": "test-key",
-             "CREATOR_BRIEF_LLM_BASE_URL": "http://127.0.0.1:9"})
-    rows = [json.loads(l) for l in out.read_text().splitlines()]
-    # the condensed verdict was NOT resumed: the window was re-attempted
-    # under the full-spec contract (and errored against the dead endpoint)
-    assert all(r.get("contract") == "full-spec" for r in rows)
-    assert not any(r.get("error") is None and r.get("verdict") for r in rows)
-    assert proc.returncode == 1      # ran (and errored), not skipped-as-done
