@@ -15,15 +15,19 @@ description: >
 Two modes, one contract:
 
 - **PROFILE** (channel only, no brand needed): build the reusable ledger —
-  `tl-creator-profiles/<channel_id>-facts.jsonl` (the machine ledger other
-  skills and CONNECT consume) plus `<channel_id>-meta.json` (when it was
-  built, over which videos, what it found) — and hand the user its rendered
-  view, `<channel_id>-profile-ledger.html`. Spec: `references/profile-spec.md`.
+  `tl-creator-profiles/<channel_id>-facts.jsonl`, ONE file: its first line is
+  the meta record (when it was built, over which videos, what it found), then
+  one verified fact per line. It is the machine interface other skills and
+  CONNECT consume; there is no human profile page. The run report in chat
+  (funnel, counts, the selected facts, the path) is what the user reads.
+  Spec: `references/profile-spec.md`.
 - **CONNECT** (channel + brand): reuse (or build) the ledger, do a
-  deliberately light brand read, write `<channel_id>-<brand_id>-connections.md`
-  (a ranked connection map) and render the one designed deliverable,
-  `<channel_id>-<brand_id>-connections.html`, with a "who they are" section
-  drawn from the ledger. A no-fit verdict is a valid output.
+  deliberately light brand read, write the ranked connection map as a working
+  file (`.corpus/<channel_id>/connections-<brand_id>.md`) and render the one
+  human deliverable, `tl-creator-profiles/<channel_id>-<brand_id>-connections.html`
+  — who they are (from the ledger), what the brand is, the ranked
+  connections, and the ledger's honesty strip. A no-fit verdict is a valid
+  output.
 
 Every run starts the same way, whichever mode: **look for the ledger**
 (`## Reuse` below). A found ledger is used and announced; it is rebuilt
@@ -90,21 +94,29 @@ python3 scripts/ledger_meta.py check --channel <id> [--rebuild] [--no-refresh]
 Pass `--lanes transcripts+socials` when the socials lane is on. Found: it
 prints ONE announcement line, which you repeat to the user verbatim, plus a
 JSON `decision` — `reuse` (CONNECT skips fetch → extract → merge and lands at
-the brand read; PROFILE re-renders the ledger view), `refresh` (run ONE
+the brand read; PROFILE reports the ledger as it is), `refresh` (run ONE
 incremental round, below, then continue) or `build` (run the full PROFILE
 pipeline). The thresholds, the flags and the announcement contract live in
 `references/profile-spec.md`, "Reuse"; never reuse silently.
 
 **Incremental refresh** (decision `refresh`, round `N` = the JSON's
 `next_round`): `fetch_cues.py --channel <id> --host-terms "…" --round N
---exclude <corpus>/<id>/classified.jsonl` (only passages not yet judged are
-batched, into `batches-rN/`); fan out extractors over those batches only;
+--since <latest_video_date from the check's JSON>
+--exclude <corpus>/<id>/classified.jsonl` (`--since` bounds the fetch to the
+uploads the ledger has not seen — without it a round re-pulls every unjudged
+passage in the catalogue and costs a full 20-agent fan-out; `--exclude`
+skips passages already judged; the new material is batched into
+`batches-rN/`); fan out extractors over those batches only;
 `assemble_extracts.py --batches <corpus>/<id>/batches-rN --returns
 <corpus>/<id>/returns-rN --out <corpus>/<id> --append`; re-cluster the whole
-`gems.jsonl`; run the merge pass with the existing `<channel_id>-facts.jsonl`
-as its starting ledger (keep fact_ids, add, supersede); verify; rewrite the
-ledger; `ledger_meta.py write … --rounds N` (descriptive fields not passed
-again are carried over from the record). Cost scales with the new uploads,
+`gems.jsonl`; `merge_pass.py prepare … --existing
+tl-creator-profiles/<id>-facts.jsonl --state <corpus>/<id>/merge-state.json`
+— passages already judged map back to their facts by member key, so the
+agent sees only the genuinely new clusters (plus the compact list of
+existing facts to fold into or supersede); one merge agent; `expand
+--existing … --state …` keeps fact_ids, adds, marks superseded; verify;
+`ledger_meta.py write --from … --rounds N` (descriptive fields not passed
+again are carried over from the header). Cost scales with the new uploads,
 not the corpus.
 
 ## PROFILE pipeline
@@ -112,7 +124,7 @@ not the corpus.
 One retrieval flow, one extraction fan-out, then judgment. Every stage below
 prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
 
-1. **Fetch the cue passages — one script, 7–21 seconds.**
+1. **Fetch the cue passages — one script, under a minute.**
 
    ```bash
    python3 scripts/fetch_cues.py --channel <id> --host-terms "<surname>,<company>"
@@ -120,9 +132,10 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
 
    It asks the index for the transcript passages around first-person cue
    phrases (`references/cue-phrases.txt`) and writes ranked, capped batches of
-   25 windows plus a passage-only `corpus.jsonl.gz`. Channel size barely
-   moves the clock — a 4,200-video channel costs the same few dozen small
-   queries as a 300-video one. **The fetch never waits for anything.** When
+   25 windows plus a passage-only `corpus.jsonl.gz`. Measured: 7–25 s on
+   channels up to a few hundred matched videos, 36–54 s when 700–1,200 videos
+   match a cue — the clock follows matched videos, not the upload count.
+   **The fetch never waits for anything.** When
    the socials lane is on, launch both in the SAME message; `--host-terms`
    for this first round come from the channel's own metadata and the user's
    request, and any name the lane turns up later feeds a **second round**
@@ -138,7 +151,7 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
      unreached is reported "linked but unread".
    - **Second channels: report, don't mine.** `channel_context.py` emits
      `second_channel_candidates`; each is resolved with `tl channels find`
-     and listed in the ledger view's "Other channels and platforms" section
+     and listed in the page's "Other channels and platforms" section
      (name, id). Mining one happens ONLY when the user asks — it roughly doubles
      the run.
    - **Lane OFF — what changes.** `channel_context.py` still runs and still
@@ -190,41 +203,64 @@ prints a `FUNNEL` line; the details live in `references/transcript-mining.md`.
    the merge pass one read instead of thirty. Merge rules:
    `references/transcript-mining.md`, Layer 4. Do not hand-merge what the
    script left apart.
-6. **Merge pass + verification.** ONE agent reads
-   `gems-clustered.slim.jsonl` — the clusters without the window text, which
-   is all the judgment needs (plus the identity lane's findings when that
-   lane ran) — **never the
-   windows, never a transcript** — and finalizes what a script cannot:
-   recurrence from **distinct `video_id`s** among a cluster's members,
-   deduplication across clusters, the sensitivity tier, superseded-fact
-   resolution, the `selected` picks. It drops any candidate whose claim
-   asserts more than its quote supports, and re-tiers sensitivity where the
-   extractor missed an obvious case. It writes `facts.jsonl`
-   (`references/profile-spec.md` shape). Then
-   `scripts/verify_quotes.py --in facts.jsonl --corpus ...` re-checks every
-   transcript quote against the stored passages: exact matches publish (their
-   timestamps are authoritative), partial/none get fixed to the caption text
-   or dropped.
-7. **Emit** per `references/profile-spec.md`: copy the verified facts to
-   `tl-creator-profiles/<channel_id>-facts.jsonl`, then
+6. **Merge pass — decisions from one agent, the ledger from a script.**
 
    ```bash
-   python3 scripts/ledger_meta.py write --channel <id> --channel-name "…" \
-     --format <label> --format-evidence "…" --context <channel_context.json> \
-     [--lanes transcripts+socials]
-   python3 scripts/build_html.py --facts tl-creator-profiles/<id>-facts.jsonl \
-     --meta tl-creator-profiles/<id>-meta.json
+   python3 scripts/merge_pass.py prepare --clustered <…>/gems-clustered.jsonl \
+     --format <label> --out <…>            # writes merge-input.jsonl
    ```
 
-   The meta record is counted from the build's files, never typed in;
-   `--context` is `channel_context.py`'s output saved to a file, so the
-   linked platforms ("linked but unread" when the lane was off) and sibling
-   channels ("not mined") still reach the page. The ledger view
-   `<channel_id>-profile-ledger.html` is PROFILE's human surface — every
-   fact, its citation, its sensitivity tier, then the other channels and
-   platforms. There is no prose one-pager. When running in a host with an Artifact tool, publish
-   the ledger view so the user gets a link; the files in
-   `tl-creator-profiles/` are the durable copies.
+   The script applies the deterministic parts of `evidence-rules.md` itself
+   (guest and co-host voices dropped; unclear voices dropped on shared-voice
+   formats; solo-format `unclear`/narration kept as host, capped
+   unconfirmed) and hands ONE agent `merge-input.jsonl`: one compact line per
+   cluster — claim, quote, domain, tier, speaker, distinct-video count,
+   ad-read and anchor flags — **never the windows, never a transcript**. The
+   agent returns ONE JSON object of decisions, a few kilobytes, as its final
+   message (`references/transcript-mining.md`, Layer 4, holds the contract):
+   per cluster `keep` (optionally with a re-tier, a narrowed claim, a
+   confidence override, a `supersedes`, a `gloss`), `fold` into another
+   cluster or an existing fact, or `drop` with a reason — its proposed
+   `selected` picks, and, when the socials lane ran, the lane's `social`/`web`
+   facts as `facts` records (URL + seen-date, never dressed as quotes). Save it as `<…>/merge-decisions-r1.json`, then
+
+   ```bash
+   python3 scripts/merge_pass.py expand --clustered <…>/gems-clustered.jsonl \
+     --decisions <…>/merge-decisions-r1.json --format <label> --channel <id> \
+     --out <…>/facts.jsonl
+   ```
+
+   Expand validates the contract (every cluster decided exactly once, targets
+   exist, enums, a narrowed claim introduces no number the quote lacks) and
+   exits **3** listing the offending ids: re-ask the agent for exactly those
+   ids ONCE, save the reply as a second `--decisions` patch file, re-run; a
+   second failure runs `expand --fallback-original`, which keeps the
+   cluster's own claim for the still-offending ids and reports them. Never
+   hand-patch a decision. Expand builds every record (recurrence over folds
+   from distinct videos, the format-gated confidence default, the derived
+   `sensitive` flag, fact_ids, `members`), owns the final `selected` set, and
+   writes `facts.jsonl` plus `merge-state.json` (the member-key map the next
+   refresh reads). Then `scripts/verify_quotes.py --in facts.jsonl --corpus
+   ...` re-checks every transcript quote against the stored passages: exact
+   matches publish (their timestamps are authoritative), partial/none get
+   fixed to the caption text or dropped.
+7. **Emit** per `references/profile-spec.md`:
+
+   ```bash
+   python3 scripts/ledger_meta.py write --channel <id> \
+     --from <…>/facts.jsonl.verified.jsonl --channel-name "…" \
+     --format <label> --format-evidence "…" --context <channel_context.json> \
+     [--lanes transcripts+socials]
+   ```
+
+   That writes the one ledger, `tl-creator-profiles/<channel_id>-facts.jsonl`,
+   header first: the meta record is counted from the build's files, never
+   typed in; `--context` is `channel_context.py`'s output saved to a file,
+   so the linked platforms ("linked but unread" when the lane was off) and
+   sibling channels ("not mined") reach the record and, later, the page.
+   `--from` refuses (exit 2, nothing written) any transcript fact whose
+   verification is missing or not `exact`.
+   PROFILE ends here — the run report (below) is its human output.
 
 ## Run report — the funnel, every run
 
@@ -239,12 +275,13 @@ FUNNEL stage=fetch_cues videos_matched=… passages=… windows_capped=… batch
 FUNNEL stage=extract batches=… agents=… windows=… gems=… respawned=… elapsed_s=…   ← you print this one
 FUNNEL stage=assemble windows_expected=… windows_assembled=… gems=… respawn_windows=… elapsed_s=…
 FUNNEL stage=cluster gems=… clusters=… merged=… elapsed_s=…
-FUNNEL stage=merge clusters=… facts=… selected=… dropped=… elapsed_s=…            ← you print this one
+FUNNEL stage=merge clusters=… judged=… auto_dropped=… facts=… folded=… dropped=… selected=… elapsed_s=…
 FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… elapsed_s=…
 ```
 
 Then one line naming the extraction shape and its cost:
-`extraction: 20 sonnet agents × 25 windows, one round`. A second `--exclude`
+`extraction: 20 sonnet agents × 25 windows, one round; merge: 1 agent,
+<N> decisions`. A second `--exclude`
 round adds its own fetch/extract/assemble lines rather than replacing the
 first round's. Cost and path belong in the run report **once, and never in the
 profile**.
@@ -259,6 +296,10 @@ And, when a ledger was found, the reuse announcement line exactly as
 `ledger_meta.py check` printed it, plus the decision it took (`reuse`,
 `refresh` round N, or `build`).
 
+Then, on a PROFILE run, the `selected` facts as a short list (claim, domain,
+recurrence) and the ledger path — the closest thing to a profile the user
+sees, and deliberately not a file.
+
 Why this is mandatory: the connections page shows a dozen facts, while the
 ledger holds every verified fact. A run that renders "9 facts" is not a
 failed run until the funnel says which stage lost them — without the table
@@ -270,19 +311,22 @@ A "fast run" is a run shape, not a script flag (no script takes `--fast`):
 PROFILE only, the primary channel only (no second-channel mining), **the
 socials lane off, without asking**, the default 500-window cap, and ONE
 extraction round — no `--exclude` deepening. Wall clock is the fan-out: the
-fetch is 7–21 s and the local scripts are seconds, so a run is roughly one
-agent generation (2.3–8 minutes, longer on gem-dense channels) plus the merge
-pass. Everything that could outrun that is bounded rather than skipped: the
+fetch is under a minute and the local scripts are seconds, so a run is
+roughly one agent generation (2.3–8 minutes, longer on gem-dense channels)
+plus the merge pass (one agent returning decisions, minutes not tens of them). Everything that could outrun that is bounded rather than skipped: the
 20-agent round is the cap, the identity lane is time-boxed as in step 1 when
-the user turned it on, and the merge pass stays at one agent. Report the
+the user turned it on, and the merge pass stays at one agent returning
+decisions (`--shards N` on `merge_pass.py prepare` splits the input by life
+domain across N agents when one is still slow; folds never cross domains). Report the
 per-stage `elapsed_s` from the funnel lines so a slow run says which stage was
 slow. A deeper pass (a second `--exclude` round, a second channel) is always
 one re-run away and is never taken on the skill's own initiative.
 
 ## CONNECT pipeline
 
-Run the `## Reuse` check first: `reuse` loads `<channel_id>-facts.jsonl` +
-`<channel_id>-meta.json` as they are, `refresh` runs one incremental round,
+Run the `## Reuse` check first: `reuse` loads `<channel_id>-facts.jsonl`
+(header and facts, via `scripts/ledger_io.py`) as it is, `refresh` runs one
+incremental round,
 `build` runs the PROFILE pipeline. Then:
 
 1. **Brand read — four lanes, all cheap subagents, all four spawned in ONE
@@ -306,21 +350,27 @@ Run the `## Reuse` check first: `reuse` loads `<channel_id>-facts.jsonl` +
    **category precedent** (one channel-scoped probe of brand-category terms
    for moments the creator already does what the product enables). Follow-up
    queries are **confirm-only**: they deepen a candidate connection, never
-   invent one. Write `<channel_id>-<brand_id>-connections.md` per
-   `references/profile-spec.md` (one `## ` section per connection, strongest
-   first, the type as a bold tag on the heading), then render the deliverable:
+   invent one. Write the map as a working file,
+   `tl-creator-profiles/.corpus/<id>/connections-<brand>.md`, per
+   `references/profile-spec.md`: first one `## About <brand>` section (two or
+   three neutral sentences from the web/social lanes and the public category
+   — never sponsorship patterns, never a price), then one `## ` section per
+   connection, strongest first, the type as a bold tag on the heading. Then
+   render the deliverable:
 
    ```bash
    python3 scripts/build_html.py \
-     --in tl-creator-profiles/<id>-<brand>-connections.md \
-     --facts tl-creator-profiles/<id>-facts.jsonl \
-     --meta tl-creator-profiles/<id>-meta.json
+     --in tl-creator-profiles/.corpus/<id>/connections-<brand>.md \
+     --facts tl-creator-profiles/<id>-facts.jsonl
    ```
 
-   The page opens with **who they are** — the top recurring facts by domain
-   and the format label, rendered from the ledger, never written by hand —
-   above the ranked connection cards. Publish it as an artifact where the
-   host supports one; it is the only page most users see.
+   That writes `tl-creator-profiles/<id>-<brand>-connections.html` — the only
+   file a CONNECT run adds to the deliverable directory. It opens with **who
+   they are** (rendered from the ledger, never written by hand), then the
+   brand, the ranked connection cards, and the ledger's honesty strip
+   (tallies, coverage, "absence is not evidence", linked platforms).
+   Publish it as an artifact where the host supports one; it is the only
+   page anyone sees.
 
 ## Guardrails
 

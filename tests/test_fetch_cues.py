@@ -593,3 +593,23 @@ def test_round_2_merges_the_corpus_and_uses_suffixed_batches_and_returns(
     assert len(rows) == 1
     starts = sorted(c[0] for c in rows[0]["cues"])
     assert starts == [100.0, 500.0]    # round 1's cue survives, round 2 merges in
+
+
+def test_date_range_is_the_year_bucket_unless_since_cuts_into_it():
+    assert fetch_cues.date_range(2024, None) == {
+        "range": {"publication_date": {"gte": "2024-01-01", "lt": "2025-01-01"}}}
+    # a since date before the bucket leaves the bucket whole
+    assert fetch_cues.date_range(2024, "2023-06-01") == {
+        "range": {"publication_date": {"gte": "2024-01-01", "lt": "2025-01-01"}}}
+    # inside the bucket: strictly after since, so the ledger's newest video is not refetched
+    assert fetch_cues.date_range(2024, "2024-05-01") == {
+        "range": {"publication_date": {"gt": "2024-05-01", "lt": "2025-01-01"}}}
+
+
+def test_query_body_carries_since_into_the_filter():
+    body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None, since="2026-05-01")
+    assert {"range": {"publication_date": {"gt": "2026-05-01", "lt": "2027-01-01"}}} in \
+        body["query"]["bool"]["filter"]
+    body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None)
+    assert {"range": {"publication_date": {"gte": "2026-01-01", "lt": "2027-01-01"}}} in \
+        body["query"]["bool"]["filter"]

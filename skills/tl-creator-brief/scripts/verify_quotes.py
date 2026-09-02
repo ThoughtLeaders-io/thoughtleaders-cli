@@ -13,10 +13,13 @@ Usage:
     verify_quotes.py --in candidates.jsonl \\
         --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz
 
-Input: one candidate per line. Lines with ``provenance: "transcript"`` (or no
-provenance but a ``video`` field) need ``quote`` and ``video`` (the corpus ref,
-``<channel_id>:<video_id>``). Other provenances pass through unverified —
-social/web facts are not quotes and never dress as them.
+Input is read through ``ledger_io``: one candidate per line, and a ledger's
+meta header (first line, ``schema: tl-creator-meta/*``) is not a candidate —
+it is carried over to the output file unchanged. Candidates with
+``provenance: "transcript"`` (or no provenance but a ``video`` field) need
+``quote`` and ``video`` (the corpus ref, ``<channel_id>:<video_id>``). Other
+provenances pass through unverified — social/web facts are not quotes and
+never dress as them.
 
 Output (``--out``, default ``<in>.verified.jsonl``): every input line with a
 ``verify`` object merged in:
@@ -43,6 +46,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from corpus_io import open_corpus  # sibling script
+from ledger_io import read_ledger, write_ledger  # sibling script
 from quote_timestamp import locate  # sibling script
 
 
@@ -85,62 +89,61 @@ def main() -> None:
     cues_by_video = load_cues(pathlib.Path(a.corpus))
 
     counts = {"exact": 0, "partial": 0, "none": 0, "n/a": 0}
-    with open(in_path, encoding="utf-8") as fin, \
-            open(out_path, "w", encoding="utf-8") as fout:
-        for line in fin:
-            line = line.strip()
-            if not line:
-                continue
-            fact = json.loads(line)
-            provenance = fact.get("provenance") or (
-                "transcript" if fact.get("video") else "n/a")
-            if provenance != "transcript":
-                fact["verify"] = {"match": "n/a"}
-                counts["n/a"] += 1
+    header, candidates = read_ledger(in_path)
+    verified: list[dict] = []
+    for fact in candidates:
+        provenance = fact.get("provenance") or (
+            "transcript" if fact.get("video") else "n/a")
+        if provenance != "transcript":
+            fact["verify"] = {"match": "n/a"}
+            counts["n/a"] += 1
+        else:
+            video = str(fact.get("video") or "")
+            quote = fact.get("quote") or ""
+            cues = cues_by_video.get(video)
+            if cues is None:
+                # a wrong ref is a broken candidate, not a coverage gap
+                hit = {"match": "none",
+                       "error": f"video {video!r} not in corpus"}
+            elif not cues:
+                hit = {"match": "none",
+                       "error": "video has no stored transcript"}
+            elif not quote:
+                hit = {"match": "none", "error": "empty quote"}
             else:
-                video = str(fact.get("video") or "")
-                quote = fact.get("quote") or ""
-                cues = cues_by_video.get(video)
-                if cues is None:
-                    # a wrong ref is a broken candidate, not a coverage gap
-                    hit = {"match": "none",
-                           "error": f"video {video!r} not in corpus"}
-                elif not cues:
-                    hit = {"match": "none",
-                           "error": "video has no stored transcript"}
-                elif not quote:
-                    hit = {"match": "none", "error": "empty quote"}
-                else:
-                    hint = fact.get("start")
-                    hit = locate(cues, quote,
-                                 hint_start=float(hint)
-                                 if isinstance(hint, (int, float)) else None)
-                verify = {"match": hit["match"],
-                          "found": hit["match"] == "exact"}
-                if hit["match"] != "none":
-                    verify["start"] = hit["start"]
-                    vid = video.split(":")[-1]
-                    verify["url"] = (f"https://www.youtube.com/watch"
-                                     f"?v={vid}&t={hit['start']}s")
-                    verify["cue"] = hit["cue"]
-                if hit["match"] == "partial":
-                    verify["matched_prefix"] = hit["matched_prefix"]
-                    verify["unmatched_tail"] = hit["unmatched_tail"]
-                    verify["warning"] = ("partial match: fix the quote to "
-                                         "the caption text or drop the "
-                                         "fact; never publish as verbatim")
-                if hit["match"] == "exact":
-                    # the located timestamp is authoritative
-                    fact["start"] = hit["start"]
-                    fact["url"] = verify["url"]
-                    if hit.get("occurrences", 1) > 1:
-                        verify["occurrences"] = hit["occurrences"]
-                if "error" in hit:
-                    verify["error"] = hit["error"]
-                fact["verify"] = verify
-                counts[hit["match"]] += 1
-            fout.write(json.dumps(fact, ensure_ascii=False, default=str)
-                       + "\n")
+                hint = fact.get("start")
+                hit = locate(cues, quote,
+                             hint_start=float(hint)
+                             if isinstance(hint, (int, float)) else None)
+            verify = {"match": hit["match"],
+                      "found": hit["match"] == "exact"}
+            if hit["match"] != "none":
+                verify["start"] = hit["start"]
+                vid = video.split(":")[-1]
+                verify["url"] = (f"https://www.youtube.com/watch"
+                                 f"?v={vid}&t={hit['start']}s")
+                verify["cue"] = hit["cue"]
+            if hit["match"] == "partial":
+                verify["matched_prefix"] = hit["matched_prefix"]
+                verify["unmatched_tail"] = hit["unmatched_tail"]
+                verify["warning"] = ("partial match: fix the quote to "
+                                     "the caption text or drop the "
+                                     "fact; never publish as verbatim")
+            if hit["match"] == "exact":
+                # the located timestamp is authoritative
+                fact["start"] = hit["start"]
+                fact["url"] = verify["url"]
+                if hit.get("occurrences", 1) > 1:
+                    verify["occurrences"] = hit["occurrences"]
+            if "error" in hit:
+                verify["error"] = hit["error"]
+            fact["verify"] = verify
+            counts[hit["match"]] += 1
+        # candidates come from an agent's file: a value json cannot encode
+        # (a date, say) is stringified here rather than crashing the writer
+        verified.append(json.loads(json.dumps(fact, ensure_ascii=False,
+                                              default=str)))
+    write_ledger(out_path, header, verified)
 
     failed = counts["partial"] + counts["none"]
     elapsed = round(time.monotonic() - started, 1)

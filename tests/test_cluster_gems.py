@@ -159,7 +159,8 @@ def test_singleton_passes_through_with_cluster_shape():
     line = cluster_gems.build_line([gem])
     assert line["occurrences"] == 1
     assert line["members"] == [{"video_id": "v1", "start": 10,
-                                "published": "2020-01-01"}]
+                                "published": "2020-01-01",
+                                "in_sponsor_read": False, "host_anchor": False}]
     # the full representative gem survives untouched alongside the two new keys
     assert line["window"] == gem["window"]
     assert line["verdict"] == gem["verdict"]
@@ -250,7 +251,8 @@ def test_run_over_a_gems_file(tmp_path):
     assert [ln["occurrences"] for ln in lines] == [5, 2, 1, 1]
     for ln in lines:
         assert len(ln["members"]) == ln["occurrences"]
-        assert all(set(m) == {"video_id", "start", "published"}
+        assert all(set(m) == {"video_id", "start", "published",
+                              "in_sponsor_read", "host_anchor"}
                    for m in ln["members"])
         assert ln["window"] and ln["verdict"]
 
@@ -273,3 +275,41 @@ def test_run_over_a_gems_file(tmp_path):
                     "--in", str(gems_path), "--out", str(tmp_path / "again.jsonl")],
                    capture_output=True, text=True, check=True)
     assert (tmp_path / "again.jsonl").read_text() == out.read_text()
+
+
+# --------------------------------------------------------------------------- #
+# member refs carry the per-member attribution flags
+# --------------------------------------------------------------------------- #
+def test_member_ref_carries_the_sponsor_read_and_anchor_flags():
+    """The merge pass caps an ad-read-ONLY cluster and confirms a shared-voice
+    cluster only on an anchor: both are questions about every member, so the
+    flags travel per member, not just on the representative."""
+    ad = _gem("v1", notable="visited his parents", text="chatter one about home")
+    ad["window"]["in_sponsor_read"] = True
+    ad["window"]["host_anchor"] = False
+    organic = _gem("v2", notable="visited his parents",
+                   text="chatter two about home")
+    organic["window"]["in_sponsor_read"] = False
+    organic["window"]["host_anchor"] = True
+
+    line = cluster_gems.build_line([ad, organic])
+    by_video = {m["video_id"]: m for m in line["members"]}
+    assert by_video["v1"]["in_sponsor_read"] is True
+    assert by_video["v1"]["host_anchor"] is False
+    assert by_video["v2"]["in_sponsor_read"] is False
+    assert by_video["v2"]["host_anchor"] is True
+
+
+def test_member_ref_flags_default_to_false_when_the_window_lacks_them():
+    line = cluster_gems.build_line([_gem("v1", notable="a", text="b")])
+    assert line["members"][0]["in_sponsor_read"] is False
+    assert line["members"][0]["host_anchor"] is False
+
+
+def test_member_ref_keeps_the_identity_fields_unchanged():
+    ref = cluster_gems.member_ref(_gem("v9", notable="a", text="b", start=42,
+                                       published="2021-07-04"))
+    assert ref["video_id"] == "v9" and ref["start"] == 42
+    assert ref["published"] == "2021-07-04"
+    assert set(ref) == {"video_id", "start", "published", "in_sponsor_read",
+                        "host_anchor"}

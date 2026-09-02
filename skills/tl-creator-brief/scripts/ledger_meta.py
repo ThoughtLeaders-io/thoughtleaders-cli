@@ -1,17 +1,32 @@
 #!/usr/bin/env python3
-"""The per-creator meta record, and the reuse decision built on it.
+"""The ledger's meta header, and the reuse decision built on it.
+
+One machine file per creator: ``<profiles>/<channel_id>-facts.jsonl``, whose
+FIRST line is the meta record (``"schema": "tl-creator-meta/v2"`` — what the
+build was: when, over which videos, what it found) and whose every following
+line is one fact. There is no ``<channel_id>-meta.json`` sidecar any more;
+everything goes through ``scripts/ledger_io.py``.
 
 Two subcommands:
 
     ledger_meta.py write --channel <id> [--profiles-dir tl-creator-profiles]
-        [--corpus-dir <profiles>/.corpus/<id>] [--channel-name "…"]
-        [--format solo] [--format-evidence "…"] [--rounds N]
-        [--credits-spent N]
+        [--corpus-dir <profiles>/.corpus/<id>] [--from facts.verified.jsonl]
+        [--channel-name "…"] [--format solo] [--format-evidence "…"]
+        [--rounds N] [--credits-spent N] [--lanes …] [--context <json>]
 
-    Writes ``<profiles>/<channel_id>-meta.json`` from the files a build leaves
-    behind (on a refresh, descriptive fields not passed again — name, format,
-    lanes, credits, channel context — are carried over from the record): the
-    verified ledger (facts), the passage store (videos matched, corpus window), the windows files (passages), classified.jsonl (windows
+    With ``--from``, the verified working facts (``verify_quotes.py``'s
+    output) become the ledger: every transcript fact must carry
+    ``verify.match == "exact"`` — anything else refuses the write with the
+    offending fact ids and exit 2 — the ``verify`` key is stripped, every
+    other field is kept, and the file is written with the header first.
+    Without ``--from`` the existing ledger's header is rewritten in place:
+    the facts are untouched, the counts are recounted from the build's
+    files, and descriptive fields not passed again (name, format, lanes,
+    credits, channel context) are carried over from the old header.
+
+    Counts come from the build's own files — the ledger (facts, counted
+    through ``ledger_io``), the passage store (videos matched, corpus
+    window), the windows files (passages), classified.jsonl (windows
     judged), gems.jsonl (gems) and the fetch summaries (videos with
     transcript, latest upload, rounds). Nothing is typed in by hand; a count
     that cannot be derived is 0 and says so in ``missing``.
@@ -19,19 +34,21 @@ Two subcommands:
     ledger_meta.py check --channel <id> [--profiles-dir tl-creator-profiles]
         [--rebuild] [--no-refresh] [--max-new-videos 5] [--max-age-days 60]
 
-    Looks for ``<channel_id>-facts.jsonl`` + ``<channel_id>-meta.json``. When
-    both exist it prints ONE announcement line (creator, build date, corpus
-    window, fact count, uploads since) followed by a JSON decision:
-    ``reuse`` (few new uploads and a young ledger), ``refresh`` (an additive
-    round is worth it: more than --max-new-videos uploads since, or older than
-    --max-age-days), or ``build`` (nothing usable, or --rebuild). The uploads
+    Reads ``<channel_id>-facts.jsonl``. When it exists and carries a header
+    this prints ONE announcement line (creator, build date, corpus window,
+    fact count, uploads since) followed by a JSON decision: ``reuse`` (few
+    new uploads and a young ledger), ``refresh`` (an additive round is worth
+    it: more than --max-new-videos uploads since, or older than
+    --max-age-days), or ``build`` (nothing usable, a headerless ledger, a
+    legacy ledger + ``<id>-meta.json`` pair, or --rebuild). The uploads
     count is one cheap index count against ``meta.latest_video_date``.
     ``--no-refresh`` forces ``reuse``; ``--rebuild`` forces ``build``. A
     ledger built from transcripts only refreshes when ``--lanes
     transcripts+socials`` is asked for; the reverse reuses (more grounded
     facts, never fewer).
 
-Stdout is the announcement line (check only) and one JSON object; exit 0.
+Stdout is the announcement line (check only) and one JSON object; exit 0,
+except a refused ``write --from``, which exits 2.
 """
 from __future__ import annotations
 
@@ -44,9 +61,11 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import ledger_io  # sibling script  # noqa: E402
 import tl_data  # noqa: E402
 
-SCHEMA = "tl-creator-meta/v1"
+SCHEMA = "tl-creator-meta/v2"
 DEFAULT_MAX_NEW_VIDEOS = 5
 DEFAULT_MAX_AGE_DAYS = 60
 LANES = ("transcripts", "transcripts+socials")
@@ -94,8 +113,8 @@ def _fetch_summaries(corpus_dir: pathlib.Path) -> list[dict]:
 
 
 def load_context(path: str | None) -> dict | None:
-    """The parts of channel_context.py's output the ledger view still shows:
-    linked platforms and sibling-channel candidates."""
+    """The parts of channel_context.py's output the connections page's ledger
+    footer still shows: linked platforms and sibling-channel candidates."""
     if not path:
         return None
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
@@ -157,7 +176,7 @@ def build_meta(channel: int, profiles_dir: pathlib.Path, corpus_dir: pathlib.Pat
             "passages": passages,
             "windows_judged": windows_judged,
             "gems": gems,
-            "facts": _count_lines(facts_path),
+            "facts": ledger_io.count_facts(facts_path),
         },
         "format": carried["format"],
         "format_evidence": carried["format_evidence"],
@@ -239,32 +258,77 @@ def decide(meta: dict, new_videos: int | None, *, rebuild: bool, no_refresh: boo
     return out
 
 
+class Unverified(Exception):
+    """Raised by ``verified_facts`` — the ids that did not match exactly."""
+
+    def __init__(self, ids: list[str]):
+        super().__init__(", ".join(ids))
+        self.ids = ids
+
+
+def verified_facts(path: pathlib.Path) -> list[dict]:
+    """The ledger facts inside ``verify_quotes.py``'s output: every transcript
+    fact must have matched EXACTLY (a partial match is how a fabricated quote
+    gets a real timestamp), and the ``verify`` bookkeeping does not belong in
+    the ledger. Everything else on the fact — ``members`` included — survives."""
+    _, facts = ledger_io.read_ledger(path)
+    bad: list[str] = []
+    out: list[dict] = []
+    for i, fact in enumerate(facts, 1):
+        provenance = fact.get("provenance") or ("transcript" if fact.get("video") else "n/a")
+        verify = fact.get("verify") or {}
+        if provenance == "transcript" and str(verify.get("match")) != "exact":
+            bad.append(f"{fact.get('fact_id') or f'line {i}'}"
+                       f" ({verify.get('match') or 'unverified'})")
+        out.append({k: v for k, v in fact.items() if k != "verify"})
+    if bad:
+        raise Unverified(bad)
+    return out
+
+
 def cmd_write(a: argparse.Namespace) -> int:
     profiles = pathlib.Path(a.profiles_dir)
     corpus_dir = (pathlib.Path(a.corpus_dir) if a.corpus_dir
                   else profiles / ".corpus" / str(a.channel))
-    path = profiles / f"{a.channel}-meta.json"
-    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    path = profiles / f"{a.channel}-facts.jsonl"
+    previous = ledger_io.read_ledger(path)[0] if path.exists() else None
+    if a.from_facts:
+        try:
+            facts = verified_facts(pathlib.Path(a.from_facts))
+        except Unverified as exc:
+            print(f"refusing to write the ledger: {len(exc.ids)} transcript facts did not "
+                  f"match their captions exactly — fix or drop them, then re-run "
+                  f"verify_quotes.py: {exc}", file=sys.stderr)
+            return 2
+        profiles.mkdir(parents=True, exist_ok=True)
+        ledger_io.write_ledger(path, None, facts)      # counted, then headed below
+    else:
+        facts = ledger_io.read_ledger(path)[1] if path.exists() else []
     meta = build_meta(a.channel, profiles, corpus_dir, channel_name=a.channel_name,
                       fmt=a.format, format_evidence=a.format_evidence, rounds=a.rounds,
                       credits_spent=a.credits_spent, lanes=a.lanes,
                       context=load_context(a.context), previous=previous)
-    path.write_text(json.dumps(meta, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(json.dumps({"meta": str(path), **meta}, ensure_ascii=False))
+    ledger_io.write_ledger(path, meta, facts)
+    print(json.dumps({"ledger": str(path), **meta}, ensure_ascii=False))
     return 0
 
 
 def cmd_check(a: argparse.Namespace) -> int:
     profiles = pathlib.Path(a.profiles_dir)
     facts_path = profiles / f"{a.channel}-facts.jsonl"
-    meta_path = profiles / f"{a.channel}-meta.json"
-    if not facts_path.exists() or not meta_path.exists():
-        have = [p.name for p in (facts_path, meta_path) if p.exists()]
-        print(json.dumps({"decision": "build", "reason": "no ledger" if not have
-                          else f"incomplete ledger: only {', '.join(have)}",
-                          "facts": str(facts_path), "meta": str(meta_path), "next_round": 1}))
+    sidecar = profiles / f"{a.channel}-meta.json"
+    meta = ledger_io.read_ledger(facts_path)[0] if facts_path.exists() else None
+    if meta is None:
+        if not facts_path.exists():
+            reason = "no ledger"
+        elif sidecar.exists():
+            reason = f"legacy ledger: {sidecar.name} sidecar, no meta header"
+        else:
+            reason = "incomplete ledger: no meta header"
+        print(json.dumps({"decision": "build", "reason": reason,
+                          "facts": str(facts_path), "meta": str(facts_path),
+                          "next_round": 1}))
         return 0
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     new_videos: int | None = None
     since = meta.get("latest_video_date")
     if since:
@@ -275,7 +339,7 @@ def cmd_check(a: argparse.Namespace) -> int:
     print(announce(meta, new_videos))
     out = decide(meta, new_videos, rebuild=a.rebuild, no_refresh=a.no_refresh,
                  max_new=a.max_new_videos, max_age_days=a.max_age_days, lanes=a.lanes)
-    out.update(facts=str(facts_path), meta=str(meta_path),
+    out.update(facts=str(facts_path), meta=str(facts_path),
                latest_video_date=since, generated_at=meta.get("generated_at"),
                fact_count=(meta.get("coverage") or {}).get("facts"))
     print(json.dumps(out, ensure_ascii=False))
@@ -285,11 +349,16 @@ def cmd_check(a: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    w = sub.add_parser("write", help="write <channel_id>-meta.json from the build's files")
+    w = sub.add_parser("write",
+                       help="write the ledger's meta header from the build's files")
     w.add_argument("--channel", type=int, required=True)
     w.add_argument("--profiles-dir", default="tl-creator-profiles")
     w.add_argument("--corpus-dir", default=None,
                    help="default: <profiles-dir>/.corpus/<channel>")
+    w.add_argument("--from", dest="from_facts", default=None,
+                   help="verify_quotes.py output: its facts become the ledger "
+                        "(exact matches only, verify stripped). Omit to rewrite "
+                        "the header of the existing ledger in place.")
     w.add_argument("--channel-name", default=None)
     w.add_argument("--format", default=None,
                    help="solo | interview | multi_host | faceless_scripted")
@@ -302,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
                         "or the existing record's value on a refresh")
     w.add_argument("--context", default=None,
                    help="channel_context.py output JSON: linked platforms and sibling "
-                        "channels are kept in the record for the ledger view")
+                        "channels are kept in the header for the connections page")
     w.set_defaults(fn=cmd_write)
     c = sub.add_parser("check", help="reuse decision for an existing ledger")
     c.add_argument("--channel", type=int, required=True)

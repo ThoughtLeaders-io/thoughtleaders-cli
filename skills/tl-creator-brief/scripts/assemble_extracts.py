@@ -20,7 +20,9 @@ mini-batch re-spawn; nothing is hand-patched.
 Usage: assemble_extracts.py --batches <dir> --returns <dir> --out <dir> [--append]
 A batch may have several return files (the original plus mini-batch re-spawns
 named batch-NNN.extract.r2.json …); later files override the indexes they
-carry. ``--append`` adds a later round's rows to the existing files.
+carry. ``--append`` adds a later round's rows to the existing files, replacing
+any earlier rows for the same windows — so re-assembling a round after a
+re-spawn never stacks a second copy of its gems.
 Outputs in <out>: classified.jsonl, gems.jsonl (cluster_gems.py input),
 candidates.jsonl (verify_quotes.py input), respawn.json, one FUNNEL line.
 """
@@ -154,10 +156,28 @@ def main() -> int:
         if bad_idx:
             respawn[n] = sorted(bad_idx)
         report[n] = r
-    mode = "a" if a.append else "w"
+    # --append is idempotent: a round that is re-assembled after a re-spawn
+    # replaces its own earlier rows (same window id + start) instead of
+    # stacking a second copy under them
+    this_round = {(x["window"].get("id"), x["window"].get("start")) for x in rows}
+
+    def _keep(line: str) -> bool:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            return True
+        w = obj.get("window")
+        key = ((w.get("id"), w.get("start")) if isinstance(w, dict)
+               else (obj.get("video"), obj.get("start")))      # candidates.jsonl rows
+        return key not in this_round
+
     for name, items in (("classified.jsonl", rows), ("gems.jsonl", gems), ("candidates.jsonl", cands)):
-        with open(out / name, mode, encoding="utf-8") as fh:
-            fh.write("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in items))
+        kept = ""
+        if a.append and (out / name).exists():
+            with open(out / name, encoding="utf-8") as fh:
+                kept = "".join(ln for ln in fh if ln.strip() and _keep(ln))
+        with open(out / name, "w", encoding="utf-8") as fh:
+            fh.write(kept + "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in items))
     (out / "respawn.json").write_text(json.dumps(respawn, indent=1), encoding="utf-8")
     expected = sum(r["expected"] for r in report.values())
     need = sum(len(v) for v in respawn.values())

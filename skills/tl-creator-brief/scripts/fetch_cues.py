@@ -13,7 +13,7 @@ download.
 Usage:
     fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
                   [--max-windows 500] [--batch-size 25]
-                  [--exclude <classified.jsonl>]
+                  [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
 ``batches/batch-NNN.json`` (the capped model-layer batches, 25 windows each)
@@ -198,7 +198,7 @@ def latest_upload(channel: int) -> str | None:
     return (rows[0].get("publication_date") or "")[:10] or None
 
 
-def fetch_non_english(channel: int, size: int = 40) -> list[dict]:
+def fetch_non_english(channel: int, size: int = 40, since: str | None = None) -> list[dict]:
     """Uploads whose captions are not English carry no English cue phrase, so
     the cue query cannot see them. Pull their transcripts and stride-sample a
     few windows per video into the same schema; the extractor judges them in
@@ -212,7 +212,8 @@ def fetch_non_english(channel: int, size: int = 40) -> list[dict]:
                 "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
                                               {"term": {"channel.id": channel}},
                                               {"exists": {"field": "transcript"}},
-                                              {"exists": {"field": "transcript_language"}}],
+                                              {"exists": {"field": "transcript_language"}}]
+                                   + ([{"range": {"publication_date": {"gt": since}}}] if since else []),
                                    "must_not": [{"terms": {"transcript_language": sorted(ENGLISH_CODES)}}]}},
                 "sort": [{"publication_date": "desc"}, {"id": "asc"}]}
         if after:
@@ -244,8 +245,19 @@ def sample_windows(cue_list: list, per_video: int = NON_EN_WINDOWS_PER_VIDEO,
     return [runs[int(i * step)] for i in range(per_video)]
 
 
+def date_range(year: int, since: str | None) -> dict:
+    """The year bucket's publication window, cut down to uploads after
+    ``since`` when a refresh round only wants what is new."""
+    lo = f"{year}-01-01"
+    rng = {"gte": lo, "lt": f"{year + 1}-01-01"}
+    if since and since >= lo:
+        rng = {"gt": since, "lt": f"{year + 1}-01-01"}
+    return {"range": {"publication_date": rng}}
+
+
 def query_body(channel: int, phrases: list[str], year: int, size: int,
-               fragment_size: int, fragments: int, after: list | None) -> dict:
+               fragment_size: int, fragments: int, after: list | None,
+               since: str | None = None) -> dict:
     should = [{"match_phrase": {"transcript": {"query": p, "boost": 2.0}}} for p in phrases]
     should += [{"match": {"transcript": {"query": g, "boost": GENERIC_BOOST}}} for g in GENERIC_TERMS]
     body = {
@@ -257,8 +269,7 @@ def query_body(channel: int, phrases: list[str], year: int, size: int,
                 {"term": {"doc_type": "article"}},
                 {"term": {"channel.id": channel}},
                 {"exists": {"field": "transcript"}},
-                {"range": {"publication_date": {"gte": f"{year}-01-01",
-                                                "lt": f"{year + 1}-01-01"}}},
+                date_range(year, since),
             ],
             "must": [{"bool": {"should": should, "minimum_should_match": 1}}],
         }},
@@ -273,11 +284,11 @@ def query_body(channel: int, phrases: list[str], year: int, size: int,
 
 
 def fetch_year(channel: int, phrases: list[str], year: int, size: int,
-               fragment_size: int, fragments: int) -> list[dict]:
+               fragment_size: int, fragments: int, since: str | None = None) -> list[dict]:
     docs: list[dict] = []
     after = None
     while True:
-        body = query_body(channel, phrases, year, size, fragment_size, fragments, after)
+        body = query_body(channel, phrases, year, size, fragment_size, fragments, after, since)
         rows = tl_data.cli_rows(["db", "es", "-", "--json", "--highlight"],
                                 input_text=json.dumps(body))
         docs.extend(rows)
@@ -341,8 +352,12 @@ def main() -> int:
     ap.add_argument("--exclude", default="", help="classified.jsonl from earlier rounds; "
                     "passages already judged (same video, start within 30 s) are skipped, so a "
                     "second round deepens the ledger instead of repeating it")
+    ap.add_argument("--since", default="", help="only uploads published after this date "
+                    "(YYYY-MM-DD) — a refresh round passes the ledger's latest_video_date so "
+                    "its cost scales with the new uploads, not the catalogue")
     a = ap.parse_args()
     t0 = time.monotonic()
+    since = a.since.strip() or None
 
     phrases, recurring = load_phrases(pathlib.Path(a.phrases))
     host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
@@ -352,7 +367,8 @@ def main() -> int:
     docs: list[dict] = []
     with cf.ThreadPoolExecutor(max_workers=a.concurrency) as pool:
         futs = [pool.submit(fetch_year, a.channel, all_phrases, y, a.page_size,
-                            a.fragment_size, a.fragments_per_doc) for y in YEARS]
+                            a.fragment_size, a.fragments_per_doc, since)
+                for y in YEARS if not since or y >= int(since[:4])]
         for f in futs:
             docs.extend(f.result())
     queries_note = f"{len(YEARS)} year buckets"
@@ -367,12 +383,20 @@ def main() -> int:
         latest_video_date = None
         print(f"latest-upload lookup failed: {exc}", file=sys.stderr)
     non_en_docs: list[dict] = []
+    non_en_failed = False
     non_en_total = sum(n for k, n in langs.items() if not is_english(k))
     if non_en_total:
         try:
-            non_en_docs = fetch_non_english(a.channel)
+            non_en_docs = fetch_non_english(a.channel, since=since)
         except Exception as exc:
+            non_en_failed = True
             print(f"non-English fetch failed: {exc}", file=sys.stderr)
+    if non_en_failed:
+        # the round did not read everything after the old watermark, so it
+        # must not advance it: the summary carries no latest_video_date and the
+        # ledger header keeps the previous round's, so the next --since refresh
+        # re-covers the uploads this round missed
+        latest_video_date = None
 
     done: dict[str, list[int]] = {}
     if a.exclude and pathlib.Path(a.exclude).exists():
@@ -555,6 +579,7 @@ def main() -> int:
         "batches": batches, "returns_dir": str(rdir),
         "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
         "corpus": str(corpus_path), "latest_video_date": latest_video_date,
+        "non_english_fetch_failed": non_en_failed,
         "elapsed_s": elapsed,
     }
     summary_path = out / f"fetch{suffix}.json"   # ledger_meta.py reads these per round

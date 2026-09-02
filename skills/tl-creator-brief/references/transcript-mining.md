@@ -7,11 +7,14 @@ script, extraction runs on sonnet agents that each see 25 windows and nothing
 else, and the expensive context is spent only on judgment no script can
 encode.
 
-Measured end to end on three channels (Sydney Watson 20107, Alex Hormozi
-253904 = 4,205 videos, Emma Chamberlain 3268): fetch 7–21 s regardless of
-channel size; 310 gems / 500 windows, 405 / 497, 432 / 500; every quote exact
-by construction; extractor agents 2.3–8 minutes each, gem-dense channels at
-the long end.
+Measured end to end on five channels (Sydney Watson 20107, Alex Hormozi
+253904 = 4,205 videos, Emma Chamberlain 3268, Professor G 1069544, Ali Abdaal
+31792): fetch 7–21 s on the first three and 36–54 s on the two channels with
+700–1,200 cue-matched videos — the clock follows the number of matched videos
+whose passages come back, not the upload count; 310 gems / 500 windows, 405 /
+497, 432 / 500; every quote exact by construction; extractor agents 2.3–8
+minutes each, gem-dense channels at the long end, and a 20-agent round lands
+at 5.6–6.3 minutes of wall clock including the subset re-spawn.
 
 ## Layer 1+2: fetch the cue passages, one script
 
@@ -172,8 +175,10 @@ for a later round), `gems.jsonl` (the cluster step's input), `candidates.jsonl`
 and `respawn.json`, and exits **3** when any window needs re-running.
 `respawn.json` maps batch → the window indexes that failed or were skipped:
 re-spawn exactly those as one mini-batch of extractor agents and re-run
-assemble. **Nothing is hand-patched** — a hand-edited return is an
-unverifiable quote.
+assemble (with `--append` on a later round: it replaces that round's earlier
+rows for the same windows, so a re-assembly after a re-spawn never stacks a
+second copy of the round's gems). **Nothing is hand-patched** — a hand-edited
+return is an unverifiable quote.
 
 ## Layer 4: cluster, then one merge pass judges
 
@@ -205,38 +210,137 @@ member must match every other member. Near-duplicates that fail any of those
 stay separate — a missed merge costs a few tokens, a false merge would delete
 a distinct fact. Do not hand-merge what the script left apart.
 
-**One merge pass — ONE agent.** It reads `gems-clustered.slim.jsonl` plus the
-identity lane's findings (when that lane ran) and **never the windows, never a
-transcript**: the extractor already lifted the claim and the quote, so the
-merge pass only decides what a script cannot:
+**One merge pass — ONE agent, returning decisions, never records.** The
+old pass wrote every ledger record itself and took 21–23 minutes on a
+220-fact channel, output-bound; now a script prepares its input, the agent
+returns a few kilobytes of judgment, and the same script expands them.
 
-- finalize recurrence and provenance on each candidate — recurrence is the
-  count of **distinct `video_id`s among the cluster's `members`**, never
-  `occurrences` itself (`evidence-rules.md`);
-- attribution reasoning over the deterministic features under
-  `evidence-rules.md` — including the rules no feature can encode
-  (recurrence never confirms on a multi-host channel; an ad-read fact must
-  recur outside reads); resolve `speaker_guess: "unclear"` windows or drop
-  them;
+```bash
+python3 <skill>/scripts/merge_pass.py prepare \
+  --clustered <corpus>/gems-clustered.jsonl --format <label> --out <corpus> \
+  [--existing tl-creator-profiles/<channel_id>-facts.jsonl --state <corpus>/merge-state.json] \
+  [--shards N]
+```
+
+`prepare` numbers the clusters `c001…` and writes `merge-input.jsonl`: one
+compact line per cluster the agent must judge — `c`, `domain`, `speaker`,
+`tier`, `conf` (the extractor's confirmed/likely), `claim`, `quote`,
+`title`, `published`, `videos` (distinct video_ids over the members), `occ`,
+`ad_read` (every member inside a sponsor read), `anchor` (a host anchor on
+some member), `format_hint`, `lang`, `notable`. No window text, no member
+list. Before the agent sees anything it applies the parts of
+`evidence-rules.md` no judgment is needed for: `guest` and `cohost` voices
+are dropped (a second named voice is unattributable on any format);
+`unclear` is dropped on interview and multi-host formats (a window's own
+`format_hint` beats the channel label); on solo and faceless-scripted
+channels `unclear` and `narration` stay in as the host, capped at
+`unconfirmed`. Caps beat overrides: the agent can lower a confidence, never
+lift a capped cluster to `confirmed`. Those never reach the agent and are counted as
+`auto_dropped`. With `--shards N` the input is split by life domain into N
+files for N agents (folds never cross a domain, so a shard is a complete
+judgment unit).
+
+The agent reads `merge-input.jsonl` (plus the identity lane's findings when
+that lane ran) and **never the windows, never a transcript**. It decides
+what a script cannot, per `evidence-rules.md`:
+
+- attribution reasoning the features cannot encode (recurrence never
+  confirms on a multi-host channel; an ad-read fact must recur outside
+  reads);
 - deduplication across clusters the script left apart for good reason but
-  which say the same thing about the same fact;
-- the sensitivity tier (`evidence-rules.md`), including **re-tiering where the
-  extractor missed an obvious case** — a stated allergy is `lifestyle`, not
-  `none` and not `clinical`;
-- **dropping any candidate whose claim asserts more than its quote supports.**
-  The extractor is told the claim must stand on the span alone; this pass is
-  where that is enforced against the assembled record. Narrow the claim to
-  what the quote says, or drop the fact — never publish the wider claim.
-- superseded-fact resolution (latest wins, history kept), confidence buckets,
-  and the `selected` picks (the facts the connections page leads with).
+  which say the same thing about the same fact — a `fold`;
+- the sensitivity tier, **re-tiered where the extractor missed an obvious
+  case** — a stated allergy is `lifestyle`, not `none` and not `clinical`;
+- **dropping any candidate whose claim asserts more than its quote
+  supports** — or narrowing the claim to what the quote says; never the
+  wider claim;
+- superseded-fact resolution (latest wins, history kept), confidence
+  overrides where a rule above changes the default, and its proposed
+  `selected` picks.
 
-It writes `facts.jsonl` (the shape in `references/profile-spec.md`), claims
-grounded in the assembled quotes only — the verifier, not the model, is the
-verbatim authority — and prints
-`FUNNEL stage=merge clusters=… facts=… selected=… dropped=… elapsed_s=…`.
-On an incremental round it starts from the existing `<channel_id>-facts.jsonl`
-rather than a blank page: fact_ids are kept, new facts are added, and a fact
-the new material supersedes is marked, never deleted.
+It returns ONE JSON object as its final message — never a file of records:
+
+```json
+{"decisions": {
+   "c001": {"action": "keep"},
+   "c013": {"action": "fold", "target": "c012"},
+   "c014": {"action": "drop", "reason": "claim asserts more than the quote supports"},
+   "c015": {"action": "keep", "tier": "lifestyle"},
+   "c016": {"action": "keep", "claim": "narrowed to what the quote says"},
+   "c017": {"action": "keep", "confidence": "unconfirmed"},
+   "c018": {"action": "keep", "supersedes": "c003"},
+   "c019": {"action": "keep", "gloss": "English translation of a non-English quote"},
+   "c040": {"action": "fold", "target": "f007"}},
+ "selected": ["c012", "c001", "f007", "s1"],
+ "facts": [{"ref": "s1", "provenance": "social", "claim": "runs a pottery studio",
+            "domain": "work", "sensitivity": "none",
+            "source_url": "https://instagram.com/…", "seen_date": "2026-09-02",
+            "corroborates": "c012"}]}
+```
+
+Every cluster in the input appears exactly once. `facts` is the identity
+lane's output when that lane ran: one record per `social`/`web` disclosure
+(never a quote, never a video — lanes do not masquerade), with its URL and
+seen-date; `corroborates` names the cluster or existing fact it confirms,
+which lifts both to `confirmed` (cross-lane corroboration is the top tier —
+a social or web fact alone stays `unconfirmed`, and the agent cannot declare
+otherwise). A compact input line carrying `dropped_members: N` is a cluster
+that gained a passage the last round dropped — it is asked again rather than
+silently joining a fact. `fold`/`supersedes`
+targets are kept clusters in the same domain, or — on a refresh — existing
+`f…` facts. The orchestrator saves the reply as
+`<corpus>/merge-decisions-rN.json` and runs
+
+```bash
+python3 <skill>/scripts/merge_pass.py expand \
+  --clustered <corpus>/gems-clustered.jsonl --decisions <corpus>/merge-decisions-rN.json \
+  --format <label> --channel <channel_id> --out <corpus>/facts.jsonl \
+  [--existing … --state …] [--fallback-original]
+```
+
+`expand` validates first — totality, unknown ids, targets (a fold into a
+cluster or an existing fact must stay in its domain), fold cycles, a
+supersession that resolves to the fact itself or a cycle, enums, identity
+records, and a narrowed claim that introduces a number token its quote and
+cluster claim lack — and exits **3** with the offending ids and reasons. The
+orchestrator re-asks the agent for exactly those ids ONCE and passes the
+reply as a second `--decisions` file (later files override earlier ones per
+id); on a second failure it runs with `--fallback-original`, which keeps the
+cluster's own claim for the still-offending ids and names them in the
+summary. Bounded: two asks, never a loop, never a hand edit.
+
+Then it builds every record from the cluster's representative: claim
+(narrowed if given), domain, quote, video, window `start`, the derived
+`url`, `published`; **recurrence = distinct `video_id`s over the cluster
+and everything folded into it**, never `occurrences`; confidence = the
+agent's override, else the format-gated default — solo: the extractor's
+`confirmed`→confirmed, `likely`→unconfirmed; interview/multi-host or a
+window hinting interview/reaction: confirmed only with a host anchor; a
+cluster entirely inside sponsor reads, or a solo `unclear`/narration voice,
+caps at unconfirmed; the tier and its derived `sensitive` flag;
+`superseded_by`; `members` (the passage keys the fact was built from);
+`selected` — the agent's picks first, then filled to 20 across the active
+ledger by confidence and recurrence, trimmed past 20 the same way. fact_ids
+are `f001…` in cluster order on a fresh build. It writes `facts.jsonl`
+(working file, no header), `merge-state.json`, and prints
+`FUNNEL stage=merge clusters=… judged=… auto_dropped=… facts=… folded=…
+dropped=… selected=… elapsed_s=…`.
+
+**On an incremental round** it starts from the existing ledger rather than
+a blank page. `prepare --existing --state` maps every re-clustered cluster
+by its **member keys** (`<video_id>:<window start>` — never the fact's
+`start`, which the verifier rewrites): members all known to one existing
+fact → additive, judgment carried, recurrence recomputed, not sent to the
+agent; members known to two or more facts, or one that also carries a passage
+dropped last round → re-judged, with those `f…` ids listed for the agent (a
+kept re-judged cluster keeps the first inherited id and marks the others
+superseded by it, their evidence pooled); every member
+previously dropped → stays dropped; no known member → new. Only the new and
+re-judged clusters reach the agent, along with a compact list of the
+existing facts to fold into or supersede. `expand` keeps every fact_id,
+continues numbering after the existing max, marks a superseded fact (never
+deletes it), and asserts every existing fact is claimed by exactly one
+cluster.
 
 **Then verify in bulk, locally:**
 
@@ -249,12 +353,13 @@ Every transcript-provenance quote is located in the stored passages. Only
 `match: "exact"` publishes, and its located timestamp is authoritative.
 `partial` and `none` are flagged, never accepted: fix the quote to the
 caption text the result shows, or drop the fact. A quote that needs more
-than a mechanical fix goes back through the merge pass, not past it. Verified facts become `<channel_id>-facts.jsonl`; `ledger_meta.py write`
-records the build's meta beside it and `build_html.py` renders the ledger
-view from those two files per `references/profile-spec.md`.
+than a mechanical fix goes back through the merge pass, not past it. Verified facts become `<channel_id>-facts.jsonl` via `ledger_meta.py write
+--from`, which puts the build's meta record on line 1 of the same file per
+`references/profile-spec.md`.
 
 **The orchestrating context never sees raw transcripts.** It sees the fetch
-summary, the extractors' receipt lines, the assemble summary, the merge pass's returns, and the rendered pages.
+summary, the extractors' receipt lines, the assemble summary, the merge
+pass's decisions and the expand summary, and the rendered page.
 
 ## Entity expansion: a second round, not a re-scan
 
@@ -269,7 +374,11 @@ python3 <skill>/scripts/fetch_cues.py --channel <id> \
 ```
 
 Passages already judged are skipped, so the round costs one fetch (seconds)
-plus one extraction fan-out over genuinely new material. Confirmed entities
+plus one extraction fan-out over genuinely new material. (A *refresh* round —
+new uploads, not new terms — adds `--since <latest_video_date>` so the fetch
+is bounded to what the ledger has not seen; measured live, an unbounded
+`--exclude` round on a 283-video channel re-pulled 1,765 unjudged passages
+and would have cost another full fan-out.) Confirmed entities
 also feed Mode B's connection probes and improve attribution (a fact tied to a
 known family name anchors the host).
 
@@ -299,14 +408,19 @@ profile header.
 
 ## Speed
 
-Wall clock is the extraction fan-out and nothing else. Measured: the fetch is
-**7–21 s for any channel size**, the local scripts (assemble, cluster, verify)
-are seconds, and the extractor agents run **2.3–8 minutes each** in parallel —
-gem-dense channels at the long end, because a batch with 20 gems in it is
-simply more writing. Claude's share of a profile build is the fan-out plus a
-handful of turns: the identity lane, the format call, one merge pass —
-**≤22 subagents total** (up to 20 extractors, one merge, one socials lane),
-not one per window and not one per fact.
+Wall clock is the extraction fan-out plus the merge pass. Measured: the fetch
+is **7–21 s on small channels and 36–54 s on channels with 700–1,200
+cue-matched videos**, the local scripts (assemble, cluster, expand, verify)
+are seconds, the extractor agents run **2.3–8 minutes each** in parallel (a
+20-agent round is 5.6–6.3 minutes with its re-spawn) — gem-dense channels at
+the long end, because a batch with 20 gems in it is simply more writing — and
+the merge pass is one agent returning a few kilobytes of decisions. The old
+merge pass, which wrote every ledger record itself, took 21–23 minutes on a
+220-fact channel; that is what the decision contract exists to cut. Claude's
+share of a profile build is the fan-out plus a handful of turns: the identity
+lane, the format call, one merge pass — **≤22 subagents total** (up to 20
+extractors, one merge, one socials lane), not one per window and not one per
+fact.
 
 Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
 is always answerable with a stage name. Rounds are the knob that matters: one

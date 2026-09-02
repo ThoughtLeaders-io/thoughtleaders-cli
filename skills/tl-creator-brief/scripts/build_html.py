@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
-"""Render the two human surfaces of a creator brief from facts + meta.
+"""Render the connections page — the one human deliverable of a creator brief.
 
 Deterministic templating in code — the template lives here, is never
-redesigned per run, and the model never hand-writes HTML. JSONL + Markdown
-stay canonical; HTML is the view.
+redesigned per run, and the model never hand-writes HTML. The ledger
+(``<channel_id>-facts.jsonl``, header + one fact per line) and the connection
+map's markdown stay canonical; HTML is the view.
 
 Usage:
-    build_html.py --facts <channel_id>-facts.jsonl --meta <channel_id>-meta.json
-        [--ledger-out <channel_id>-profile-ledger.html]
-    build_html.py --in <channel_id>-<brand_id>-connections.md
-        --facts <channel_id>-facts.jsonl --meta <channel_id>-meta.json
-        [--out <channel_id>-<brand_id>-connections.html]
+    build_html.py --in .corpus/<id>/connections-<brand>.md \\
+        --facts tl-creator-profiles/<id>-facts.jsonl \\
+        [--out tl-creator-profiles/<id>-<brand>-connections.html]
 
-Two surfaces:
+``--out`` defaults to ``<facts dir>/<channel_id>-<brand_id>-connections.html``
+when ``--facts`` is given (the markdown is a working file under
+``.corpus/``; only the HTML lands in the deliverable directory), and to the
+input path with an ``.html`` suffix when it is not. ``--meta`` is a legacy
+escape hatch: the meta record is the ledger's first line, and the flag is
+read only when the ledger carries no header.
 
-- the **ledger view** (PROFILE mode's human surface): the meta strip
-  (build date, corpus window, coverage counts, format label), the tallies
-  (confidence, sensitivity tier, domain) and every fact with its full
-  citation and its tier. Written whenever ``--facts`` is given and no
-  ``--in``; default path ``<facts dir>/<channel_id>-profile-ledger.html``.
-- the **connections page** (CONNECT's deliverable): a "who they are"
-  section rendered from the ledger at render time — the top recurring facts
-  by life domain, the format label, the corpus window — above the ranked
-  connection map the markdown carries. Provenance labels in the markdown
-  (``[web]``, ``[social: …]``) are kept: a connection map names its lanes.
+The page, in order:
+
+- the header — creator × brand, with the brand-read and ledger-build dates;
+- **Who they are** — rendered from the ledger at render time, never written
+  by a model: the top recurring facts by life domain;
+- **About <brand>** — the markdown body's ``## About …`` section, rendered as
+  prose above the cards (it is context, not a connection, so it is never
+  numbered as one);
+- **Connections** — one numbered card per remaining ``## `` section, in the
+  markdown's order, which IS the ranking. Provenance labels in the markdown
+  (``[web]``, ``[social: …]``) are kept: a connection map names its lanes. A
+  no-fit verdict has no sections and stays prose;
+- **About this ledger** — the honesty footer ``references/evidence-rules.md``
+  requires: the confidence and sensitivity tallies with the count withheld
+  from angles, the coverage ratio and "absence is not evidence", the build
+  facts, and the linked platforms / sibling channels the run did not mine.
 
 Facts at tier ``children`` or ``location`` never enter the who-they-are
 section (they are withheld from brand-facing angles by default); ``clinical``
@@ -39,7 +49,11 @@ import html
 import json
 import pathlib
 import re
+import sys
 from collections import Counter, defaultdict
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from ledger_io import read_ledger  # sibling script  # noqa: E402
 
 BADGES = {
     "direct": "direct",
@@ -147,10 +161,22 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
 .meta li { margin: 0; }
 .meta li::before { content: "·"; color: var(--ink-3); margin-right: .55rem; }
 .meta li:first-child::before { content: none; margin: 0; }
+.about {
+  margin: 0; padding: .9rem 1.1rem; background: var(--surface);
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 6px; color: var(--ink-2);
+}
+.about h3 { font-size: 1.05rem; color: var(--ink); margin: 0 0 .3rem; }
+.about p { margin: .35rem 0; }
 .ledger {
-  margin: 1.2rem 0 0; padding: .75rem 1rem; background: var(--surface);
+  margin: .6rem 0 0; padding: .75rem 1rem; background: var(--surface);
   border: 1px solid var(--line); border-radius: 6px; font-size: .9rem;
   color: var(--ink-2);
+}
+.ledger h3 {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500;
+  font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin: .8rem 0 .35rem;
 }
 .tally { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .2rem 0 0; padding: 0; list-style: none; }
 .tally li { margin: 0; font-variant-numeric: tabular-nums; }
@@ -188,17 +214,6 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
 .conn h3 .badge { margin-left: .5rem; vertical-align: .2em; }
 .conn p { max-width: 70ch; }
 .prose { margin-top: 1rem; }
-.facts { margin: 1.4rem 0 0; padding: 0; list-style: none; }
-.facts > li {
-  margin: 0 0 .8rem; padding: .7rem 1rem .8rem; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 6px;
-}
-.facts .claim { font-weight: 600; margin: 0; }
-.facts .claim .badge { margin-left: .5rem; vertical-align: .15em; }
-.facts .src {
-  margin: .35rem 0 0; font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .74rem; color: var(--ink-3); word-break: break-word; max-width: none;
-}
 .badge {
   display: inline-block; padding: .08rem .5rem; border-radius: 3px;
   font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .66rem;
@@ -338,18 +353,43 @@ def render_markdown(md: str) -> str:
     return "\n".join(out)
 
 
-def connection_cards(body_html: str) -> str:
-    """Each ``## …`` section of the connection map becomes one ranked card;
-    whatever precedes the first section stays prose (the header lines, or a
-    no-fit verdict). Sections are the ranking, so cards are numbered."""
+def split_sections(body_html: str) -> tuple[str, list[tuple[str, str]]]:
+    """``(intro, [(title, rest), …])`` — whatever precedes the first ``## ``
+    section stays prose (the header lines, or a no-fit verdict); each section
+    is one (title, body) pair in the markdown's order."""
     parts = re.split(r"(?=<h2>)", body_html)
-    intro = parts[0].strip()
-    cards = []
+    sections: list[tuple[str, str]] = []
     for chunk in parts[1:]:
         m = re.match(r"<h2>(.*?)</h2>\n?(.*)", chunk, re.S)
         if not m:
             continue
-        title, rest = m.group(1), m.group(2).strip()
+        sections.append((m.group(1), m.group(2).strip()))
+    return parts[0].strip(), sections
+
+
+def plain(title_html: str) -> str:
+    """A section heading as text: tags dropped, entities decoded."""
+    return html.unescape(re.sub(r"<[^>]+>", "", title_html)).strip()
+
+
+def is_about(title_html: str) -> bool:
+    """``## About <brand>`` — the brand strip, context rather than a
+    connection, so it never becomes a numbered card."""
+    return plain(title_html).lower().startswith("about ")
+
+
+def about_block(sections: list[tuple[str, str]]) -> str:
+    """The brand strip: plain prose above the cards."""
+    blocks = [f'<div class="about"><h3>{title}</h3>{rest}</div>'
+              for title, rest in sections]
+    return "".join(blocks)
+
+
+def connection_cards(sections: list[tuple[str, str]], intro: str = "") -> str:
+    """Each connection section becomes one ranked card; the section order IS
+    the ranking, so cards are numbered."""
+    cards = []
+    for title, rest in sections:
         # a leading "1. " in the heading duplicates the card's own numeral
         title = re.sub(r"^\d+[.)]\s*", "", title)
         cards.append(f'<li><div class="body"><h3>{title}</h3>{rest}</div></li>')
@@ -362,20 +402,17 @@ def connection_cards(body_html: str) -> str:
 # --------------------------------------------------------------------------- #
 # ledger data
 # --------------------------------------------------------------------------- #
-def load_facts(facts_path: pathlib.Path) -> list[dict]:
-    facts: list[dict] = []
-    with open(facts_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                facts.append(json.loads(line))
-    return facts
-
-
-def load_meta(meta_path: pathlib.Path | None) -> dict:
-    if not meta_path:
-        return {}
-    return json.loads(pathlib.Path(meta_path).read_text(encoding="utf-8"))
+def load_ledger(facts_path: pathlib.Path | None,
+                meta_path: pathlib.Path | None) -> tuple[list[dict] | None, dict]:
+    """``(facts, meta)`` from the ledger — its first line is the meta record.
+    ``--meta`` is only read when the ledger predates the header (legacy)."""
+    if facts_path is None:
+        return None, (json.loads(pathlib.Path(meta_path).read_text(encoding="utf-8"))
+                      if meta_path else {})
+    meta, facts = read_ledger(facts_path)
+    if meta is None and meta_path:
+        meta = json.loads(pathlib.Path(meta_path).read_text(encoding="utf-8"))
+    return facts, meta or {}
 
 
 def tier_of(fact: dict) -> str:
@@ -395,39 +432,10 @@ def tier_badge(fact: dict) -> str:
     return badge(label) or ""
 
 
-def meta_chips(meta: dict) -> str:
-    chips = []
-    if meta.get("generated_at"):
-        chips.append(f"built {meta['generated_at']}")
-    window = meta.get("corpus_window")
-    if isinstance(window, str):
-        chips.append(f"corpus {window.strip('[]')}")
-    elif isinstance(window, (list, tuple)) and any(window):
-        lo, hi = (list(window) + [None, None])[:2]
-        chips.append(f"corpus {lo or '?'} → {hi or '?'}")
-    cov = meta.get("coverage") or {}
-    if cov.get("videos_matched") and cov.get("videos_with_transcript"):
-        chips.append(f"{cov['videos_matched']}/{cov['videos_with_transcript']} "
-                     "transcript videos matched")
-    if cov.get("windows_judged"):
-        chips.append(f"{cov['windows_judged']} passages judged")
-    if cov.get("facts"):
-        chips.append(f"{cov['facts']} facts")
-    if meta.get("format"):
-        chips.append(f"format: {meta['format']}")
-    if meta.get("lanes"):
-        chips.append(f"lanes: {meta['lanes']}")
-    if meta.get("rounds") and int(meta.get("rounds") or 1) > 1:
-        chips.append(f"{meta['rounds']} rounds")
-    if meta.get("brand_id"):
-        chips.append(f"brand {meta['brand_id']}")
-    if not chips:
-        return ""
-    items = "".join(f"<li>{html.escape(str(c))}</li>" for c in chips)
-    return f'<ul class="meta">{items}</ul>'
-
-
-def ledger_strip(facts: list[dict]) -> str:
+def tallies(facts: list[dict]) -> list[str]:
+    """The honesty tallies ``references/evidence-rules.md`` requires: how many
+    facts at which confidence, which sensitivity tiers, and how many of them
+    are withheld from brand-facing angles."""
     confidence: Counter = Counter()
     domains: Counter = Counter()
     tiers: Counter = Counter()
@@ -449,49 +457,85 @@ def ledger_strip(facts: list[dict]) -> str:
                       and int(f.get("recurrence") or 0) < 3))
     tier_text = (", ".join(tier_parts) + (f" — {withheld} withheld from angles" if withheld else "")
                  if tier_parts else "all at tier none")
-    items = "".join(f"<li>{html.escape(x)}</li>" for x in (
-        f"{len(facts)} facts: {conf}",
-        f"sensitivity: {tier_text}",
-        f"domains: {doms}",
-    ))
-    return (f'<div class="ledger">Full ledger — every verified fact, with its citation.'
-            f'<ul class="tally">{items}</ul></div>')
+    return [f"{len(facts)} facts: {conf}",
+            f"sensitivity: {tier_text}",
+            f"domains: {doms}"]
 
 
-def ledger_facts(facts: list[dict]) -> str:
-    """Every fact with its full citation and its sensitivity tier."""
+def coverage_line(meta: dict) -> str:
+    """What the ledger can speak for, and the line that bounds it."""
+    cov = meta.get("coverage") or {}
+    parts = []
+    if cov.get("videos_matched") and cov.get("videos_with_transcript"):
+        parts.append(f"{cov['videos_matched']}/{cov['videos_with_transcript']} "
+                     "transcript videos matched")
+    if cov.get("windows_judged"):
+        parts.append(f"{cov['windows_judged']} passages judged")
+    return f"{', '.join(parts) if parts else 'coverage not recorded'} — absence is not evidence"
+
+
+def build_line(meta: dict) -> str:
+    """Format, corpus window, rounds and lanes: what built this ledger."""
+    parts = []
+    if meta.get("format"):
+        parts.append(f"format: {meta['format']}")
+    window = meta.get("corpus_window")
+    if isinstance(window, str):
+        parts.append(f"corpus {window.strip('[]')}")
+    elif isinstance(window, (list, tuple)) and any(window):
+        lo, hi = (list(window) + [None, None])[:2]
+        parts.append(f"corpus {lo or '?'} → {hi or '?'}")
+    if meta.get("lanes"):
+        parts.append(f"lanes: {meta['lanes']}")
+    if meta.get("rounds"):
+        n = int(meta["rounds"])
+        parts.append(f"{n} round{'s' if n != 1 else ''}")
+    if meta.get("generated_at"):
+        parts.append(f"built {meta['generated_at']}")
+    return " · ".join(parts)
+
+
+def context_section(meta: dict) -> str:
+    """Linked platforms and sibling channels from the ledger header's channel
+    context — what the run could have read and did not. Each platform says
+    whether the socials lane read it; each sibling channel says "not mined"."""
+    ctx = meta.get("context") or {}
+    links = ctx.get("social_links") or []
+    sibs = ctx.get("second_channel_candidates") or []
+    if not links and not sibs:
+        return ""
+    read = str(meta.get("lanes") or "") == "transcripts+socials"
     items = []
-    for fact in facts:
-        claim = html.escape(str(fact.get("claim") or ""))
-        parts = [f'<p class="claim">{claim}{tier_badge(fact)}</p>']
-        if fact.get("quote"):
-            quote = html.escape(str(fact["quote"]))
-            parts.append(f"<blockquote><p>{quote}</p></blockquote>")
-        cite = []
-        for key in ("provenance", "domain", "confidence", "video", "published",
-                    "seen_date", "recurrence", "fact_id"):
-            if fact.get(key) not in (None, ""):
-                cite.append(f"{key}: {fact[key]}")
-        cite.append(f"sensitivity: {tier_of(fact)}")
-        if fact.get("superseded_by"):
-            cite.append(f"superseded by {fact['superseded_by']}")
-        if fact.get("selected"):
-            cite.append("selected")
-        line = html.escape(" · ".join(cite))
-        for key in ("url", "source_url"):
-            if fact.get(key):
-                raw = str(fact[key])
-                # ledger data is researched/hand-edited content: only
-                # http(s) becomes a link, anything else renders as text
-                if raw.lower().startswith(("http://", "https://")):
-                    url = html.escape(raw, quote=True)
-                    line += f' · <a href="{url}">{html.escape(raw)}</a>'
-                else:
-                    line += f" · {html.escape(raw)}"
-        items.append(f'<li>{"".join(parts)}<p class="src">{line}</p></li>')
-    if not items:
-        return '<p class="empty">No verified facts in this ledger.</p>'
-    return f'<ul class="facts">{"".join(items)}</ul>'
+    for link in links:
+        raw = str(link)
+        shown = html.escape(raw)
+        if raw.lower().startswith(("http://", "https://")):
+            shown = f'<a href="{html.escape(raw, quote=True)}">{shown}</a>'
+        items.append(f"<li>{shown} — {'read (socials lane)' if read else 'linked but unread (socials lane not run)'}</li>")
+    for c in sibs:
+        name = html.escape(str(c.get("name") or c.get("link") or ""))
+        ident = c.get("id") or c.get("channel_id")
+        tail = f" (id {html.escape(str(ident))})" if ident else ""
+        items.append(f"<li>{name}{tail} — not mined</li>")
+    return ('<h3>Other channels and platforms</h3>'
+            f'<ul class="links">{"".join(items)}</ul>')
+
+
+def ledger_footer(facts: list[dict] | None, meta: dict) -> str:
+    """"About this ledger" — the honesty surface the connections page carries
+    for the ledger behind it. Superseded and withheld facts are counted here
+    even though they never appear above."""
+    if facts is None and not meta:
+        return ""
+    lines = tallies(facts or []) + [coverage_line(meta)]
+    build = build_line(meta)
+    if build:
+        lines.append(build)
+    items = "".join(f"<li>{html.escape(x)}</li>" for x in lines)
+    return ('<h2>About this ledger</h2>'
+            f'<div class="ledger">Every angle above comes from the machine ledger: '
+            f'verified quotes only, each with its citation.'
+            f'<ul class="tally">{items}</ul>{context_section(meta)}</div>')
 
 
 # --------------------------------------------------------------------------- #
@@ -594,37 +638,22 @@ def page_html(title: str, eyebrow: str, header_extra: str, body: str) -> str:
 """
 
 
-def context_section(meta: dict) -> str:
-    """Linked platforms and sibling channels from the channel context — the
-    parts of the old one-pager's "Other channels" section that still have no
-    other home. Each platform says whether the socials lane read it."""
-    ctx = meta.get("context") or {}
-    links = ctx.get("social_links") or []
-    sibs = ctx.get("second_channel_candidates") or []
-    if not links and not sibs:
-        return ""
-    read = str(meta.get("lanes") or "") == "transcripts+socials"
-    items = []
-    for link in links:
-        raw = str(link)
-        shown = html.escape(raw)
-        if raw.lower().startswith(("http://", "https://")):
-            shown = f'<a href="{html.escape(raw, quote=True)}">{shown}</a>'
-        items.append(f"<li>{shown} — {'read (socials lane)' if read else 'linked but unread (socials lane not run)'}</li>")
-    for c in sibs:
-        name = html.escape(str(c.get("name") or c.get("link") or ""))
-        ident = c.get("id") or c.get("channel_id")
-        tail = f" (id {html.escape(str(ident))})" if ident else ""
-        items.append(f"<li>{name}{tail} — not mined</li>")
-    return ('<h2>Other channels and platforms</h2>'
-            f'<ul class="links">{"".join(items)}</ul>')
-
-
-def render_ledger(facts: list[dict], meta: dict, title: str | None = None) -> str:
-    name = title or meta.get("channel_name") or f"channel {meta.get('channel_id', '')}".strip()
-    return page_html(f"{name} — ledger", "creator ledger",
-                     meta_chips(meta) + "\n" + ledger_strip(facts),
-                     ledger_facts(facts) + context_section(meta))
+def default_out(in_path: pathlib.Path, facts_path: pathlib.Path | None,
+                fm: dict) -> pathlib.Path:
+    """The deliverable lands next to the ledger as
+    ``<channel_id>-<brand_id>-connections.html``; without a ledger it lands
+    next to its own markdown."""
+    if facts_path is None:
+        return in_path.with_suffix(".html")
+    channel = re.sub(r"-facts$", "", facts_path.stem)
+    brand = str(fm.get("brand_id") or "").strip()
+    if not brand:
+        m = (re.search(r"^connections-(.+)$", in_path.stem)
+             or re.search(r"^\d+-([^-]+)-connections$", in_path.stem))
+        brand = m.group(1) if m else ""
+    name = (f"{channel}-{brand}-connections.html" if brand
+            else f"{in_path.stem}.html")
+    return facts_path.parent / name
 
 
 def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tuple[str, str]:
@@ -642,47 +671,44 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
     chips = []
     if fm.get("brand_read_date"):
         chips.append(f"brand read {fm['brand_read_date']}")
-    if fm.get("facts_file"):
-        chips.append(f"from {fm['facts_file']}")
+    if meta.get("generated_at"):
+        chips.append(f"ledger built {meta['generated_at']}")
     header_extra = (f'<ul class="meta">{"".join(f"<li>{html.escape(c)}</li>" for c in chips)}</ul>'
                     if chips else "")
+    intro, sections = split_sections(body_html)
+    about = [sec for sec in sections if is_about(sec[0])]
+    conns = [sec for sec in sections if not is_about(sec[0])]
     who = who_they_are(facts, meta) if facts is not None else ""
-    conn = "<h2>Connections</h2>" + connection_cards(body_html)
-    return title, page_html(title, "creator × brand connection map", header_extra, who + conn)
+    body_out = (who + about_block(about) + "<h2>Connections</h2>"
+                + connection_cards(conns, intro) + ledger_footer(facts, meta))
+    return title, page_html(title, "creator × brand connection map", header_extra, body_out)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="infile", default=None,
-                    help="<channel_id>-<brand_id>-connections.md; omit for the ledger view")
-    ap.add_argument("--facts", default=None, help="<channel_id>-facts.jsonl")
-    ap.add_argument("--meta", default=None, help="<channel_id>-meta.json")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--in", dest="infile", required=True,
+                    help="the connection map's markdown, e.g. "
+                         ".corpus/<channel_id>/connections-<brand_id>.md")
+    ap.add_argument("--facts", default=None,
+                    help="<channel_id>-facts.jsonl — the ledger, header first")
+    ap.add_argument("--meta", default=None,
+                    help="legacy <channel_id>-meta.json; read only when the "
+                         "ledger carries no meta header")
     ap.add_argument("--out", default=None,
-                    help="connections page; default: input path with .html")
-    ap.add_argument("--ledger-out", dest="ledger_out", default=None,
-                    help="ledger view; default: <facts dir>/<channel_id>-profile-ledger.html")
+                    help="default: <facts dir>/<channel_id>-<brand_id>-connections.html, "
+                         "or the input path with .html when --facts is omitted")
     a = ap.parse_args()
-    if not a.infile and not a.facts:
-        ap.error("give --facts (ledger view) and/or --in (connections page)")
 
-    facts = load_facts(pathlib.Path(a.facts)) if a.facts else None
-    meta = load_meta(a.meta)
-    result: dict = {}
-
-    if a.infile:
-        in_path = pathlib.Path(a.infile)
-        out_path = pathlib.Path(a.out) if a.out else in_path.with_suffix(".html")
-        title, page = render_connections(in_path.read_text(encoding="utf-8"), facts, meta)
-        out_path.write_text(page, encoding="utf-8")
-        result.update(html=str(out_path), title=title)
-    elif facts is not None:
-        facts_path = pathlib.Path(a.facts)
-        stem = re.sub(r"-facts$", "", facts_path.stem)
-        ledger_path = (pathlib.Path(a.ledger_out) if a.ledger_out
-                       else facts_path.with_name(f"{stem}-profile-ledger.html"))
-        ledger_path.write_text(render_ledger(facts, meta), encoding="utf-8")
-        result.update(ledger_html=str(ledger_path))
-    print(json.dumps(result))
+    facts_path = pathlib.Path(a.facts) if a.facts else None
+    facts, meta = load_ledger(facts_path, pathlib.Path(a.meta) if a.meta else None)
+    in_path = pathlib.Path(a.infile)
+    text = in_path.read_text(encoding="utf-8")
+    out_path = (pathlib.Path(a.out) if a.out
+                else default_out(in_path, facts_path, parse_frontmatter(text)[0]))
+    title, page = render_connections(text, facts, meta)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(page, encoding="utf-8")
+    print(json.dumps({"html": str(out_path), "title": title}))
 
 
 if __name__ == "__main__":

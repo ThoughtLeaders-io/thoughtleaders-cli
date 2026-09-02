@@ -360,3 +360,33 @@ def test_the_funnel_line_reports_the_stage(tmp_path):
                                      "gems": [_gem(0, wins[0])], "not_gems": []})
     line = next(x for x in proc.stderr.splitlines() if x.startswith("FUNNEL"))
     assert "stage=assemble" in line and "gems=1" in line and "elapsed_s=" in line
+
+
+def test_append_replaces_the_same_rounds_earlier_rows_instead_of_stacking_them(tmp_path):
+    """A round re-assembled after a subset re-spawn must not double its gems."""
+    out = tmp_path / "out"
+    wins1 = [_window(0)]
+    b1, r1 = tmp_path / "batches1", tmp_path / "returns1"
+    b1.mkdir(); r1.mkdir()
+    (b1 / "batch-000.json").write_text(json.dumps(wins1))
+    (r1 / "batch-000.extract.json").write_text(json.dumps({
+        "batch": "000", "windows": 1, "gems": [_gem(0, wins1[0])], "not_gems": []}))
+    subprocess.run([sys.executable, str(_SCRIPTS / "assemble_extracts.py"),
+                    "--batches", str(b1), "--returns", str(r1), "--out", str(out)],
+                   capture_output=True, text=True, check=True)
+    wins2 = [_window(1)]
+    b2, r2 = tmp_path / "batches2", tmp_path / "returns2"
+    b2.mkdir(); r2.mkdir()
+    (b2 / "batch-000.json").write_text(json.dumps(wins2))
+    (r2 / "batch-000.extract.json").write_text(json.dumps({
+        "batch": "000", "windows": 1, "gems": [_gem(0, wins2[0])], "not_gems": []}))
+    for _ in range(2):        # the second --append is the re-assembly after a re-spawn
+        proc = subprocess.run([sys.executable, str(_SCRIPTS / "assemble_extracts.py"),
+                               "--batches", str(b2), "--returns", str(r2), "--out", str(out),
+                               "--append"], capture_output=True, text=True)
+        assert proc.returncode == 0
+    for name in ("classified.jsonl", "gems.jsonl", "candidates.jsonl"):
+        rows = [json.loads(x) for x in (out / name).read_text().splitlines()]
+        assert len(rows) == 2, name
+    cands = [json.loads(x) for x in (out / "candidates.jsonl").read_text().splitlines()]
+    assert [c["video"] for c in cands] == [wins1[0]["id"], wins2[0]["id"]]   # round 1 stays first

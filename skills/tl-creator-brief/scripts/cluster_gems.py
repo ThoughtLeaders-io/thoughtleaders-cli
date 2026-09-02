@@ -22,9 +22,10 @@ text) with two fields merged in:
 
 * ``occurrences`` — how many gems the cluster holds (1 for a singleton, which
   passes through unchanged apart from these two fields).
-* ``members`` — ``{video_id, start, published}`` for every member, the
-  representative included, so recurrence can be counted over **distinct
-  videos** without going back to the raw gems.
+* ``members`` — ``{video_id, start, published, in_sponsor_read, host_anchor}``
+  for every member, the representative included, so recurrence can be counted
+  over **distinct videos** — and the ad-read and anchor questions answered per
+  member — without going back to the raw gems.
 
 Clustering is deliberately conservative: a false merge silently deletes a
 distinct fact, a missed merge only costs a few tokens. Two gems may merge only
@@ -214,9 +215,16 @@ def representative_key(gem: dict) -> tuple:
 
 def member_ref(gem: dict) -> dict:
     window = gem.get("window") or {}
+    # in_sponsor_read and host_anchor travel per member, not just on the
+    # representative: the merge pass caps an ad-read-only cluster at
+    # `unconfirmed` and confirms a shared-voice cluster only on an anchor, and
+    # both are questions about EVERY member, not about the one that happened
+    # to rank highest.
     return {"video_id": window.get("video_id"),
             "start": window.get("start"),
-            "published": window.get("published")}
+            "published": window.get("published"),
+            "in_sponsor_read": bool(window.get("in_sponsor_read")),
+            "host_anchor": bool(window.get("host_anchor"))}
 
 
 def cluster(gems: list[dict]) -> list[list[dict]]:
