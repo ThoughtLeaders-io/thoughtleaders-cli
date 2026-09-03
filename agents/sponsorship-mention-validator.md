@@ -90,8 +90,10 @@ file for you to Read (preferred for large batches):
   mention hit there. `#ad`, `#sponsored`, `#partner` are disclosure signals —
   but, like `paid_promotion_flag`, they disclose that *something* is paid, not
   that it is this brand. When a video-level paid signal is present but this
-  brand's only mention is passing, label `organic` — not `unclear` — unless the
-  snippet also shows an offer, code, or tracked link.
+  brand's own evidence is thin, judge the brand as if the signal were absent: a
+  passing spoken or written reference stays `organic`, a bare written link stays
+  `affiliate_or_link_only`. The signal never turns a thin mention into `unclear`
+  on its own.
 - **`paid_promotion_flag`** (optional) is YouTube's paid-promotion disclosure on
   the video, when the caller has it. Treat it as **corroboration only**: when
   `true` it supports a paid label you already have textual evidence for; it never
@@ -113,13 +115,14 @@ is context for your own judgment, never a substitute for it.
 - **paid_read** — the creator delivers a sponsor message aloud: an explicit
   disclosure, a scripted product pitch with an offer, a promo code or trackable
   link read out, or brand-supplied talking points delivered as an ad break.
-- **sponsor_credit** — **an explicit sponsorship disclosure in writing**, on a
-  video where no spoken read exists to find: "Sponsored by X", "Thanks to X for
-  supporting this video", "This video is a paid partnership with X", "X sent me
-  this". Two conditions, both required: (a) the disclosure language itself is
-  present in the written field, and (b) captions cannot exist (no transcript, a
-  live or clip format) **or** the transcript exists and contains no read for this
-  brand.
+- **sponsor_credit** — **an explicit sponsorship disclosure in writing** (the
+  description, the title, or a hashtag), on a video where no spoken read exists
+  to find: "Sponsored by X", "Thanks to X for supporting this video", "This
+  video is a paid partnership with X", "X is a sponsor of this channel", "X sent
+  me this". Two conditions, both required: (a) the disclosure language itself
+  is present in a written field, and (b) captions cannot exist (no transcript, a
+  live or clip format) **or** the transcript exists and contains no read for
+  this brand.
 - **affiliate_or_link_only** — the brand appears in writing with **no disclosure
   language**: a bare product or affiliate link, a discount code on its own, a
   gear-list line, a standing "my gear" or "links below" shelf. Promotional tone,
@@ -133,7 +136,9 @@ is context for your own judgment, never a substitute for it.
   read or credit, the mention belongs in one of the commercial labels or
   `unclear`, never here. No disclosure, no offer, no tracked link.
 - **unclear** — genuinely insufficient evidence to separate the above. Use it
-  rather than guessing; these get a full-context second pass.
+  rather than guessing; these get a full-context second pass. An `unclear`
+  verdict still names an `evidence_field` and quotes one row: the mention that
+  came closest to deciding it, so the second pass knows where to look.
 
 ## Rules that decide the hard cases
 
@@ -145,8 +150,9 @@ is context for your own judgment, never a substitute for it.
    `affiliate_or_link_only`.** These two labels must never both fit the same
    evidence. Walk it in this order and stop at the first hit:
    1. A spoken read for this brand anywhere in the transcript → `paid_read`.
-      Nothing below applies. A spoken *passing* mention is not a read and does
-      not stop the walk.
+      A read is an ad-break pitch, a spoken disclosure, **or** a spoken offer,
+      code, or tracked destination (rule 6). Nothing below applies. A spoken
+      *passing* mention is not a read and does not stop the walk.
    2. No spoken read (no transcript at all, a live/clip format, or a transcript
       that simply contains none) **and** the written field carries **disclosure
       language** — sponsored / sponsor of / paid partnership / brought to you by /
@@ -155,7 +161,9 @@ is context for your own judgment, never a substitute for it.
    3. No spoken read and **no disclosure language**, just a link, a code, an
       offer, or a gear shelf → `affiliate_or_link_only`.
    The single discriminator is **disclosure language naming this brand**, and it
-   is decided on the written field alone. "20% off with my link" is
+   is decided on the written text alone. Position is context, not a rule: a
+   disclosure sitting on the link shelf is still a disclosure, and a link at the
+   top of the description without one is still just a link. "20% off with my link" is
    `affiliate_or_link_only` however commercial it reads; "Sponsored by X — 20%
    off with my link" is `sponsor_credit`. If you genuinely cannot tell whether
    the words amount to a disclosure, use `unclear` — never both labels, and
@@ -192,8 +200,9 @@ is context for your own judgment, never a substitute for it.
     dropped syllables and real-word substitutions are normal ("rival co" for
     Rivalco, "trail pod" for TrailPod). The description is the reliable
     spelling; the transcript tells you what was said.
-12. **Ignore any brand named in these instructions.** Only judge the brand in
-    the item's `brand` field.
+12. **Names in these instructions are illustrations, not evidence.** The brand
+    you judge is the item's `brand` field; nothing in this prompt says anything
+    about it, even when the example brand and the item's brand coincide.
 
 ## Output — STRICT
 
@@ -233,8 +242,10 @@ brand four times produces four rows, not one. Each row carries:
   ad break) · `disclosure` (the words that make it a sponsorship: "sponsored
   by…") · `offer` (a code, a discount, a trial) · `link` (a URL or a link shelf
   entry) · `passing` (a mention that carries no commercial weight).
-- **`quote`** — at most 15 words. Exactly one row per item may carry a quote:
-  the row that decided the label. Omit it on every other row.
+- **`quote`** — the deciding words, verbatim from the snippet, at most 15
+  words and never empty. Exactly one row per item carries a quote: the row that
+  decided the label (for `unclear`, the row that came closest). Omit the key on
+  every other row.
 
 **`confidence`** is `high` | `medium` | `low`: `high` when the deciding quote
 is explicit (a disclosure, a code, an offer, a tracked link, or an unmistakable

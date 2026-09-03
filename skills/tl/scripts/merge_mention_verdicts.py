@@ -59,6 +59,8 @@ def check_items(items: object) -> list[str]:
     errs: list[str] = []
     if not isinstance(items, list):
         return ["input: must be a JSON array of items"]
+    if not items:
+        return ["input: the candidate array is empty (nothing to judge)"]
     seen: set = set()
     for pos, item in enumerate(items):
         where = f"input[{pos}]"
@@ -112,7 +114,7 @@ def check_verdicts(items: list[dict], verdicts: object, *, partial: bool = False
             errs.append(f"{where}: must be an object")
             continue
         i = v.get("i")
-        if i not in by_i:
+        if not isinstance(i, int) or isinstance(i, bool) or i not in by_i:
             errs.append(f"{where}: `i`={i!r} is not an input item")
             continue
         if i in seen:
@@ -132,8 +134,11 @@ def check_verdicts(items: list[dict], verdicts: object, *, partial: bool = False
             errs.append(f"{where}: `confidence` must be one of {CONFIDENCES}, got {v.get('confidence')!r}")
         if v.get("evidence_field") not in OUTPUT_FIELDS:
             errs.append(f"{where}: `evidence_field` must be one of {OUTPUT_FIELDS}, got {v.get('evidence_field')!r}")
-        if "note" in v and _words(v["note"]) > NOTE_MAX_WORDS:
-            errs.append(f"{where}: `note` is {_words(v['note'])} words, max {NOTE_MAX_WORDS}")
+        note = v.get("note")
+        if "note" in v and (not isinstance(note, str) or not note.strip()):
+            errs.append(f"{where}: `note` must be non-empty text")
+        elif "note" in v and _words(note) > NOTE_MAX_WORDS:
+            errs.append(f"{where}: `note` is {_words(note)} words, max {NOTE_MAX_WORDS}")
 
         mentions = by_i[i].get("mentions") or []
         matches = v.get("matches")
@@ -153,7 +158,7 @@ def check_verdicts(items: list[dict], verdicts: object, *, partial: bool = False
             if extra_m:
                 errs.append(f"{rw}: extra keys {sorted(extra_m)}")
             m = row.get("m")
-            if m != pos_m:
+            if isinstance(m, bool) or m != pos_m:
                 errs.append(f"{rw}: `m` must be {pos_m} (0..n-1 in input order), got {m!r}")
             field = row.get("field")
             if field not in OUTPUT_FIELDS:
@@ -168,8 +173,11 @@ def check_verdicts(items: list[dict], verdicts: object, *, partial: bool = False
                 errs.append(f"{rw}: `role` must be one of {ROLES}, got {row.get('role')!r}")
             if "quote" in row:
                 quotes += 1
-                if _words(row["quote"]) > QUOTE_MAX_WORDS:
-                    errs.append(f"{rw}: `quote` is {_words(row['quote'])} words, max {QUOTE_MAX_WORDS}")
+                quote = row["quote"]
+                if not isinstance(quote, str) or not quote.strip():
+                    errs.append(f"{rw}: `quote` must be non-empty text")
+                elif _words(quote) > QUOTE_MAX_WORDS:
+                    errs.append(f"{rw}: `quote` is {_words(quote)} words, max {QUOTE_MAX_WORDS}")
         if matches and quotes != 1:
             errs.append(f"{where}: exactly one match row must carry `quote`, found {quotes}")
         if v.get("evidence_field") in OUTPUT_FIELDS and fields_seen and v["evidence_field"] not in fields_seen:
@@ -206,6 +214,7 @@ def score_against_gold(verdicts: list[dict], gold: list[dict]) -> dict:
     """Score labels against a gold file (`label`, optional `also_ok`)."""
     by_i = {v["i"]: v for v in verdicts}
     misses = []
+    evidence_mismatches = []
     for g in gold:
         v = by_i.get(g["i"])
         accepted = {g["label"], *g.get("also_ok", [])}
@@ -213,7 +222,10 @@ def score_against_gold(verdicts: list[dict], gold: list[dict]) -> dict:
         if got not in accepted:
             misses.append({"i": g["i"], "expected": g["label"], "also_ok": g.get("also_ok", []),
                            "got": got, "why": g.get("why", "")})
-    return {"total": len(gold), "correct": len(gold) - len(misses), "misses": misses}
+        elif v and "evidence_field" in g and v.get("evidence_field") != g["evidence_field"]:
+            evidence_mismatches.append({"i": g["i"], "expected": g["evidence_field"], "got": v.get("evidence_field")})
+    return {"total": len(gold), "correct": len(gold) - len(misses), "misses": misses,
+            "evidence_mismatches": evidence_mismatches}
 
 
 def second_pass_items(verdicts: list[dict]) -> list[int]:
@@ -247,10 +259,6 @@ def main(argv: list[str] | None = None) -> int:
     if second:
         print(f"second pass: {len(second)} item(s) (unclear or low confidence): {second}")
 
-    if args.merged:
-        Path(args.merged).write_text(json.dumps(merged, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"merged -> {args.merged}")
-
     rc = 0
     if args.gold:
         score = score_against_gold(merged, _load(args.gold))
@@ -258,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         for miss in score["misses"]:
             alt = f" (also ok: {', '.join(miss['also_ok'])})" if miss["also_ok"] else ""
             print(f"  MISS i={miss['i']}: expected {miss['expected']}{alt}, got {miss['got']}  -- {miss['why']}")
+        for mm in score["evidence_mismatches"]:
+            print(f"  evidence_field i={mm['i']}: expected {mm['expected']}, got {mm['got']}")
         if score["misses"]:
             rc = 1
 
@@ -269,6 +279,13 @@ def main(argv: list[str] | None = None) -> int:
             rc = 1
     else:
         print("contract: ok")
+
+    if args.merged:
+        if errs and not args.lenient:
+            print(f"merged NOT written ({args.merged}): fix the contract violations first", file=sys.stderr)
+        else:
+            Path(args.merged).write_text(json.dumps(merged, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(f"merged -> {args.merged}")
     return rc
 
 

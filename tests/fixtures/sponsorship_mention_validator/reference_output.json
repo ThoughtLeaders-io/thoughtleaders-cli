@@ -373,5 +373,20 @@
    }
   ],
   "note": "Bluefin is the sponsor; Rivalco affiliate link"
+ },
+ {
+  "i": 23,
+  "label": "unclear",
+  "confidence": "low",
+  "evidence_field": "transcript",
+  "matches": [
+   {
+    "m": 0,
+    "field": "transcript",
+    "role": "read",
+    "quote": "that's exactly where Rivalco comes in"
+   }
+  ],
+  "note": "pitch opening cut off before any offer"
  }
 ]

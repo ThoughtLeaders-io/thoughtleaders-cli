@@ -72,7 +72,7 @@ def test_agent_frontmatter_is_well_formed():
 
 
 def test_agent_prompt_states_the_contract_the_checker_enforces(mv):
-    text = _AGENT.read_text()
+    text = " ".join(_AGENT.read_text().split())
     for label in mv.LABELS:
         assert f"**{label}**" in text, f"label {label} is not defined in the prompt"
     for role in mv.ROLES:
@@ -108,7 +108,7 @@ def test_gold_covers_every_item_with_valid_labels(mv, items, gold):
 
 def test_fixture_covers_every_label_and_the_hard_cases(gold):
     labels = {g["label"] for g in gold}
-    assert labels >= {"paid_read", "sponsor_credit", "affiliate_or_link_only", "organic"}
+    assert labels == {"paid_read", "sponsor_credit", "affiliate_or_link_only", "organic", "unclear"}
     whys = " ".join(g["why"].lower() for g in gold)
     for case in ("generic", "asr", "alias", "not sponsored", "own merch", "passing", "affiliate", "partnership"):
         assert case in whys, f"fixture lost its {case!r} case"
@@ -118,6 +118,7 @@ def test_reference_output_passes_the_contract_and_gold(mv, items, gold, referenc
     assert mv.check_verdicts(items, reference) == []
     score = mv.score_against_gold(reference, gold)
     assert score["misses"] == []
+    assert score["evidence_mismatches"] == []
     assert score["correct"] == len(items)
 
 
@@ -145,6 +146,13 @@ def _mutate(reference, i, fn):
     ("bad role", 0, lambda v: v["matches"][0].__setitem__("role", "ad"), "`role` must be one of"),
     ("evidence_field matches no row", 0, lambda v: v.__setitem__("evidence_field", "title"), "matches no row"),
     ("missing key", 0, lambda v: v.pop("note"), "missing keys ['note']"),
+    ("empty quote", 0, lambda v: v["matches"][0].__setitem__("quote", ""), "`quote` must be non-empty text"),
+    ("null quote", 0, lambda v: v["matches"][0].__setitem__("quote", None), "`quote` must be non-empty text"),
+    ("object quote", 0, lambda v: v["matches"][0].__setitem__("quote", {"a": 1}), "`quote` must be non-empty text"),
+    ("empty note", 0, lambda v: v.__setitem__("note", " "), "`note` must be non-empty text"),
+    ("boolean m", 20, lambda v: v["matches"][1].__setitem__("m", True), "`m` must be 1"),
+    ("float i", 0, lambda v: v.__setitem__("i", 0.0), "`i`=0.0 is not an input item"),
+    ("boolean i", 1, lambda v: v.__setitem__("i", True), "`i`=True is not an input item"),
 ])
 def test_checker_rejects(mv, items, reference, name, i, mutate, expect):
     errs = mv.check_verdicts(items, _mutate(reference, i, mutate))
@@ -154,7 +162,7 @@ def test_checker_rejects(mv, items, reference, name, i, mutate, expect):
 def test_checker_rejects_length_and_index_drift(mv, items, reference):
     short = reference[:-1]
     errs = mv.check_verdicts(items, short)
-    assert any("no verdict for input `i` [22]" in e for e in errs)
+    assert any(f"no verdict for input `i` [{reference[-1]['i']}]" in e for e in errs)
 
     wrong_i = copy.deepcopy(reference)
     wrong_i[0]["i"] = 999
@@ -169,6 +177,10 @@ def test_checker_rejects_length_and_index_drift(mv, items, reference):
 
 
 def test_checker_rejects_bad_input(mv, items):
+    assert mv.check_items({}) == ["input: must be a JSON array of items"]
+    assert mv.check_items([]) == ["input: the candidate array is empty (nothing to judge)"]
+    assert any("`i` must be an integer" in e for e in mv.check_items([{**items[0], "i": "0"}]))
+    assert any("`i` must be an integer" in e for e in mv.check_items([{**items[0], "i": True}]))
     bad = copy.deepcopy(items)
     bad[0]["aliases"] = ["rivalco.com"]
     bad[1]["mentions"] = []
@@ -192,7 +204,8 @@ def test_merge_reassembles_batches_and_flags_second_pass(mv, items, reference):
     merged, errs = mv.merge_verdicts(items, [b2, b1])
     assert errs == []
     assert [v["i"] for v in merged] == sorted(it["i"] for it in items)
-    assert mv.second_pass_items(merged) == sorted([b2[0]["i"], b2[1]["i"]])
+    already = mv.second_pass_items(reference)
+    assert mv.second_pass_items(merged) == sorted({b2[0]["i"], b2[1]["i"], *already})
 
 
 def test_merge_reports_overlap_and_gaps(mv, items, reference):
@@ -200,6 +213,11 @@ def test_merge_reports_overlap_and_gaps(mv, items, reference):
     assert any("already judged by an earlier batch" in e for e in errs)
     assert any("merged: no verdict for input `i`" in e for e in errs)
     assert len(merged) == 8
+
+
+def test_gold_and_reference_agree_on_evidence_field(gold, reference):
+    ref = {v["i"]: v for v in reference}
+    assert [(g["i"], g["evidence_field"]) for g in gold] == [(g["i"], ref[g["i"]]["evidence_field"]) for g in gold]
 
 
 def test_gold_scoring_honours_also_ok(mv, gold, reference):
@@ -230,10 +248,18 @@ def test_cli_merges_scores_and_exits_nonzero_on_violation(tmp_path, reference):
     broken = copy.deepcopy(reference)
     broken[0]["matches"][0]["field"] = "summary"
     (tmp_path / "broken.json").write_text(json.dumps(broken))
+    not_written = tmp_path / "not_written.json"
     run = subprocess.run([sys.executable, str(_SCRIPT), "--input", str(_FIXTURES / "input.json"),
-                          "--verdicts", str(tmp_path / "broken.json")], capture_output=True, text=True)
+                          "--verdicts", str(tmp_path / "broken.json"), "--merged", str(not_written)],
+                         capture_output=True, text=True)
     assert run.returncode == 1
     assert "write `description`, not `summary`" in run.stderr
+    assert "merged NOT written" in run.stderr and not not_written.exists()
+
+    (tmp_path / "empty.json").write_text("[]")
+    run = subprocess.run([sys.executable, str(_SCRIPT), "--input", str(tmp_path / "empty.json"),
+                          "--verdicts", str(tmp_path / "empty.json")], capture_output=True, text=True)
+    assert run.returncode == 1 and "candidate array is empty" in run.stderr
     run = subprocess.run([sys.executable, str(_SCRIPT), "--input", str(_FIXTURES / "input.json"),
                           "--verdicts", str(tmp_path / "broken.json"), "--lenient"], capture_output=True, text=True)
     assert run.returncode == 0
