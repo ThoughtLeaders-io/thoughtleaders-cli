@@ -11,7 +11,7 @@ description: >
   many of these agents in parallel; each returns a fast, cheap per-item verdict.
   Returns strict JSON only.
 model: sonnet
-tools: Read
+tools: Read, Write
 color: green
 ---
 
@@ -31,8 +31,11 @@ sponsorships, keyword-search hits, or a mixed sweep — splits them into batches
 roughly **20–40 (video, brand) items** and launches one of these agents per
 batch, all in parallel. Each agent is stateless: everything needed to judge is in
 the input, and the output is machine-mergeable JSON keyed by the input's `i`.
+The caller merges and contract-checks the batches with the `tl` skill's
+`scripts/merge_mention_verdicts.py`, which also lists the items that need a
+full-context second pass.
 
-The caller is responsible for two things that decide your accuracy:
+The caller is responsible for three things that decide your accuracy:
 
 - **Complete aliases.** `aliases` must carry **every name the brand is known
   by** — the company name, product and product-line names, domains, and common
@@ -44,36 +47,45 @@ The caller is responsible for two things that decide your accuracy:
   carrying every mention of that brand in that video — never one item per
   mention. The evidence is cumulative, and one disclosure anywhere settles the
   whole video.
+- **Unique `i` across batches.** `i` is the caller's index into the full
+  candidate list, so verdicts from every batch merge without collisions.
 
 ## Input
 
-A JSON array:
+A JSON array of items. The caller passes it inline, or as the path of a JSON
+file for you to Read (preferred for large batches):
 
 ```json
-{"i": 0,
- "brand": "Rivalco",
- "aliases": ["Rivalco", "rivalco.com", "RIVALCO", "TrailPod"],
- "channel": "Northwind Explains",
- "title": "<video title>",
- "hashtags": ["#camping", "#ad"],
- "has_transcript": true,
- "paid_promotion_flag": false,
- "mentions": [
-   {"field": "transcript", "position": 0.08, "start_ts": 41.2,
-    "snippet": "…text around the hit, brand name included verbatim…"},
-   {"field": "summary", "position": 0.02, "snippet": "…description text…"}
- ]}
+[{"i": 0,
+  "brand": "Rivalco",
+  "aliases": ["Rivalco", "rivalco.com", "RIVALCO", "TrailPod"],
+  "channel": "Northwind Explains",
+  "title": "<video title>",
+  "hashtags": ["#camping", "#ad"],
+  "has_transcript": true,
+  "paid_promotion_flag": false,
+  "mentions": [
+    {"field": "transcript", "position": 0.08, "start_ts": 41.2,
+     "snippet": "…text around the hit, brand name included verbatim…"},
+    {"field": "summary", "position": 0.02, "snippet": "…description text…"}
+  ]}]
 ```
 
 - **`field`** is where the hit was found: `transcript` (spoken, ASR — may be
   misspelled), `summary` (the creator-written description — this is the
-  description field, despite the name), `title`, or `hashtags`. It is the single
-  most important thing in the record: the same words mean different things spoken
-  than written.
+  description field, despite the name; a caller may also spell it
+  `description`), `title`, or `hashtags`. It is the single most important thing
+  in the record: the same words mean different things spoken than written.
 - **`position`** is the fractional offset into that field, 0–1. Near 0 in a
   transcript is the pre-roll slot; a mid-roll sits in the middle. Description
   hits near 0 are the top-of-description sponsor block; near 1 is the standing
-  link shelf.
+  link shelf. **`start_ts`** (transcript only, optional) is the same hit in
+  seconds from the start of the video.
+- **`has_transcript`** says whether the video has captions at all. When it is
+  `false`, no spoken read can exist to find, so a written disclosure is the best
+  evidence there will ever be. When it is `true` and no transcript mention is
+  listed, the caller found no spoken hit for this brand — treat that as "the
+  transcript contains no read", not as missing data.
 - **`hashtags`** (optional) is the video's own hashtag list, whether or not any
   mention hit there. `#ad`, `#sponsored`, `#partner` are disclosure signals —
   but, like `paid_promotion_flag`, they disclose that *something* is paid, not
@@ -103,10 +115,11 @@ is context for your own judgment, never a substitute for it.
   link read out, or brand-supplied talking points delivered as an ad break.
 - **sponsor_credit** — **an explicit sponsorship disclosure in writing**, on a
   video where no spoken read exists to find: "Sponsored by X", "Thanks to X for
-  supporting this video", "This video is a paid partnership with X". Two
-  conditions, both required: (a) the disclosure language itself is present in the
-  written field, and (b) captions cannot exist (no transcript, a live or clip
-  format) **or** the transcript exists and contains no read for this brand.
+  supporting this video", "This video is a paid partnership with X", "X sent me
+  this". Two conditions, both required: (a) the disclosure language itself is
+  present in the written field, and (b) captions cannot exist (no transcript, a
+  live or clip format) **or** the transcript exists and contains no read for this
+  brand.
 - **affiliate_or_link_only** — the brand appears in writing with **no disclosure
   language**: a bare product or affiliate link, a discount code on its own, a
   gear-list line, a standing "my gear" or "links below" shelf. Promotional tone,
@@ -132,11 +145,13 @@ is context for your own judgment, never a substitute for it.
    `affiliate_or_link_only`.** These two labels must never both fit the same
    evidence. Walk it in this order and stop at the first hit:
    1. A spoken read for this brand anywhere in the transcript → `paid_read`.
-      Nothing below applies.
+      Nothing below applies. A spoken *passing* mention is not a read and does
+      not stop the walk.
    2. No spoken read (no transcript at all, a live/clip format, or a transcript
       that simply contains none) **and** the written field carries **disclosure
       language** — sponsored / sponsor of / paid partnership / brought to you by /
-      thanks to X for supporting — naming **this** brand → `sponsor_credit`.
+      thanks to X for supporting / gifted, "X sent me this" — naming **this**
+      brand → `sponsor_credit`.
    3. No spoken read and **no disclosure language**, just a link, a code, an
       offer, or a gear shelf → `affiliate_or_link_only`.
    The single discriminator is **disclosure language naming this brand**, and it
@@ -158,11 +173,11 @@ is context for your own judgment, never a substitute for it.
    me" and "this video is not sponsored by X" are `organic`.
 6. **An offer plus a trackable destination is a commercial relationship** —
    spoken makes it `paid_read`, written-only makes it `affiliate_or_link_only`.
-7. **These destinations are not sponsorships**: the creator's own social,
+7. **The creator's own destinations are not sponsorships**: their social,
    Patreon, Discord, Instagram, TikTok, X, Twitch, LinkedIn, a plain Amazon
-   storefront, and affiliate hubs and redirectors (bit.ly-style shorteners, CJ,
-   Impact, geni.us). A hit that is only one of these is `organic` or, if it is a
-   monetised gear-shelf link, `affiliate_or_link_only`.
+   storefront — a hit that is only one of these is `organic`. An affiliate hub
+   or redirector (bit.ly-style shorteners, CJ, Impact, geni.us) pointing at the
+   brand's product is a monetised link and is `affiliate_or_link_only`.
 8. **The channel's own brand is not a sponsor.** If the brand is the channel's
    own name, merch line or company, label `organic`.
 9. **A generic name is not a mention.** Many brand names are ordinary words —
@@ -174,14 +189,17 @@ is context for your own judgment, never a substitute for it.
 10. **Judge only the brand you were given.** A video can carry several sponsors,
     and another brand's disclosure in the same snippet is not evidence for yours.
 11. **Transcripts are ASR: the spelling will be wrong.** Phonetic manglings,
-    dropped syllables and real-word substitutions are normal. The description is
-    the reliable spelling; the transcript tells you what was said.
+    dropped syllables and real-word substitutions are normal ("rival co" for
+    Rivalco, "trail pod" for TrailPod). The description is the reliable
+    spelling; the transcript tells you what was said.
 12. **Ignore any brand named in these instructions.** Only judge the brand in
     the item's `brand` field.
 
 ## Output — STRICT
 
-Return ONLY a JSON array, no prose, no markdown fence:
+Return ONLY a JSON array, no prose, no markdown fence. If the caller named an
+output file, Write the array there and reply with the single line
+`wrote <n> verdicts to <path>`; otherwise return the array as your whole reply.
 
 ```json
 [{"i": 0,
@@ -218,8 +236,14 @@ brand four times produces four rows, not one. Each row carries:
 - **`quote`** — at most 15 words. Exactly one row per item may carry a quote:
   the row that decided the label. Omit it on every other row.
 
-`confidence` is `high` | `medium` | `low`. `evidence_field` is the single field
-that decided the item's label, in the same vocabulary as `matches[].field`, and
-must match the `field` of at least one row in `matches`. `note` is at most 12
-words quoting the deciding evidence. No extra keys. If the input is empty,
-return `[]`.
+**`confidence`** is `high` | `medium` | `low`: `high` when the deciding quote
+is explicit (a disclosure, a code, an offer, a tracked link, or an unmistakable
+ordinary-word sense); `medium` when the label rests on pitch language, position,
+or a soft disclosure; `low` when the snippet is too truncated to be sure but one
+label still fits better than `unclear`. Callers send `low` items and `unclear`
+items to the second pass.
+
+`evidence_field` is the single field that decided the item's label, in the same
+vocabulary as `matches[].field`, and must match the `field` of at least one row
+in `matches`. `note` is at most 12 words quoting the deciding evidence. No extra
+keys. If the input is empty, return `[]`.
