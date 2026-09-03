@@ -127,11 +127,44 @@ def test_format_hint_detects_interview_or_collab_titles():
     assert fetch_cues.format_hint("Interview with a chef") == "interview_or_collab"
     assert fetch_cues.format_hint("Cooking ft. John Doe") == "interview_or_collab"
     assert fetch_cues.format_hint("A collab video") == "interview_or_collab"
+    assert fetch_cues.format_hint("Special guest: my mum") == "interview_or_collab"
+    assert fetch_cues.format_hint("Q&A with my editor") == "interview_or_collab"
+
+
+def test_format_hint_detects_with_name_and_w_slash_collab_titles():
+    # Live miss (ChippyGaming, 2026-09-03): four-way call titles whose
+    # windows were judged as the solo host, because "w/" never matched and
+    # "with <Name>" was not a pattern at all.
+    for title in (
+        "Terraria w/ JaidenAnimations, AntiDarkHeart & AliceSnowpuff",
+        "Terraria with JaidenAnimations, AntiDarkHeart and AliceSnowpuff",
+        "Teeny Tiny Terraria Bosses! #2 w/ Jaiden Animations & Ant",
+        "I Played Terraria 1.4.5 with The Developers",
+        "I Played 1.4.5 with Terraria’s Creator",
+        "Terraria Livestream with PythonGB and Pedguin!",
+        "Cooking with @chefjane",
+    ):
+        assert fetch_cues.format_hint(title) == "interview_or_collab", title
 
 
 def test_format_hint_returns_none_for_plain_titles():
     assert fetch_cues.format_hint("My daily vlog") is None
     assert fetch_cues.format_hint(None) is None
+    # lower-case "with <thing>" is a mod, a pack or a tool, not a person
+    assert fetch_cues.format_hint("You NEED to replay Terraria with this mod!") is None
+    assert fetch_cues.format_hint("Ocram is FINALLY playable on PC Terraria! (with mods)") is None
+
+
+def test_format_hint_is_the_same_rule_channel_context_counts():
+    # One home: the per-window hint and the context brief's title census must
+    # never disagree on what counts as a second voice.
+    import channel_context
+    titles = ["Terraria with JaidenAnimations", "I REACT to old vlogs",
+              "My daily vlog", "Cooking ft. John Doe"]
+    for title in titles:
+        expected = next((fmt for fmt, rx in channel_context.TITLE_SECOND_VOICE.items()
+                         if rx.search(title)), None)
+        assert fetch_cues.format_hint(title) == expected, title
 
 
 # --------------------------------------------------------------------------- #

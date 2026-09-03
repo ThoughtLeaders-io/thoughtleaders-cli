@@ -42,6 +42,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sponsor_spans  # noqa: E402  — sibling script
 import tl_data  # noqa: E402
+from channel_context import TITLE_SECOND_VOICE  # noqa: E402  — sibling script, one home for title hints
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_PHRASES = HERE.parent / "references" / "cue-phrases.txt"
@@ -54,8 +55,6 @@ START_RX = re.compile(r'start="([\d.]+)"')
 EM_RX = re.compile(r"<em>(.*?)</em>", re.S)
 YEARS = list(range(2005, time.gmtime().tm_year + 2))   # YouTube launch → next year
 CUE_RX = re.compile(r'<text start="([\d.]+)"[^>]*>')
-REACTION_RX = re.compile(r"\b(reacts?|reaction|reacting|react to|watching|responds? to)\b", re.I)
-COLLAB_RX = re.compile(r"\b(interview|podcast|ft\.?|feat\.?|featuring|w/|with @|collab|q&a with|guest)\b", re.I)
 NON_EN_WINDOWS_PER_VIDEO = 3
 NON_EN_WINDOW_WORDS = 80
 WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
@@ -150,10 +149,9 @@ def clean(frag: str) -> tuple[str, list[str], float | None, list[str], list[list
 def format_hint(title: str | None) -> str | None:
     """Per-video hint the rubric lets override the channel label."""
     t = title or ""
-    if REACTION_RX.search(t):
-        return "reaction"
-    if COLLAB_RX.search(t):
-        return "interview_or_collab"
+    for fmt, rx in TITLE_SECOND_VOICE.items():  # reaction first, then collab
+        if rx.search(t):
+            return fmt
     return None
 
 

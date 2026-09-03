@@ -46,13 +46,26 @@ INTERVIEW = re.compile(
     r"podcast)|please welcome|thanks for (coming on|joining|having me)|"
     r"joining me today|great to have you|tell (us|me) about yourself)\b", re.I)
 
+# The ONE home for title -> second-voice hints. `fetch_cues.format_hint` reads
+# this dict too, so a title that counts as a collab here is the same title
+# whose windows carry `format_hint` into the extractor and the merge pass.
+# "with <Name>" counts only when what follows is shaped like a person: an
+# @handle, a CamelCase handle (PythonGB, JaidenAnimations), a name list
+# ("Jaiden, AntiDarkHeart and Alice", "Pedguin and PythonGB"), "The <Group>"
+# ("The Developers", "The Yogscast") or a possessive title ("Terraria's
+# Creator"). That branch is case-sensitive on purpose: "with this mod",
+# "With These Mods", "with Calamity's latest update", "with DEATH mode" are
+# things, not voices, and the rest of the pattern stays case-insensitive.
 TITLE_SECOND_VOICE = {
-    "interview_or_collab": re.compile(
-        r"(\binterview(s|ed|ing)?\b|\bsits down with\b|\bin conversation "
-        r"with\b|\bft\.?\s|\bfeat\.?\s|\bw/\s?\w|\bwith @|\bvs\.?\s)", re.I),
     "reaction": re.compile(
-        r"(\breact(s|ing|ion|ions)?\b|\bfirst time (watching|hearing|playing|"
-        r"seeing)\b)", re.I),
+        r"(\breact(s|ing|ion|ions)?\b|\breact to\b|\bwatching\b|\bresponds? to\b|"
+        r"\bfirst time (watching|hearing|playing|seeing)\b)", re.I),
+    "interview_or_collab": re.compile(
+        r"(?i:\binterview(s|ed|ing)?\b|\bpodcast\b|\bcollab(s|oration)?\b|\bguests?\b|"
+        r"\bq&a with\b|\bsits down with\b|\bin conversation with\b|"
+        r"\bft\.?\s|\bfeat\.?\s|\bfeaturing\b|\bw/\s?\w|\bwith @\w|\bvs\.?\s)"
+        r"|\b[Ww]ith (?:[A-Z][a-z]+[A-Z]\w*|[A-Z]\w+(?:,| and | & )|The [A-Z]\w+"
+        r"|[A-Z]\w+['’]s [A-Z]\w+)"),
 }
 
 
