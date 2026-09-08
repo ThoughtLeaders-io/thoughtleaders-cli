@@ -36,6 +36,8 @@ jobs:
         # tests/ mock the HTTP client (CliRunner + fake get_client), so there
         # is no network, no API key, and no credit spend.
         run: uv run --python ${{ matrix.python-version }} --with pytest pytest tests/ -v
+      - name: Check MCP reference drift and build upload bundle
+        run: uv run python scripts/build_mcp_plugin.py --output dist/thoughtleaders-youtube-data.zip
 
   windows-launcher:
     name: Windows launcher (tl setup windows)
