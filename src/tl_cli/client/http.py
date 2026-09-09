@@ -18,8 +18,12 @@ SIGNED_IN_AT_HEADER = "X-TL-Signed-In-At"
 class TLClient:
     """HTTP client that handles auth injection, token refresh, and error mapping."""
 
-    def __init__(self) -> None:
+    def __init__(self, stored_session_only: bool = False) -> None:
+        """`stored_session_only`: authenticate with the keychain session even
+        when `TL_API_KEY` is set — for the one call that is about that session,
+        `tl auth logout` telling the platform it has ended."""
         self._config = get_config()
+        self._stored_session_only = stored_session_only
         self._client = httpx.Client(
             base_url=self._config.cli_api_base,
             timeout=30.0,
@@ -91,7 +95,7 @@ class TLClient:
     def _auth_headers(self) -> dict[str, str]:
         """Get authorization headers from API key env var or stored credentials."""
         # API key env var takes priority (for CI/scripts)
-        if self._config.api_key:
+        if self._config.api_key and not self._stored_session_only:
             return {
                 "Authorization": f"Bearer {self._config.api_key}",
                 "X-TL-Auth": "API-KEY",
@@ -154,6 +158,6 @@ class TLClient:
         self._client.close()
 
 
-def get_client() -> TLClient:
+def get_client(stored_session_only: bool = False) -> TLClient:
     """Get a configured TL API client."""
-    return TLClient()
+    return TLClient(stored_session_only=stored_session_only)

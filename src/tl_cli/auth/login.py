@@ -41,15 +41,16 @@ def web_signin_url(config) -> str:
     return f"{config.api_url.rstrip('/')}/signin?go=1&from=cli"
 
 
-def web_logout_url(config) -> str:
+def web_logout_url(config, web_only: bool = False) -> str:
     """The platform's logout page. It ends the web session and the Auth0 session
-    on the shared domain, so the SSO cookie the CLI login created goes too. The
-    Chrome extension notices the web logout on its own. `web_only`: the CLI has
-    already ended the session everywhere through the API by the time the browser
-    gets here, and a second, later record of it could refuse a sign-in the user
-    has meanwhile started.
+    on the shared domain, so the SSO cookie the CLI login created goes too, and
+    unless `web_only` it records the sign-out for every other surface. The CLI
+    asks for `web_only` once it has recorded the sign-out through the API
+    itself: a second, later record could refuse a sign-in the user has meanwhile
+    started. When that call did not get through, the page is the fallback.
     """
-    return f"{config.api_url.rstrip('/')}/logout?web_only=1"
+    base = f"{config.api_url.rstrip('/')}/logout"
+    return f"{base}?web_only=1" if web_only else base
 
 
 def login_browser(open_browser: bool = True) -> StoredTokens:
@@ -378,14 +379,20 @@ def _extract_email_from_jwt(token: str) -> str | None:
     return email if isinstance(email, str) else None
 
 
-def signed_in_time(access_token: str) -> float:
+def signed_in_time(access_token: str) -> float | None:
     """When the session this token belongs to was signed in: the token's own
     issue time, on the issuer's clock — the same clock the platform compares it
     with — so a machine whose clock runs behind is not judged to have signed in
-    before its last sign-out and locked out. The local clock is the fallback
-    for a token that is not a JWT."""
+    before its last sign-out and locked out. None for a token without one: no
+    sign-in time is sent, and the platform judges by the token alone, which is
+    safer than a guess from this machine's clock."""
     iat = _jwt_claims(access_token).get("iat")
-    return float(iat) if isinstance(iat, int | float) and not isinstance(iat, bool) else time.time()
+    if isinstance(iat, str):
+        try:
+            iat = float(iat)
+        except ValueError:
+            return None
+    return float(iat) if isinstance(iat, int | float) and not isinstance(iat, bool) else None
 
 
 def _start_callback_server(

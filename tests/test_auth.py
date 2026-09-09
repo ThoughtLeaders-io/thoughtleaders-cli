@@ -1,7 +1,10 @@
 """Tests for PKCE and token storage."""
 
+import io
+
 import httpx
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from tl_cli.auth import commands as auth_commands
@@ -10,6 +13,7 @@ from tl_cli.auth.commands import app as auth_app
 from tl_cli.auth.login import revoke_refresh_token
 from tl_cli.auth.pkce import generate_pkce_pair
 from tl_cli.auth.token_store import KIND_API_KEY, KIND_BEARER, StoredTokens
+import tl_cli.client.errors as errors_module
 from tl_cli.client.errors import ApiError, handle_api_error
 
 runner = CliRunner()
@@ -123,6 +127,8 @@ class _FakeClient:
 
     def post(self, path, json_body=None):
         self.calls["posted"] = path
+        if self.fail == "refresh":
+            raise SystemExit(2)  # what a refresh that Auth0 refused raises
         if self.fail:
             raise httpx.ConnectError("offline")
         if self.refuse:
@@ -145,12 +151,16 @@ class TestLogoutCommand:
             auth_commands, "open_in_browser",
             lambda url: calls.__setitem__("opened", url) or browser_opens,
         )
-        monkeypatch.setattr(auth_commands, "get_client", lambda: _FakeClient(calls, fail=api_down, refuse=api_refuses))
+        monkeypatch.setattr(
+            auth_commands, "get_client",
+            lambda stored_session_only=False: calls.__setitem__("stored_only", stored_session_only)
+            or _FakeClient(calls, fail=api_down, refuse=api_refuses),
+        )
         monkeypatch.setattr(auth_commands, "_interactive", lambda: tty)
         return calls
 
-    def _web_logout(self):
-        return auth_commands.web_logout_url(auth_commands.get_config())
+    def _web_logout(self, web_only=True):
+        return auth_commands.web_logout_url(auth_commands.get_config(), web_only=web_only)
 
     def test_bearer_logout_revokes_clears_and_ends_web_session(self, monkeypatch) -> None:
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
@@ -163,7 +173,8 @@ class TestLogoutCommand:
         # extension and other CLIs are refused), then its /logout is driven in
         # the browser to end the web session too.
         assert calls["posted"] == "/auth/sign-out"
-        assert calls["opened"] == self._web_logout()
+        assert calls["stored_only"] is True   # the session, not TL_API_KEY, is what ends
+        assert calls["opened"] == self._web_logout(web_only=True)
         assert "web platform" in result.output
 
     def test_api_key_logout_only_clears_the_key(self, monkeypatch) -> None:
@@ -199,14 +210,41 @@ class TestLogoutCommand:
 
     def test_platform_unreachable_still_logs_out_locally(self, monkeypatch) -> None:
         # A transport failure, not an HTTP answer: the platform is simply down.
+        # Nothing was recorded, so the browser logout is the fallback that may.
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens, api_down=True)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
         assert calls["posted"] == "/auth/sign-out"
         assert calls["cleared"] is True
-        assert calls["opened"] == self._web_logout()
+        assert calls["opened"] == self._web_logout(web_only=False)
         assert "Could not reach the platform" in result.output
+
+    def test_a_refresh_giving_up_mid_logout_still_logs_out_locally(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens, api_down="refresh")
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["cleared"] is True
+        assert calls["opened"] == self._web_logout(web_only=False)
+
+    def test_not_recorded_and_no_browser_says_so(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens, api_down=True, tty=False)
+        result = runner.invoke(auth_app, ["logout"])
+        assert calls["opened"] is None
+        assert "Other surfaces stay signed in" in result.output
+        assert self._web_logout(web_only=False) in result.output
+
+    def test_revokes_the_refresh_token_the_store_holds_after_the_platform_call(self, monkeypatch) -> None:
+        # The sign-out call may have refreshed (rotating the refresh token).
+        first = StoredTokens(access_token="a", refresh_token="rt-old", expires_at=9e9, email="e@x.com")
+        rotated = StoredTokens(access_token="b", refresh_token="rt-new", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, first)
+        loads = iter([first, rotated])
+        monkeypatch.setattr(auth_commands, "load_tokens", lambda: next(loads))
+        runner.invoke(auth_app, ["logout"])
+        assert calls["revoked"] == "rt-new"
 
     def test_already_signed_out_elsewhere_is_a_success(self, monkeypatch) -> None:
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
@@ -225,17 +263,18 @@ class TestLogoutCommand:
         assert calls["cleared"] is True
         assert "did not sign you out everywhere: Nope." in result.output
 
-    def test_env_api_key_does_not_pretend_to_sign_out_everywhere(self, monkeypatch) -> None:
-        # TL_API_KEY would be what reaches the platform, and an API key cannot
-        # end a session — so say so instead of reporting a refusal as an outage.
+    def test_env_api_key_does_not_get_in_the_way(self, monkeypatch) -> None:
+        # TL_API_KEY is not the session being ended: the stored session is
+        # what tells the platform, and the browser logout still follows.
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens)
         monkeypatch.setenv("TL_API_KEY", "ci-key")
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
-        assert calls["posted"] is None
+        assert calls["posted"] == "/auth/sign-out"
+        assert calls["stored_only"] is True
         assert calls["cleared"] is True
-        assert "TL_API_KEY" in result.output
+        assert calls["opened"] == self._web_logout(web_only=True)
 
     def test_no_tty_prints_url_instead_of_opening_browser(self, monkeypatch) -> None:
         # An agent or script must never get a browser window popped at it.
@@ -276,6 +315,14 @@ class TestForgetSession:
         )
         auth_login.forget_session(rejected_access_token="old", rejected_signed_in_at=1000.0)
         assert calls == {"revoked": "rt2", "cleared": True}
+
+    def test_a_fractional_store_matches_the_whole_second_header_it_sent(self, monkeypatch) -> None:
+        # The header carries whole seconds; the store may hold a fraction.
+        calls = self._patch(
+            monkeypatch, StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, signed_in_at=1700000000.7)
+        )
+        auth_login.forget_session(rejected_access_token="a", rejected_signed_in_at=1700000000.0)
+        assert calls == {"revoked": "rt", "cleared": True}
 
     def test_a_newer_sign_in_is_kept_even_if_its_token_matches_nothing(self, monkeypatch) -> None:
         calls = self._patch(
@@ -405,6 +452,7 @@ class TestCallbackServer:
             r = self._get(port, "/callback?code=abc&state=st")
         finally:
             server.shutdown()
+            server.server_close()
         assert r.status_code == 302
         assert r.headers["location"] == "https://app.example/signin?go=1&from=cli"
         assert result.code == "abc"
@@ -416,6 +464,7 @@ class TestCallbackServer:
             r = self._get(port, "/callback?code=abc&state=st")
         finally:
             server.shutdown()
+            server.server_close()
         assert r.status_code == 200
         assert "close this tab" in r.text
         assert result.code == "abc"
@@ -429,6 +478,7 @@ class TestCallbackServer:
             r = self._get(port, "/callback?code=abc&state=WRONG")
         finally:
             server.shutdown()
+            server.server_close()
         assert r.status_code == 200
         assert result.code is None
         assert result.error
@@ -439,7 +489,8 @@ class TestWebUrls:
         monkeypatch.setenv("TL_API_URL", "https://staging.example/")
         cfg = auth_login.get_config()
         assert auth_login.web_signin_url(cfg) == "https://staging.example/signin?go=1&from=cli"
-        assert auth_login.web_logout_url(cfg) == "https://staging.example/logout?web_only=1"
+        assert auth_login.web_logout_url(cfg) == "https://staging.example/logout"
+        assert auth_login.web_logout_url(cfg, web_only=True) == "https://staging.example/logout?web_only=1"
 
     def test_default_auth0_domain_is_the_shared_custom_domain(self, monkeypatch) -> None:
         # One SSO cookie per host: only this host shares the web platform's session.
@@ -487,45 +538,46 @@ class TestSignedInTime:
         # running behind must not look like it signed in before its sign-out.
         assert auth_login.signed_in_time(_jwt(iat=1700000000)) == 1700000000.0
 
-    def test_falls_back_to_the_local_clock_for_a_non_jwt(self, monkeypatch) -> None:
-        monkeypatch.setattr(auth_login.time, "time", lambda: 42.0)
-        assert auth_login.signed_in_time("opaque") == 42.0
-        assert auth_login.signed_in_time(_jwt(iat=True)) == 42.0
+    def test_is_unknown_rather_than_guessed_for_a_token_without_one(self) -> None:
+        # No sign-in time is then sent, and the platform judges by the token
+        # alone — safer than this machine's clock.
+        assert auth_login.signed_in_time("opaque") is None
+        assert auth_login.signed_in_time(_jwt(iat=True)) is None
+        assert auth_login.signed_in_time(_jwt(iat="soon")) is None
+        assert auth_login.signed_in_time(_jwt(iat="1700000000")) == 1700000000.0
 
 
 class TestSignedOutMessage:
-    def _run(self, raw) -> str:
-        from rich.console import Console
-        buf = Console(stderr=True, file=__import__("io").StringIO(), width=200)
-        import tl_cli.client.errors as errors
-        original = errors.err
-        errors.err = buf
-        try:
-            with pytest.raises(SystemExit) as exc:
-                handle_api_error(ApiError(401, raw.get("detail", ""), raw=raw))
-        finally:
-            errors.err = original
+    def _run(self, raw, monkeypatch) -> str:
+        buf = Console(stderr=True, file=io.StringIO(), width=200)
+        monkeypatch.setattr(errors_module, "err", buf)
+        with pytest.raises(SystemExit) as exc:
+            handle_api_error(ApiError(401, raw.get("detail", ""), raw=raw))
         assert exc.value.code == 2
         return buf.file.getvalue()
 
-    def test_uses_the_servers_words(self) -> None:
-        out = self._run({"detail": "You signed out of ThoughtLeaders.", "code": "signed_out"})
+    def test_uses_the_servers_words(self, monkeypatch) -> None:
+        out = self._run({"detail": "You signed out of ThoughtLeaders.", "code": "signed_out"}, monkeypatch)
         assert "You signed out of ThoughtLeaders." in out
         assert "tl auth login" in out
 
-    def test_keeps_a_hint_on_its_own_line(self) -> None:
-        out = self._run({"detail": "You signed out. Try again.", "hint": "Try again.", "code": "signed_out"})
+    def test_keeps_a_hint_on_its_own_line(self, monkeypatch) -> None:
+        out = self._run({"detail": "You signed out. Try again.", "hint": "Try again.", "code": "signed_out"}, monkeypatch)
         assert "Hint:" in out and "Try again." in out
 
-    def test_falls_back_when_the_server_sent_no_detail(self) -> None:
-        out = self._run({"code": "signed_out"})
+    def test_falls_back_when_the_server_sent_no_detail(self, monkeypatch) -> None:
+        out = self._run({"code": "signed_out"}, monkeypatch)
         assert "signed out" in out
         assert "{" not in out
 
-    def test_server_text_is_not_markup(self) -> None:
-        out = self._run({"detail": "Closed [/session] by admin", "code": "signed_out"})
+    def test_server_text_is_not_markup(self, monkeypatch) -> None:
+        out = self._run({"detail": "Closed [/session] by admin", "code": "signed_out"}, monkeypatch)
         assert "Closed [/session] by admin" in out
 
-    def test_other_401s_keep_the_generic_line(self) -> None:
-        out = self._run({"detail": "Token has expired"})
+    def test_a_hint_is_not_markup_either(self, monkeypatch) -> None:
+        out = self._run({"detail": "You signed out.", "hint": "Ask [/admin] for help", "code": "signed_out"}, monkeypatch)
+        assert "Ask [/admin] for help" in out
+
+    def test_other_401s_keep_the_generic_line(self, monkeypatch) -> None:
+        out = self._run({"detail": "Token has expired"}, monkeypatch)
         assert "Authentication required" in out

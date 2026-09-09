@@ -188,7 +188,7 @@ def _login_api_key() -> None:
         data = client.get("/whoami")
     except ApiError as e:
         clear_tokens()
-        console.print(f"[red]API key rejected:[/red] {e.detail}")
+        console.print(f"[red]API key rejected:[/red] {escape(e.detail)}")
         raise typer.Exit(1)
     finally:
         client.close()
@@ -228,14 +228,12 @@ def logout_cmd(
     Auth0, clear stored tokens, then end the web platform session in the
     browser. Pass --local to leave the other surfaces signed in."""
     tokens = load_tokens()
+    recorded = False
     if not local and tokens and not tokens.is_api_key:
-        if get_config().api_key:
-            console.print(
-                "[yellow]TL_API_KEY is set, so the platform cannot be told about this session; "
-                "the web platform and extension stay signed in.[/yellow]"
-            )
-        else:
-            _sign_out_everywhere()
+        recorded = _sign_out_everywhere()
+        # That call may have refreshed the session (rotating the refresh token)
+        # or, finding it already ended, cleared the store: revoke what is there now.
+        tokens = load_tokens()
     # Revoke the long-lived credential server-side so a leaked/synced copy of
     # the local token store can't keep minting access tokens. Best-effort —
     # API-key auth has no refresh token, and an offline revoke must not block
@@ -263,40 +261,49 @@ def logout_cmd(
     # platform's logout page ends all of those, but only when a real browser
     # visits it. Drive it when we have one; otherwise hand over the URL rather
     # than popping a window from an agent or a script.
-    logout_url = web_logout_url(get_config())
+    # Recorded already? Then the page only has to end the browser's session.
+    # Otherwise it is the one chance left to record the sign-out for the other
+    # surfaces — which it does when the browser is signed in to the platform.
+    logout_url = web_logout_url(get_config(), web_only=recorded)
     if _interactive() and open_in_browser(logout_url):
-        console.print("[dim]Signing you out of the web platform and extension in your browser.[/dim]")
+        console.print("[dim]Signing you out of the web platform in your browser.[/dim]")
+    elif recorded:
+        console.print(f"To also sign out of the web platform, visit: [cyan]{logout_url}[/cyan]")
     else:
         console.print(
-            f"To also sign out of the web platform and extension, visit: [cyan]{logout_url}[/cyan]"
+            "Other surfaces stay signed in until you visit, in a browser signed in to the platform: "
+            f"[cyan]{logout_url}[/cyan]"
         )
 
 
-def _sign_out_everywhere() -> None:
+def _sign_out_everywhere() -> bool:
     """Best-effort: ask the platform to end this session everywhere. The
-    platform then refuses every token this sign-in produced — the extension's
+    platform then refuses every session this sign-in produced — the extension's
     and other CLIs' included — while this command goes on to clear its own.
-    Nothing here may stop the local logout, so failures only get a note."""
+    True when the sign-out is now recorded (by this call, or already by another
+    surface). Nothing here may stop the local logout — not an unreachable
+    platform, and not a token refresh giving up (`SystemExit`) — so failures
+    only get a note. Speaks for the stored session even when `TL_API_KEY` is
+    set: that key is not the session being ended."""
     client = None
     try:
-        client = get_client()
+        client = get_client(stored_session_only=True)
         client.post("/auth/sign-out", json_body={})
         console.print("[dim]Signed out everywhere.[/dim]")
+        return True
     except ApiError as e:
         if isinstance(e.raw, dict) and e.raw.get("code") == SIGNED_OUT_CODE:
             # Someone got there first: this session was already ended
             # elsewhere, which is exactly the state we were after.
             console.print("[dim]Already signed out everywhere.[/dim]")
-        else:
-            console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
-    except Exception:  # noqa: BLE001 — declared best-effort: nothing may stop the local logout
-        console.print(
-            "[yellow]Could not reach the platform to sign out everywhere; "
-            "other surfaces stay signed in until they next check.[/yellow]"
-        )
+            return True
+        console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
+    except (Exception, SystemExit):  # noqa: BLE001 — declared best-effort: nothing may stop the local logout
+        console.print("[yellow]Could not reach the platform to sign out everywhere.[/yellow]")
     finally:
         if client is not None:
             client.close()
+    return False
 
 
 @app.command("status")

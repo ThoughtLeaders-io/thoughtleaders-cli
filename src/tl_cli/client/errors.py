@@ -63,7 +63,7 @@ def _split_hint(error: ApiError) -> tuple[str, str | None]:
 
 def _print_hint(hint: str | None) -> None:
     if hint:
-        err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{hint}[/yellow]")
+        err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{escape(hint)}[/yellow]")
 
 
 def handle_api_error(error: ApiError) -> None:
