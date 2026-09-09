@@ -126,7 +126,8 @@ class _FakeClient:
         if self.fail:
             raise httpx.ConnectError("offline")
         if self.refuse:
-            raise ApiError(401, self.refuse, raw={"detail": self.refuse, "code": "signed_out"})
+            detail, code = self.refuse if isinstance(self.refuse, tuple) else (self.refuse, "signed_out")
+            raise ApiError(401, detail, raw={"detail": detail, "code": code})
         return {"signed_out_at": "2026-09-09T00:00:00Z"}
 
     def close(self):
@@ -207,14 +208,22 @@ class TestLogoutCommand:
         assert calls["opened"] == self._web_logout()
         assert "Could not reach the platform" in result.output
 
-    def test_platform_refusing_is_reported_in_its_words(self, monkeypatch) -> None:
+    def test_already_signed_out_elsewhere_is_a_success(self, monkeypatch) -> None:
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens, api_refuses="You signed out of ThoughtLeaders.")
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
         assert calls["cleared"] is True
-        assert "You signed out of ThoughtLeaders." in result.output
+        assert "Already signed out everywhere" in result.output
         assert "Could not reach" not in result.output
+
+    def test_any_other_refusal_is_reported_in_the_platforms_words(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens, api_refuses=("Nope.", "something_else"))
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["cleared"] is True
+        assert "did not sign you out everywhere: Nope." in result.output
 
     def test_env_api_key_does_not_pretend_to_sign_out_everywhere(self, monkeypatch) -> None:
         # TL_API_KEY would be what reaches the platform, and an API key cannot
@@ -430,7 +439,7 @@ class TestWebUrls:
         monkeypatch.setenv("TL_API_URL", "https://staging.example/")
         cfg = auth_login.get_config()
         assert auth_login.web_signin_url(cfg) == "https://staging.example/signin?go=1&from=cli"
-        assert auth_login.web_logout_url(cfg) == "https://staging.example/logout"
+        assert auth_login.web_logout_url(cfg) == "https://staging.example/logout?web_only=1"
 
     def test_default_auth0_domain_is_the_shared_custom_domain(self, monkeypatch) -> None:
         # One SSO cookie per host: only this host shares the web platform's session.

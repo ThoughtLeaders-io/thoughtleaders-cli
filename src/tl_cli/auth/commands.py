@@ -17,7 +17,7 @@ from tl_cli.auth.login import (
     web_logout_url,
 )
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
-from tl_cli.client.errors import ApiError
+from tl_cli.client.errors import SIGNED_OUT_CODE, ApiError
 from tl_cli.client.http import get_client
 from tl_cli.config import get_config
 
@@ -283,9 +283,12 @@ def _sign_out_everywhere() -> None:
         client.post("/auth/sign-out", json_body={})
         console.print("[dim]Signed out everywhere.[/dim]")
     except ApiError as e:
-        # The platform answered but would not do it — most likely this session
-        # had already been signed out elsewhere. Its own words say which.
-        console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
+        if isinstance(e.raw, dict) and e.raw.get("code") == SIGNED_OUT_CODE:
+            # Someone got there first: this session was already ended
+            # elsewhere, which is exactly the state we were after.
+            console.print("[dim]Already signed out everywhere.[/dim]")
+        else:
+            console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
     except Exception:  # noqa: BLE001 — declared best-effort: nothing may stop the local logout
         console.print(
             "[yellow]Could not reach the platform to sign out everywhere; "

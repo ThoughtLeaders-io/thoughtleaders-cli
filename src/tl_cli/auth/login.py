@@ -44,9 +44,12 @@ def web_signin_url(config) -> str:
 def web_logout_url(config) -> str:
     """The platform's logout page. It ends the web session and the Auth0 session
     on the shared domain, so the SSO cookie the CLI login created goes too. The
-    Chrome extension notices the web logout on its own.
+    Chrome extension notices the web logout on its own. `web_only`: the CLI has
+    already ended the session everywhere through the API by the time the browser
+    gets here, and a second, later record of it could refuse a sign-in the user
+    has meanwhile started.
     """
-    return f"{config.api_url.rstrip('/')}/logout"
+    return f"{config.api_url.rstrip('/')}/logout?web_only=1"
 
 
 def login_browser(open_browser: bool = True) -> StoredTokens:
