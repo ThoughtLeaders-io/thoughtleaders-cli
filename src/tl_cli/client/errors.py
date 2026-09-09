@@ -1,12 +1,18 @@
 """User-friendly error handling for API responses."""
 
-import json
 import sys
 import traceback
 
 from rich.console import Console
+from rich.markup import escape
 
 err = Console(stderr=True)
+
+# The server's `code` on a 401 for a session the user ended on another surface.
+# The HTTP client drops the stored credentials when it sees it; this module only
+# has to explain what happened.
+SIGNED_OUT_CODE = "signed_out"
+SIGNED_OUT_FALLBACK = "You signed out of ThoughtLeaders elsewhere."
 
 
 class ApiError(Exception):
@@ -57,14 +63,22 @@ def _split_hint(error: ApiError) -> tuple[str, str | None]:
 
 def _print_hint(hint: str | None) -> None:
     if hint:
-        err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{hint}[/yellow]")
+        err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{escape(hint)}[/yellow]")
 
 
 def handle_api_error(error: ApiError) -> None:
     """Print a user-friendly error message and exit with the right code."""
     detail, hint = _split_hint(error)
     if error.status_code == 401:
-        err.print("[red]Authentication required.[/red] Run: tl auth login")
+        if isinstance(error.raw, dict) and error.raw.get("code") == SIGNED_OUT_CODE:
+            # The user signed out on another surface; the client has already
+            # dropped its credentials. Say so in the server's words — escaped,
+            # since they are text, not markup — or in ours if it sent none.
+            server_detail = detail if isinstance(error.raw.get("detail"), str) else ""
+            err.print(f"[red]{escape(server_detail or SIGNED_OUT_FALLBACK)}[/red] Run: tl auth login")
+            _print_hint(hint)
+        else:
+            err.print("[red]Authentication required.[/red] Run: tl auth login")
         _print_debug(error)
         sys.exit(2)
     elif error.status_code == 402:
@@ -75,7 +89,7 @@ def handle_api_error(error: ApiError) -> None:
         # everyone. The `tl credits buy` line stays: it is the CLI-native way
         # to act on the refusal, which the server's sentence can't know about.
         if detail:
-            err.print(f"[red]{detail}[/red]")
+            err.print(f"[red]{escape(detail)}[/red]")
         else:
             err.print("[red]Insufficient credits.[/red]")
             err.print("Or visit: https://app.thoughtleaders.io/billing")
@@ -89,12 +103,12 @@ def handle_api_error(error: ApiError) -> None:
         # rest of the 403s — "Superuser only", permission errors — are not
         # plan problems, so "your plan may not include this" was misdirection
         # exactly where the user needed the real reason.
-        err.print(f"[red]Access denied:[/red] {detail}")
+        err.print(f"[red]Access denied:[/red] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)
     elif error.status_code == 404:
-        err.print(f"[yellow]Not found:[/yellow] {detail}")
+        err.print(f"[yellow]Not found:[/yellow] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)
@@ -105,7 +119,7 @@ def handle_api_error(error: ApiError) -> None:
         # thing that tells the user whether to wait, buy credits, or ask for a
         # seat. An edge/WAF 429 carries no detail and keeps the generic wording.
         if detail:
-            err.print(f"[yellow]{detail}[/yellow]")
+            err.print(f"[yellow]{escape(detail)}[/yellow]")
         else:
             err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
         _print_hint(hint)
@@ -116,7 +130,7 @@ def handle_api_error(error: ApiError) -> None:
         _print_debug(error)
         sys.exit(3)
     else:
-        err.print(f"[red]Error ({error.status_code}):[/red] {detail}")
+        err.print(f"[red]Error ({error.status_code}):[/red] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)

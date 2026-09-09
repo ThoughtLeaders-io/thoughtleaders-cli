@@ -3,17 +3,27 @@
 import httpx
 
 from tl_cli import __version__
-from tl_cli.auth.login import refresh_access_token
-from tl_cli.auth.token_store import load_tokens
-from tl_cli.client.errors import ApiError
+from tl_cli.auth.login import forget_session, refresh_access_token
+from tl_cli.auth.token_store import StoredTokens, load_tokens
+from tl_cli.client.errors import SIGNED_OUT_CODE, ApiError
 from tl_cli.config import get_config
+
+# When the user signed in on this machine, as Unix seconds. A refreshed access
+# token is newer than the sign-in it belongs to; this header lets the server
+# judge the session by the sign-in, so a sign-out elsewhere still reaches a CLI
+# whose access token has since been refreshed.
+SIGNED_IN_AT_HEADER = "X-TL-Signed-In-At"
 
 
 class TLClient:
     """HTTP client that handles auth injection, token refresh, and error mapping."""
 
-    def __init__(self) -> None:
+    def __init__(self, stored_session_only: bool = False) -> None:
+        """`stored_session_only`: authenticate with the keychain session even
+        when `TL_API_KEY` is set — for the one call that is about that session,
+        `tl auth logout` telling the platform it has ended."""
         self._config = get_config()
+        self._stored_session_only = stored_session_only
         self._client = httpx.Client(
             base_url=self._config.cli_api_base,
             timeout=30.0,
@@ -50,12 +60,24 @@ class TLClient:
 
         response = self._client.request(method, path, **request_kwargs)
 
-        # On 401, try refreshing the token once
-        if response.status_code == 401:
-            headers = self._refresh_and_get_headers()
-            if headers:
-                request_kwargs["headers"] = headers
-                response = self._client.request(method, path, **request_kwargs)
+        # On a 401 for a stored session, try refreshing the token once — unless
+        # the server says the user signed out (on the web, from the extension,
+        # or elsewhere): then the session is over and a refresh would only
+        # resurrect it. The verdict is read off the final response, so a
+        # sign-out reported on the retry is honoured too. An API key is not a
+        # session: never refresh or forget anything on its behalf.
+        if response.status_code == 401 and "X-TL-Auth" not in headers:
+            if self._error_code(response) != SIGNED_OUT_CODE:
+                refreshed = self._refresh_and_get_headers()
+                if refreshed:
+                    headers = request_kwargs["headers"] = refreshed
+                    response = self._client.request(method, path, **request_kwargs)
+            if response.status_code == 401 and self._error_code(response) == SIGNED_OUT_CODE:
+                signed_in_at = headers.get(SIGNED_IN_AT_HEADER)
+                forget_session(
+                    rejected_access_token=headers["Authorization"].removeprefix("Bearer "),
+                    rejected_signed_in_at=float(signed_in_at) if signed_in_at else None,
+                )
 
         if response.status_code >= 400:
             detail = self._extract_detail(response)
@@ -73,7 +95,7 @@ class TLClient:
     def _auth_headers(self) -> dict[str, str]:
         """Get authorization headers from API key env var or stored credentials."""
         # API key env var takes priority (for CI/scripts)
-        if self._config.api_key:
+        if self._config.api_key and not self._stored_session_only:
             return {
                 "Authorization": f"Bearer {self._config.api_key}",
                 "X-TL-Auth": "API-KEY",
@@ -90,9 +112,16 @@ class TLClient:
             }
 
         if tokens.is_expired and tokens.refresh_token:
-            tokens = refresh_access_token(tokens.refresh_token)
+            tokens = refresh_access_token(tokens)
 
-        return {"Authorization": f"Bearer {tokens.access_token}"}
+        return self._bearer_headers(tokens)
+
+    @staticmethod
+    def _bearer_headers(tokens: StoredTokens) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {tokens.access_token}"}
+        if tokens.signed_in_at is not None:
+            headers[SIGNED_IN_AT_HEADER] = str(int(tokens.signed_in_at))
+        return headers
 
     def _refresh_and_get_headers(self) -> dict[str, str] | None:
         """Try to refresh the token. Returns new headers or None."""
@@ -100,10 +129,19 @@ class TLClient:
         if not tokens or not tokens.refresh_token:
             return None
         try:
-            new_tokens = refresh_access_token(tokens.refresh_token)
-            return {"Authorization": f"Bearer {new_tokens.access_token}"}
+            return self._bearer_headers(refresh_access_token(tokens))
         except SystemExit:
             return None
+
+    @staticmethod
+    def _error_code(response: httpx.Response) -> str | None:
+        """The machine-readable `code` of an error body, if there is one."""
+        try:
+            data = response.json()
+        except Exception:
+            return None
+        code = data.get("code") if isinstance(data, dict) else None
+        return code if isinstance(code, str) else None
 
     def _extract_detail(self, response: httpx.Response) -> str:
         """Extract error detail from response body."""
@@ -120,6 +158,6 @@ class TLClient:
         self._client.close()
 
 
-def get_client() -> TLClient:
+def get_client(stored_session_only: bool = False) -> TLClient:
     """Get a configured TL API client."""
-    return TLClient()
+    return TLClient(stored_session_only=stored_session_only)

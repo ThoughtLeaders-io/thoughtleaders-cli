@@ -1,6 +1,8 @@
 """Auth0 login flows: browser-based PKCE and headless device code."""
 
+import base64
 import http.server
+import json
 import secrets
 import threading
 import time
@@ -12,8 +14,8 @@ import httpx
 from rich.console import Console
 
 from tl_cli.auth.pkce import generate_pkce_pair
-from tl_cli.auth.token_store import StoredTokens, save_tokens
-from tl_cli.config import get_config
+from tl_cli.auth.token_store import StoredTokens, clear_tokens, load_tokens, save_tokens
+from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT, get_config
 
 console = Console(stderr=True)
 
@@ -27,13 +29,38 @@ class _CallbackResult:
     state: str | None = None
 
 
-def login_browser() -> StoredTokens:
+def web_signin_url(config) -> str:
+    """Where the browser goes once the CLI login has completed.
+
+    The platform's `/signin?go=1` jumps straight to Auth0; with the SSO cookie
+    the login just created, that round trip completes silently and leaves the
+    browser signed in to the web platform too. The Chrome extension adopts the
+    web session from that page load, so one login covers all three surfaces.
+    `from=cli` lets the platform land on a page that says so.
+    """
+    return f"{config.api_url.rstrip('/')}/signin?go=1&from=cli"
+
+
+def web_logout_url(config, web_only: bool = False) -> str:
+    """The platform's logout page. It ends the web session and the Auth0 session
+    on the shared domain, so the SSO cookie the CLI login created goes too, and
+    unless `web_only` it records the sign-out for every other surface. The CLI
+    asks for `web_only` once it has recorded the sign-out through the API
+    itself: a second, later record could refuse a sign-in the user has meanwhile
+    started. When that call did not get through, the page is the fallback.
+    """
+    base = f"{config.api_url.rstrip('/')}/logout"
+    return f"{base}?web_only=1" if web_only else base
+
+
+def login_browser(open_browser: bool = True) -> StoredTokens:
     """Run the Auth0 PKCE login flow with a local browser.
 
     1. Generate PKCE pair + state
     2. Start localhost callback server
-    3. Open browser to Auth0 /authorize
-    4. Wait for callback with authorization code
+    3. Open browser to Auth0 /authorize (or just print the URL)
+    4. Wait for callback with authorization code; send the browser on to the
+       platform's sign-in so the web session (and the extension) follow
     5. Exchange code for tokens
     6. Store tokens
     """
@@ -43,8 +70,17 @@ def login_browser() -> StoredTokens:
     result = _CallbackResult()
 
     # Start callback server on the fixed port (must match Auth0 allowed callback URLs)
-    from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT
-    server, port = _start_callback_server(result, state, DEFAULT_AUTH0_CALLBACK_PORT)
+    try:
+        server, port = _start_callback_server(
+            result, state, DEFAULT_AUTH0_CALLBACK_PORT, success_redirect=web_signin_url(config)
+        )
+    except OSError as exc:
+        console.print(
+            f"[red]Could not listen on port {DEFAULT_AUTH0_CALLBACK_PORT} for the login callback "
+            f"({exc.strerror or exc}).[/red] Close whatever is using it, or run: "
+            "tl auth login --method device"
+        )
+        raise SystemExit(1) from exc
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -61,20 +97,25 @@ def login_browser() -> StoredTokens:
     }
     auth_url = f"https://{config.auth0_domain}/authorize?{urllib.parse.urlencode(params)}"
 
-    console.print("[bold]Opening browser for login...[/bold]")
-    console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
-    webbrowser.open(auth_url)
+    if open_browser:
+        console.print("[bold]Opening browser for login...[/bold]")
+        console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
+        open_in_browser(auth_url)
+    else:
+        console.print(f"[bold]Open this URL in a browser on this machine:[/bold]\n{auth_url}\n")
 
     # Wait for callback (timeout after 120 seconds)
     deadline = time.time() + 120
     while result.code is None and result.error is None:
         if time.time() > deadline:
             server.shutdown()
+            server.server_close()
             console.print("[red]Login timed out. Please try again.[/red]")
             raise SystemExit(1)
         time.sleep(0.1)
 
     server.shutdown()
+    server.server_close()
 
     if result.error:
         console.print(f"[red]Login failed: {result.error}[/red]")
@@ -159,6 +200,7 @@ def login_device_code() -> StoredTokens:
                 refresh_token=token_data.get("refresh_token"),
                 expires_at=time.time() + token_data.get("expires_in", 3600),
                 email=email,
+                signed_in_at=signed_in_time(token_data["access_token"]),
             )
             save_tokens(tokens)
             console.print(f"\n[green]Logged in as {tokens.email or 'unknown'}[/green]")
@@ -184,8 +226,48 @@ def login_device_code() -> StoredTokens:
     raise SystemExit(1)
 
 
-def refresh_access_token(refresh_token: str) -> StoredTokens:
-    """Use a refresh token to get a new access token."""
+def open_in_browser(url: str) -> bool:
+    """Open `url` in the user's browser. False when it could not be opened —
+    a missing or misconfigured browser raises from `webbrowser` on some
+    platforms, and the caller always has a URL to print instead."""
+    try:
+        return webbrowser.open(url)
+    except Exception:  # noqa: BLE001 — anything here just means "print the URL"
+        return False
+
+
+def forget_session(
+    rejected_access_token: str | None = None, rejected_signed_in_at: float | None = None
+) -> None:
+    """Drop this machine's session after the server refused it as signed out.
+
+    A 401 with `code: signed_out` means these credentials belong to a session
+    the user has since ended — on the web, from the extension, or from another
+    CLI. Refreshing would only mint another token for it, so the CLI revokes
+    its refresh token (best-effort) and clears the store, as `tl auth logout
+    --local` does. Two cases are left alone: an API key, which is not a session
+    and cannot be re-obtained by `tl auth login`; and a store that now holds a
+    different session — a new sign-in has replaced the one the verdict was
+    about. A session is known by when it was signed in, which survives the
+    token refreshes other `tl` processes may have done meanwhile; only a store
+    from before that was recorded is compared by access token.
+    """
+    tokens = load_tokens()
+    if tokens is None or tokens.is_api_key:
+        return
+    if tokens.signed_in_at is not None and rejected_signed_in_at is not None:
+        if int(tokens.signed_in_at) != int(rejected_signed_in_at):
+            return
+    elif rejected_access_token is not None and tokens.access_token != rejected_access_token:
+        return
+    if tokens.refresh_token:
+        revoke_refresh_token(tokens.refresh_token)
+    clear_tokens()
+
+
+def refresh_access_token(tokens: StoredTokens) -> StoredTokens:
+    """Use the stored refresh token to get a new access token. Everything else
+    about the session — who signed in, and when — carries over."""
     config = get_config()
 
     response = httpx.post(
@@ -193,7 +275,7 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         json={
             "grant_type": "refresh_token",
             "client_id": config.auth0_client_id,
-            "refresh_token": refresh_token,
+            "refresh_token": tokens.refresh_token,
         },
     )
 
@@ -202,14 +284,20 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         raise SystemExit(2)
 
     data = response.json()
-    tokens = StoredTokens(
+    refreshed = StoredTokens(
         access_token=data["access_token"],
-        refresh_token=data.get("refresh_token", refresh_token),
+        refresh_token=data.get("refresh_token", tokens.refresh_token),
         expires_at=time.time() + data.get("expires_in", 3600),
-        email=None,  # Not returned on refresh
+        email=tokens.email,
+        # A store from before the sign-in time was recorded gets it from the
+        # token being replaced — the newest moment the session is known to be
+        # at least as old as — so it is not exempt from sign-outs forever.
+        signed_in_at=tokens.signed_in_at
+        if tokens.signed_in_at is not None
+        else signed_in_time(tokens.access_token),
     )
-    save_tokens(tokens)
-    return tokens
+    save_tokens(refreshed)
+    return refreshed
 
 
 def revoke_refresh_token(refresh_token: str) -> bool:
@@ -270,29 +358,55 @@ def _exchange_code(
         refresh_token=data.get("refresh_token"),
         expires_at=time.time() + data.get("expires_in", 3600),
         email=email,
+        signed_in_at=signed_in_time(data["access_token"]),
     )
 
 
-def _extract_email_from_jwt(token: str) -> str | None:
-    """Extract email from JWT payload without full verification (already trusted from Auth0)."""
-    import base64
-    import json
-
+def _jwt_claims(token: str) -> dict:
+    """The payload of a JWT without verification (already trusted from Auth0);
+    empty when the string is not a JWT."""
     try:
         payload_part = token.split(".")[1]
-        # Add padding
-        padding = 4 - len(payload_part) % 4
-        payload_part += "=" * padding
-        payload = json.loads(base64.urlsafe_b64decode(payload_part))
-        return payload.get("email")
+        payload_part += "=" * (4 - len(payload_part) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_part))
+        return claims if isinstance(claims, dict) else {}
     except Exception:
-        return None
+        return {}
+
+
+def _extract_email_from_jwt(token: str) -> str | None:
+    email = _jwt_claims(token).get("email")
+    return email if isinstance(email, str) else None
+
+
+def signed_in_time(access_token: str) -> float | None:
+    """When the session this token belongs to was signed in: the token's own
+    issue time, on the issuer's clock — the same clock the platform compares it
+    with — so a machine whose clock runs behind is not judged to have signed in
+    before its last sign-out and locked out. None for a token without one: no
+    sign-in time is sent, and the platform judges by the token alone, which is
+    safer than a guess from this machine's clock."""
+    iat = _jwt_claims(access_token).get("iat")
+    if isinstance(iat, str):
+        try:
+            iat = float(iat)
+        except ValueError:
+            return None
+    return float(iat) if isinstance(iat, int | float) and not isinstance(iat, bool) else None
 
 
 def _start_callback_server(
-    result: _CallbackResult, expected_state: str, port: int = 0
+    result: _CallbackResult,
+    expected_state: str,
+    port: int = 0,
+    success_redirect: str | None = None,
 ) -> tuple[http.server.HTTPServer, int]:
-    """Start a temporary HTTP server to receive the OAuth callback."""
+    """Start a temporary HTTP server to receive the OAuth callback.
+
+    On success the browser is redirected to `success_redirect` when given
+    (the platform's sign-in, see `web_signin_url`), otherwise shown a static
+    "you can close this tab" page. Failures always get the static page.
+    """
 
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -324,6 +438,11 @@ def _start_callback_server(
                 return
 
             result.code = code
+            if success_redirect:
+                self.send_response(302)
+                self.send_header("Location", success_redirect)
+                self.end_headers()
+                return
             self._respond(
                 "Login successful! You can close this tab and return to the terminal."
             )

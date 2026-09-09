@@ -6,10 +6,19 @@ import time
 import typer
 from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Prompt
 
-from tl_cli.auth.login import login_browser, login_device_code, revoke_refresh_token
+from tl_cli.auth.login import (
+    login_browser,
+    login_device_code,
+    open_in_browser,
+    revoke_refresh_token,
+    web_logout_url,
+)
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
+from tl_cli.client.errors import SIGNED_OUT_CODE, ApiError
+from tl_cli.client.http import get_client
 from tl_cli.config import get_config
 
 app = typer.Typer(cls=AlphaSortedTyperGroup, help="Authentication commands")
@@ -79,23 +88,66 @@ def _read_masked(prompt: str) -> str:
     return ''.join(buf)
 
 
+LOGIN_METHODS = {"browser": "1", "device": "2", "api-key": "3"}
+
+
+def _interactive() -> bool:
+    """Is a person at a terminal — i.e. may we ask a question or open a browser
+    window? Output goes to stderr, so that is the stream that matters; stdout
+    may well be a file or a pipe in a perfectly interactive session."""
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
 @app.command("login", help="Log in to ThoughtLeaders.")
-def login_cmd() -> None:
+def login_cmd(
+    method: str | None = typer.Option(
+        None,
+        "--method",
+        "-m",
+        help="Skip the menu: browser (OAuth2 on this machine), device (code for another "
+        "device), or api-key. Required when there is no terminal to answer the menu.",
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="Browser method only: print the login URL instead of opening a browser, then wait "
+        "up to two minutes for it to be opened on this machine. Implied when there is no "
+        "terminal, so a window never pops up at an agent.",
+    ),
+) -> None:
     """Log in to ThoughtLeaders.
 
-    The default flow opens a browser on this machine for OAuth2 (Auth0).
-    A device-code flow is available for headless environments, and a
-    pre-issued API key can be configured for CI/scripts.
+    The default flow opens a browser on this machine for OAuth2 (Auth0). If
+    you are already signed in to the web platform in that browser, it
+    completes without a password; either way it leaves the browser signed in
+    to the platform too, and the Chrome extension follows. A device-code flow
+    is available for headless environments, and a pre-issued API key can be
+    configured for CI/scripts.
     """
-    console.print("[bold]How would you like to authenticate?[/bold]")
-    console.print(
-        "  [cyan]1[/cyan] — OAuth2 in a browser on this machine "
-        "[dim](default — opens a URL in the local browser)[/dim]"
-    )
-    console.print("  [cyan]2[/cyan] — Device code (use a browser on another device)")
-    console.print("  [cyan]3[/cyan] — API key (paste a pre-issued key; for CI / non-interactive use)")
-    console.print()
-    choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
+    if method is not None:
+        if method not in LOGIN_METHODS:
+            console.print(
+                f"[red]Unknown --method {method!r}.[/red] "
+                f"Choose one of: {', '.join(LOGIN_METHODS)}"
+            )
+            raise typer.Exit(1)
+        choice = LOGIN_METHODS[method]
+    elif not _interactive():
+        console.print(
+            "[red]No terminal to answer the login menu.[/red] "
+            "Pass --method browser, --method device or --method api-key."
+        )
+        raise typer.Exit(2)
+    else:
+        console.print("[bold]How would you like to authenticate?[/bold]")
+        console.print(
+            "  [cyan]1[/cyan] — OAuth2 in a browser on this machine "
+            "[dim](default — opens a URL in the local browser)[/dim]"
+        )
+        console.print("  [cyan]2[/cyan] — Device code (use a browser on another device)")
+        console.print("  [cyan]3[/cyan] — API key (paste a pre-issued key; for CI / non-interactive use)")
+        console.print()
+        choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
 
     if choice == "3":
         _login_api_key()
@@ -104,7 +156,7 @@ def login_cmd() -> None:
     if choice == "2":
         login_device_code()
     else:
-        login_browser()
+        login_browser(open_browser=not no_browser and _interactive())
 
 
 def _login_api_key() -> None:
@@ -116,11 +168,6 @@ def _login_api_key() -> None:
     request. We immediately call /whoami to (a) verify the key is valid and
     (b) capture the owning user's email for `tl auth status` output.
     """
-    # Imported here to avoid pulling httpx/keyring into the module-level
-    # import graph when callers just want `tl auth logout` / `status`.
-    from tl_cli.client.errors import ApiError
-    from tl_cli.client.http import get_client
-
     key = _read_masked("Paste your API key: ").strip()
     if not key:
         console.print("[red]No key provided.[/red]")
@@ -141,7 +188,7 @@ def _login_api_key() -> None:
         data = client.get("/whoami")
     except ApiError as e:
         clear_tokens()
-        console.print(f"[red]API key rejected:[/red] {e.detail}")
+        console.print(f"[red]API key rejected:[/red] {escape(e.detail)}")
         raise typer.Exit(1)
     finally:
         client.close()
@@ -168,9 +215,25 @@ def _login_api_key() -> None:
 
 
 @app.command("logout")
-def logout_cmd() -> None:
-    """Log out: revoke the refresh token at Auth0, then clear stored tokens."""
+def logout_cmd(
+    local: bool = typer.Option(
+        False,
+        "--local",
+        help="Only clear this machine's credentials. By default logout also signs you "
+        "out of the web platform and the Chrome extension.",
+    ),
+) -> None:
+    """Log out everywhere: tell the platform this session has ended (which
+    signs out the extension and any other CLI), revoke the refresh token at
+    Auth0, clear stored tokens, then end the web platform session in the
+    browser. Pass --local to leave the other surfaces signed in."""
     tokens = load_tokens()
+    recorded = False
+    if not local and tokens and not tokens.is_api_key:
+        recorded = _sign_out_everywhere()
+        # That call may have refreshed the session (rotating the refresh token)
+        # or, finding it already ended, cleared the store: revoke what is there now.
+        tokens = load_tokens()
     # Revoke the long-lived credential server-side so a leaked/synced copy of
     # the local token store can't keep minting access tokens. Best-effort —
     # API-key auth has no refresh token, and an offline revoke must not block
@@ -183,28 +246,97 @@ def logout_cmd() -> None:
                 "[yellow]Could not reach Auth0 to revoke the refresh token; "
                 "clearing local credentials anyway.[/yellow]"
             )
-        # Revoking the refresh token doesn't end the browser SSO session that
-        # the interactive login established. Point the user at Auth0's logout
-        # URL so the next `tl auth login` doesn't silently SSO straight back in.
-        logout_url = f"https://{get_config().auth0_domain}/logout"
-        console.print(f"To end your Auth0 browser session, visit: [cyan]{logout_url}[/cyan]")
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
 
+    if local:
+        return
+    if tokens is None or tokens.is_api_key:
+        # Nothing here ever created a web session: an API key is not one, and
+        # with nothing stored there is nothing whose web counterpart to end.
+        # The browser's own session, whoever's it is, is not ours to close.
+        return
+    # Revoking the refresh token doesn't end the browser session the login
+    # established — on the web platform, at Auth0, or in the extension. The
+    # platform's logout page ends all of those, but only when a real browser
+    # visits it. Drive it when we have one; otherwise hand over the URL rather
+    # than popping a window from an agent or a script.
+    # Recorded already? Then the page only has to end the browser's session.
+    # Otherwise it is the one chance left to record the sign-out for the other
+    # surfaces — which it does when the browser is signed in to the platform.
+    logout_url = web_logout_url(get_config(), web_only=recorded)
+    if _interactive() and open_in_browser(logout_url):
+        console.print("[dim]Signing you out of the web platform in your browser.[/dim]")
+    elif recorded:
+        console.print(f"To also sign out of the web platform, visit: [cyan]{logout_url}[/cyan]")
+    else:
+        console.print(
+            "Other surfaces stay signed in until you visit, in a browser signed in to the platform: "
+            f"[cyan]{logout_url}[/cyan]"
+        )
+
+
+def _sign_out_everywhere() -> bool:
+    """Best-effort: ask the platform to end this session everywhere. The
+    platform then refuses every session this sign-in produced — the extension's
+    and other CLIs' included — while this command goes on to clear its own.
+    True when the sign-out is now recorded (by this call, or already by another
+    surface). Nothing here may stop the local logout — not an unreachable
+    platform, and not a token refresh giving up (`SystemExit`) — so failures
+    only get a note. Speaks for the stored session even when `TL_API_KEY` is
+    set: that key is not the session being ended."""
+    client = None
+    try:
+        client = get_client(stored_session_only=True)
+        client.post("/auth/sign-out", json_body={})
+        console.print("[dim]Signed out everywhere.[/dim]")
+        return True
+    except ApiError as e:
+        if isinstance(e.raw, dict) and e.raw.get("code") == SIGNED_OUT_CODE:
+            # Someone got there first: this session was already ended
+            # elsewhere, which is exactly the state we were after.
+            console.print("[dim]Already signed out everywhere.[/dim]")
+            return True
+        console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
+    except (Exception, SystemExit):  # noqa: BLE001 — declared best-effort: nothing may stop the local logout
+        console.print("[yellow]Could not reach the platform to sign out everywhere.[/yellow]")
+    finally:
+        if client is not None:
+            client.close()
+    return False
+
 
 @app.command("status")
-def status_cmd() -> None:
-    """Show current authentication status."""
+def status_cmd(
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print nothing; exit 0 if logged in, 2 otherwise."
+    ),
+) -> None:
+    """Show current authentication status: exit 0 when the next command will
+    authenticate, 2 when it will not."""
+    if get_config().api_key:
+        # TL_API_KEY wins over anything stored (see the HTTP client), so this
+        # machine is authenticated whatever the keychain holds.
+        if not quiet:
+            console.print("[green]Authenticated[/green] via API key from TL_API_KEY.")
+        return
+
     tokens = load_tokens()
     if not tokens:
-        console.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
+        if not quiet:
+            console.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
         raise SystemExit(2)
 
-    if tokens.is_expired:
-        console.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
-        console.print("Run: tl auth login")
+    # An expired access token with a refresh token is still a working session:
+    # the next command refreshes it on its own.
+    if tokens.is_expired and not tokens.refresh_token:
+        if not quiet:
+            console.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
+            console.print("Run: tl auth login")
         raise SystemExit(2)
 
+    if quiet:
+        return
     if tokens.is_api_key:
         console.print("[green]Authenticated[/green] via API key.")
     else:

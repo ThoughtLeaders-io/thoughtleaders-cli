@@ -94,9 +94,13 @@ tl setup codex         # install Codex CLI skill (optional)
 
 `tl auth login` offers three options:
 
-1. **OAuth2 in a local browser** (default) — opens a URL on this machine.
+1. **OAuth2 in a local browser** (default) — opens a URL on this machine. If that browser is already signed in to the web platform, no password is asked; either way the browser ends up signed in to the platform too, and the Chrome extension follows. Pass `--no-browser` to print the URL instead of opening a window.
 2. **Device code** — for headless environments; complete the flow on another device.
 3. **API key** — paste a pre-issued `APIKey` from Django admin. The CLI verifies it via `/whoami` and stores it tagged so every request sends `X-TL-Auth: API-KEY`.
+
+Pass `--method browser|device|api-key` to skip the menu; without a terminal the menu is an error, so agents must pass it. Without a terminal the browser method prints the URL instead of opening a window (`--no-browser` does the same at a terminal).
+
+`tl auth logout` signs you out everywhere: it tells the platform the session has ended (so the extension and any other CLI are signed out on their next call), revokes and clears this machine's credentials, then opens the platform's logout page to end the web session too. Without a terminal it prints that page's URL instead of opening it. `--local` clears only this machine.
 
 ## Quick Start
 

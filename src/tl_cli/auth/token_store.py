@@ -33,6 +33,10 @@ class StoredTokens:
     expires_at: float  # Unix timestamp; 0 for API keys
     email: str | None = None
     kind: str = KIND_BEARER
+    # When the user signed in interactively (Unix timestamp). Survives token
+    # refreshes, which only replace the access token, so the server can tell
+    # a session that predates the user's last sign-out from a fresh one.
+    signed_in_at: float | None = None
 
     @property
     def is_expired(self) -> bool:
@@ -52,6 +56,7 @@ class StoredTokens:
             "expires_at": self.expires_at,
             "email": self.email,
             "kind": self.kind,
+            "signed_in_at": self.signed_in_at,
         })
 
     @classmethod
@@ -63,6 +68,7 @@ class StoredTokens:
             expires_at=parsed.get("expires_at") or 0,
             email=parsed.get("email"),
             kind=parsed.get("kind", KIND_BEARER),
+            signed_in_at=parsed.get("signed_in_at"),
         )
 
 
