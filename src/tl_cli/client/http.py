@@ -3,10 +3,15 @@
 import httpx
 
 from tl_cli import __version__
-from tl_cli.auth.login import refresh_access_token
+from tl_cli.auth.login import forget_session, refresh_access_token
 from tl_cli.auth.token_store import load_tokens
 from tl_cli.client.errors import ApiError
 from tl_cli.config import get_config
+
+
+# Error `code` the server sends with a 401 for a token issued before the user
+# last signed out. Shared with the Chrome extension, which reacts the same way.
+SIGNED_OUT_CODE = "signed_out"
 
 
 class TLClient:
@@ -50,12 +55,17 @@ class TLClient:
 
         response = self._client.request(method, path, **request_kwargs)
 
-        # On 401, try refreshing the token once
+        # On 401, try refreshing the token once — unless the server says the
+        # user signed out (on the web, from the extension, or elsewhere): then
+        # this session is over and a refresh would only resurrect it.
         if response.status_code == 401:
-            headers = self._refresh_and_get_headers()
-            if headers:
-                request_kwargs["headers"] = headers
-                response = self._client.request(method, path, **request_kwargs)
+            if self._error_code(response) == SIGNED_OUT_CODE:
+                forget_session()
+            else:
+                headers = self._refresh_and_get_headers()
+                if headers:
+                    request_kwargs["headers"] = headers
+                    response = self._client.request(method, path, **request_kwargs)
 
         if response.status_code >= 400:
             detail = self._extract_detail(response)
@@ -104,6 +114,16 @@ class TLClient:
             return {"Authorization": f"Bearer {new_tokens.access_token}"}
         except SystemExit:
             return None
+
+    @staticmethod
+    def _error_code(response: httpx.Response) -> str | None:
+        """The machine-readable `code` of an error body, if there is one."""
+        try:
+            data = response.json()
+        except Exception:
+            return None
+        code = data.get("code") if isinstance(data, dict) else None
+        return code if isinstance(code, str) else None
 
     def _extract_detail(self, response: httpx.Response) -> str:
         """Extract error detail from response body."""

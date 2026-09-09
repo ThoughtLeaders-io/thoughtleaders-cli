@@ -180,6 +180,30 @@ class TestLogoutCommand:
         assert self._web_logout() in result.output
 
 
+class TestForgetSession:
+    def _patch(self, monkeypatch, tokens):
+        calls = {"revoked": None, "cleared": False}
+        monkeypatch.setattr(auth_login, "load_tokens", lambda: tokens)
+        monkeypatch.setattr(auth_login, "clear_tokens", lambda: calls.__setitem__("cleared", True))
+        monkeypatch.setattr(auth_login, "revoke_refresh_token", lambda rt: calls.__setitem__("revoked", rt) or True)
+        return calls
+
+    def test_bearer_revokes_then_clears(self, monkeypatch) -> None:
+        calls = self._patch(monkeypatch, StoredTokens(access_token="a", refresh_token="rt", expires_at=None))
+        auth_login.forget_session()
+        assert calls == {"revoked": "rt", "cleared": True}
+
+    def test_api_key_just_clears(self, monkeypatch) -> None:
+        calls = self._patch(monkeypatch, StoredTokens(access_token="k", refresh_token=None, expires_at=None, kind=KIND_API_KEY))
+        auth_login.forget_session()
+        assert calls == {"revoked": None, "cleared": True}
+
+    def test_nothing_stored_still_clears(self, monkeypatch) -> None:
+        calls = self._patch(monkeypatch, None)
+        auth_login.forget_session()
+        assert calls == {"revoked": None, "cleared": True}
+
+
 class TestStatusCommand:
     def test_quiet_logged_in_prints_nothing(self, monkeypatch) -> None:
         tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")

@@ -64,7 +64,12 @@ def handle_api_error(error: ApiError) -> None:
     """Print a user-friendly error message and exit with the right code."""
     detail, hint = _split_hint(error)
     if error.status_code == 401:
-        err.print("[red]Authentication required.[/red] Run: tl auth login")
+        if isinstance(error.raw, dict) and error.raw.get("code") == "signed_out":
+            # The user signed out on another surface; the client has already
+            # dropped its credentials. Say so in the server's words.
+            err.print(f"[red]{detail}[/red] Run: tl auth login")
+        else:
+            err.print("[red]Authentication required.[/red] Run: tl auth login")
         _print_debug(error)
         sys.exit(2)
     elif error.status_code == 402:

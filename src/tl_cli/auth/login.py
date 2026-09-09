@@ -12,7 +12,7 @@ import httpx
 from rich.console import Console
 
 from tl_cli.auth.pkce import generate_pkce_pair
-from tl_cli.auth.token_store import StoredTokens, save_tokens
+from tl_cli.auth.token_store import StoredTokens, clear_tokens, load_tokens, save_tokens
 from tl_cli.config import get_config
 
 console = Console(stderr=True)
@@ -208,6 +208,20 @@ def login_device_code() -> StoredTokens:
 
     console.print("[red]Login timed out. Please try again.[/red]")
     raise SystemExit(1)
+
+
+def forget_session() -> None:
+    """Drop this machine's credentials for a session the user ended elsewhere.
+
+    The server refuses tokens issued before the user's last sign-out (on the
+    web, from the extension, or from another CLI). Refreshing would only mint
+    another token for that ended session, so the CLI revokes its refresh token
+    (best-effort) and clears the store, exactly as `tl auth logout --local`.
+    """
+    tokens = load_tokens()
+    if tokens and not tokens.is_api_key and tokens.refresh_token:
+        revoke_refresh_token(tokens.refresh_token)
+    clear_tokens()
 
 
 def refresh_access_token(refresh_token: str) -> StoredTokens:
