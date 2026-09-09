@@ -491,17 +491,20 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
     from the domains it saw: replacing would let the last shard read silently
     decide the whole page. ``expand`` still owns the final count.
 
-    The identity-lane ``facts`` list stays a whole-document field, so a later
-    file that carries one replaces it and a file that omits it leaves the
-    earlier answer standing. An explicitly empty ``facts`` is a violation
-    rather than a silent wipe of the lane, and a file that changes nothing at
-    all is a violation too: a patch that no-ops is the failure mode that
-    costs a stage a manual diagnosis."""
+    The identity-lane ``facts`` list is a **union** by ``ref`` for exactly
+    the same reason: a sharded merge gives each shard its own slice of the
+    lane, so replacing would keep only the last file read and silently drop
+    the rest, along with every ``corroborates`` call the earlier shards made.
+    Later files win per ``ref``; a record with no ``ref`` cannot be keyed, so
+    it is appended. An empty or omitted ``facts`` leaves the union standing,
+    which is what a shard whose domains hold no lane record returns. A file
+    that changes nothing at all is still a violation: a patch that no-ops is
+    the failure mode that costs a stage a manual diagnosis."""
     decisions: dict[str, dict] = {}
     selected: list[str] = []
     identity: list[dict] = []
     problems: list[str] = []
-    identity_seen = False
+    ref_slot: dict[str, int] = {}
     for p in paths:
         path = pathlib.Path(p)
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "",
@@ -533,17 +536,21 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
         if "facts" in data:
             if not isinstance(data["facts"], list):
                 problems.append(f"{path.name}: `facts` is not a list")
-            elif not data["facts"] and identity_seen:
-                problems.append(
-                    f"{path.name}: `facts` is empty, which would drop the "
-                    f"{len(identity)} identity-lane fact(s) an earlier file "
-                    "carried; omit the key to leave them standing")
             else:
-                identity = [x for x in data["facts"] if isinstance(x, dict)]
-                if len(identity) != len(data["facts"]):
+                recs = [x for x in data["facts"] if isinstance(x, dict)]
+                if len(recs) != len(data["facts"]):
                     problems.append(f"{path.name}: a `facts` entry is not an object")
-                identity_seen = True
-                touched = True
+                for rec in recs:
+                    ref = str(rec.get("ref") or "").strip()
+                    if not ref:
+                        identity.append(rec)
+                    elif ref in ref_slot:
+                        identity[ref_slot[ref]] = rec
+                    else:
+                        ref_slot[ref] = len(identity)
+                        identity.append(rec)
+                if recs:
+                    touched = True
         if not touched:
             problems.append(
                 f"{path.name}: carries no decisions, no `selected` and no "
@@ -700,7 +707,14 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         sup = dec.get("supersedes")
         if sup is None:
             continue
-        sup = str(sup)
+        if not isinstance(sup, str):
+            # A list here is the agent saying one fact replaces several. The
+            # old message blamed the target for not existing, which sent the
+            # diagnosis the wrong way for a whole re-ask.
+            bad(key, f"supersedes takes a single cluster or fact id, not a "
+                     f"{type(sup).__name__}: supersede the closest fact and "
+                     "handle any others as their own decisions")
+            continue
         if sup.startswith("f"):
             if sup not in existing_ids:
                 bad(key, f"supersedes target {sup} is not in --existing")
@@ -876,6 +890,29 @@ def identity_fact(rec: dict, fact_id: str) -> dict:
     if str(rec.get("gloss") or "").strip():
         fact["gloss"] = str(rec["gloss"]).strip()
     return fact
+
+
+def selectable(fact: dict) -> bool:
+    """Whether a fact may carry ``selected``, which is what reaches a
+    brand-facing page's "who they are" section.
+
+    ``children`` and ``location`` never do. ``clinical`` does only where the
+    creator made it public themselves: for a transcript fact that is 3+
+    distinct videos, per ``references/evidence-rules.md``, since one passing
+    mention never qualifies. A social or web record is public by the act of
+    having been posted, and its recurrence is always 1 because the record
+    carries no videos at all, so recurrence cannot be the test there.
+
+    ``build_html.py --check`` refuses a selected fact at a withheld tier at
+    the other end of the pipeline. That check is the backstop; this is the
+    end that owns the rule, so nothing is left to be caught at render time.
+    Nothing opts itself in: the fill-to-target loop reads this too."""
+    tier = fact.get("sensitivity")
+    if tier in ("children", "location"):
+        return False
+    if tier == "clinical" and fact.get("provenance") == "transcript":
+        return int(fact.get("recurrence") or 0) >= 3
+    return True
 
 
 def rank_key(fact: dict) -> tuple:
@@ -1135,16 +1172,19 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     # ---- selected: the agent proposes, the script owns the count ---------- #
     active = [f for f in facts if not f.get("superseded_by")]
-    active_ids = {str(f["fact_id"]) for f in active}
+    # A withheld tier is not selectable however it was nominated: an agent
+    # pick lands in `selected_ignored` so the refusal is visible, and the
+    # fill loop below never sees it at all.
+    eligible = {str(f["fact_id"]) for f in active if selectable(f)}
     picked: list[str] = []
     ignored: list[str] = []
     # the agent names c* ids, f* ids, and an identity fact's own `ref`
     pick_map = {**assigned, **identity_by_ref}
     for raw in agent_selected:
         fact_id = pick_map.get(raw, raw)
-        if fact_id in active_ids and fact_id not in picked:
+        if fact_id in eligible and fact_id not in picked:
             picked.append(fact_id)
-        elif fact_id not in active_ids:
+        elif fact_id not in eligible:
             ignored.append(raw)
     if len(picked) > SELECTED_TARGET:
         ranked = sorted((fact_index[p] for p in picked), key=rank_key)
@@ -1153,8 +1193,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
         for fact in sorted(active, key=rank_key):
             if len(picked) >= SELECTED_TARGET:
                 break
-            if str(fact["fact_id"]) not in picked:
-                picked.append(str(fact["fact_id"]))
+            fact_id = str(fact["fact_id"])
+            if fact_id in eligible and fact_id not in picked:
+                picked.append(fact_id)
     chosen = set(picked)
     for fact in facts:
         fact["selected"] = str(fact.get("fact_id")) in chosen

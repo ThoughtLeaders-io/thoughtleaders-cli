@@ -345,13 +345,28 @@ It returns ONE JSON object as its final message — never a file of records:
             "corroborates": "c012"}]}
 ```
 
+`action` is a closed set of exactly three values, `keep`, `fold` and
+`drop`; `expand` rejects anything else and does not alias it the way it
+aliases near-miss enum *values*. Every other judgment is a key alongside
+`action`, never a value of it: `target`, `reason`, `tier`, `claim`,
+`confidence`, `supersedes`, `gloss`. `confidence` is `confirmed` or
+`unconfirmed` only. And a narrowed `claim` may not carry a number absent
+from both the quote and the cluster claim, which includes a year taken from
+the line's own `published` field: anchor it as "as of this video" instead.
+`supersedes` names exactly ONE id and is never a list: where one fact
+replaces two, supersede the closest and give the other its own decision.
+
 Every cluster in the input appears exactly once. `facts` is the identity
 lane's output when that lane ran: one record per `social`/`web` disclosure
 (never a quote, never a video — lanes do not masquerade), with its URL and
 seen-date; `corroborates` names the cluster or existing fact it confirms,
 which lifts both to `confirmed` (cross-lane corroboration is the top tier —
 a social or web fact alone stays `unconfirmed`, and the agent cannot declare
-otherwise). A compact input line carrying `dropped_members: N` is a cluster
+otherwise). Across a sharded merge `facts` is **unioned by `ref`**, later
+file winning per ref, so each shard carries the lane records that sit beside
+the clusters it can see rather than every shard repeating the whole lane; a
+shard with none returns `"facts": []` and drops nothing. A compact input line
+carrying `dropped_members: N` is a cluster
 that gained a passage the last round dropped — it is asked again rather than
 silently joining a fact. `fold`/`supersedes`
 targets are kept clusters in the same domain, or — on a refresh — existing

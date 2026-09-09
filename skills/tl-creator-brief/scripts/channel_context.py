@@ -27,6 +27,9 @@ Usage:
         --format-label solo --format-evidence "fp density 41/1k words" \\
         [--host-names "Ali,Abdaal"] [--known-facts "ex-doctor;lives in London"] \\
         --write-context <dir>/context.json
+    channel_context.py --set-socials <dir>/context-full.json \\
+        --social-read "https://instagram.com/x" \\
+        --social-unread "https://tiktok.com/@x,https://x.com/x"
 
 The third form is the step between the stats and the extractor prompts: the
 model reads ``context-full.json``, calls the format label from it, and hands
@@ -289,6 +292,33 @@ def write_context(full: dict, *, format_label: str, format_evidence: str,
     }
 
 
+def set_socials(path: pathlib.Path, read: list[str], unread: list[str]) -> dict:
+    """Record which of the channel's linked platforms the socials lane
+    actually opened, into the ``context-full.json`` this script emits.
+
+    It patches that file rather than taking an argument at write time,
+    because only the lane knows the answer and the lane finishes long after
+    the context is written. ``context-full.json`` is the right home because
+    it is the file that carries ``social_links`` in the first place, and the
+    file ``ledger_meta.py write --context`` is pointed at. Both it and
+    ``build_html.py`` read
+    ``social_links_read`` / ``social_links_unread`` from here; with neither
+    key the page falls back to an all-or-nothing label off the `lanes` flag
+    and reports every linked platform as read whenever the lane ran at all,
+    including pages it never opened. A time-boxed lane is not a lane that
+    read everything, so the honesty strip needs the per-link truth."""
+    if not path.exists():
+        raise SystemExit(f"no context file at {path}: write the full context "
+                         "first (`--channel <id> ... > context-full.json`)")
+    ctx = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(ctx, dict):
+        raise SystemExit(f"{path} is not a context object")
+    ctx["social_links_read"] = read
+    ctx["social_links_unread"] = unread
+    path.write_text(json.dumps(ctx, ensure_ascii=False, indent=1), encoding="utf-8")
+    return ctx
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", type=int, default=None,
@@ -299,6 +329,14 @@ def main() -> None:
     ap.add_argument("--write-context", dest="write_context", default=None,
                     help="write the compact extractor context block here "
                          "(needs --format-label; --format-evidence recommended)")
+    ap.add_argument("--set-socials", dest="set_socials", default=None,
+                    help="patch an existing context.json with which linked "
+                         "platforms the socials lane read; pass the lane's "
+                         "answer as --social-read / --social-unread")
+    ap.add_argument("--social-read", dest="social_read", default=None,
+                    help="comma-separated links the socials lane opened")
+    ap.add_argument("--social-unread", dest="social_unread", default=None,
+                    help="comma-separated links it did not open")
     ap.add_argument("--format-label", dest="format_label", default=None,
                     choices=FORMAT_LABELS,
                     help="the format the model called from the stats")
@@ -318,6 +356,20 @@ def main() -> None:
                          "array is megabytes, and stdout is read by the "
                          "orchestrating session)")
     a = ap.parse_args()
+
+    if a.set_socials:
+        read = _split(a.social_read, ",")
+        unread = _split(a.social_unread, ",")
+        if not read and not unread:
+            ap.error("--set-socials needs --social-read and/or --social-unread; "
+                     "with neither the page cannot tell read from unread")
+        path = pathlib.Path(a.set_socials)
+        ctx = set_socials(path, read, unread)
+        print(json.dumps({"context": str(path),
+                          "social_links_read": ctx["social_links_read"],
+                          "social_links_unread": ctx["social_links_unread"]},
+                         ensure_ascii=False))
+        return
 
     if a.write_context:
         if not a.format_label:

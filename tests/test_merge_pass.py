@@ -1013,16 +1013,6 @@ def test_a_patch_that_changes_nothing_exits_3(tmp_path):
     assert "changes nothing" in v["_files"][0]
 
 
-def test_an_empty_facts_list_never_silently_wipes_the_identity_lane(tmp_path):
-    clustered = _write_clusters(tmp_path, [_cluster("one")])
-    good = _envelope(tmp_path, {"c001": {"action": "keep"}},
-                     facts=[_identity()], name="r1.json")
-    wipe = tmp_path / "patch.json"
-    wipe.write_text(json.dumps({"decisions": {}, "facts": []}), encoding="utf-8")
-    v = _violations(_expand(clustered, [good, wipe], tmp_path / "facts.jsonl"))
-    assert any("would drop the 1 identity-lane fact" in p for p in v["_files"])
-
-
 def test_omitting_facts_leaves_the_earlier_lane_standing(tmp_path):
     clustered = _write_clusters(tmp_path, [
         _cluster("one", video="v1"), _cluster("two", video="v2")])

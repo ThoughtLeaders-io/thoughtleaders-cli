@@ -188,13 +188,24 @@ more than the scripts.
    message that reads this result.
 
 5. **Merge pass: sharded agents decide, the script builds the ledger.**
-   **Model: Opus, deliberately**; shard it rather than downgrade it. One
-   agent per shard file (`<corpus>/merge-input-N.jsonl`, or
-   `merge-input.jsonl` when `N` is 1), all in one message. Each reads its
+   One `tl-cli:merge-shard` agent per shard file
+   (`<corpus>/merge-input-N.jsonl`, or `merge-input.jsonl` when `N` is 1),
+   all in one message. The agent pins **Opus, deliberately**; shard it
+   rather than downgrade it. If the agent name does not resolve, use
+   `general-purpose` with `model: opus`, say so, and expect the two enum
+   failures its brief exists to prevent: an invented `action` value, and a
+   narrowed claim dated from the line's `published` field. Each reads its
    compact cluster lines, never the windows, and returns one JSON object of
    decisions (`keep` / `fold` / `drop`, `selected` picks, *(socials ON)* the
    lane's facts; contract in `transcript-mining.md`, Layer 4). Save each as
-   `<corpus>/merge-decisions-r1-sN.json`, then:
+   `<corpus>/merge-decisions-r1-sN.json`.
+
+   *(socials ON, more than one shard)* Split the lane's facts by life domain
+   too, one slice per shard, so each agent judges the lane records that sit
+   beside the clusters it can see and `corroborates` can reach them. `expand`
+   unions the slices by `ref`, so a shard whose domains hold no lane record
+   returns `"facts": []` and costs nothing. Socials OFF means no lane and
+   nothing to divide. Then:
 
    ```bash
    python3 <skill>/scripts/merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl \
@@ -210,6 +221,18 @@ more than the scripts.
    matches publish, partial or none get fixed to the caption text or dropped.
 
 6. **Write the ledger.**
+
+   *(socials ON)* First record which linked platforms the lane actually
+   opened, since only the lane knows and the honesty strip reports it:
+
+   ```bash
+   python3 <skill>/scripts/channel_context.py --set-socials <corpus>/context-full.json \
+     --social-read "<links it opened>" --social-unread "<links it did not>"
+   ```
+
+   Skip it on a socials-OFF run. Without it the page cannot tell one link
+   from another and reports every linked platform as read whenever the lane
+   ran at all, including pages it never opened.
 
    ```bash
    python3 <skill>/scripts/ledger_meta.py write --channel <id> \
