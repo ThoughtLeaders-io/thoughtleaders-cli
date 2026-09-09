@@ -1,6 +1,9 @@
 """Public bundle boundaries and canonical-reference drift checks (no network)."""
 
+import ast
 import importlib.util
+import sys
+import sysconfig
 import json
 import shutil
 import zipfile
@@ -18,9 +21,9 @@ SPEC.loader.exec_module(builder)
 def isolated_repo(tmp_path):
     for path in (builder.PLUGIN, Path('.agents/plugins')):
         shutil.copytree(ROOT / path, tmp_path / path)
-    source = tmp_path / builder.SOURCE
-    source.parent.mkdir(parents=True)
-    source.write_bytes((ROOT / builder.SOURCE).read_bytes())
+    for name in ('tl', '_shared', *builder.SKILLS):
+        shutil.copytree(ROOT / 'skills' / name, tmp_path / 'skills' / name)
+    shutil.copytree(ROOT / 'agents', tmp_path / 'agents')
     return tmp_path
 
 
@@ -33,7 +36,7 @@ def test_canonical_change_requires_regeneration(isolated_repo):
     source.write_text(source.read_text().replace('ergonomic keyboard review', 'standing desk review'))
     with pytest.raises(ValueError, match='drifted'):
         builder.validate(isolated_repo)
-    (isolated_repo / builder.PLUGIN / builder.GENERATED).write_text(builder.render_examples(source.read_text()))
+    builder.generate(isolated_repo)
     builder.validate(isolated_repo)
 
 
@@ -97,3 +100,87 @@ def test_skill_names_and_routing_are_isolated():
     assert (ROOT / 'skills/tl/SKILL.md').read_text().startswith('---\nname: tl\n')
     mcp = json.loads((ROOT / builder.PLUGIN / '.mcp.json').read_text())
     assert 'command' not in mcp['mcpServers']['thoughtleaders']
+
+
+@pytest.mark.parametrize('source', [
+    'skills/tl-keyword-research/scripts/probe.py',
+    'skills/tl-channel-authenticity/scripts/score.py',
+    'skills/_shared/tl_data.py',
+    'agents/youtube-comment-classifier.md',
+    'skills/tl-keyword-research/SKILL.md',
+])
+def test_canonical_dependency_changes_require_generation(isolated_repo, source):
+    path = isolated_repo / source
+    path.write_text(path.read_text(encoding='utf-8') + '\n# Updated canonical source\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='drifted'):
+        builder.validate(isolated_repo)
+    builder.generate(isolated_repo)
+    builder.validate(isolated_repo)
+
+
+def test_full_workflows_and_prompts_are_shared():
+    for name, spec in builder.SKILLS.items():
+        package = ROOT / builder.PLUGIN / 'skills' / (name + '-mcp')
+        canonical = builder.without_frontmatter((ROOT / 'skills' / name / 'SKILL.md').read_text(encoding='utf-8'))
+        assert (package / 'references/methodology.md').read_text(encoding='utf-8').endswith(canonical)
+        for agent in spec['agents']:
+            prompt = (package / 'references/agents' / (agent + '.md')).read_text(encoding='utf-8')
+            assert prompt == builder.without_frontmatter((ROOT / 'agents' / (agent + '.md')).read_text(encoding='utf-8'))
+            assert not prompt.startswith('---')
+        for script in spec['scripts']:
+            assert (package / 'scripts' / (script + '.py')).read_bytes() == (ROOT / 'skills' / name / 'scripts' / (script + '.py')).read_bytes()
+        for script in builder.SHARED_SCRIPTS:
+            assert (package / 'scripts' / (script + '.py')).read_bytes() == (ROOT / 'skills/_shared' / (script + '.py')).read_bytes()
+
+
+def test_installed_packages_have_complete_python_dependencies(tmp_path):
+    archive = tmp_path / 'plugin.zip'
+    builder.build_zip(ROOT, archive)
+    with zipfile.ZipFile(archive) as zipped:
+        zipped.extractall(tmp_path / 'installed')
+    # Every local import resolves inside the individual installed skill. The only
+    # third-party runtime dependency is the explicitly documented yt-dlp scraper.
+    for name in builder.SKILLS:
+        scripts = tmp_path / 'installed/skills' / (name + '-mcp') / 'scripts'
+        local = {path.stem for path in scripts.glob('*.py')}
+        for path in scripts.glob('*.py'):
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+            compile(tree, str(path), 'exec')
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports = [alias.name.split('.')[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imports = [node.module.split('.')[0]]
+                else:
+                    continue
+                stdlib = set(getattr(sys, 'stdlib_module_names', ()))
+                stdlib.update(sys.builtin_module_names)
+                stdlib.update(p.stem for p in Path(sysconfig.get_path('stdlib')).iterdir()
+                              if p.name not in {'site-packages', 'dist-packages'})
+                stdlib.update(p.name.split('.')[0] for p in
+                              (Path(sysconfig.get_path('stdlib')) / 'lib-dynload').glob('*'))
+                assert set(imports) <= local | stdlib | {'yt_dlp'}, (path, imports)
+
+
+def test_all_three_discoverable_skill_names():
+    names = [Path(name).parts[1] for name in builder.FILES if name.endswith('/SKILL.md')]
+    assert sorted(names) == ['tl-channel-authenticity-mcp', 'tl-keyword-research-mcp', 'tl-mcp']
+    for name in names:
+        body = (ROOT / builder.PLUGIN / 'skills' / name / 'SKILL.md').read_text(encoding='utf-8')
+        assert body.startswith('---\nname: ' + name + '\n')
+        assert 'explicitly requests the ThoughtLeaders CLI' in body
+
+
+def test_generated_files_have_no_private_schema_catalogue():
+    names = set(builder.FILES)
+    assert not any(name.endswith('postgres-schema.md') for name in names)
+    assert not any(name.endswith('elasticsearch-schema.md') for name in names)
+    public = (ROOT / builder.PLUGIN / builder.TL_METHOD).read_text(encoding='utf-8')
+    assert '**Profiles**' not in public
+    assert '**TPP**' not in public
+    assert 'media_buying_network_join_date' not in public
+
+
+@pytest.mark.parametrize('name', list(builder.SKILLS))
+def test_cli_installed_skill_has_generated_shared_helper(name):
+    assert (ROOT / 'skills' / name / 'scripts/tl_data.py').read_bytes() == (ROOT / 'skills/_shared/tl_data.py').read_bytes()

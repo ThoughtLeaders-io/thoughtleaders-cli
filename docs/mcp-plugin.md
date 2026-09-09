@@ -1,76 +1,130 @@
-# ThoughtLeaders - YouTube Data for Codex
+# ThoughtLeaders shared MCP skills
 
-The optional Git-backed plugin connects to `https://app.thoughtleaders.io/mcp`
-and adds the `tl-mcp` research skill. It supports YouTube transcript evidence,
-brand mentions, creator discovery and historical performance research, with
-sponsorship intelligence as a principal use case. It requires a ThoughtLeaders
-account and consumes that account's query credits. Authenticate through the
-client connection flow; no tokens belong in this repository.
+The optional plugin connects to `https://app.thoughtleaders.io/mcp` and exports
+three skills from maintained CLI sources:
 
-The plugin requires no CLI installation or shell execution for research. The
-existing CLI, Claude plugin and `tl setup`/`tl update` continue independently.
-When a user explicitly requests the CLI, `tl-mcp` defers to the CLI skill. When
-both skills are available, the distinct name permits explicit `$tl-mcp` selection;
-automatic selection remains a host/model decision. MCP offers no report creation,
-purchase, payment or campaign-editing workflow.
+| MCP skill | Purpose | Runtime |
+|---|---|---|
+| `tl-mcp` | General YouTube research and discovery | Connected MCP tools |
+| `tl-keyword-research-mcp` | Validated filters, trend videos and channel targets | MCP, Python, writable files, host classifiers where required |
+| `tl-channel-authenticity-mcp` | Complete engagement, curve, integrity and comment audit | MCP, Python, writable files, yt-dlp/YouTube access, two independent classifier calls |
 
-## Git installation and updates
+Authenticate through the host connection flow. The account's access and query
+credits still apply; no tokens belong in scripts, receipts or the repository.
+Advanced skills require executable scripts, but no TL CLI installation or CLI
+authentication. An unsupported runtime cannot complete those workflows merely by
+loading their text. Actual target-host validation remains a release gate.
 
-After this PR is merged, add the repository marketplace and install its plugin:
+The existing CLI, Claude plugin and `tl setup`/`tl update` remain separate.
+Explicit CLI requests select existing CLI skills. Distinct MCP names allow
+explicit selection and avoid overwriting installed CLI skills. Automatic
+activation with both installed is still a host/model behavior to validate.
+
+## Maintained sources
+
+`scripts/build_mcp_plugin.py` declares a reviewed dependency manifest, rather than
+copying every file under `skills/`:
+
+- `skills/tl-keyword-research/` and `skills/tl-channel-authenticity/` own the full
+  methodology, processing scripts and references. Their bodies are generated
+  verbatim into each MCP skill's `references/methodology.md`; command examples
+  identify scripts/arguments, while the explicit MCP runtime guide governs how
+  they execute. No regex command translation or second scoring implementation.
+- `skills/_shared/tl_data.py` owns data operations and full result envelopes;
+  `skills/_shared/mcp_run.py` owns the request/receipt runner. Both are copied
+  verbatim into each generated `scripts/` directory, so standalone imports work
+  without a sibling shared directory surviving installation. The same generator
+  also vendors `tl_data.py` into both canonical complex skill directories for
+  CLI installers, which copy standalone skills and do not copy `_shared`.
+- `skills/_shared/references/mcp-runtime.md` owns the execution adaptation.
+  `plugins/thoughtleaders-youtube-data/` owns concise MCP entrypoints and metadata.
+- `agents/*.md` own classifier/research prompts. The explicitly listed prompts
+  are bundled with only their host-specific frontmatter removed.
+- `skills/tl/SKILL.md` supplies an explicit public subset of terminology and the
+  sponsorship matching method. The full internal glossary is not exported.
+  `skills/tl/references/elasticsearch-schema.md` supplies three selected JSON
+  examples. Live schema/tool definitions take precedence over static examples.
+
+Copies in the generated distribution are release artifacts, not independently
+maintained source. Change canonical files and regenerate. Tests reject source
+or output drift, missing references and unsafe bundled symlinks. Unlisted files
+are excluded from the ZIP. Adding dependencies requires updating the manifest.
+
+## How the shared data boundary works
+
+CLI scripts use the existing CLI provider by default. In an explicit MCP session,
+shared operations prepare typed requests. The host calls the connected MCP tools,
+captures complete JSON responses, and imports them as receipts. The same scripts
+then resume, using prior receipts without issuing the same query again. Preserve
+results, totals, aggregations, highlights, pagination, coverage and error metadata;
+never reconstruct a large response manually from a displayed excerpt.
+
+The concrete invocation is:
+
+```sh
+python3 SKILL_DIR/scripts/mcp_run.py run --session SESSION_DIR \
+  SKILL_DIR/scripts/probe.py --level topic "sustainable fashion"
+python3 SKILL_DIR/scripts/mcp_run.py ingest --session SESSION_DIR \
+  --request REQUEST_ID --response RESPONSE_JSON
+```
+
+Use absolute paths. Repeat the original run until it completes, then read
+`output_path`. For stdin use `--input FILE` before the script path. Split canonical
+shell pipelines into completed output files and subsequent inputs. Sessions bind
+evidence to their source and invocation context; use one new directory per
+workflow/account and restart on expiry or source changes. Nothing passes OAuth
+credentials to Python.
+
+Keyword research retains validation, refinement, intensity and context checks.
+Its report builder returns an inline report URL and config without saving a
+record. Named report persistence is not provided by this MCP package.
+
+Authenticity retains every required evidence group, YouTube comment collection
+and two independent classifier passes. Failed collection is not an empty comment
+section; incomplete/invalid classifier output cannot support a completed audit.
+The classifier prompt is shared, while host execution replaces legacy agent names.
+A backend collector may be needed if the target host cannot reach YouTube; that
+is a deployment decision after runtime validation, not solved by packaging.
+
+## Build and verify
+
+From the repository root:
+
+```sh
+python3 scripts/build_mcp_plugin.py --generate
+python3 scripts/build_mcp_plugin.py
+python3 -m pytest tests/test_mcp_plugin.py
+python3 scripts/build_mcp_plugin.py --output /tmp/thoughtleaders-youtube-data.zip
+```
+
+The ZIP contains the allowlisted files in fixed order, with fixed timestamps and
+modes. A sibling SHA-256 file identifies the artifact. Plugin version `0.2.0`
+tracks this package separately from the CLI release. Build and validation do not
+publish, upload, install or authenticate anything.
+
+## Git installation and static submission
+
+After merge, add the repository marketplace and install its plugin:
 
 ```sh
 codex plugin marketplace add ThoughtLeaders-io/thoughtleaders-cli --ref main
 codex plugin add thoughtleaders-youtube-data@thoughtleaders-mcp
 ```
 
-For pre-merge review, use `--ref feature/mcp-skill-distribution` instead of `main`.
-A full checkout is intentional: the marketplace references `plugins/` and the
-maintained generator reads canonical references. For reproducible review, pin a
-commit with `--ref <commit>` instead of following a moving branch.
+For review, pin the implementation commit with `--ref <commit>` instead of `main`.
+A full checkout includes the marketplace and generated plugin files. Refresh a
+tracked source with `codex plugin marketplace upgrade thoughtleaders-mcp`, then
+use the host update/reinstall flow and start a new task. Pinned refs stay pinned.
+Python package installation does not configure this MCP plugin.
 
-Refresh a tracked Git source with:
+For the public With MCP submission, retain the remote endpoint and upload the
+built package using the portal controls. Skill content is a reviewed static
+snapshot: updating Git does not update the submission. Ship only after the
+actual target host passes authenticated workflow checks, including complete JSON
+receipt transfer, representative keyword refinement, comment retrieval and both
+classifier passes. Fixture parity and packaging tests establish source and local
+processing behavior, not live host compatibility or portal acceptance.
 
-```sh
-codex plugin marketplace upgrade thoughtleaders-mcp
-```
-
-Then use the client's plugin update/reinstall flow and start a new task to pick
-up skills. A pinned commit stays pinned; choose a new ref when changing versions.
-These commands configure the user's client only when they run them; building or
-installing the Python package does not configure the MCP plugin.
-
-## Maintained sources and upload artifact
-
-- `plugins/thoughtleaders-youtube-data/` owns MCP-specific guidance and metadata.
-- `skills/tl/references/elasticsearch-schema.md` remains the canonical home of
-  shared ES examples. The generator extracts only three selected JSON bodies,
-  removing their exact CLI wrapper. It does not copy private prose, full schema
-  catalogues, the business glossary, scripts or role-specific workflows.
-- `query-examples.md` is generated. Edit the canonical source and regenerate;
-  never independently edit the generated copy. Missing/duplicate headings or an
-  unfamiliar wrapper fail generation. Live `tl_schema_*` results take precedence
-  over static examples for current fields, permissions and query rules.
-
-From the repository root:
-
-```sh
-python scripts/build_mcp_plugin.py --generate
-python scripts/build_mcp_plugin.py
-python scripts/build_mcp_plugin.py --output /tmp/thoughtleaders-youtube-data.zip
-```
-
-The ZIP contains only the explicitly allowlisted plugin files, with fixed order,
-timestamps and modes, plus a sibling SHA-256 file. CI checks reference drift and
-bundle boundaries. The same maintained plugin source supplies Git installations
-and the upload; no second skill source is maintained. The Codex compatibility
-manifest version tracks this plugin, independently of the unchanged CLI release.
-
-For the existing **With MCP** public submission, retain the remote endpoint and
-upload the generated bundle as skills/package material using the portal's current
-upload controls. The public listing's skill content is a reviewed snapshot:
-refreshing a Git marketplace does not update that public submission. This build
-neither uploads nor submits anything. Portal acceptance, OAuth, and authenticated
-research in a newly installed client require separate verification.
-
-Official references: [package plugins](https://developers.openai.com/plugins/build/plugins)
-and [submit plugins](https://developers.openai.com/plugins/deploy/submission).
+Official references: [build skills](https://developers.openai.com/plugins/build/skills),
+[package plugins](https://developers.openai.com/plugins/build/plugins), and
+[submit plugins](https://developers.openai.com/plugins/deploy/submission).

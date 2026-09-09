@@ -1,7 +1,7 @@
 {
   "name": "thoughtleaders-youtube-data",
-  "version": "0.1.0",
-  "description": "YouTube transcripts, brand mentions, performance history and discovery for sponsorship intelligence and content research.",
+  "version": "0.2.0",
+  "description": "YouTube research, validated keyword filters and complete channel authenticity workflows using shared ThoughtLeaders skills.",
   "author": {
     "name": "ThoughtLeaders Ltd."
   },
@@ -9,14 +9,14 @@
   "interface": {
     "displayName": "ThoughtLeaders - YouTube Data",
     "shortDescription": "Research YouTube content, creators and sponsorships.",
-    "longDescription": "YouTube transcripts, brand mentions, performance history and discovery for sponsorship intelligence and content research.",
+    "longDescription": "YouTube research, validated keyword filters and complete channel authenticity workflows using shared ThoughtLeaders skills.",
     "developerName": "ThoughtLeaders Ltd.",
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": [
       "Find YouTube channels similar to Marques Brownlee.",
-      "Find recent YouTube transcript mentions of Surfshark.",
-      "Show how a YouTube video\u2019s views grew over time."
+      "Build a validated keyword filter and channel shortlist for sustainable fashion.",
+      "Audit a YouTube channel for suspicious views and bot comments."
     ],
     "websiteURL": "https://thoughtleaders.io"
   },

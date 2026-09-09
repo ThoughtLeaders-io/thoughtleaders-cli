@@ -13,6 +13,13 @@ This skill uses MCP tools directly. It does not require the ThoughtLeaders CLI,
 a terminal, or other installed skills. When the user explicitly chooses the CLI,
 use that interface and its CLI skill instead.
 
+Read [shared terminology and methodology](references/methodology.md) for the
+canonical research concepts. For content topics and validated filters, route to
+`tl-keyword-research-mcp`. For fake views, bot comments or channel vetting, route
+to `tl-channel-authenticity-mcp`. Both advanced skills include their full scripts
+and have additional runtime requirements; read their entrypoints before starting.
+Do not approximate their required validation with a few raw queries.
+
 ## Start with the question and access
 
 Call `tl_whoami` once at the start of the research session to establish account
