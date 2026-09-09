@@ -604,24 +604,6 @@ def test_write_context_carries_the_channels_own_description_to_the_extractors(tm
     assert len(ctx["channel_ai_profile"]) == 900 and ctx["channel_ai_profile"].endswith("…")
 
 
-def test_websites_come_from_the_creators_labelled_header_links(tmp_path):
-    """Postgres social_links._other holds the creator's own sites under the
-    labels they wrote; the index's list holds bare platform links. The lane
-    starts at the sites, so they are separated out, and emails never travel."""
-    import channel_context
-    pg = {"_other": {"Turn Anything Into Pizza": "https://pizzafy.com/",
-                     "Second channel": "https://youtube.com/@airrack2"},
-          "_emails": ["zack@example.com"],
-          "instagram": "https://www.instagram.com/airrack/",
-          "tiktok": "https://vm.tiktok.com/ZMRDwC6n5/"}
-    es = ["instagram.com/airrack", "pizzafy.com"]
-    websites, socials = channel_context.websites_and_socials(pg, es)
-    assert websites == [{"label": "Turn Anything Into Pizza", "url": "https://pizzafy.com/"}]
-    assert socials == ["instagram.com/airrack", "pizzafy.com", "https://vm.tiktok.com/ZMRDwC6n5/"]
-    assert "zack@example.com" not in json.dumps([websites, socials])
-    # nothing from postgres: the index list stands alone
-    assert channel_context.websites_and_socials(None, es) == ([], es)
-
 
 def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
     """The channel's About text and the AI profile come from the ledger meta

@@ -125,14 +125,10 @@ more than the scripts.
    - *(socials ON)* Spawn the identity lane in the same message:
      `general-purpose`, **`model: sonnet`**, about 8 lookups. It runs
      `channel_context.py --channel <id>`, searches the creator's names and
-     reads the linked profiles (`social_links`, plus `websites`: the labelled
-     header links, a personal site or a company). Read what the YouTube page
-     links to; never crawl from one site to the next. A brand appearing on
-     the creator's socials is the brand-site lane's business, never a lane
-     fact here. Put the `social`/`web` fact record and its enums from
-     `profile-spec.md` in its prompt, or it invents labels that `expand`
-     rejects. What it has when extraction finishes is what the merge pass
-     gets; the rest is reported "linked but unread".
+     reads the linked profiles. Put the `social`/`web` fact record and its
+     enums from `profile-spec.md` in its prompt, or it invents labels that
+     `expand` rejects. What it has when extraction finishes is what the merge
+     pass gets; the rest is reported "linked but unread".
    - Second channels are reported, never mined, unless the user asks. A
      deeper round (`--exclude <corpus>/classified.jsonl`, `transcript-mining.md`
      "Entity expansion") is never taken on the skill's own initiative.
@@ -264,7 +260,7 @@ FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… 
 
 Then one line each: the extraction shape (`N sonnet agents × M windows, U
 unjudged; merge: N shards`); the socials lane (`off, N linked platforms
-listed unread` or `on, N websites opened, N sources read`); on CONNECT, the
+listed unread` or `on, N sources read`); on CONNECT, the
 three brand lanes with their wall clock, slowest first (`probe 84 s, site
 61 s, tl-data 40 s`), so a slow lane is always named; the reuse announcement and decision
 when a ledger was found; on PROFILE, the `selected` facts as a short list plus
