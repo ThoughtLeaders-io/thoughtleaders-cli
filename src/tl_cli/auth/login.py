@@ -27,13 +27,34 @@ class _CallbackResult:
     state: str | None = None
 
 
-def login_browser() -> StoredTokens:
+def web_signin_url(config) -> str:
+    """Where the browser goes once the CLI login has completed.
+
+    The platform's `/signin?go=1` jumps straight to Auth0; with the SSO cookie
+    the login just created, that round trip completes silently and leaves the
+    browser signed in to the web platform too. The Chrome extension adopts the
+    web session from that page load, so one login covers all three surfaces.
+    `from=cli` lets the platform land on a page that says so.
+    """
+    return f"{config.api_url.rstrip('/')}/signin?go=1&from=cli"
+
+
+def web_logout_url(config) -> str:
+    """The platform's logout page. It ends the web session and the Auth0 session
+    on the shared domain, so the SSO cookie the CLI login created goes too. The
+    Chrome extension notices the web logout on its own.
+    """
+    return f"{config.api_url.rstrip('/')}/logout"
+
+
+def login_browser(open_browser: bool = True) -> StoredTokens:
     """Run the Auth0 PKCE login flow with a local browser.
 
     1. Generate PKCE pair + state
     2. Start localhost callback server
-    3. Open browser to Auth0 /authorize
-    4. Wait for callback with authorization code
+    3. Open browser to Auth0 /authorize (or just print the URL)
+    4. Wait for callback with authorization code; send the browser on to the
+       platform's sign-in so the web session (and the extension) follow
     5. Exchange code for tokens
     6. Store tokens
     """
@@ -44,7 +65,9 @@ def login_browser() -> StoredTokens:
 
     # Start callback server on the fixed port (must match Auth0 allowed callback URLs)
     from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT
-    server, port = _start_callback_server(result, state, DEFAULT_AUTH0_CALLBACK_PORT)
+    server, port = _start_callback_server(
+        result, state, DEFAULT_AUTH0_CALLBACK_PORT, success_redirect=web_signin_url(config)
+    )
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -61,9 +84,12 @@ def login_browser() -> StoredTokens:
     }
     auth_url = f"https://{config.auth0_domain}/authorize?{urllib.parse.urlencode(params)}"
 
-    console.print("[bold]Opening browser for login...[/bold]")
-    console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
-    webbrowser.open(auth_url)
+    if open_browser:
+        console.print("[bold]Opening browser for login...[/bold]")
+        console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
+        webbrowser.open(auth_url)
+    else:
+        console.print(f"[bold]Open this URL in a browser on this machine:[/bold]\n{auth_url}\n")
 
     # Wait for callback (timeout after 120 seconds)
     deadline = time.time() + 120
@@ -290,9 +316,17 @@ def _extract_email_from_jwt(token: str) -> str | None:
 
 
 def _start_callback_server(
-    result: _CallbackResult, expected_state: str, port: int = 0
+    result: _CallbackResult,
+    expected_state: str,
+    port: int = 0,
+    success_redirect: str | None = None,
 ) -> tuple[http.server.HTTPServer, int]:
-    """Start a temporary HTTP server to receive the OAuth callback."""
+    """Start a temporary HTTP server to receive the OAuth callback.
+
+    On success the browser is redirected to `success_redirect` when given
+    (the platform's sign-in, see `web_signin_url`), otherwise shown a static
+    "you can close this tab" page. Failures always get the static page.
+    """
 
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -324,6 +358,11 @@ def _start_callback_server(
                 return
 
             result.code = code
+            if success_redirect:
+                self.send_response(302)
+                self.send_header("Location", success_redirect)
+                self.end_headers()
+                return
             self._respond(
                 "Login successful! You can close this tab and return to the terminal."
             )

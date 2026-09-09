@@ -2,13 +2,19 @@
 
 import sys
 import time
+import webbrowser
 
 import typer
 from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
 from rich.prompt import Prompt
 
-from tl_cli.auth.login import login_browser, login_device_code, revoke_refresh_token
+from tl_cli.auth.login import (
+    login_browser,
+    login_device_code,
+    revoke_refresh_token,
+    web_logout_url,
+)
 from tl_cli.auth.token_store import KIND_API_KEY, StoredTokens, clear_tokens, load_tokens, save_tokens
 from tl_cli.config import get_config
 
@@ -79,23 +85,57 @@ def _read_masked(prompt: str) -> str:
     return ''.join(buf)
 
 
+LOGIN_METHODS = {"browser": "1", "device": "2", "api-key": "3"}
+
+
+def _interactive() -> bool:
+    """Is a person at a terminal — i.e. may we open a browser window?"""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 @app.command("login", help="Log in to ThoughtLeaders.")
-def login_cmd() -> None:
+def login_cmd(
+    method: str | None = typer.Option(
+        None,
+        "--method",
+        "-m",
+        help="Skip the menu: browser (OAuth2 on this machine), device (code for another "
+        "device), or api-key. Required when there is no terminal to answer the menu.",
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="With the browser method, print the login URL instead of opening a browser. "
+        "For agents and other contexts where a window must not pop up.",
+    ),
+) -> None:
     """Log in to ThoughtLeaders.
 
-    The default flow opens a browser on this machine for OAuth2 (Auth0).
-    A device-code flow is available for headless environments, and a
-    pre-issued API key can be configured for CI/scripts.
+    The default flow opens a browser on this machine for OAuth2 (Auth0). If
+    you are already signed in to the web platform in that browser, it
+    completes without a password; either way it leaves the browser signed in
+    to the platform too, and the Chrome extension follows. A device-code flow
+    is available for headless environments, and a pre-issued API key can be
+    configured for CI/scripts.
     """
-    console.print("[bold]How would you like to authenticate?[/bold]")
-    console.print(
-        "  [cyan]1[/cyan] — OAuth2 in a browser on this machine "
-        "[dim](default — opens a URL in the local browser)[/dim]"
-    )
-    console.print("  [cyan]2[/cyan] — Device code (use a browser on another device)")
-    console.print("  [cyan]3[/cyan] — API key (paste a pre-issued key; for CI / non-interactive use)")
-    console.print()
-    choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
+    if method is not None:
+        if method not in LOGIN_METHODS:
+            console.print(
+                f"[red]Unknown --method {method!r}.[/red] "
+                f"Choose one of: {', '.join(LOGIN_METHODS)}"
+            )
+            raise typer.Exit(1)
+        choice = LOGIN_METHODS[method]
+    else:
+        console.print("[bold]How would you like to authenticate?[/bold]")
+        console.print(
+            "  [cyan]1[/cyan] — OAuth2 in a browser on this machine "
+            "[dim](default — opens a URL in the local browser)[/dim]"
+        )
+        console.print("  [cyan]2[/cyan] — Device code (use a browser on another device)")
+        console.print("  [cyan]3[/cyan] — API key (paste a pre-issued key; for CI / non-interactive use)")
+        console.print()
+        choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
 
     if choice == "3":
         _login_api_key()
@@ -104,7 +144,7 @@ def login_cmd() -> None:
     if choice == "2":
         login_device_code()
     else:
-        login_browser()
+        login_browser(open_browser=not no_browser)
 
 
 def _login_api_key() -> None:
@@ -168,8 +208,17 @@ def _login_api_key() -> None:
 
 
 @app.command("logout")
-def logout_cmd() -> None:
-    """Log out: revoke the refresh token at Auth0, then clear stored tokens."""
+def logout_cmd(
+    local: bool = typer.Option(
+        False,
+        "--local",
+        help="Only clear this machine's credentials. By default logout also signs you "
+        "out of the web platform and the Chrome extension.",
+    ),
+) -> None:
+    """Log out everywhere: revoke the refresh token at Auth0, clear stored
+    tokens, then end the web platform session (which the extension follows).
+    Pass --local to leave the other surfaces signed in."""
     tokens = load_tokens()
     # Revoke the long-lived credential server-side so a leaked/synced copy of
     # the local token store can't keep minting access tokens. Best-effort —
@@ -183,28 +232,46 @@ def logout_cmd() -> None:
                 "[yellow]Could not reach Auth0 to revoke the refresh token; "
                 "clearing local credentials anyway.[/yellow]"
             )
-        # Revoking the refresh token doesn't end the browser SSO session that
-        # the interactive login established. Point the user at Auth0's logout
-        # URL so the next `tl auth login` doesn't silently SSO straight back in.
-        logout_url = f"https://{get_config().auth0_domain}/logout"
-        console.print(f"To end your Auth0 browser session, visit: [cyan]{logout_url}[/cyan]")
     clear_tokens()
     console.print("[green]Logged out successfully.[/green]")
 
+    if local:
+        return
+    # Revoking the refresh token doesn't end the browser session the login
+    # established — on the web platform, at Auth0, or in the extension. The
+    # platform's logout page ends all of those, but only when a real browser
+    # visits it. Drive it when we have one; otherwise hand over the URL rather
+    # than popping a window from an agent or a script.
+    logout_url = web_logout_url(get_config())
+    if _interactive() and webbrowser.open(logout_url):
+        console.print("[dim]Signing you out of the web platform and extension in your browser.[/dim]")
+    else:
+        console.print(
+            f"To also sign out of the web platform and extension, visit: [cyan]{logout_url}[/cyan]"
+        )
+
 
 @app.command("status")
-def status_cmd() -> None:
+def status_cmd(
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print nothing; exit 0 if logged in, 2 otherwise."
+    ),
+) -> None:
     """Show current authentication status."""
     tokens = load_tokens()
     if not tokens:
-        console.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
+        if not quiet:
+            console.print("[yellow]Not logged in.[/yellow] Run: tl auth login")
         raise SystemExit(2)
 
     if tokens.is_expired:
-        console.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
-        console.print("Run: tl auth login")
+        if not quiet:
+            console.print(f"[yellow]Token expired.[/yellow] Logged in as: {tokens.email or 'unknown'}")
+            console.print("Run: tl auth login")
         raise SystemExit(2)
 
+    if quiet:
+        return
     if tokens.is_api_key:
         console.print("[green]Authenticated[/green] via API key.")
     else:
