@@ -6,6 +6,7 @@ import time
 import typer
 from tl_cli._typer_utils import AlphaSortedTyperGroup
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Prompt
 
 from tl_cli.auth.login import (
@@ -109,8 +110,9 @@ def login_cmd(
     no_browser: bool = typer.Option(
         False,
         "--no-browser",
-        help="Browser method only: print the login URL instead of opening a browser. "
-        "Implied when there is no terminal, so a window never pops up at an agent.",
+        help="Browser method only: print the login URL instead of opening a browser, then wait "
+        "up to two minutes for it to be opened on this machine. Implied when there is no "
+        "terminal, so a window never pops up at an agent.",
     ),
 ) -> None:
     """Log in to ThoughtLeaders.
@@ -227,7 +229,13 @@ def logout_cmd(
     browser. Pass --local to leave the other surfaces signed in."""
     tokens = load_tokens()
     if not local and tokens and not tokens.is_api_key:
-        _sign_out_everywhere()
+        if get_config().api_key:
+            console.print(
+                "[yellow]TL_API_KEY is set, so the platform cannot be told about this session; "
+                "the web platform and extension stay signed in.[/yellow]"
+            )
+        else:
+            _sign_out_everywhere()
     # Revoke the long-lived credential server-side so a leaked/synced copy of
     # the local token store can't keep minting access tokens. Best-effort —
     # API-key auth has no refresh token, and an offline revoke must not block
@@ -244,6 +252,11 @@ def logout_cmd(
     console.print("[green]Logged out successfully.[/green]")
 
     if local:
+        return
+    if tokens is None or tokens.is_api_key:
+        # Nothing here ever created a web session: an API key is not one, and
+        # with nothing stored there is nothing whose web counterpart to end.
+        # The browser's own session, whoever's it is, is not ours to close.
         return
     # Revoking the refresh token doesn't end the browser session the login
     # established — on the web platform, at Auth0, or in the extension. The
@@ -264,14 +277,23 @@ def _sign_out_everywhere() -> None:
     platform then refuses every token this sign-in produced — the extension's
     and other CLIs' included — while this command goes on to clear its own.
     Nothing here may stop the local logout, so failures only get a note."""
-    client = get_client()
+    client = None
     try:
+        client = get_client()
         client.post("/auth/sign-out", json_body={})
         console.print("[dim]Signed out everywhere.[/dim]")
-    except (ApiError, SystemExit):
-        console.print("[yellow]Could not reach the platform to sign out everywhere; other surfaces stay signed in until they next check.[/yellow]")
+    except ApiError as e:
+        # The platform answered but would not do it — most likely this session
+        # had already been signed out elsewhere. Its own words say which.
+        console.print(f"[yellow]The platform did not sign you out everywhere: {escape(e.detail)}[/yellow]")
+    except Exception:  # noqa: BLE001 — declared best-effort: nothing may stop the local logout
+        console.print(
+            "[yellow]Could not reach the platform to sign out everywhere; "
+            "other surfaces stay signed in until they next check.[/yellow]"
+        )
     finally:
-        client.close()
+        if client is not None:
+            client.close()
 
 
 @app.command("status")

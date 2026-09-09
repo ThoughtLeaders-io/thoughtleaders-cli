@@ -118,7 +118,12 @@ class TestSignedOutElsewhere:
             with (
                 patch("tl_cli.client.http.load_tokens", return_value=stored or self._stored()),
                 patch.object(client._client, "request", fake_request),
-                patch("tl_cli.client.http.forget_session", lambda rejected_access_token=None: calls.__setitem__("forgot", rejected_access_token)),
+                patch(
+                    "tl_cli.client.http.forget_session",
+                    lambda rejected_access_token=None, rejected_signed_in_at=None: calls.__setitem__(
+                        "forgot", (rejected_access_token, rejected_signed_in_at)
+                    ),
+                ),
                 patch.object(client, "_refresh_and_get_headers", fake_refresh),
             ):
                 try:
@@ -132,7 +137,7 @@ class TestSignedOutElsewhere:
     def test_signed_out_drops_the_refused_token_without_refreshing(self):
         body = {"detail": "You signed out of ThoughtLeaders.", "code": "signed_out"}
         calls, error = self._run(self._resp(401, body))
-        assert calls["forgot"] == "old-jwt"     # the exact token that was refused
+        assert calls["forgot"] == ("old-jwt", None)     # the exact token that was refused
         assert calls["refreshed"] is False
         assert error is not None and error.status_code == 401
         assert error.raw == body
@@ -151,14 +156,16 @@ class TestSignedOutElsewhere:
 
     def test_signed_out_on_the_retry_is_honoured(self):
         # First 401 is a plain expiry, the refreshed token is then refused as
-        # signed out: the verdict is read off the final response.
+        # signed out: the verdict is read off the final response, and the
+        # session is named by the sign-in time that request carried.
         calls, error = self._run(
             self._resp(401, {"detail": "Token has expired"}),
             self._resp(401, {"detail": "You signed out.", "code": "signed_out"}),
-            refreshed_headers={"Authorization": "Bearer fresh-jwt"},
+            refreshed_headers={"Authorization": "Bearer fresh-jwt", "X-TL-Signed-In-At": "1700000000"},
         )
         assert calls["refreshed"] is True
-        assert calls["forgot"] == "fresh-jwt"
+        assert calls["forgot"] == ("fresh-jwt", 1700000000.0)
+        assert calls["requests"][1]["X-TL-Signed-In-At"] == "1700000000"
         assert error is not None and error.raw["code"] == "signed_out"
 
     def test_env_api_key_never_refreshes_or_forgets(self):

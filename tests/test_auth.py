@@ -118,13 +118,15 @@ class TestRevokeRefreshToken:
 
 
 class _FakeClient:
-    def __init__(self, calls, fail=False):
-        self.calls, self.fail = calls, fail
+    def __init__(self, calls, fail=False, refuse=None):
+        self.calls, self.fail, self.refuse = calls, fail, refuse
 
     def post(self, path, json_body=None):
         self.calls["posted"] = path
         if self.fail:
-            raise ApiError(503, "down")
+            raise httpx.ConnectError("offline")
+        if self.refuse:
+            raise ApiError(401, self.refuse, raw={"detail": self.refuse, "code": "signed_out"})
         return {"signed_out_at": "2026-09-09T00:00:00Z"}
 
     def close(self):
@@ -132,8 +134,9 @@ class _FakeClient:
 
 
 class TestLogoutCommand:
-    def _patch(self, monkeypatch, tokens, *, tty=True, browser_opens=True, api_down=False):
+    def _patch(self, monkeypatch, tokens, *, tty=True, browser_opens=True, api_down=False, api_refuses=None):
         calls = {"revoked": None, "cleared": False, "opened": None, "posted": None}
+        monkeypatch.delenv("TL_API_KEY", raising=False)
         monkeypatch.setattr(auth_commands, "load_tokens", lambda: tokens)
         monkeypatch.setattr(auth_commands, "clear_tokens", lambda: calls.__setitem__("cleared", True))
         monkeypatch.setattr(auth_commands, "revoke_refresh_token", lambda rt: calls.__setitem__("revoked", rt) or True)
@@ -141,7 +144,7 @@ class TestLogoutCommand:
             auth_commands, "open_in_browser",
             lambda url: calls.__setitem__("opened", url) or browser_opens,
         )
-        monkeypatch.setattr(auth_commands, "get_client", lambda: _FakeClient(calls, fail=api_down))
+        monkeypatch.setattr(auth_commands, "get_client", lambda: _FakeClient(calls, fail=api_down, refuse=api_refuses))
         monkeypatch.setattr(auth_commands, "_interactive", lambda: tty)
         return calls
 
@@ -149,7 +152,7 @@ class TestLogoutCommand:
         return auth_commands.web_logout_url(auth_commands.get_config())
 
     def test_bearer_logout_revokes_clears_and_ends_web_session(self, monkeypatch) -> None:
-        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
@@ -162,15 +165,17 @@ class TestLogoutCommand:
         assert calls["opened"] == self._web_logout()
         assert "web platform" in result.output
 
-    def test_api_key_logout_skips_revoke_but_still_ends_web_session(self, monkeypatch) -> None:
-        tokens = StoredTokens(access_token="k", refresh_token=None, expires_at=None, email=None, kind=KIND_API_KEY)
+    def test_api_key_logout_only_clears_the_key(self, monkeypatch) -> None:
+        # An API key is not a session: nothing to tell the platform, and no
+        # web session of ours to end — the browser's, if any, is not the key's.
+        tokens = StoredTokens(access_token="k", refresh_token=None, expires_at=9e9, email=None, kind=KIND_API_KEY)
         calls = self._patch(monkeypatch, tokens)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
         assert calls["revoked"] is None   # no refresh token → no Auth0 call
-        assert calls["posted"] is None    # an API key is not a session to end
+        assert calls["posted"] is None
         assert calls["cleared"] is True
-        assert calls["opened"] == self._web_logout()
+        assert calls["opened"] is None
 
     def test_logged_out_already_just_clears(self, monkeypatch) -> None:
         calls = self._patch(monkeypatch, None)
@@ -178,9 +183,10 @@ class TestLogoutCommand:
         assert result.exit_code == 0
         assert calls["revoked"] is None
         assert calls["cleared"] is True
+        assert calls["opened"] is None    # no session of ours to end in the browser
 
     def test_local_leaves_other_surfaces_alone(self, monkeypatch) -> None:
-        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens)
         result = runner.invoke(auth_app, ["logout", "--local"])
         assert result.exit_code == 0
@@ -191,17 +197,40 @@ class TestLogoutCommand:
         assert "/logout" not in result.output
 
     def test_platform_unreachable_still_logs_out_locally(self, monkeypatch) -> None:
-        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        # A transport failure, not an HTTP answer: the platform is simply down.
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens, api_down=True)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
         assert calls["posted"] == "/auth/sign-out"
         assert calls["cleared"] is True
+        assert calls["opened"] == self._web_logout()
         assert "Could not reach the platform" in result.output
+
+    def test_platform_refusing_is_reported_in_its_words(self, monkeypatch) -> None:
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens, api_refuses="You signed out of ThoughtLeaders.")
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["cleared"] is True
+        assert "You signed out of ThoughtLeaders." in result.output
+        assert "Could not reach" not in result.output
+
+    def test_env_api_key_does_not_pretend_to_sign_out_everywhere(self, monkeypatch) -> None:
+        # TL_API_KEY would be what reaches the platform, and an API key cannot
+        # end a session — so say so instead of reporting a refusal as an outage.
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
+        calls = self._patch(monkeypatch, tokens)
+        monkeypatch.setenv("TL_API_KEY", "ci-key")
+        result = runner.invoke(auth_app, ["logout"])
+        assert result.exit_code == 0
+        assert calls["posted"] is None
+        assert calls["cleared"] is True
+        assert "TL_API_KEY" in result.output
 
     def test_no_tty_prints_url_instead_of_opening_browser(self, monkeypatch) -> None:
         # An agent or script must never get a browser window popped at it.
-        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens, tty=False)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
@@ -209,7 +238,7 @@ class TestLogoutCommand:
         assert self._web_logout() in result.output
 
     def test_browser_refusing_falls_back_to_url(self, monkeypatch) -> None:
-        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=None, email="e@x.com")
+        tokens = StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9, email="e@x.com")
         calls = self._patch(monkeypatch, tokens, browser_opens=False)
         result = runner.invoke(auth_app, ["logout"])
         assert result.exit_code == 0
@@ -226,19 +255,35 @@ class TestForgetSession:
         return calls
 
     def test_bearer_revokes_then_clears(self, monkeypatch) -> None:
-        calls = self._patch(monkeypatch, StoredTokens(access_token="a", refresh_token="rt", expires_at=None))
+        calls = self._patch(monkeypatch, StoredTokens(access_token="a", refresh_token="rt", expires_at=9e9))
         auth_login.forget_session(rejected_access_token="a")
         assert calls == {"revoked": "rt", "cleared": True}
 
+    def test_the_same_session_refreshed_by_another_process_is_still_dropped(self, monkeypatch) -> None:
+        # Another `tl` refreshed the store meanwhile: the access token differs,
+        # the session — known by its sign-in time — is the one that was refused.
+        calls = self._patch(
+            monkeypatch, StoredTokens(access_token="rotated", refresh_token="rt2", expires_at=9e9, signed_in_at=1000.0)
+        )
+        auth_login.forget_session(rejected_access_token="old", rejected_signed_in_at=1000.0)
+        assert calls == {"revoked": "rt2", "cleared": True}
+
+    def test_a_newer_sign_in_is_kept_even_if_its_token_matches_nothing(self, monkeypatch) -> None:
+        calls = self._patch(
+            monkeypatch, StoredTokens(access_token="new", refresh_token="rt2", expires_at=9e9, signed_in_at=2000.0)
+        )
+        auth_login.forget_session(rejected_access_token="new", rejected_signed_in_at=1000.0)
+        assert calls == {"revoked": None, "cleared": False}
+
     def test_api_key_is_kept(self, monkeypatch) -> None:
         # An API key is not a session and `tl auth login` cannot get it back.
-        calls = self._patch(monkeypatch, StoredTokens(access_token="k", refresh_token=None, expires_at=None, kind=KIND_API_KEY))
+        calls = self._patch(monkeypatch, StoredTokens(access_token="k", refresh_token=None, expires_at=9e9, kind=KIND_API_KEY))
         auth_login.forget_session(rejected_access_token="k")
         assert calls == {"revoked": None, "cleared": False}
 
     def test_a_newer_session_is_kept(self, monkeypatch) -> None:
         # The verdict was about a token a fresh sign-in has since replaced.
-        calls = self._patch(monkeypatch, StoredTokens(access_token="new", refresh_token="rt2", expires_at=None))
+        calls = self._patch(monkeypatch, StoredTokens(access_token="new", refresh_token="rt2", expires_at=9e9))
         auth_login.forget_session(rejected_access_token="old")
         assert calls == {"revoked": None, "cleared": False}
 
@@ -393,22 +438,50 @@ class TestWebUrls:
         assert auth_login.get_config().auth0_domain == "auth.thoughtleaders.io"
 
 
+def _jwt(**claims) -> str:
+    import base64  # noqa: PLC0415 — test helper
+    import json  # noqa: PLC0415
+    part = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
+    return f"{part({'alg': 'RS256'})}.{part(claims)}.sig"
+
+
 class TestRefreshAccessToken:
-    def test_keeps_who_signed_in_and_when(self, monkeypatch) -> None:
+    def _refresh(self, monkeypatch, old: StoredTokens) -> StoredTokens:
         class _Resp:
             status_code = 200
             def json(self):
-                return {"access_token": "new", "expires_in": 3600}
+                return {"access_token": _jwt(iat=5000), "expires_in": 3600}
         monkeypatch.setattr(auth_login.httpx, "post", lambda *a, **k: _Resp())
         saved = {}
         monkeypatch.setattr(auth_login, "save_tokens", lambda t: saved.setdefault("t", t))
-        old = StoredTokens(access_token="old", refresh_token="rt", expires_at=0.0, email="e@x.com", signed_in_at=123.0)
         new = auth_login.refresh_access_token(old)
-        assert new.access_token == "new"
+        assert saved["t"] is new
+        return new
+
+    def test_keeps_who_signed_in_and_when(self, monkeypatch) -> None:
+        old = StoredTokens(access_token=_jwt(iat=4000), refresh_token="rt", expires_at=0.0, email="e@x.com", signed_in_at=123.0)
+        new = self._refresh(monkeypatch, old)
         assert new.refresh_token == "rt"          # not rotated by this response
         assert new.email == "e@x.com"
         assert new.signed_in_at == 123.0           # the sign-in is older than the token
-        assert saved["t"] is new
+
+    def test_a_store_from_before_sign_in_times_gets_one_from_the_old_token(self, monkeypatch) -> None:
+        # Otherwise such a session would carry no sign-in time forever and its
+        # refreshed tokens would always look newer than any sign-out.
+        old = StoredTokens(access_token=_jwt(iat=4000), refresh_token="rt", expires_at=0.0)
+        assert self._refresh(monkeypatch, old).signed_in_at == 4000.0
+
+
+class TestSignedInTime:
+    def test_comes_from_the_tokens_own_clock(self) -> None:
+        # The issuer's clock is what the platform compares against; a machine
+        # running behind must not look like it signed in before its sign-out.
+        assert auth_login.signed_in_time(_jwt(iat=1700000000)) == 1700000000.0
+
+    def test_falls_back_to_the_local_clock_for_a_non_jwt(self, monkeypatch) -> None:
+        monkeypatch.setattr(auth_login.time, "time", lambda: 42.0)
+        assert auth_login.signed_in_time("opaque") == 42.0
+        assert auth_login.signed_in_time(_jwt(iat=True)) == 42.0
 
 
 class TestSignedOutMessage:
@@ -420,7 +493,7 @@ class TestSignedOutMessage:
         errors.err = buf
         try:
             with pytest.raises(SystemExit) as exc:
-                handle_api_error(ApiError(401, "irrelevant", raw=raw))
+                handle_api_error(ApiError(401, raw.get("detail", ""), raw=raw))
         finally:
             errors.err = original
         assert exc.value.code == 2
@@ -430,6 +503,10 @@ class TestSignedOutMessage:
         out = self._run({"detail": "You signed out of ThoughtLeaders.", "code": "signed_out"})
         assert "You signed out of ThoughtLeaders." in out
         assert "tl auth login" in out
+
+    def test_keeps_a_hint_on_its_own_line(self) -> None:
+        out = self._run({"detail": "You signed out. Try again.", "hint": "Try again.", "code": "signed_out"})
+        assert "Hint:" in out and "Try again." in out
 
     def test_falls_back_when_the_server_sent_no_detail(self) -> None:
         out = self._run({"code": "signed_out"})

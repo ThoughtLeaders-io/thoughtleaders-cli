@@ -69,7 +69,11 @@ class TLClient:
                     headers = request_kwargs["headers"] = refreshed
                     response = self._client.request(method, path, **request_kwargs)
             if response.status_code == 401 and self._error_code(response) == SIGNED_OUT_CODE:
-                forget_session(rejected_access_token=headers["Authorization"].removeprefix("Bearer "))
+                signed_in_at = headers.get(SIGNED_IN_AT_HEADER)
+                forget_session(
+                    rejected_access_token=headers["Authorization"].removeprefix("Bearer "),
+                    rejected_signed_in_at=float(signed_in_at) if signed_in_at else None,
+                )
 
         if response.status_code >= 400:
             detail = self._extract_detail(response)

@@ -1,6 +1,5 @@
 """User-friendly error handling for API responses."""
 
-import json
 import sys
 import traceback
 
@@ -75,9 +74,9 @@ def handle_api_error(error: ApiError) -> None:
             # The user signed out on another surface; the client has already
             # dropped its credentials. Say so in the server's words — escaped,
             # since they are text, not markup — or in ours if it sent none.
-            server_detail = error.raw.get("detail")
-            message = server_detail if isinstance(server_detail, str) and server_detail else SIGNED_OUT_FALLBACK
-            err.print(f"[red]{escape(message)}[/red] Run: tl auth login")
+            server_detail = detail if isinstance(error.raw.get("detail"), str) else ""
+            err.print(f"[red]{escape(server_detail or SIGNED_OUT_FALLBACK)}[/red] Run: tl auth login")
+            _print_hint(hint)
         else:
             err.print("[red]Authentication required.[/red] Run: tl auth login")
         _print_debug(error)
@@ -90,7 +89,7 @@ def handle_api_error(error: ApiError) -> None:
         # everyone. The `tl credits buy` line stays: it is the CLI-native way
         # to act on the refusal, which the server's sentence can't know about.
         if detail:
-            err.print(f"[red]{detail}[/red]")
+            err.print(f"[red]{escape(detail)}[/red]")
         else:
             err.print("[red]Insufficient credits.[/red]")
             err.print("Or visit: https://app.thoughtleaders.io/billing")
@@ -104,12 +103,12 @@ def handle_api_error(error: ApiError) -> None:
         # rest of the 403s — "Superuser only", permission errors — are not
         # plan problems, so "your plan may not include this" was misdirection
         # exactly where the user needed the real reason.
-        err.print(f"[red]Access denied:[/red] {detail}")
+        err.print(f"[red]Access denied:[/red] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)
     elif error.status_code == 404:
-        err.print(f"[yellow]Not found:[/yellow] {detail}")
+        err.print(f"[yellow]Not found:[/yellow] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)
@@ -120,7 +119,7 @@ def handle_api_error(error: ApiError) -> None:
         # thing that tells the user whether to wait, buy credits, or ask for a
         # seat. An edge/WAF 429 carries no detail and keeps the generic wording.
         if detail:
-            err.print(f"[yellow]{detail}[/yellow]")
+            err.print(f"[yellow]{escape(detail)}[/yellow]")
         else:
             err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
         _print_hint(hint)
@@ -131,7 +130,7 @@ def handle_api_error(error: ApiError) -> None:
         _print_debug(error)
         sys.exit(3)
     else:
-        err.print(f"[red]Error ({error.status_code}):[/red] {detail}")
+        err.print(f"[red]Error ({error.status_code}):[/red] {escape(detail)}")
         _print_hint(hint)
         _print_debug(error)
         sys.exit(1)

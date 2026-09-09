@@ -1,6 +1,8 @@
 """Auth0 login flows: browser-based PKCE and headless device code."""
 
+import base64
 import http.server
+import json
 import secrets
 import threading
 import time
@@ -103,6 +105,7 @@ def login_browser(open_browser: bool = True) -> StoredTokens:
     while result.code is None and result.error is None:
         if time.time() > deadline:
             server.shutdown()
+            server.server_close()
             console.print("[red]Login timed out. Please try again.[/red]")
             raise SystemExit(1)
         time.sleep(0.1)
@@ -193,7 +196,7 @@ def login_device_code() -> StoredTokens:
                 refresh_token=token_data.get("refresh_token"),
                 expires_at=time.time() + token_data.get("expires_in", 3600),
                 email=email,
-                signed_in_at=time.time(),
+                signed_in_at=signed_in_time(token_data["access_token"]),
             )
             save_tokens(tokens)
             console.print(f"\n[green]Logged in as {tokens.email or 'unknown'}[/green]")
@@ -229,7 +232,9 @@ def open_in_browser(url: str) -> bool:
         return False
 
 
-def forget_session(rejected_access_token: str | None = None) -> None:
+def forget_session(
+    rejected_access_token: str | None = None, rejected_signed_in_at: float | None = None
+) -> None:
     """Drop this machine's session after the server refused it as signed out.
 
     A 401 with `code: signed_out` means these credentials belong to a session
@@ -237,14 +242,19 @@ def forget_session(rejected_access_token: str | None = None) -> None:
     CLI. Refreshing would only mint another token for it, so the CLI revokes
     its refresh token (best-effort) and clears the store, as `tl auth logout
     --local` does. Two cases are left alone: an API key, which is not a session
-    and cannot be re-obtained by `tl auth login`; and a store that no longer
-    holds `rejected_access_token`, because a new sign-in has replaced the
-    session the verdict was about.
+    and cannot be re-obtained by `tl auth login`; and a store that now holds a
+    different session — a new sign-in has replaced the one the verdict was
+    about. A session is known by when it was signed in, which survives the
+    token refreshes other `tl` processes may have done meanwhile; only a store
+    from before that was recorded is compared by access token.
     """
     tokens = load_tokens()
     if tokens is None or tokens.is_api_key:
         return
-    if rejected_access_token is not None and tokens.access_token != rejected_access_token:
+    if tokens.signed_in_at is not None and rejected_signed_in_at is not None:
+        if int(tokens.signed_in_at) != int(rejected_signed_in_at):
+            return
+    elif rejected_access_token is not None and tokens.access_token != rejected_access_token:
         return
     if tokens.refresh_token:
         revoke_refresh_token(tokens.refresh_token)
@@ -275,7 +285,12 @@ def refresh_access_token(tokens: StoredTokens) -> StoredTokens:
         refresh_token=data.get("refresh_token", tokens.refresh_token),
         expires_at=time.time() + data.get("expires_in", 3600),
         email=tokens.email,
-        signed_in_at=tokens.signed_in_at,
+        # A store from before the sign-in time was recorded gets it from the
+        # token being replaced — the newest moment the session is known to be
+        # at least as old as — so it is not exempt from sign-outs forever.
+        signed_in_at=tokens.signed_in_at
+        if tokens.signed_in_at is not None
+        else signed_in_time(tokens.access_token),
     )
     save_tokens(refreshed)
     return refreshed
@@ -339,24 +354,35 @@ def _exchange_code(
         refresh_token=data.get("refresh_token"),
         expires_at=time.time() + data.get("expires_in", 3600),
         email=email,
-        signed_in_at=time.time(),
+        signed_in_at=signed_in_time(data["access_token"]),
     )
 
 
-def _extract_email_from_jwt(token: str) -> str | None:
-    """Extract email from JWT payload without full verification (already trusted from Auth0)."""
-    import base64
-    import json
-
+def _jwt_claims(token: str) -> dict:
+    """The payload of a JWT without verification (already trusted from Auth0);
+    empty when the string is not a JWT."""
     try:
         payload_part = token.split(".")[1]
-        # Add padding
-        padding = 4 - len(payload_part) % 4
-        payload_part += "=" * padding
-        payload = json.loads(base64.urlsafe_b64decode(payload_part))
-        return payload.get("email")
+        payload_part += "=" * (4 - len(payload_part) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_part))
+        return claims if isinstance(claims, dict) else {}
     except Exception:
-        return None
+        return {}
+
+
+def _extract_email_from_jwt(token: str) -> str | None:
+    email = _jwt_claims(token).get("email")
+    return email if isinstance(email, str) else None
+
+
+def signed_in_time(access_token: str) -> float:
+    """When the session this token belongs to was signed in: the token's own
+    issue time, on the issuer's clock — the same clock the platform compares it
+    with — so a machine whose clock runs behind is not judged to have signed in
+    before its last sign-out and locked out. The local clock is the fallback
+    for a token that is not a JWT."""
+    iat = _jwt_claims(access_token).get("iat")
+    return float(iat) if isinstance(iat, int | float) and not isinstance(iat, bool) else time.time()
 
 
 def _start_callback_server(
