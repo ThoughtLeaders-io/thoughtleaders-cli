@@ -13,7 +13,7 @@ from rich.console import Console
 
 from tl_cli.auth.pkce import generate_pkce_pair
 from tl_cli.auth.token_store import StoredTokens, clear_tokens, load_tokens, save_tokens
-from tl_cli.config import get_config
+from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT, get_config
 
 console = Console(stderr=True)
 
@@ -64,10 +64,17 @@ def login_browser(open_browser: bool = True) -> StoredTokens:
     result = _CallbackResult()
 
     # Start callback server on the fixed port (must match Auth0 allowed callback URLs)
-    from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT
-    server, port = _start_callback_server(
-        result, state, DEFAULT_AUTH0_CALLBACK_PORT, success_redirect=web_signin_url(config)
-    )
+    try:
+        server, port = _start_callback_server(
+            result, state, DEFAULT_AUTH0_CALLBACK_PORT, success_redirect=web_signin_url(config)
+        )
+    except OSError as exc:
+        console.print(
+            f"[red]Could not listen on port {DEFAULT_AUTH0_CALLBACK_PORT} for the login callback "
+            f"({exc.strerror or exc}).[/red] Close whatever is using it, or run: "
+            "tl auth login --method device"
+        )
+        raise SystemExit(1) from exc
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -87,7 +94,7 @@ def login_browser(open_browser: bool = True) -> StoredTokens:
     if open_browser:
         console.print("[bold]Opening browser for login...[/bold]")
         console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
-        webbrowser.open(auth_url)
+        open_in_browser(auth_url)
     else:
         console.print(f"[bold]Open this URL in a browser on this machine:[/bold]\n{auth_url}\n")
 
@@ -101,6 +108,7 @@ def login_browser(open_browser: bool = True) -> StoredTokens:
         time.sleep(0.1)
 
     server.shutdown()
+    server.server_close()
 
     if result.error:
         console.print(f"[red]Login failed: {result.error}[/red]")
@@ -185,6 +193,7 @@ def login_device_code() -> StoredTokens:
                 refresh_token=token_data.get("refresh_token"),
                 expires_at=time.time() + token_data.get("expires_in", 3600),
                 email=email,
+                signed_in_at=time.time(),
             )
             save_tokens(tokens)
             console.print(f"\n[green]Logged in as {tokens.email or 'unknown'}[/green]")
@@ -210,22 +219,41 @@ def login_device_code() -> StoredTokens:
     raise SystemExit(1)
 
 
-def forget_session() -> None:
-    """Drop this machine's credentials for a session the user ended elsewhere.
+def open_in_browser(url: str) -> bool:
+    """Open `url` in the user's browser. False when it could not be opened —
+    a missing or misconfigured browser raises from `webbrowser` on some
+    platforms, and the caller always has a URL to print instead."""
+    try:
+        return webbrowser.open(url)
+    except Exception:  # noqa: BLE001 — anything here just means "print the URL"
+        return False
 
-    The server refuses tokens issued before the user's last sign-out (on the
-    web, from the extension, or from another CLI). Refreshing would only mint
-    another token for that ended session, so the CLI revokes its refresh token
-    (best-effort) and clears the store, exactly as `tl auth logout --local`.
+
+def forget_session(rejected_access_token: str | None = None) -> None:
+    """Drop this machine's session after the server refused it as signed out.
+
+    A 401 with `code: signed_out` means these credentials belong to a session
+    the user has since ended — on the web, from the extension, or from another
+    CLI. Refreshing would only mint another token for it, so the CLI revokes
+    its refresh token (best-effort) and clears the store, as `tl auth logout
+    --local` does. Two cases are left alone: an API key, which is not a session
+    and cannot be re-obtained by `tl auth login`; and a store that no longer
+    holds `rejected_access_token`, because a new sign-in has replaced the
+    session the verdict was about.
     """
     tokens = load_tokens()
-    if tokens and not tokens.is_api_key and tokens.refresh_token:
+    if tokens is None or tokens.is_api_key:
+        return
+    if rejected_access_token is not None and tokens.access_token != rejected_access_token:
+        return
+    if tokens.refresh_token:
         revoke_refresh_token(tokens.refresh_token)
     clear_tokens()
 
 
-def refresh_access_token(refresh_token: str) -> StoredTokens:
-    """Use a refresh token to get a new access token."""
+def refresh_access_token(tokens: StoredTokens) -> StoredTokens:
+    """Use the stored refresh token to get a new access token. Everything else
+    about the session — who signed in, and when — carries over."""
     config = get_config()
 
     response = httpx.post(
@@ -233,7 +261,7 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         json={
             "grant_type": "refresh_token",
             "client_id": config.auth0_client_id,
-            "refresh_token": refresh_token,
+            "refresh_token": tokens.refresh_token,
         },
     )
 
@@ -242,14 +270,15 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         raise SystemExit(2)
 
     data = response.json()
-    tokens = StoredTokens(
+    refreshed = StoredTokens(
         access_token=data["access_token"],
-        refresh_token=data.get("refresh_token", refresh_token),
+        refresh_token=data.get("refresh_token", tokens.refresh_token),
         expires_at=time.time() + data.get("expires_in", 3600),
-        email=None,  # Not returned on refresh
+        email=tokens.email,
+        signed_in_at=tokens.signed_in_at,
     )
-    save_tokens(tokens)
-    return tokens
+    save_tokens(refreshed)
+    return refreshed
 
 
 def revoke_refresh_token(refresh_token: str) -> bool:
@@ -310,6 +339,7 @@ def _exchange_code(
         refresh_token=data.get("refresh_token"),
         expires_at=time.time() + data.get("expires_in", 3600),
         email=email,
+        signed_in_at=time.time(),
     )
 
 

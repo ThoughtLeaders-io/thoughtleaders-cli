@@ -5,8 +5,15 @@ import sys
 import traceback
 
 from rich.console import Console
+from rich.markup import escape
 
 err = Console(stderr=True)
+
+# The server's `code` on a 401 for a session the user ended on another surface.
+# The HTTP client drops the stored credentials when it sees it; this module only
+# has to explain what happened.
+SIGNED_OUT_CODE = "signed_out"
+SIGNED_OUT_FALLBACK = "You signed out of ThoughtLeaders elsewhere."
 
 
 class ApiError(Exception):
@@ -64,10 +71,13 @@ def handle_api_error(error: ApiError) -> None:
     """Print a user-friendly error message and exit with the right code."""
     detail, hint = _split_hint(error)
     if error.status_code == 401:
-        if isinstance(error.raw, dict) and error.raw.get("code") == "signed_out":
+        if isinstance(error.raw, dict) and error.raw.get("code") == SIGNED_OUT_CODE:
             # The user signed out on another surface; the client has already
-            # dropped its credentials. Say so in the server's words.
-            err.print(f"[red]{detail}[/red] Run: tl auth login")
+            # dropped its credentials. Say so in the server's words — escaped,
+            # since they are text, not markup — or in ours if it sent none.
+            server_detail = error.raw.get("detail")
+            message = server_detail if isinstance(server_detail, str) and server_detail else SIGNED_OUT_FALLBACK
+            err.print(f"[red]{escape(message)}[/red] Run: tl auth login")
         else:
             err.print("[red]Authentication required.[/red] Run: tl auth login")
         _print_debug(error)
