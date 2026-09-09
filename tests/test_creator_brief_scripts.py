@@ -266,6 +266,24 @@ def test_the_footer_lists_linked_platforms_and_sibling_channels(tmp_path):
     assert "read (socials lane)" in read and "unread" not in read
 
 
+def test_the_footer_honours_per_link_truth_over_the_lane_flag(tmp_path):
+    """A time-boxed lane reads some linked platforms and not others. Without
+    the per-link lists the footer falls back to the `lanes` flag and calls
+    every platform read, including pages the lane never opened, which is the
+    one claim the honesty strip exists not to make."""
+    meta = dict(_META, lanes="transcripts+socials",
+                context={"social_links": ["https://instagram.com/patterrz",
+                                          "https://tiktok.com/@patterrz"],
+                         "social_links_read": ["https://instagram.com/patterrz"],
+                         "social_links_unread": ["https://tiktok.com/@patterrz"]})
+    footer = _render_conn(tmp_path, _CONN_MD, meta=meta).split(
+        "<h2>About this ledger</h2>")[1]
+    instagram = [ln for ln in footer.split("<li>") if "instagram.com" in ln][0]
+    tiktok = [ln for ln in footer.split("<li>") if "tiktok.com" in ln][0]
+    assert "read (socials lane)" in instagram
+    assert "linked but unread" in tiktok
+
+
 def test_the_meta_header_is_read_from_the_ledger_itself(tmp_path):
     """No --meta: the record is the ledger's first line."""
     html = _render_conn(tmp_path, _CONN_MD)
@@ -399,6 +417,39 @@ def test_write_context_builds_the_extractor_block_from_the_saved_full_context(tm
          "--format-label", "Solo", "--write-context", str(out)],
         capture_output=True, text=True)
     assert bad.returncode != 0
+
+
+def test_set_socials_records_which_links_the_lane_read(tmp_path):
+    """Only the socials lane knows this, and it finishes long after the
+    context is written, so it lands as a patch on context-full.json, which
+    is the file `ledger_meta.py write --context` is pointed at."""
+    full = tmp_path / "context-full.json"
+    full.write_text(json.dumps({"name": "Ali Abdaal",
+                                "social_links": ["https://instagram.com/x",
+                                                 "https://tiktok.com/@x"]}))
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(full),
+         "--social-read", "https://instagram.com/x",
+         "--social-unread", "https://tiktok.com/@x"],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    ctx = json.loads(full.read_text())
+    assert ctx["social_links_read"] == ["https://instagram.com/x"]
+    assert ctx["social_links_unread"] == ["https://tiktok.com/@x"]
+    # everything the file already carried survives the patch
+    assert ctx["name"] == "Ali Abdaal" and len(ctx["social_links"]) == 2
+    # neither list is a refusal: with no answer the page cannot tell them apart
+    bare = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(full)], capture_output=True, text=True)
+    assert bare.returncode != 0
+    missing = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(tmp_path / "nope.json"),
+         "--social-read", "https://instagram.com/x"],
+        capture_output=True, text=True)
+    assert missing.returncode != 0 and "no context file" in missing.stderr
 
 
 def test_youtu_be_shortlinks_are_not_second_channel_candidates():

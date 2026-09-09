@@ -569,6 +569,74 @@ def test_unknown_selected_ids_are_ignored_not_fatal(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# selection: a withheld tier never reaches a brand-facing page
+# --------------------------------------------------------------------------- #
+def test_the_fill_loop_never_tops_up_with_a_withheld_tier(tmp_path):
+    """The fill-to-target loop is the path that bit a live run: no agent
+    nominated the fact, the loop took it because it was next by rank, and
+    `build_html --check` refused the page at the very end. Nothing opts
+    itself in."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("lives on a named street", video="v1", tier="location"),
+        _cluster("has two kids", video="v2", domain="family", tier="children"),
+        _cluster("moved to Austin", video="v3")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    chosen = {k for k, f in facts.items() if f["selected"]}
+    assert len(chosen) == 1
+    assert facts[next(iter(chosen))]["sensitivity"] == "none"
+
+
+def test_an_agent_nomination_of_a_withheld_tier_is_ignored_visibly(tmp_path):
+    """Refused rather than silently dropped: it lands in `selected_ignored`
+    so the run report shows the pick was overruled."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("lives on a named street", video="v1", tier="location")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out, selected=["c001"])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["selected_ignored"] == ["c001"]
+    assert not any(f["selected"] for f in _facts(out).values())
+
+
+def test_a_passing_clinical_mention_is_not_selectable_but_a_recurring_one_is(tmp_path):
+    """`clinical` is usable where the creator made it public themselves,
+    which evidence-rules.md scores as 3+ distinct videos. One mention never
+    is. Same threshold build_html.py's honesty tally already counts by."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("mentioned a diagnosis once", video="v1", domain="health",
+                 tier="clinical"),
+        _cluster("talks about the condition often", video="v2", domain="health",
+                 tier="clinical",
+                 members=[_member("v2", 10), _member("v3", 20), _member("v4", 30)])])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    passing = next(f for f in facts.values() if f["recurrence"] == 1)
+    recurring = next(f for f in facts.values() if f["recurrence"] == 3)
+    assert passing["selected"] is False
+    assert recurring["selected"] is True
+
+
+def test_supersedes_as_a_list_says_what_is_wrong(tmp_path):
+    """It used to report the target as not a kept cluster, which sent a live
+    run's diagnosis the wrong way for a whole re-ask."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("one", video="v1"), _cluster("two", video="v2"),
+        _cluster("three", video="v3")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out,
+                     extra={"c003": {"action": "keep",
+                                     "supersedes": ["c001", "c002"]}})
+    v = _violations(proc)
+    assert "single cluster or fact id" in v["c003"][0]
+    assert "list" in v["c003"][0]
+
+
+# --------------------------------------------------------------------------- #
 # refresh: the state file decides who gets re-judged
 # --------------------------------------------------------------------------- #
 def test_state_round_trip_additive_rejudge_dropped_and_new(tmp_path):
@@ -1011,6 +1079,86 @@ def test_a_patch_that_changes_nothing_exits_3(tmp_path):
     noop.write_text(json.dumps({"decisions": {}}), encoding="utf-8")
     v = _violations(_expand(clustered, [good, noop], tmp_path / "facts.jsonl"))
     assert "changes nothing" in v["_files"][0]
+
+
+def test_identity_facts_are_unioned_across_shard_files(tmp_path):
+    """A sharded merge gives each shard its own slice of the lane. Replacing
+    kept only the last file read: measured on a live run, 7 of 8 records were
+    lost with nothing reported but a lower `identity_facts` count."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("one", video="v1"), _cluster("two", video="v2", domain="home")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity(ref="s1")], name="s1.json")
+    s2 = _envelope(tmp_path, {"c002": {"action": "keep"}},
+                   facts=[_identity(ref="s2", claim="keeps two whippets",
+                                    domain="pets")], name="s2.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, s2], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["identity_facts"] == 2
+    claims = {f["claim"] for f in _facts(out).values()
+              if f.get("provenance") == "social"}
+    assert claims == {"runs a pottery studio in Lisbon", "keeps two whippets"}
+
+
+def test_a_shard_with_no_lane_records_returns_empty_facts_and_drops_nothing(tmp_path):
+    """Splitting the lane by domain means some shards hold none of it. That
+    shard says so with an empty list, and the union stands."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("one", video="v1"), _cluster("two", video="v2", domain="home")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity()], name="s1.json")
+    s2 = _envelope(tmp_path, {"c002": {"action": "keep"}},
+                   facts=[], name="s2.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, s2], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["identity_facts"] == 1
+
+
+def test_a_later_shard_file_wins_per_ref(tmp_path):
+    """Same rule the decisions map already uses, so an exit-3 re-ask can
+    correct one lane record without resending the rest."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity(ref="s1")], name="s1.json")
+    patch = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_identity(ref="s1", claim="runs a pottery studio")],
+                      name="patch.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, patch], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["identity_facts"] == 1
+    social = [f for f in _facts(out).values() if f.get("provenance") == "social"]
+    assert social[0]["claim"] == "runs a pottery studio"
+
+
+def test_an_earlier_shards_corroboration_survives_the_union(tmp_path):
+    """The reason the union matters beyond a count: a lost lane record also
+    loses the cross-lane lift on its transcript twin."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("runs a pottery studio", conf="likely", video="v1"),
+        _cluster("two", video="v2", domain="home")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity(ref="s1", corroborates="c001")], name="s1.json")
+    s2 = _envelope(tmp_path, {"c002": {"action": "keep"}},
+                   facts=[_identity(ref="s2", claim="keeps two whippets",
+                                    domain="pets")], name="s2.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, s2], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert facts["f001"]["confidence"] == "confirmed"
+
+
+def test_a_facts_only_patch_that_changes_nothing_is_still_a_violation(tmp_path):
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    good = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                     facts=[_identity()], name="r1.json")
+    noop = tmp_path / "patch.json"
+    noop.write_text(json.dumps({"decisions": {}, "facts": []}), encoding="utf-8")
+    v = _violations(_expand(clustered, [good, noop], tmp_path / "facts.jsonl"))
+    assert any("changes nothing" in p for p in v["_files"])
 
 
 def test_omitting_facts_leaves_the_earlier_lane_standing(tmp_path):
