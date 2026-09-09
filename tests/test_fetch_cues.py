@@ -76,6 +76,49 @@ def test_clean_drops_a_cut_timed_text_tag_at_a_fragment_start(stub):
     assert start == 10.0
 
 
+@pytest.mark.parametrize("stub", [
+    "text>", "ext>", "xt>", "t>", "/text>",
+    'text start="188.94" dur="5.379">',        # the `<` alone was cut
+    'xt start="53.199">',
+])
+def test_clean_drops_a_tag_NAME_cut_at_a_fragment_start(stub):
+    """The boundary can land inside the tag name, not just its attributes,
+    which leaves `text> move to los angeles` or a whole
+    `text start="188.94" dur="5.379">` at the head of the window."""
+    frag = (f'{stub} move to los angeles and '
+            f'<text start="651.279">so <em>my dad</em> came too</text>')
+    text, hits, start, _, pieces = fetch_cues.clean(frag)
+    assert text == "move to los angeles and so my dad came too", text
+    assert pieces[0][1] == text
+    assert start == 651.28
+    assert "my dad" in hits
+
+
+@pytest.mark.parametrize("tail", [
+    '<text start="651.279',
+    '<text start=',
+    '<tex',
+    '<em',
+    '<',
+])
+def test_clean_drops_an_unterminated_tag_at_a_fragment_end(tail):
+    """Neither CUE_RX nor TAG_RX matches a tag with no closing `>`, so the far
+    boundary used to leave `... my family to go <text start="651.279`."""
+    frag = f'<text start="10">i left my girlfriend my family to go {tail}'
+    text, _, start, _, pieces = fetch_cues.clean(frag)
+    assert text == "i left my girlfriend my family to go", text
+    assert pieces[-1][1] == text
+    assert start == 10.0
+
+
+def test_clean_keeps_an_escaped_less_than_that_is_not_markup():
+    """`&lt;` is prose, not a cut tag: the strip runs before unescaping so a
+    real `<` in the captions survives."""
+    frag = '<text start="10">the answer was &amp;lt;3 honestly</text>'
+    text, _, _, _, _ = fetch_cues.clean(frag)
+    assert text == "the answer was <3 honestly", text
+
+
 def test_clean_reports_em_hits_lowercased_and_deduped():
     frag = ('<text start="12"><em>I grew up</em> in ohio and '
             '<em>i grew up</em> poor, <em>my dad</em> worked nights</text>')

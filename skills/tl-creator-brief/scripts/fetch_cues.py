@@ -151,10 +151,24 @@ _PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
 # ... or inside a timed-text tag, leaving `start="138" dur="3.78">`,
 # `="664.399" dur="2.801">` or a bare `>` in front of the first words
 _PARTIAL_TAG_RX = re.compile(r'^\s*(?:(?:[\w-]*=)?"[^"]*"\s*)*>\s*')
+# ... or inside the tag NAME, which leaves a suffix of `<text ...>` or
+# `</text>` with its opening `<` gone: `text> move to los angeles`, or with
+# the attributes still attached, `text start="188.94" dur="5.379">[Music]`.
+# Only the timed-text tag name is accepted, so prose that happens to hold a
+# `>` survives.
+_PARTIAL_NAME_RX = re.compile(
+    r'^\s*/?(?:text|ext|xt|t)(?:\s+[\w-]+="[^"]*")*\s*>\s*')
+# The far boundary cuts tags too, and an UNTERMINATED tag matches neither
+# CUE_RX nor TAG_RX (both need the closing `>`), so `<text start="651.279` and
+# a bare `<em` used to survive into the window text. Anchored to the end of the
+# last cue only, where a fragment boundary is the only thing that can produce
+# a `<` with no `>` after it.
+_DANGLING_TAG_RX = re.compile(r"<[^>]*$")
 
 
 def _fix_partial_entity(t: str) -> str:
     t = _PARTIAL_TAG_RX.sub("", t, count=1)
+    t = _PARTIAL_NAME_RX.sub("", t, count=1)
     m = _PARTIAL_ENTITY_RX.match(t)
     if not m:
         return t
@@ -181,6 +195,10 @@ def clean(frag: str) -> tuple[str, list[str], float | None, list[str], list[list
     hits = [re.sub(r"\s+", " ", html.unescape(html.unescape(TAG_RX.sub(" ", m)))).strip().lower()
             for m in EM_RX.findall(frag)]
     body = frag.replace("<em>", "").replace("</em>", "")
+    # Before splitting, and before any unescaping: a `&lt;` in the captions has
+    # not become a `<` yet at this point, so the only `<` with no `>` after it
+    # is a tag the far fragment boundary cut in half.
+    body = _DANGLING_TAG_RX.sub("", body)
     parts = CUE_RX.split(body)
     pieces: list[list] = []
     for k in range(1, len(parts) - 1, 2):
