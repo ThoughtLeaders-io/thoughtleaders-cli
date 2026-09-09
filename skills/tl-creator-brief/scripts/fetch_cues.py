@@ -17,7 +17,7 @@ only what is left: a phrase window always outranks a fallback window
 Usage:
     fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
                   [--max-windows 500] [--batch-size N] [--reserve N]
-                  [--generic-floor N] [--fragment-size 600] [--round N]
+                  [--generic-floor N] [--fragment-size 450] [--round N]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
@@ -88,6 +88,13 @@ APOSTROPHE_TOKEN = " 39 "
 RECURRING_PREFIX = "~"          # a phrase that fires in most uploads (greeting, sign-off)
 RECURRING_CAP = 12              # max windows any recurring-bit phrase may supply to the cap
 PHRASE_CAP_SHARE = 0.08         # no single phrase supplies more than this share of the cap
+# Per-phrase weight from cue-phrases.txt (``phrase | 3``): how personal and
+# durable the statement behind the phrase usually is, never which life domain
+# it sits in. It is the ES boost (so the highlighter's fragment slots go to
+# the most personal passages of a video) and the window's rank score.
+PHRASE_WEIGHT_DEFAULT = 1.0
+WEAK_WEIGHT = 0.5
+RANK_CAP = 6.0                  # two top-weight cues saturate a window's cue score
 WEAK_CUES = {"i love", "i hate", "i think that", "my life", "my own", "i always", "i never",
              "personally i", "my favorite", "my favourite", "i believe", "i want", "i play",
              "i watch", "i read", "i listen to", "i can't stand", "my story", "my journey",
@@ -98,21 +105,42 @@ EXTRA_GENERIC = ["i've always", "i've never", "i always", "i never", "i used to"
                  "i live", "i'm from", "my home", "my life", "my whole life", "my own"]
 
 
-def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str]]:
+def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str], dict[str, float]]:
+    """``(phrases, recurring, weights)``. A line is ``phrase``, ``~phrase``
+    (a recurring bit) or ``phrase | weight``; a phrase with no weight gets
+    WEAK_WEIGHT when it is in WEAK_CUES, else PHRASE_WEIGHT_DEFAULT."""
     out: list[str] = []
     recurring: set[str] = set()
+    weights: dict[str, float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        weight = None
+        if "|" in line:
+            line, _, raw = line.rpartition("|")
+            line = line.strip()
+            try:
+                weight = float(raw.strip())
+            except ValueError:
+                raise SystemExit(f"cue-phrases: bad weight {raw.strip()!r} on {line!r}")
         if line.startswith(RECURRING_PREFIX):
             line = line[1:].strip()
             recurring.add(line.lower())
         out.append(line)
+        if weight is not None:
+            weights[line.lower()] = weight
     for g in EXTRA_GENERIC:
         if g not in out:
             out.append(g)
-    return out, recurring
+    return out, recurring, weights
+
+
+def phrase_weight(phrase: str, weights: dict[str, float] | None) -> float:
+    p = phrase.lower()
+    if weights and p in weights:
+        return weights[p]
+    return WEAK_WEIGHT if p in WEAK_CUES else PHRASE_WEIGHT_DEFAULT
 
 
 # a highlight fragment can start inside a doubly-escaped caption entity
@@ -292,11 +320,13 @@ def phrase_variants(phrase: str) -> list[str]:
 
 def query_body(channel: int, phrases: list[str], year: int, size: int,
                fragment_size: int, fragments: int, after: list | None,
-               since: str | None = None) -> dict:
+               since: str | None = None, weights: dict[str, float] | None = None) -> dict:
     """One year bucket of ``match_phrase`` clauses over ``phrases``: the cue
     phrases on the main pass, GENERIC_TERMS on the fallback pass. Nothing else
-    joins the ``should``; a single-token phrase is a plain term match."""
-    should = [{"match_phrase": {"transcript": {"query": v, "boost": 2.0}}}
+    joins the ``should``; a single-token phrase is a plain term match. Each
+    clause's boost is the phrase's weight, so with ``order: score`` the
+    highlighter spends a video's fragment slots on its most personal passages."""
+    should = [{"match_phrase": {"transcript": {"query": v, "boost": phrase_weight(p, weights)}}}
               for p in phrases for v in phrase_variants(p)]
     body = {
         "size": size,
@@ -322,11 +352,13 @@ def query_body(channel: int, phrases: list[str], year: int, size: int,
 
 
 def fetch_year(channel: int, phrases: list[str], year: int, size: int,
-               fragment_size: int, fragments: int, since: str | None = None) -> list[dict]:
+               fragment_size: int, fragments: int, since: str | None = None,
+               weights: dict[str, float] | None = None) -> list[dict]:
     docs: list[dict] = []
     after = None
     while True:
-        body = query_body(channel, phrases, year, size, fragment_size, fragments, after, since)
+        body = query_body(channel, phrases, year, size, fragment_size, fragments, after, since,
+                          weights=weights)
         rows = tl_data.cli_rows(["db", "es", "-", "--json", "--highlight"],
                                 input_text=json.dumps(body))
         docs.extend(rows)
@@ -432,12 +464,13 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     return "brand_mentions"
 
 
-def fetch_all_years(channel: int, phrases: list[str], a, since: str | None) -> list[dict]:
+def fetch_all_years(channel: int, phrases: list[str], a, since: str | None,
+                    weights: dict[str, float] | None = None) -> list[dict]:
     """Every year bucket of one pass, ``a.concurrency`` buckets at a time."""
     docs: list[dict] = []
     with cf.ThreadPoolExecutor(max_workers=a.concurrency) as pool:
         futs = [pool.submit(fetch_year, channel, phrases, y, a.page_size,
-                            a.fragment_size, a.fragments_per_doc, since)
+                            a.fragment_size, a.fragments_per_doc, since, weights)
                 for y in YEARS if not since or y >= int(since[:4])]
         for f in futs:
             docs.extend(f.result())
@@ -446,11 +479,11 @@ def fetch_all_years(channel: int, phrases: list[str], a, since: str | None) -> l
 
 def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, list[int]],
                   seen: dict[str, list[float]], host_lc: set[str], recurring: set[str],
-                  retrieval: str) -> list[dict]:
+                  retrieval: str, weights: dict[str, float] | None = None) -> list[dict]:
     """The passages of one pass's highlight docs, in the window schema.
 
     ``retrieval`` is ``"phrase"`` for the cue-phrase pass, whose windows score
-    on the cues they fired, or ``"generic"`` for the fallback pass, whose
+    on the weights of the cues they fired, or ``"generic"`` for the fallback pass, whose
     windows fired no cue and score on first-person density alone. ``seen`` is
     shared across the passes, so a fallback passage within 30 s of one the
     phrase pass already produced is dropped; ``corpus`` grows in place.
@@ -489,7 +522,7 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 cue_hits = [h for h in hits if h not in host_lc]
                 specific = [h for h in cue_hits if h not in recurring]
                 rec = [h for h in cue_hits if h in recurring]
-                heur = round(min(sum(0.5 if h in WEAK_CUES else 1.0 for h in specific), 4)
+                heur = round(min(sum(phrase_weight(h, weights) for h in specific), RANK_CAP)
                              + 0.5 * min(len(rec), 1) + 2 * len(anchor_hits), 2)
             windows.append({
                 "id": vid, "video_id": vid.split(":", 1)[-1], "title": d.get("title"),
@@ -505,6 +538,7 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 "retrieval": retrieval,
                 "rank_score": heur,
                 "_specific": specific, "_recurring": rec,
+                "_weights": weights,
             })
     return windows
 
@@ -532,7 +566,7 @@ def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int]
         n = per_video.get(w["id"], 0)
         if n >= per_video_cap:
             return False
-        strong = [c for c in w["_specific"] if c not in WEAK_CUES]
+        strong = [c for c in w["_specific"] if phrase_weight(c, w.get("_weights")) >= 1.0]
         if w["_recurring"] and len(strong) < 2 and any(
                 per_phrase.get(c, 0) >= RECURRING_CAP for c in w["_recurring"]):
             return False
@@ -591,7 +625,9 @@ def main() -> int:
                          "ends in the channel id nests it twice")
     ap.add_argument("--phrases", default=str(DEFAULT_PHRASES))
     ap.add_argument("--host-terms", default="")
-    ap.add_argument("--max-windows", type=int, default=500)
+    ap.add_argument("--max-windows", type=int, default=300,
+                    help="passages that reach the model layer in one round; fewer, more "
+                         "personal windows beat more, thinner ones (was 500)")
     ap.add_argument("--batch-size", type=int, default=None,
                     help="windows per batch file (one extractor each); default: enough batches "
                          "to use every concurrent agent the host allows, "
@@ -601,9 +637,10 @@ def main() -> int:
                          "(1 when the socials lane is on). Batches are sized "
                          "against cap minus this, so the last extractor is "
                          "not rejected and relaunched a wave later")
-    ap.add_argument("--fragment-size", type=int, default=600,
+    ap.add_argument("--fragment-size", type=int, default=450,
                     help="highlight width in RAW characters, of which about half is "
-                         "timed-text markup: 600 is about 45 spoken words, 900 about 70")
+                         "timed-text markup: 450 is about 30 spoken words, 600 about 45, "
+                         "900 about 70")
     ap.add_argument("--generic-floor", type=int, default=None,
                     help="run the first-person fallback pass (GENERIC_TERMS) only when the "
                          "cue phrases keep fewer windows than this, and fill just the "
@@ -625,12 +662,12 @@ def main() -> int:
     t0 = time.monotonic()
     since = a.since.strip() or None
 
-    phrases, recurring = load_phrases(pathlib.Path(a.phrases))
+    phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
     host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
     host_lc = {t.lower() for t in host_terms}
     all_phrases = phrases + host_terms
 
-    docs = fetch_all_years(a.channel, all_phrases, a, since)
+    docs = fetch_all_years(a.channel, all_phrases, a, since, weights)
     queries_note = f"{len(YEARS)} year buckets"
     try:
         videos_with_transcript, langs = census(a.channel)
@@ -667,7 +704,7 @@ def main() -> int:
     corpus: dict[str, dict] = {}
     seen: dict[str, list[float]] = {}
     windows = build_windows(docs, corpus=corpus, done=done, seen=seen, host_lc=host_lc,
-                            recurring=recurring, retrieval="phrase")
+                            recurring=recurring, retrieval="phrase", weights=weights)
 
     import store_io  # sibling; parses the timed-text XML into [start, text] cues
     for d in non_en_docs:
@@ -696,7 +733,7 @@ def main() -> int:
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
                 "recurrence_videos": 0, "recurring_phrase": None,
                 "retrieval": "non_english_sample", "rank_score": 1.0,
-                "_specific": [], "_recurring": [],
+                "_specific": [], "_recurring": [], "_weights": None,
             })
     per_video: dict[str, int] = {}
     per_phrase: dict[str, int] = {}
@@ -730,6 +767,7 @@ def main() -> int:
     for w in windows:
         w.pop("_specific", None)
         w.pop("_recurring", None)
+        w.pop("_weights", None)
     sponsor_source = apply_sponsor_spans(kept)
 
     out = pathlib.Path(a.out) / str(a.channel)

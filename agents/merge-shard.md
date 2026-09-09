@@ -57,6 +57,19 @@ So `"action": "tier"`, `"action": "confidence"` and
 `"action": "supersedes"` are all wrong. The action stays `keep`; the
 judgment goes in its own key.
 
+## You own the sensitivity tier
+
+The extractor does not tier. The `tier` on each input line is a keyword hint
+a script attached (`tier_hint.py`: it flags obvious words and errs
+protective), never a judgment. You make the call for every cluster you keep:
+a `keep` with no `tier` key accepts the hint; write `tier` whenever the claim
+touches health, a child, or a precise place and the hint is wrong in either
+direction (a casual allergy hinted `clinical` is `lifestyle`; a diagnosis the
+words did not catch is `clinical`; a child's name or age hinted `none` is
+`children`). The tiers and what they hold are in the evidence rules the
+caller's message carries. Each line's `speaker_evidence`, when present, is
+the extractor's stated reason for its voice call; weigh it, never assume it.
+
 `confidence` takes exactly `confirmed` or `unconfirmed`. `likely` is an
 input value the extractor uses; it is not a decision value. A cap in the
 input can be lowered, never lifted.

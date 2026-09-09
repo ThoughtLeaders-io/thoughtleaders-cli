@@ -261,6 +261,9 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
 .badge-lifestyle { background: var(--badge-lifestyle); }
 .badge-clinical { background: var(--badge-clinical); }
 .badge-withheld { background: var(--badge-withheld); }
+.platform { margin: 0.35rem 0; color: var(--muted, #555); font-size: 0.95em; }
+.platform .k { font-weight: 600; color: inherit; }
+.platform .k::after { content: ":"; }
 .badge-nofit { background: var(--badge-nofit); }
 .empty { color: var(--ink-2); font-style: italic; }
 .links { list-style: none; padding: 0; margin: 0; font-size: .92rem; color: var(--ink-2); }
@@ -685,6 +688,15 @@ def pick_who_flat(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     return out[:max_facts]
 
 
+_MONEY = re.compile(r"[$€£]\s?\d|\d\s?(?:USD|EUR|GBP)\b")
+
+
+def no_money_sentences(text: str) -> str:
+    """The text minus any sentence that carries a currency amount."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return " ".join(p for p in parts if p and not _MONEY.search(p)).strip()
+
+
 def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     picks = pick_who_flat(facts)
     fmt = meta.get("format")
@@ -698,8 +710,21 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     cov = meta.get("coverage") or {}
     if cov.get("facts"):
         lead.append(f"{cov['facts']} facts in the ledger")
+    # What the platform already says about the channel leads the section, so
+    # the ledger facts below only have to add what the videos prove. Public
+    # text, but it is forwarded with the page, so a sentence carrying a
+    # currency amount is dropped rather than shown.
+    ctx = meta.get("context") or {}
+    platform = []
+    for key, label in (("about_text", "From the channel"),
+                       ("generated_profile", "Platform profile")):
+        text = no_money_sentences(str(ctx.get(key) or ""))
+        if text:
+            platform.append(f'<p class="platform"><span class="k">{label}</span> '
+                            f'{html.escape(text)}</p>')
     head = ('<h2>Who they are</h2>'
             + (f'<div class="about">{intro_html}</div>' if intro_html else "")
+            + "".join(platform)
             + (f'<ul class="meta">{"".join(f"<li>{html.escape(x)}</li>" for x in lead)}</ul>'
                if lead else ""))
     if not picks:

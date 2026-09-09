@@ -132,6 +132,16 @@ diagnosed with X", and that difference is the whole judgment:
 - **Only `clinical`, `children` and `location` are withheld from connection
   angles by default.** They still appear in the profile, so the human reading
   it knows they exist.
+- **Withheld is withheld from angles, not from the warnings.** "Where this
+  could go wrong" exists to say what NOT to pitch, and the withheld tiers are
+  where that knowledge lives: a creator who talks about sobriety must not be
+  handed a hangover-cure read, a creator with a chronic condition must not be
+  asked to joke about it. So every tier, withheld ones included, is read when
+  that section is written. State the risk at the level of the fact's kind,
+  never its detail: "talks about their own sobriety" is the warning, the
+  clinic and the dates are not; "has young children whose names come up" is
+  the warning, the names are not; "has named where they live" is the
+  warning, the street is not. Nothing in that section is an angle.
 - **`clinical` is usable when the creator made it public themselves**: when
   they discuss it repeatedly (3+ distinct videos) or frame it as part of
   their story, it may be used in an angle. One passing mention never is.
@@ -142,6 +152,14 @@ diagnosed with X", and that difference is the whole judgment:
 
 `sensitive: true` survives in the ledger as the derived boolean (true exactly
 for the withheld tiers) so older readers keep working; the tier is the fact.
+
+**Who tiers.** Not the extractor: its job is who is talking and what they
+said, and a fact it withheld could never be protected or used later.
+`assemble_extracts.py` attaches a keyword hint (`tier_hint.py`, protective by
+design) to every gem; the merge shard sees it as `tier` on its input line and
+owns the final call; `merge_pass.py expand` falls back to the hint when the
+shard said nothing. So a run's tiers are decided once, at the end, with the
+whole cluster in view.
 
 ## Contradictions and staleness
 

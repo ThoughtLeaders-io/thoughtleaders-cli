@@ -482,3 +482,45 @@ def test_coverage_is_compared_unrounded(tmp_path):
     # 474/499 = 0.94990 rounds to 0.950 but is below the 0.95 threshold
     proc, summary, _ = _run_many(tmp_path, 499, bad=list(range(25)))
     assert summary["coverage"] == 0.95 and proc.returncode == 3
+
+
+# --------------------------------------------------------------------------- #
+# the extractor no longer tiers: the assembler hints, the merge pass owns it
+# --------------------------------------------------------------------------- #
+def test_an_untiered_gem_gets_a_keyword_hint_and_says_so(tmp_path):
+    wins = [_window(0), _window(1), _window(2), _window(3)]
+    gems = [_gem(0, wins[0], claim="was diagnosed with ADHD", notable="ADHD diagnosis"),
+            _gem(1, wins[1], claim="daughter is named Maple", notable="daughter Maple"),
+            _gem(2, wins[2], claim="wears glasses", notable="glasses"),
+            _gem(3, wins[3])]                                   # father ran a bakery
+    for g in gems:
+        g.pop("sensitivity")
+        g["speaker_evidence"] = "solo channel, first person"
+    _, _, _, _, cands, _ = _run(tmp_path, wins, {"batch": "000", "windows": 4,
+                                                   "gems": gems, "not_gems": []})
+    got = {c["claim"]: (c["sensitivity"], c["sensitive"], c["sensitivity_source"]) for c in cands}
+    assert got == {"was diagnosed with ADHD": ("clinical", True, "heuristic"),
+                   "daughter is named Maple": ("children", True, "heuristic"),
+                   "wears glasses": ("lifestyle", False, "heuristic"),
+                   "father ran a bakery in Ohio": ("none", False, "heuristic")}
+    assert all(c["speaker_evidence"] == "solo channel, first person" for c in cands)
+
+
+def test_a_tier_an_extractor_did_send_is_kept_and_attributed(tmp_path):
+    wins = [_window(0)]
+    _, _, _, _, cands, _ = _run(tmp_path, wins, {"batch": "000", "windows": 1,
+                                                   "gems": [_gem(0, wins[0], sensitivity="lifestyle")],
+                                                   "not_gems": []})
+    assert cands[0]["sensitivity"] == "lifestyle" and cands[0]["sensitivity_source"] == "extractor"
+
+
+def test_the_hint_errs_protective_and_never_tiers_a_parent_as_children():
+    import tier_hint
+    assert tier_hint.tier_for("takes medication for anxiety") == "clinical"
+    assert tier_hint.tier_for("has two kids") == "none"                # being a parent
+    assert tier_hint.tier_for("son just turned seven") == "children"
+    assert tier_hint.tier_for("lives on Elm Street") == "location"
+    assert tier_hint.tier_for("lives in Austin") == "none"             # city is ordinary
+    assert tier_hint.tier_for("quit drinking two years ago") == "lifestyle"
+    assert tier_hint.tier_for("went to rehab") == "clinical"
+    assert tier_hint.tier_for(None, "", "grew up in Ohio") == "none"

@@ -5,7 +5,7 @@ and the candidate facts, validating the contract mechanically.
 Each extractor agent produces ``<returns>/batch-NNN.extract.json``:
     {"batch": "NNN", "windows": N,
      "gems":     [{"i", "start", "anchor", "life_domain", "speaker_guess",
-                   "sensitivity", "entity_corrections", "notable", "claim",
+                   "speaker_evidence", "entity_corrections", "notable", "claim",
                    "quote_span": {"first", "last"}, "confidence"}],
      "not_gems": [{"i", "speaker_guess", "reason"}]}
 
@@ -13,7 +13,11 @@ Checks per batch: every index 0..N-1 exactly once; ``start`` and ``anchor``
 match the window they claim (``start`` is a hard check; the five-word anchor
 is advisory because extractors normalise punctuation); enums valid; the quote
 span resolves to a contiguous 4-45-word substring of the window text, which
-is cut mechanically so every quote is verbatim by construction. Windows an
+is cut mechanically so every quote is verbatim by construction. The extractor
+does not tier sensitivity: every gem gets a keyword ``sensitivity`` hint here
+(``tier_hint.py``, ``sensitivity_source: "heuristic"``), which the merge pass
+owns from then on; a tier an old-schema extractor did send is validated and
+kept (``sensitivity_source: "extractor"``). Windows an
 extractor skipped, or whose verdict failed a check, are **unjudged**: they
 stay out of every output file (so a later ``--exclude`` round can still pick
 them up) and are listed in ``respawn.json`` in case a caller wants to
@@ -43,6 +47,9 @@ import pathlib
 import re
 import sys
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import tier_hint  # noqa: E402  sibling: the keyword sensitivity hint
 
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health", "habits",
            "tastes", "beliefs", "relationships", "other"}
@@ -203,8 +210,8 @@ def main() -> int:
                 problems.append("speaker")
             if v.get("life_domain") not in DOMAINS:
                 problems.append("domain")
-            if v.get("sensitivity") not in SENSITIVITY:
-                problems.append("sensitivity")
+            if v.get("sensitivity") is not None and v.get("sensitivity") not in SENSITIVITY:
+                problems.append("sensitivity")     # present but not a tier: stale schema
             q = extract_span(w["text"], v.get("quote_span"))
             if q is None:
                 problems.append("span")
@@ -217,6 +224,11 @@ def main() -> int:
             v = dict(v)
             v["self_disclosure"] = True
             v["quote"] = q
+            if v.get("sensitivity") is None:
+                v["sensitivity"] = tier_hint.tier_for(v.get("claim"), v.get("notable"), q)
+                v["sensitivity_source"] = "heuristic"
+            else:
+                v["sensitivity_source"] = "extractor"
             v["sensitive"] = v["sensitivity"] in WITHHELD
             rows.append({"window": w, "verdict": v, "error": None})
             if v["speaker_guess"] in ("host", "unclear"):
@@ -226,7 +238,9 @@ def main() -> int:
                               "provenance": "transcript", "quote": q, "video": w["id"], "start": w["start"],
                               "published": w.get("published"), "confidence": v.get("confidence"),
                               "sensitivity": v["sensitivity"], "sensitive": v["sensitive"],
+                              "sensitivity_source": v["sensitivity_source"],
                               "speaker_guess": v["speaker_guess"], "notable": v.get("notable"),
+                              "speaker_evidence": v.get("speaker_evidence"),
                               "entity_corrections": v.get("entity_corrections") or {}})
         if bad_idx:
             respawn[n] = sorted(bad_idx)

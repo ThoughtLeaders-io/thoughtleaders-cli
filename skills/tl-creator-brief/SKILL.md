@@ -125,10 +125,14 @@ more than the scripts.
    - *(socials ON)* Spawn the identity lane in the same message:
      `general-purpose`, **`model: sonnet`**, about 8 lookups. It runs
      `channel_context.py --channel <id>`, searches the creator's names and
-     reads the linked profiles. Put the `social`/`web` fact record and its
-     enums from `profile-spec.md` in its prompt, or it invents labels that
-     `expand` rejects. What it has when extraction finishes is what the merge
-     pass gets; the rest is reported "linked but unread".
+     reads the linked profiles (`social_links`, plus `websites`: the labelled
+     header links, a personal site or a company). Read what the YouTube page
+     links to; never crawl from one site to the next. A brand appearing on
+     the creator's socials is the brand-site lane's business, never a lane
+     fact here. Put the `social`/`web` fact record and its enums from
+     `profile-spec.md` in its prompt, or it invents labels that `expand`
+     rejects. What it has when extraction finishes is what the merge pass
+     gets; the rest is reported "linked but unread".
    - Second channels are reported, never mined, unless the user asks. A
      deeper round (`--exclude <corpus>/classified.jsonl`, `transcript-mining.md`
      "Entity expansion") is never taken on the skill's own initiative.
@@ -260,46 +264,58 @@ FUNNEL stage=verify candidates=… verified=… rejected=… passed_through=… 
 
 Then one line each: the extraction shape (`N sonnet agents × M windows, U
 unjudged; merge: N shards`); the socials lane (`off, N linked platforms
-listed unread` or `on, N sources read`); the reuse announcement and decision
+listed unread` or `on, N websites opened, N sources read`); on CONNECT, the
+three brand lanes with their wall clock, slowest first (`probe 84 s, site
+61 s, tl-data 40 s`), so a slow lane is always named; the reuse announcement and decision
 when a ledger was found; on PROFILE, the `selected` facts as a short list plus
 the ledger path. Cost and path never go in a deliverable.
 
 ## Fast run
 
 A run shape, not a flag: PROFILE only, the primary channel only, socials OFF
-without asking, the default 500-window cap, one extraction round.
+without asking, the default 300-window cap, one extraction round.
 
 ## CONNECT pipeline
 
 Run the reuse check first. Then:
 
-1. **Brand read: five agents in ONE message, as soon as the brand resolves**
-   (alongside the merge pass on a build, immediately on a reuse). All five are
-   `general-purpose` with an explicit **`model: sonnet`**, never the inherited
-   model, and need only the channel and brand.
-   - **TL data**: `tl brands find`, category, product description, and
-     `python3 <skill>/scripts/brand_reads.py --brand <id>` for the newest
-     sponsored reads (weight the newest era).
-   - **Sponsorship patterns**: who the brand sponsors and, above all, moments
-     creators already tie it to their own lives. Public signals only.
-   - **Web**: site, search results actually read, recent news.
-   - **Brand social**: the brand's own accounts: campaign themes, how it uses
-     creators, its personal surface (founder story, a cause).
-   - **Category precedent probe**: a channel-scoped transcript search for
-     moments the creator already does what the product enables, without
-     naming the brand. It picks its own terms, returns term counts plus the
-     strongest windows with `&t=` links, and is confirm-only. Three rules:
-     every query in the foreground, never a background job; write
-     `<corpus>/category-probe.json` before any optional deepening, gaps in
-     `coverage.note`; cap every query's result size.
+1. **Brand read: three agents in ONE message, as soon as the brand resolves**
+   (alongside the merge pass on a build, immediately on a reuse). All three
+   are `general-purpose` with an explicit **`model: sonnet`**, never the
+   inherited model, need only the channel and brand, and are quick and light
+   by design: gathering brand information is background, not research.
+   - **TL data** (target under 60 s): `tl brands find`, category, product
+     description, the brand's sponsorship history on the platform (which
+     channels, which eras), and `python3 <skill>/scripts/brand_reads.py
+     --brand <id>` for the newest sponsored reads. Those reads ARE the
+     sponsorship patterns: what creators already say about the product on
+     camera and the moments they tie it to their own lives. No web lookups.
+   - **Brand site** (target under 90 s): the brand's own website (`website`
+     from `tl brands find`) and ONLY the social accounts linked directly from
+     that site. Positioning, product lines, stated audience, founder story or
+     cause, current campaign themes, how it uses creators. Read the site and
+     up to three linked accounts; never search the web for the brand's
+     socials, news or coverage.
+   - **Category precedent probe** (target under 90 s): a channel-scoped
+     transcript search for moments the creator already does what the product
+     enables, without naming the brand (for a hydration drink: the creator's
+     own words on hangovers, workouts, travel dehydration). It picks its own
+     terms, returns term counts plus the strongest windows with `&t=` links,
+     and is confirm-only. Budget: at most 3 ES queries, `size` 10 or less
+     each, one pass, no deepening; write `<corpus>/category-probe.json` with
+     whatever it has, gaps in `coverage.note`. Every query in the foreground,
+     never a background job. It was the slowest lane in run E (349 s, when it
+     ran unbounded), and on a reuse run it is the whole CONNECT critical path.
 
-2. **Connection pass.** Start when the four lanes are in; the probe is a
-   bonus, never a gate. If `category-probe.json` is missing, write the map
+2. **Connection pass.** Start when the TL-data and brand-site lanes are in;
+   the probe is a bonus, never a gate. If `category-probe.json` is missing, write the map
    without category-precedent connections and say so in the run report and
    the page's caveat section. Follow-up queries are confirm-only. Write
    `<corpus>/connections-<brand_id>.md` with the frontmatter and sections in
    `profile-spec.md`, "CONNECT" (About creator, Thesis, About brand, one
-   section per connection strongest first, Where this could go wrong last).
+   section per connection strongest first, Where this could go wrong last,
+   written from the whole ledger including the withheld tiers, as kinds of
+   fact, never details).
    Each quote is a `>` block with its `&t=` link on a `>` continuation line,
    or `--check` fails it. Then:
 
@@ -322,7 +338,10 @@ Run the reuse check first. Then:
 - **One labelled sample read per connection at most.** No scripts, full
   reads, CTA wording or alternate versions.
 - **Sensitivity is a tier** (`evidence-rules.md`): `clinical`, `children`
-  and `location` stay out of connection angles by default. Beliefs are not
+  and `location` stay out of connection angles by default, and they MUST be
+  read for "Where this could go wrong", as the kind of fact, never the
+  detail: knowing what not to say is half the brief. The extractor never
+  tiers; a script hints and the merge pass decides. Beliefs are not
   sensitive. No protected-trait inference, ever.
 - **Verbatim or not at all**; a partial quote match never publishes.
 - **An empty answer is a real answer**: "no evidence found", with the

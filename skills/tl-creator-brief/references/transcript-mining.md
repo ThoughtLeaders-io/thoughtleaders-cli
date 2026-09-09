@@ -61,17 +61,25 @@ reads carries a tag.
 | `--host-terms` | none | comma-separated names/companies; a hit on one is a strong host anchor and scores double |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
-| `--max-windows` | 500 | the cap on what reaches the model layer in one round |
-| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5 — 500 windows make 20 × 25 on the standard 20-agent host |
+| `--max-windows` | 300 | the cap on what reaches the model layer in one round; fewer, more personal windows beat more, thinner ones |
+| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
-| `--fragment-size` / `--fragments-per-doc` | 600 / 10 | passage width in raw characters (about half is markup, so 600 is about 45 spoken words) and how many per video |
+| `--fragment-size` / `--fragments-per-doc` | 450 / 10 | passage width in raw characters (about half is markup, so 450 is about 30 spoken words, a sentence or two around the cue) and how many per video |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
-| `--reserve` | 0 | agent slots held by other lanes during the fan-out (`1` when the socials lane is on). Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 500 windows make 19 × 27 rather than 20 × 25 on a 20-agent host |
+| `--reserve` | 0 | agent slots held by other lanes during the fan-out (`1` when the socials lane is on). Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 19 × 16 rather than 20 × 15 on a 20-agent host |
 | `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
 | `--round` / `--since` | 1 / none | an incremental round: `--round N` batches into `batches-rN/`, `--since <YYYY-MM-DD>` bounds the fetch to uploads after the ledger's `latest_video_date` (without it a round re-pulls every unjudged passage in the catalogue) |
 
-**`cue-phrases.txt`** is one phrase per line, `#` for comments. A leading
+**`cue-phrases.txt`** is one phrase per line, `#` for comments, and
+`phrase | weight` gives each phrase its weight: 3 for a specific durable fact
+about the person ("i was born", "i'm sober"), 2 for a personal relation,
+possession or habit ("my dad", "i go to the gym"), 1 for generic first-person
+framing, 0.5 for weak framing ("i love"). The weight is domain-neutral (a
+health phrase and a work phrase at the same weight are worth the same) and it
+is both the search boost, so the highlighter's slots go to a video's most
+personal passages, and the window's rank, so those are what reach the
+extractors. A leading
 `~` marks a **recurring bit** — a greeting, a sign-off, a channel catchphrase
 that fires in nearly every upload ("~welcome back to", "~my name is"). Those
 still score, but they are capped hard, so a channel's fixed intro can seed a
@@ -108,7 +116,7 @@ them as phrase evidence. `passages` minus `windows_capped` is what stayed out of
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
 
-**A second round is additive, never a re-run.** One round is the 500-window
+**A second round is additive, never a re-run.** One round is the 300-window
 cap spread over every agent the host runs at once. To go deeper —
 or to use host terms the socials lane turned up after the fetch — run
 `fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
@@ -122,7 +130,9 @@ agent (the file name is historical; the role is a **gem extractor**,
 `model: sonnet` — haiku truncated its output at this size in testing). One
 pass decides whether the window is self-disclosure AND writes what it says:
 the third-person claim, the span of the window that proves it, the life
-domain, the speaker guess and the sensitivity tier. The rubric has ONE home:
+domain, and the speaker guess with the evidence that decided it. It does
+not tier sensitivity: `assemble_extracts.py` attaches a keyword hint
+(`tier_hint.py`) and the merge pass owns the tier. The rubric has ONE home:
 `references/extractor-rubric.md`, which names the two `evidence-rules.md`
 sections it applies.
 
@@ -234,7 +244,7 @@ and `respawn.json`. Windows that failed a check or were skipped are
 **unjudged**: they stay out of those files and are listed in
 `respawn.json`. **Coverage decides the exit code**, not perfection: with
 `unjudged / expected` within the `--min-coverage` threshold (default 0.95,
-so up to 25 of 500 windows) it exits **0** and the run continues — a few
+so up to 15 of 300 windows) it exits **0** and the run continues; a few
 lost windows may not even be gems, and they remain reachable through a later
 `--exclude` round (unjudged passages are not in `classified.jsonl`, so the
 next fetch offers them again). It exits **3** only below the threshold, or
@@ -277,7 +287,7 @@ representative included), and the representative is the cluster's
 highest-information member, so nothing the merge pass needs is left behind.
 
 Merging is conservative on purpose: gems must share a life domain, a speaker
-guess and a sensitivity call, their one-line claims must agree — including on
+guess and a sensitivity hint, their one-line claims must agree, including on
 polarity ("has kids" never merges into "does not have kids") and on numbers
 ("has 2 cats" never merges into "has 3 cats") — and every
 member must match every other member. Near-duplicates that fail any of those
@@ -340,8 +350,9 @@ what a script cannot, per `evidence-rules.md`:
   reads);
 - deduplication across clusters the script left apart for good reason but
   which say the same thing about the same fact — a `fold`;
-- the sensitivity tier, **re-tiered where the extractor missed an obvious
-  case** — a stated allergy is `lifestyle`, not `none` and not `clinical`;
+- the sensitivity tier: the input `tier` is a script's keyword hint, and the
+  agent sets the real one for every kept cluster; a stated allergy is
+  `lifestyle`, not `none` and not `clinical`;
 - **dropping any candidate whose claim asserts more than its quote
   supports** — or narrowing the claim to what the quote says; never the
   wider claim;

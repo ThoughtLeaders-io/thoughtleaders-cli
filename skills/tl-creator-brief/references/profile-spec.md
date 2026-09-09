@@ -230,18 +230,22 @@ brand_read_date: 2026-09-02
 The sections, in this order. The renderer reads the order from the file.
 
 **`## About <creator name>`** — two or three sentences on who they are, in
-prose, drawn from the ledger. Not a fact list: the renderer has the ledger and
-renders the honesty strip itself. This leads the page because the reader needs
-to know whose brief they are holding.
+prose. The platform's own description of the channel (its About text and the
+AI profile, carried in the ledger meta as `context.about_text` and
+`context.generated_profile`) is rendered right under this prose by the
+renderer, so do not restate it: say what the ledger adds to it, the person
+behind the premise. Not a fact list: the renderer has the ledger and renders
+the honesty strip itself. This leads the page because the reader needs to
+know whose brief they are holding.
 
 **`## Thesis`** — three or four sentences on why these two fit. The core of
 the page, and the part the reader acts on. It sits **above** the brand
 introduction deliberately: the argument first, the background after.
 
 **`## About <brand name>`** — two or three neutral sentences on what the brand
-is: positioning, product lines, stated audience, written from the **web and
-brand-social lanes and TL's public category / product description only**.
-Never from sponsorship patterns, never a price, never another client's data:
+is: positioning, product lines, stated audience, written from the **brand-site
+lane and TL's public category / product description only**. Never from the
+sponsored-read snippets, never a price, never another client's data:
 this paragraph is forwarded with the page. The renderer shows it as prose, not
 as a card.
 
@@ -273,16 +277,22 @@ holds, in this order:
 
 **`## Where this could go wrong`** — the honest mismatch, always last and
 always present, even on a strong fit. What in the creator's material argues
-against this brand, stated plainly. The renderer keeps it out of the numbered
-connections so it can never be mistaken for an angle.
+against this brand, stated plainly. This section reads the WHOLE ledger,
+withheld tiers included: a sobriety disclosure against a drinks brand, a
+diagnosis against a joke-heavy read, children or a home address against a
+"film at home" ask. Name the kind of fact, never its detail (no names, no
+street, no clinic), per `evidence-rules.md`. The renderer keeps it out of the
+numbered connections so it can never be mistaken for an angle.
 
 Types: **direct** (fact ↔ product), **adjacent** (lifestyle/context fit),
 **category precedent** (the creator already does what the product enables,
-from the confirm-only probe). Facts at sensitivity tier `children` or
-`location` do not appear unless a human opted one in; `clinical` facts
-appear only when the creator discusses them repeatedly (three or more
-videos) or frames them as part of their own story, otherwise they too wait
-for a human opt-in (`evidence-rules.md`). Beliefs are ordinary material.
+from the confirm-only probe). In the connection sections, facts at
+sensitivity tier `children` or `location` do not appear unless a human
+opted one in; `clinical` facts appear only when the creator discusses them
+repeatedly (three or more videos) or frames them as part of their own story,
+otherwise they too wait for a human opt-in (`evidence-rules.md`). The same
+facts DO inform "Where this could go wrong" (above), as what not to say.
+Beliefs are ordinary material.
 
 If nothing honestly connects, the document has the About section and no
 connection sections: a **no fit** verdict in prose, what was searched, and it

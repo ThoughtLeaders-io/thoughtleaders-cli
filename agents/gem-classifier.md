@@ -3,9 +3,10 @@ name: gem-classifier
 description: >
   Extracts creator self-disclosure ("gems") from ONE batch of transcript
   windows for the tl-creator-brief skill: which windows are the creator
-  talking about themselves, whose voice it is, which life domain, how
-  sensitive, plus the third-person claim and the exact span of the window
-  that proves it. Use for the skill's extraction fan-out — one agent per
+  talking about themselves, whose voice it is and what showed that, which
+  life domain, plus the third-person claim and the exact span of the window
+  that proves it. It does not tier sensitivity; the merge pass does. Use for
+  the skill's extraction fan-out, one agent per
   rendered message file from extractor_prompt.py, all spawned in one
   message. Reads that one file, writes one JSON file, returns one line.
 model: sonnet

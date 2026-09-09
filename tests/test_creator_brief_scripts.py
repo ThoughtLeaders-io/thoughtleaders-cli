@@ -410,6 +410,7 @@ def test_write_context_builds_the_extractor_block_from_the_saved_full_context(tm
     assert json.loads(out.read_text()) == {
         "channel_name": "Ali Abdaal", "host_names": ["Ali Abdaal"],
         "known_facts": ["ex-doctor", "lives in London"],
+        "channel_about": None, "channel_ai_profile": None,
         "format_label": "solo", "format_evidence": "fp density 41/1k"}
     # the label is an enum: a near-miss fails here, not in front of 20 agents
     bad = subprocess.run(
@@ -590,3 +591,48 @@ def test_a_render_still_writes_the_page_but_reports_contract_problems(tmp_path):
     assert Path(json.loads(proc.stdout)["html"]).exists()
     assert json.loads(proc.stdout)["problems"]
     assert "PAGE CONTRACT" in proc.stderr
+
+
+def test_write_context_carries_the_channels_own_description_to_the_extractors(tmp_path):
+    """The extractor judges a find against the premise, so it gets what the
+    channel says it is: the About text and the platform's AI profile, clipped."""
+    import channel_context
+    full = {"name": "Airrack", "about_text": "Pizza Enthusiast \n\nBusiness: x@y.com",
+            "generated_profile": "A " * 600}
+    ctx = channel_context.write_context(full, format_label="solo", format_evidence="e")
+    assert ctx["channel_about"] == "Pizza Enthusiast Business: x@y.com"
+    assert len(ctx["channel_ai_profile"]) == 900 and ctx["channel_ai_profile"].endswith("…")
+
+
+def test_websites_come_from_the_creators_labelled_header_links(tmp_path):
+    """Postgres social_links._other holds the creator's own sites under the
+    labels they wrote; the index's list holds bare platform links. The lane
+    starts at the sites, so they are separated out, and emails never travel."""
+    import channel_context
+    pg = {"_other": {"Turn Anything Into Pizza": "https://pizzafy.com/",
+                     "Second channel": "https://youtube.com/@airrack2"},
+          "_emails": ["zack@example.com"],
+          "instagram": "https://www.instagram.com/airrack/",
+          "tiktok": "https://vm.tiktok.com/ZMRDwC6n5/"}
+    es = ["instagram.com/airrack", "pizzafy.com"]
+    websites, socials = channel_context.websites_and_socials(pg, es)
+    assert websites == [{"label": "Turn Anything Into Pizza", "url": "https://pizzafy.com/"}]
+    assert socials == ["instagram.com/airrack", "pizzafy.com", "https://vm.tiktok.com/ZMRDwC6n5/"]
+    assert "zack@example.com" not in json.dumps([websites, socials])
+    # nothing from postgres: the index list stands alone
+    assert channel_context.websites_and_socials(None, es) == ([], es)
+
+
+def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
+    """The channel's About text and the AI profile come from the ledger meta
+    and sit under the About prose, so the connection pass need not restate
+    public knowledge; a sentence with a currency amount never renders."""
+    meta = dict(_META, context={"about_text": "Pizza Enthusiast. Merch is $40 a hoodie. Hiring!",
+                                "generated_profile": "Airrack makes large-scale stunt videos."})
+    html = _render_conn(tmp_path, _CONN_MD, meta=meta)
+    who = html.split("<h2>Who they are</h2>")[1].split("<h2>")[0]
+    assert '<span class="k">From the channel</span> Pizza Enthusiast. Hiring!' in who
+    assert '<span class="k">Platform profile</span> Airrack makes large-scale stunt videos.' in who
+    assert "$40" not in html
+    # the honesty strip still counts the ledger, and no context means no block
+    assert "platform" not in _render_conn(tmp_path, _CONN_MD).split("<h2>Who they are</h2>")[1].split("<h2>")[0]

@@ -88,7 +88,7 @@ TITLE_SECOND_VOICE = {
 def channel_row(channel_id: int) -> dict:
     rows = tl_data.db_pg(
         "SELECT id, channel_name, url, external_channel_id, subscribers, "
-        "total_views, num_uploads, country, language, last_published "
+        "total_views, num_uploads, country, language, last_published, social_links "
         f"FROM thoughtleaders_channel WHERE id = {channel_id}"
     )
     if not rows:
@@ -110,6 +110,45 @@ def channel_doc(channel_id: int) -> dict:
         "collapse": {"field": "id"},
     })
     return rows[0] if rows else {}
+
+
+def _bare(link: str) -> str:
+    """``https://www.instagram.com/airrack/`` -> ``instagram.com/airrack``, the
+    form the index keeps, so the two sources dedupe against each other."""
+    link = re.sub(r"^https?://", "", str(link or "").strip(), flags=re.I)
+    link = re.sub(r"^www\.", "", link, flags=re.I)
+    return link.rstrip("/").lower()
+
+
+def websites_and_socials(pg_links, es_links) -> tuple[list[dict], list[str]]:
+    """The creator's own websites and their platform links, from both stores.
+
+    Postgres ``social_links`` is a dict: platform keys (``instagram``,
+    ``tiktok`` …) and an ``_other`` dict of the LABELLED links the creator put
+    in their channel header (``"Get In Touch": "https://pauljlipsky.com"``,
+    ``"Turn Anything Into Pizza": "https://pizzafy.com/"``). Those labelled
+    links are the creator's websites, and they are where the identity lane
+    starts: the site says who the person is and links the socials worth
+    reading. ``_emails`` is dropped here; a contact address is not a fact
+    about the person. The index's ``social_links`` is a flat list, kept and
+    unioned with the platform links so nothing linked is silently missing.
+    YouTube links are not websites; ``second_channel_candidates`` owns them.
+    """
+    websites: list[dict] = []
+    socials: list[str] = [str(x) for x in (es_links or []) if x]
+    seen = {_bare(x) for x in socials}
+    if isinstance(pg_links, dict):
+        for label, link in (pg_links.get("_other") or {}).items():
+            if not link or YT_LINK.search(str(link)) or "youtu.be/" in str(link):
+                continue
+            websites.append({"label": str(label).strip(), "url": str(link).strip()})
+        for key, link in pg_links.items():
+            if key.startswith("_") or not isinstance(link, str) or not link:
+                continue
+            if _bare(link) not in seen:
+                socials.append(link.strip())
+                seen.add(_bare(link))
+    return websites, socials
 
 
 def _nested(doc: dict, path: str):
@@ -283,10 +322,19 @@ def write_context(full: dict, *, format_label: str, format_evidence: str,
         raise SystemExit(f"--format-label must be one of {', '.join(FORMAT_LABELS)}, "
                          f"got {format_label!r}")
     name = full.get("name") or full.get("channel_name") or ""
+
+    def clip(text, n):
+        text = re.sub(r"\s+", " ", str(text or "")).strip()
+        return (text[: n - 1].rstrip() + "…") if len(text) > n else (text or None)
+
+    # what the channel says it is, so an extractor can tell a find from the
+    # premise and recognise the host's name or business through caption errors
     return {
         "channel_name": name,
         "host_names": host_names or ([name] if name else []),
         "known_facts": known_facts or [],
+        "channel_about": clip(full.get("about_text"), 700),
+        "channel_ai_profile": clip(full.get("generated_profile"), 900),
         "format_label": format_label,
         "format_evidence": format_evidence,
     }
@@ -394,6 +442,7 @@ def main() -> None:
         ap.error("--channel is required")
     row = channel_row(a.channel)
     doc = channel_doc(a.channel)
+    websites, socials = websites_and_socials(row.get("social_links"), doc.get("social_links"))
 
     out = {
         "channel_id": a.channel,
@@ -408,9 +457,12 @@ def main() -> None:
         "last_published": str(row.get("last_published") or "")[:10] or None,
         "generated_profile": _nested(doc, "ai.description"),
         "about_text": doc.get("description"),
-        # the identity & socials lane opens these; a profile that cannot be
-        # read is reported "linked but unread", never silently skipped
-        "social_links": doc.get("social_links") or [],
+        # the links on the creator's YouTube page: the labelled header links
+        # (their websites) and the platform links; the identity lane reads
+        # these directly. A profile that cannot be read is reported "linked
+        # but unread", never silently skipped
+        "websites": websites,
+        "social_links": socials,
         "second_channel_candidates": second_channel_candidates(row, doc),
         "topic_descriptions": _nested(doc, "ai.topic_descriptions"),
         "note": ("format label is called by a model read of a small sample "

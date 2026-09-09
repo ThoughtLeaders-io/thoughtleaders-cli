@@ -57,6 +57,7 @@ import datetime as dt
 import glob
 import gzip
 import json
+import re
 import pathlib
 import sys
 
@@ -112,13 +113,24 @@ def _fetch_summaries(corpus_dir: pathlib.Path) -> list[dict]:
     return out
 
 
+def _clip(text, n: int) -> str | None:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return None
+    return (text[: n - 1].rstrip() + "…") if len(text) > n else text
+
+
 def load_context(path: str | None) -> dict | None:
-    """The parts of channel_context.py's output the connections page's ledger
-    footer still shows: linked platforms and sibling-channel candidates."""
+    """The parts of channel_context.py's output the connections page shows:
+    what the platform already says about the channel (its About text and the
+    AI profile, which lead "Who they are" so the ledger only has to add what
+    the videos prove), linked platforms and sibling-channel candidates."""
     if not path:
         return None
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    return {"social_links": [str(x) for x in (data.get("social_links") or [])],
+    return {"about_text": _clip(data.get("about_text"), 700),
+            "generated_profile": _clip(data.get("generated_profile"), 900),
+            "social_links": [str(x) for x in (data.get("social_links") or [])],
             # A time-boxed socials lane reads some linked platforms and not
             # others; carrying the split keeps the page's honesty strip from
             # reporting an unopened page as read.

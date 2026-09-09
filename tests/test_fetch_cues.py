@@ -592,7 +592,7 @@ def test_latest_upload_is_one_sorted_single_hit_query(monkeypatch):
 def test_phrase_file_marks_recurring_bits_with_a_tilde(tmp_path):
     path = tmp_path / "p.txt"
     path.write_text("# a comment\ni grew up\n~my name is\n\n")
-    phrases, recurring = fetch_cues.load_phrases(path)
+    phrases, recurring, _ = fetch_cues.load_phrases(path)
     assert "my name is" in phrases and "my name is" in recurring
     assert "i grew up" in phrases and "i grew up" not in recurring
     assert "#" not in "".join(phrases)
@@ -835,3 +835,60 @@ def test_the_fallback_query_is_the_generic_terms_as_phrases(monkeypatch):
     assert "i am" in qs and "i was" in qs and "i 39 m" in qs and "i'm" in qs
     assert all(next(iter(c)) == "match_phrase"
                for c in body["query"]["bool"]["must"][0]["bool"]["should"])
+
+
+# --------------------------------------------------------------------------- #
+# per-phrase weights: personal-statement weighted, domain-neutral
+# --------------------------------------------------------------------------- #
+def test_phrase_file_weights_are_read_and_default_by_weakness(tmp_path):
+    p = tmp_path / "phrases.txt"
+    p.write_text("i was born | 3\nmy dad | 2\n~welcome back to\ni believe\ni love\n")
+    phrases, recurring, weights = fetch_cues.load_phrases(p)
+    assert phrases[:5] == ["i was born", "my dad", "welcome back to", "i believe", "i love"]
+    assert recurring == {"welcome back to"}
+    assert weights == {"i was born": 3.0, "my dad": 2.0}
+    assert fetch_cues.phrase_weight("i was born", weights) == 3.0
+    assert fetch_cues.phrase_weight("my hometown", weights) == 1.0   # unweighted, not weak
+    assert fetch_cues.phrase_weight("i love", weights) == 0.5        # unweighted, in WEAK_CUES
+
+
+def test_a_bad_weight_is_refused_at_load(tmp_path):
+    p = tmp_path / "phrases.txt"
+    p.write_text("my dad | heavy\n")
+    with pytest.raises(SystemExit):
+        fetch_cues.load_phrases(p)
+
+
+def test_the_shipped_phrase_file_weights_every_ordinary_phrase():
+    phrases, recurring, weights = fetch_cues.load_phrases(fetch_cues.DEFAULT_PHRASES)
+    shipped = [p for p in phrases if p not in fetch_cues.EXTRA_GENERIC]
+    unweighted = [p for p in shipped if p.lower() not in weights and p.lower() not in recurring]
+    assert unweighted == []
+    assert set(weights.values()) <= {0.5, 1.0, 2.0, 3.0}
+    assert weights["i was born"] == 3.0 and weights["my dad"] == 2.0 and weights["i love"] == 0.5
+
+
+def test_query_boost_is_the_phrase_weight():
+    body = fetch_cues.query_body(42, ["i was born", "my dad", "i love"], 2026, 10, 450, 10, None,
+                                 weights={"i was born": 3.0, "my dad": 2.0})
+    boosts = [c["match_phrase"]["transcript"]["boost"]
+              for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert boosts == [3.0, 2.0, 0.5]
+
+
+def test_a_heavier_phrase_outranks_a_lighter_one_and_two_heavy_ones_saturate(tmp_path, monkeypatch):
+    docs = [_doc("7:v1", [_frag("my dad", 100)]),
+            _doc("7:v2", [_frag("i was born", 100)]),
+            _doc("7:v3", ['<text start="100"><em>i was born</em> in ohio and '
+                          '<em>i grew up</em> on a farm <em>my hometown</em> is tiny</text>'])]
+    _, kept = _run(tmp_path, monkeypatch, docs,
+                   phrases="i was born | 3\ni grew up | 3\nmy hometown | 3\nmy dad | 2\n")
+    assert [w["id"] for w in kept] == ["7:v3", "7:v2", "7:v1"]
+    assert kept[0]["rank_score"] == fetch_cues.RANK_CAP == 6.0     # 9 capped at 6
+    assert kept[1]["rank_score"] == 3.0 and kept[2]["rank_score"] == 2.0
+
+
+def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
+    assert summary["fragment_size"] == 450
+    assert summary["generic_fallback"]["floor"] == 300

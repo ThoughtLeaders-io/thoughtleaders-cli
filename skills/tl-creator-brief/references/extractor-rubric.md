@@ -4,8 +4,10 @@ You read transcript windows from one YouTube channel and, in ONE pass, decide
 which are **self-disclosure gems** — places the creator talks about THEMSELVES
 (history, family, pets, habits, tastes, health, beliefs, work life, opinions)
 rather than about the video's subject — and write out what each gem says: the
-claim, the span of the window that proves it, and how sensitive it is. Your
-output feeds a creator profile that real people act on, so a wrong speaker
+claim, the span of the window that proves it, and whose voice it is with the
+evidence that decided it. That is the whole job. You do not tier sensitivity
+and you do not decide what is publishable; later stages do both. Your output
+feeds a creator profile that real people act on, so a wrong speaker
 attribution is worse than a missed gem, and a claim its quote does not support
 is worse than either.
 
@@ -21,9 +23,11 @@ file and nothing else). After this rubric it carries:
 
 1. The two `evidence-rules.md` sections named below, verbatim.
 2. A context block: the channel name, the host's name(s), known facts about
-   the host, the channel's format label with its evidence (solo / interview /
-   multi-host / faceless-scripted), the batch number and how many windows
-   follow (and, on a subset re-judge, which indexes).
+   the host, the channel's own About text (`channel_about`) and the
+   platform's AI profile of the channel (`channel_ai_profile`, what it covers
+   and how it presents itself), the channel's format label with its evidence
+   (solo / interview / multi-host / faceless-scripted), the batch number and
+   how many windows follow (and, on a subset re-judge, which indexes).
 3. The windows, a JSON array. Each has `i` (its index in the batch), `text`
    (the passage), `start`, `video_id`, `title`, `published`, `language`, a
    per-video `format_hint` (`interview_or_collab`, `reaction`, or null), and
@@ -55,7 +59,18 @@ Applying them to a window batch:
 - `in_sponsor_read` proves host voice. What it disqualifies is narrower than
   the whole window — see the ad-read rule below.
 - When genuinely unsure whose voice it is, say `speaker_guess: "unclear"` —
-  never guess "host" to save a gem.
+  never guess "host" to save a gem. Whatever you decide, `speaker_evidence`
+  says in a few words what decided it (the format, a flag, a name in the
+  window, a question being answered), so the merge pass can see how the
+  call was made.
+- **Read the channel's own description first.** `channel_about` and
+  `channel_ai_profile` are what the channel says it is. Use them for the
+  third test in "What counts as self-disclosure" (a fact the premise already
+  implies is not a find: a cooking channel's host liking food is nothing, the
+  same host having trained as a lawyer is a gem), to recognise the host's
+  name, business or city when captions garble them, and to notice when a
+  window describes the channel rather than the person. A disclosure that
+  contradicts the description is still reported, at `confidence: "likely"`.
 - **Windows come in any language** (each carries a `language` code). Judge
   the window in its source language; write `notable` and `claim` in English;
   report `entity_corrections` the same way. The quote span is cut from the
@@ -86,17 +101,13 @@ fixed greeting, what they call their audience, on-camera habits, stated
 tastes and preferences all count — `life_domain: "habits"`, `"tastes"`, or
 `"other"`. They are how a real profile reads like a person rather than a CV.
 
-**Health is graded, never withheld.** Collect it and tier it:
-- `sensitivity: "lifestyle"` — glasses or contacts, diet, fitness, weight
-  change discussed openly, sleep, skincare, casual allergies, supplements.
-  Ordinary disclosure.
-- `sensitivity: "clinical"` — diagnoses, mental-health conditions, medication,
-  surgery, disability, fertility or pregnancy. Still collected, tiered
-  `clinical`.
-- Being a parent is `life_domain: "family"` at `sensitivity: "none"`;
-  a child's name, age or school is `sensitivity: "children"`.
-- City or country of residence is `sensitivity: "none"`; a street,
-  neighbourhood or building is `sensitivity: "location"`.
+**Health, family and location are collected like everything else.** A
+diagnosis, a child's name, a street, a pregnancy: report the fact exactly as
+you would a favourite food. You do not tier sensitivity and you never omit,
+soften or generalise a fact because it feels private; `assemble_extracts.py`
+attaches a keyword hint and the merge pass decides the tier and what is
+withheld from brand-facing output. A fact you leave out here is a fact no
+later stage can protect or use.
 
 **Durable facts over momentary states.** "Hasn't showered yet today", "has no
 plans tonight", and day-of production notes ("didn't like my makeup in this
@@ -126,7 +137,7 @@ The message's OUTPUT section says whether you Write it to a named file
     "anchor": "so my dad ran a",
     "life_domain": "family",
     "speaker_guess": "host",
-    "sensitivity": "none",
+    "speaker_evidence": "solo channel, first person, no other voice",
     "entity_corrections": {"maddox": "Matiks"},
     "notable": "father ran a bakery",
     "claim": "father ran a bakery in Ohio",
@@ -143,17 +154,19 @@ The message's OUTPUT section says whether you Write it to a named file
 - `life_domain`: one of `origin`, `family`, `pets`, `home`, `work`, `money`,
   `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`.
 - `speaker_guess`: `host`, `guest`, `cohost`, `narration`, or `unclear`.
-- `sensitivity`: `none`, `lifestyle`, `clinical`, `children`, or `location`,
-  per the health rule above.
+- `speaker_evidence`: ≤10 words naming what decided the voice: the format
+  label, `in_sponsor_read`, a `host_anchor`, a name or role in the window, a
+  question being answered, the `format_hint`.
 - `entity_corrections`: caption-misspelled proper nouns you corrected from
   context, `{as_heard: corrected}`; `{}` when none.
 - `notable`: ≤12 words on what it reveals.
 - `claim`: the fact in the third person, ≤15 words, fully supported by the
   span.
 - `quote_span`: `first` = the first four words of the passage you are
-  quoting, `last` = its last four words — a **contiguous 8–30-word passage
-  inside the window text**, copied exactly as the window spells it (the
-  assembler tolerates 4–45 words; aim for 8–30). A script cuts the verbatim
+  quoting, `last` = its last four words, a **contiguous 6 to 20 word passage
+  inside the window text**, the shortest span that fully supports the claim,
+  copied exactly as the window spells it (the assembler tolerates 4 to 45 words;
+  aim for 6 to 20, and widen only when the claim needs it). A script cuts the verbatim
   text between them, so the quote is verbatim by construction; a span it
   cannot find, or a `first`/`last` re-spelled from how the window has it,
   leaves the window unjudged. Copy the words character for character,
