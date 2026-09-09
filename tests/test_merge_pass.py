@@ -252,14 +252,35 @@ def test_unknown_id_is_a_violation(tmp_path):
     assert "c999" in v and "unknown id" in v["c999"][0]
 
 
-def test_fold_across_domains_is_a_violation(tmp_path):
+def test_a_fold_may_cross_a_domain_and_takes_the_targets_domain(tmp_path):
+    """The extractor files each passage on its own, so one fact arrives twice
+    in two domains. Refusing the fold left only a duplicate or a deletion."""
     clustered = _write_clusters(tmp_path, [
-        _cluster("work thing", domain="work", video="v1"),
-        _cluster("pet thing", domain="pets", video="v2")])
+        _cluster("real name is Eric", domain="origin", video="v1"),
+        _cluster("his real name is Eric", domain="other", video="v2")])
     dpath = _decisions(tmp_path, {"c001": {"action": "keep"},
                                   "c002": {"action": "fold", "target": "c001"}})
-    v = _violations(_expand(clustered, dpath, tmp_path / "facts.jsonl"))
-    assert "fold across domains" in v["c002"][0]
+    proc = _expand(clustered, dpath, tmp_path / "facts.jsonl")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(tmp_path / "facts.jsonl")
+    assert len(facts) == 1
+    fact = facts["f001"]
+    assert fact["domain"] == "origin"      # the target's domain, not c002's
+    assert fact["recurrence"] == 2         # both videos pooled into it
+
+
+def test_a_fold_that_crossed_a_domain_is_reported_not_silent(tmp_path):
+    clustered = _write_clusters(tmp_path, [
+        _cluster("a work thing", domain="work", video="v1"),
+        _cluster("a pet thing", domain="pets", video="v2"),
+        _cluster("another work thing", domain="work", video="v3")])
+    dpath = _decisions(tmp_path, {"c001": {"action": "keep"},
+                                  "c002": {"action": "fold", "target": "c001"},
+                                  "c003": {"action": "fold", "target": "c001"}})
+    proc = _expand(clustered, dpath, tmp_path / "facts.jsonl")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    crossed = json.loads(proc.stdout)["folded_across_domains"]
+    assert crossed == ["c002 (pets) -> c001 (work)"]   # c003 stayed in domain
 
 
 def test_fold_into_a_cluster_that_is_not_kept_is_a_violation(tmp_path):
@@ -994,7 +1015,9 @@ def test_a_narrowed_claim_number_is_compared_as_a_token(tmp_path):
     assert "c002" not in v
 
 
-def test_a_fold_into_an_existing_fact_must_share_its_domain(tmp_path):
+def test_a_fold_into_an_existing_fact_may_cross_its_domain(tmp_path):
+    """Same ruling on a refresh: the existing fact keeps its own domain and
+    absorbs the evidence, and the crossing is reported."""
     existing = _existing(tmp_path, [_fact("f001", domain="work")])
     clustered = _write_clusters(tmp_path, [
         _cluster("a pet thing", domain="pets", video="v1"),
@@ -1002,9 +1025,21 @@ def test_a_fold_into_an_existing_fact_must_share_its_domain(tmp_path):
     dpath = _decisions(tmp_path, {"c001": {"action": "fold", "target": "f001"},
                                   "c002": {"action": "fold", "target": "f001"}})
     proc = _expand(clustered, dpath, tmp_path / "facts.jsonl", existing=existing)
-    v = _violations(proc)
-    assert "fold across domains (pets -> work)" in v["c001"][0]
-    assert "c002" not in v
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    crossed = json.loads(proc.stdout)["folded_across_domains"]
+    assert crossed == ["c001 (pets) -> f001 (work)"]
+    assert _facts(tmp_path / "facts.jsonl")["f001"]["domain"] == "work"
+
+
+def test_a_fold_target_that_does_not_exist_is_still_a_violation(tmp_path):
+    """Dropping the domain rule must not drop the target checks with it."""
+    existing = _existing(tmp_path, [_fact("f001", domain="work")])
+    clustered = _write_clusters(tmp_path, [
+        _cluster("a pet thing", domain="pets", video="v1")])
+    dpath = _decisions(tmp_path, {"c001": {"action": "fold", "target": "f404"}})
+    v = _violations(_expand(clustered, dpath, tmp_path / "facts.jsonl",
+                            existing=existing))
+    assert "f404" in v["c001"][0] and "not in --existing" in v["c001"][0]
 
 
 def test_superseding_yourself_after_id_resolution_exits_3(tmp_path):

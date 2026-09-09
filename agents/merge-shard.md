@@ -57,6 +57,14 @@ So `"action": "tier"`, `"action": "confidence"` and
 `"action": "supersedes"` are all wrong. The action stays `keep`; the
 judgment goes in its own key.
 
+**A `fold` may cross a life domain.** The extractor files each passage on its
+own, so one fact often arrives as two candidates in two domains: "his real
+name is X" under `other` and "real name is X" under `origin`. Fold them. The
+merged fact takes the TARGET's domain, so fold into the copy whose domain you
+would want the fact filed under. `expand` reports the crossing and accepts it.
+Your `target` must be a cluster you kept, or on a refresh an existing `f…`
+fact.
+
 ## You own the sensitivity tier
 
 The extractor does not tier. The `tier` on each input line is a keyword hint
@@ -69,6 +77,13 @@ words did not catch is `clinical`; a child's name or age hinted `none` is
 `children`). The tiers and what they hold are in the evidence rules the
 caller's message carries. Each line's `speaker_evidence`, when present, is
 the extractor's stated reason for its voice call; weigh it, never assume it.
+
+**Every record you return in `facts` needs a `sensitivity` of its own**, from
+the same five tiers. The identity lane does not tier its own findings either,
+and unlike a cluster there is no keyword hint standing behind it, so a `facts`
+record with no `sensitivity` is rejected outright and costs the run a re-ask.
+A city or a country is `none`; `location` means a street, a neighbourhood or a
+building. If the caller handed you lane records without the field, add it.
 
 `confidence` takes exactly `confirmed` or `unconfirmed`. `likely` is an
 input value the extractor uses; it is not a decision value. A cap in the
@@ -100,11 +115,16 @@ Every cluster in your shard appears exactly once in `decisions`. Return
 ONE JSON object as your entire final message, no prose and no code fence:
 
 ```json
-{"decisions": {"c001": {"action": "keep"}},
+{"decisions": {"c001": {"action": "keep"},
+               "c002": {"action": "fold", "target": "c001"}},
  "selected": ["c001"],
- "facts": []}
+ "facts": [{"ref": "s1", "provenance": "social", "claim": "runs a pottery studio",
+            "domain": "work", "sensitivity": "none",
+            "source_url": "https://instagram.com/…", "seen_date": "2026-09-02",
+            "corroborates": "c001"}]}
 ```
 
 `selected` nominates only from the domains your shard actually saw.
 `facts` carries the identity lane's records when that lane ran, and is
-`[]` when it did not.
+`[]` when it did not. Every record keeps its `ref` and carries
+`sensitivity`, as above.

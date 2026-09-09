@@ -322,8 +322,9 @@ lift a capped cluster to `confirmed`. Those never reach the agent and are counte
 `auto_dropped`.
 
 **Shard by default.** With `--shards N` the input is split by life domain into
-N files for N agents (folds never cross a domain, so a shard is a complete
-judgment unit), spawned in ONE message like the extraction fan-out. Size N as
+N files for N agents (a fold may cross a domain, but an agent can only fold
+what it can see, so a shard holding whole domains keeps the findable folds
+inside one agent's read), spawned in ONE message like the extraction fan-out. Size N as
 `clusters / 60`, floor 1, ceiling 6. One agent on 226 clusters measured 475 s
 and is the single slowest pass in the pipeline after extraction.
 
@@ -404,8 +405,11 @@ shard with none returns `"facts": []` and drops nothing. A compact input line
 carrying `dropped_members: N` is a cluster
 that gained a passage the last round dropped — it is asked again rather than
 silently joining a fact. `fold`/`supersedes`
-targets are kept clusters in the same domain, or — on a refresh — existing
-`f…` facts. The orchestrator saves the reply as
+targets are kept clusters, or existing `f…` facts on a refresh. A fold MAY
+cross a life domain: the extractor files each passage on its own, so one fact
+routinely arrives as two candidates in two domains, and the merged fact takes
+the target's domain. `expand` counts the crossings in
+`folded_across_domains` rather than refusing them. The orchestrator saves the reply as
 `<corpus>/merge-decisions-rN.json` and runs
 
 ```bash
@@ -415,8 +419,8 @@ python3 <skill>/scripts/merge_pass.py expand \
   [--existing … --state …] [--fallback-original]
 ```
 
-`expand` validates first — totality, unknown ids, targets (a fold into a
-cluster or an existing fact must stay in its domain), fold cycles, a
+`expand` validates first: totality, unknown ids, targets (a fold must name a
+kept cluster, or an existing fact when refreshing), fold cycles, a
 supersession that resolves to the fact itself or a cycle, enums, identity
 records, and a narrowed claim that introduces a number token its quote and
 cluster claim lack — and exits **3** with the offending ids and reasons. The

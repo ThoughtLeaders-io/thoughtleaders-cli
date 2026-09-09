@@ -677,25 +677,22 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         if conf is not None and conf not in CONFIDENCE:
             bad(key, f"confidence must be one of {sorted(CONFIDENCE)}, got {conf!r}")
 
-    # fold targets: a c* target must be a kept cluster in the same domain, an
-    # f* target must exist in the ledger we are refreshing.
+    # fold targets: a c* target must be a kept cluster, an f* target must exist
+    # in the ledger we are refreshing. A fold MAY cross a life domain. The
+    # extractor files each passage independently, so one fact routinely arrives
+    # as two candidates in two domains ("his real name is X" under `other`,
+    # "real name is X" under `origin`); refusing the fold there left the only
+    # options as a duplicate in the ledger or a deleted copy. The merged fact
+    # takes the TARGET's domain, because `fact_from_cluster` builds every record
+    # from the terminal cluster. Crossings are reported rather than silent, so a
+    # run can still see when the extractor's filing disagreed with itself.
     for key, target in folds.items():
         if target.startswith("f"):
             if target not in existing_ids:
                 bad(key, f"fold target {target} is not in --existing")
-            else:
-                src = (by_cid[key].get("verdict") or {}).get("life_domain")
-                dst = (existing[target] or {}).get("domain")
-                if src != dst:
-                    bad(key, f"fold across domains ({src} -> {dst})")
             continue
         if target not in kept:
             bad(key, f"fold target {target} is not a kept cluster")
-            continue
-        src = (by_cid[key].get("verdict") or {}).get("life_domain")
-        dst = (by_cid[target].get("verdict") or {}).get("life_domain")
-        if src != dst:
-            bad(key, f"fold across domains ({src} -> {dst})")
 
     for key in folds:
         _, cycle = resolve_fold(key, {k: v for k, v in folds.items()
@@ -1066,6 +1063,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
         add_evidence(fact_id, clusters[by_c[key]["index"]])
 
     folded_into: dict[str, list[str]] = {}
+    # Folds that merged two domains. Legal, and reported so the extractor's
+    # disagreement with itself stays visible in the run report.
+    crossed_domains: list[str] = []
     for key, target in terminal.items():
         fact_id = assigned.get(target) if not target.startswith("f") else target
         if not fact_id:
@@ -1074,6 +1074,14 @@ def cmd_expand(a: argparse.Namespace) -> int:
             seed_from_existing(fact_id)
         add_evidence(fact_id, clusters[by_c[key]["index"]])
         folded_into.setdefault(fact_id, []).append(key)
+        src = (clusters[by_c[key]["index"]].get("verdict") or {}).get("life_domain")
+        if target.startswith("f"):
+            dst = (existing_by_id.get(target) or {}).get("domain")
+        else:
+            dst = (clusters[by_c[target]["index"]].get("verdict")
+                   or {}).get("life_domain")
+        if src and dst and src != dst:
+            crossed_domains.append(f"{key} ({src}) -> {target} ({dst})")
 
     # A re-judged cluster inherited several fact ids and kept one of them.
     # The others must not stay active: their evidence pools into the fact that
@@ -1242,6 +1250,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "facts": len(facts),
         "new_facts": len(kept_set),
         "folded": len(terminal),
+        "folded_across_domains": sorted(crossed_domains),
         "dropped": dropped,
         "selected": len(chosen),
         "identity_facts": len(identity_ids),
@@ -1258,7 +1267,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
     print(json.dumps(summary, indent=1))
     funnel(stage="merge", clusters=len(clusters), judged=summary["judged"],
            auto_dropped=auto_dropped, additive=len(additive),
-           facts=len(facts), folded=len(terminal), dropped=dropped,
+           facts=len(facts), folded=len(terminal),
+           folded_across_domains=len(crossed_domains), dropped=dropped,
            selected=len(chosen), identity_facts=len(identity_ids),
            enum_aliases=len(enum_aliases), elapsed_s=elapsed)
     if enum_aliases:
