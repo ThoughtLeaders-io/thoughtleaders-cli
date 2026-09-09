@@ -302,12 +302,17 @@ def _doc(vid: str, frags: list[str], date: str = "2024-03-02") -> dict:
             "duration": 600, "highlight": {"transcript": frags}}
 
 
-def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict]):
-    """A ``tl_data.cli_rows`` stub that answers both callers that use it:
-    the year-bucket cue query (``fetch_year``, no ``must_not``) and the
-    non-English fetch (``fetch_non_english``, a ``must_not`` clause on
+_GENERIC_QUERIES = {v for g in fetch_cues.GENERIC_TERMS for v in fetch_cues.phrase_variants(g)}
+
+
+def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict],
+                     generic_by_year: dict | None = None):
+    """A ``tl_data.cli_rows`` stub that answers every caller that uses it:
+    the year-bucket cue query (``fetch_year``, no ``must_not``), the same
+    query on the fallback pass (its ``should`` holds only GENERIC_TERMS) and
+    the non-English fetch (``fetch_non_english``, a ``must_not`` clause on
     ``transcript_language: en``) — distinguished by inspecting the body,
-    exactly the way the two queries differ for real."""
+    exactly the way the queries differ for real."""
     def fake(args, input_text=None, timeout=None):
         body = json.loads(input_text)
         bool_q = body["query"]["bool"]
@@ -320,15 +325,22 @@ def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict]):
                 year = int(rng["gte"][:4])
         if "search_after" in body:
             return []
+        queries = {c["match_phrase"]["transcript"]["query"]
+                   for c in bool_q["must"][0]["bool"]["should"]}
+        if queries <= _GENERIC_QUERIES:
+            return list((generic_by_year or {}).get(year, []))
         return list(docs_by_year.get(year, []))
     return fake
 
 
 def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
-        year=2024, langs=None, non_en_docs=(), census_total=None):
-    """Run main() over stubbed ES calls, returning (summary, kept windows)."""
+        year=2024, langs=None, non_en_docs=(), census_total=None, generic_docs=()):
+    """Run main() over stubbed ES calls, returning (summary, kept windows).
+    ``generic_docs`` is what the fallback pass's query gets back (nothing by
+    default). The FUNNEL line is left on ``_run.last_funnel``."""
     monkeypatch.setattr(fetch_cues.tl_data, "cli_rows",
-                        _cli_rows_router({year: docs}, list(non_en_docs)))
+                        _cli_rows_router({year: docs}, list(non_en_docs),
+                                         {year: list(generic_docs)}))
     lang_counts = langs if langs is not None else {"en": len(docs) or 1}
     total = census_total if census_total is not None else sum(lang_counts.values())
     monkeypatch.setattr(
@@ -353,6 +365,8 @@ def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
     monkeypatch.undo()
     summary = json.loads([a[0] for a, k in capture["lines"]
                           if not k.get("file")][0])
+    _run.last_funnel = next((a[0] for a, k in capture["lines"]
+                             if k.get("file") and str(a[0]).startswith("FUNNEL")), "")
     round_n = 1
     argv_list = list(argv)
     if "--round" in argv_list:
@@ -640,6 +654,34 @@ def test_date_range_is_the_year_bucket_unless_since_cuts_into_it():
         "range": {"publication_date": {"gt": "2024-05-01", "lt": "2025-01-01"}}}
 
 
+def test_query_body_is_match_phrase_only_with_no_bare_pronouns():
+    """The bare pronouns used to ride along as low-boost ``match`` clauses.
+    They matched every transcript and, in the highlighter, pronoun-dense
+    banter outscored passages holding a real cue. Now only the given phrases
+    are queried, and only as phrases."""
+    body = fetch_cues.query_body(42, ["i grew up", "my dad"], 2026, 10, 600, 10, None)
+    should = body["query"]["bool"]["must"][0]["bool"]["should"]
+    assert [next(iter(c)) for c in should] == ["match_phrase", "match_phrase"]
+    assert [c["match_phrase"]["transcript"]["query"] for c in should] == ["i grew up", "my dad"]
+
+
+def test_query_body_spells_an_apostrophe_phrase_both_ways_the_index_knows():
+    """A double-encoded caption apostrophe indexes as ``i 39 m``; a
+    single-encoded one as ``i'm``. Both live in the same channel."""
+    body = fetch_cues.query_body(42, ["i'm from", "i can't stand", "my dad"], 2026, 10, 600, 10, None)
+    qs = [c["match_phrase"]["transcript"]["query"]
+          for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert qs == ["i'm from", "i 39 m from", "i can't stand", "i can 39 t stand", "my dad"]
+    assert fetch_cues.phrase_variants("my dad") == ["my dad"]
+
+
+def test_generic_terms_carry_no_object_or_group_pronouns():
+    """me / we / our fired on other people's lines and group stunts; the
+    fallback keeps to the creator's own voice, contracted or not."""
+    assert not {"me", "we", "our"} & set(fetch_cues.GENERIC_TERMS)
+    assert {"i", "my", "i'm", "i am", "i was"} <= set(fetch_cues.GENERIC_TERMS)
+
+
 def test_query_body_carries_since_into_the_filter():
     body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None, since="2026-05-01")
     assert {"range": {"publication_date": {"gt": "2026-05-01", "lt": "2027-01-01"}}} in \
@@ -695,3 +737,101 @@ def test_reserve_leaves_room_for_lanes_running_beside_the_fan_out():
     assert -(-500 // fetch_cues.derived_batch_size(500, cap - 1)) == 19
     # reserving more than the cap can never produce zero or negative batches
     assert fetch_cues.derived_batch_size(500, max(1, cap - 99)) >= 1
+
+
+# --------------------------------------------------------------------------- #
+# the generic fallback: a second pass, report-level, fills only the shortfall
+# --------------------------------------------------------------------------- #
+def _pronoun_frag(start: int, hits: int = 1) -> str:
+    """A fallback-pass fragment: bare first-person hits, no cue phrase."""
+    ems = " ".join("<em>i</em> <em>my</em>" for _ in range(hits))
+    return f'<text start="{start}">{ems} was up all night and the day after that too</text>'
+
+
+def test_generic_fallback_is_skipped_when_the_phrases_fill_the_cap(tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "1"),
+                         generic_docs=[_doc("7:v2", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"]["ran"] is False
+    assert summary["generic_fallback"]["floor"] == 1
+    assert [(w["id"], w["retrieval"]) for w in kept] == [("7:v1", "phrase")]
+    assert "generic_fallback=skipped generic_windows=0" in _run.last_funnel
+
+
+def test_generic_fallback_fills_only_the_shortfall_behind_every_phrase_window(
+        tmp_path, monkeypatch):
+    # one phrase window against a cap of 3: the fallback may add two, no more,
+    # and the phrase window stays first
+    generic = [_doc("7:v2", [_pronoun_frag(100)]), _doc("7:v3", [_pronoun_frag(100)]),
+               _doc("7:v4", [_pronoun_frag(100)])]
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "3"), generic_docs=generic)
+    fb = summary["generic_fallback"]
+    assert fb["ran"] is True and fb["floor"] == 3
+    assert fb["passages"] == 3 and fb["windows_kept"] == 2 and fb["videos_added"] == 3
+    assert summary["phrase_windows_kept"] == 1 and summary["windows_batched"] == 3
+    assert [w["retrieval"] for w in kept] == ["phrase", "generic", "generic"]
+    assert kept[1]["cues_fired"] == [] and kept[1]["rank_score"] == pytest.approx(0.3)
+    assert "generic_fallback=ran generic_windows=2" in _run.last_funnel
+    assert "x 2 passes" in summary["queries"]
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        assert [json.loads(line)["retrieval"] for line in f] == ["phrase"] + ["generic"] * 3
+
+
+def test_the_weakest_phrase_window_still_outranks_the_densest_fallback_window(
+        tmp_path, monkeypatch):
+    """Ranking is by pass, never by score across passes: a weak cue (0.5)
+    beats twelve first-person hits (1.8) because the phrase pass is what
+    the cap is for."""
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i love", 100)])],
+                   argv=("--max-windows", "2"), phrases="i love\n",
+                   generic_docs=[_doc("7:v2", [_pronoun_frag(100, hits=6)])])
+    assert [w["retrieval"] for w in kept] == ["phrase", "generic"]
+    assert kept[0]["rank_score"] < kept[1]["rank_score"]
+
+
+def test_a_fallback_passage_near_a_phrase_passage_is_not_repeated(tmp_path, monkeypatch):
+    generic = [_doc("7:v1", [_pronoun_frag(110), _pronoun_frag(400)])]
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "5"), generic_docs=generic)
+    # 110 is within 30 s of the phrase passage at 100: same passage, not new work
+    assert [(w["start"], w["retrieval"]) for w in kept] == [(100, "phrase"), (400, "generic")]
+    assert summary["generic_fallback"]["passages"] == 1
+    assert summary["generic_fallback"]["videos_added"] == 0
+
+
+def test_the_fallback_keeps_honouring_the_per_video_cap(tmp_path, monkeypatch):
+    generic = [_doc("7:v1", [_pronoun_frag(400), _pronoun_frag(500), _pronoun_frag(600)])]
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                   argv=("--max-windows", "10", "--per-video-cap", "2"),
+                   generic_docs=generic)
+    assert [w["start"] for w in kept] == [100, 400]
+
+
+def test_generic_floor_zero_turns_the_fallback_off(tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "5", "--generic-floor", "0"),
+                         generic_docs=[_doc("7:v2", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"] ["ran"] is False and len(kept) == 1
+    assert "generic_fallback=off" in _run.last_funnel
+
+
+def test_a_lower_generic_floor_leaves_a_modest_shortfall_alone(tmp_path, monkeypatch):
+    # two phrase windows meet a floor of 2 even though the cap of 5 is not full
+    docs = [_doc("7:v1", [_frag("i grew up", 100)]), _doc("7:v2", [_frag("my dad", 100)])]
+    summary, kept = _run(tmp_path, monkeypatch, docs,
+                         argv=("--max-windows", "5", "--generic-floor", "2"),
+                         generic_docs=[_doc("7:v3", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"]["ran"] is False and len(kept) == 2
+
+
+def test_the_fallback_query_is_the_generic_terms_as_phrases(monkeypatch):
+    """The fallback reuses ``query_body`` over GENERIC_TERMS: multi-word
+    markers (``i am``, ``i was``) are phrases, and the contractions carry
+    their encoded-apostrophe spelling like any cue phrase."""
+    body = fetch_cues.query_body(42, fetch_cues.GENERIC_TERMS, 2026, 10, 600, 10, None)
+    qs = [c["match_phrase"]["transcript"]["query"]
+          for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert "i am" in qs and "i was" in qs and "i 39 m" in qs and "i'm" in qs
+    assert all(next(iter(c)) == "match_phrase"
+               for c in body["query"]["bool"]["must"][0]["bool"]["should"])

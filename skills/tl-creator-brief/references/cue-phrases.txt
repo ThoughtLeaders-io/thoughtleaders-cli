@@ -1,3 +1,8 @@
+# One phrase per line, # for comments, a leading ~ marks a recurring bit.
+# Multi-word phrases only: a bare pronoun matches every transcript and is
+# handled by the fallback pass in fetch_cues.py, never listed here.
+# Apostrophes are fine as written: fetch_cues.py also queries each of these
+# the way the index spells an encoded caption apostrophe (i'm -> i 39 m).
 # origin / background
 i grew up
 i was born

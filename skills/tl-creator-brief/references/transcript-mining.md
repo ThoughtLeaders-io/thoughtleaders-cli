@@ -33,6 +33,26 @@ queries instead of a full transcript download, and every passage is born with
 its `&t=` link. There is no local full-transcript scan any more; nothing is
 downloaded that the model layer will not read.
 
+Only cue phrases go into that query. Every phrase holding an apostrophe is
+sent twice, as written and as the index spells a double-encoded caption
+apostrophe (`i'm from` and `i 39 m from`), because both spellings live in the
+same channel and the second is usually the commoner one. The bare
+first-person markers (`GENERIC_TERMS` in `fetch_cues.py`: `i`, `my`,
+`myself`, `i'm`, `i am`, `i've`, `i'd`, `i'll`, `i was`) are a **second pass,
+not part of the first**. They run only when the phrase pass keeps fewer
+windows than `--generic-floor` (default: the cap), and they fill just the
+shortfall: a phrase window always ranks ahead of a fallback window, whatever
+the two scored, and a fallback passage within 30 s of a phrase passage is
+dropped as a repeat. Every window says which pass produced it in
+`retrieval` (`phrase`, `generic`, `non_english_sample`).
+
+The highlight fragments come back as raw timed-text: about half of every
+fragment is `<text start=… dur=…>` markup and entity escapes, which the index
+stores and cannot strip server-side (no script fields), so `--fragment-size`
+counts raw characters and 600 buys about 45 spoken words. `clean()` strips
+the markup and keeps each cue's `start` in the corpus; nothing the extractor
+reads carries a tag.
+
 **Flags:**
 
 | flag | default | what it does |
@@ -44,7 +64,8 @@ downloaded that the model layer will not read.
 | `--max-windows` | 500 | the cap on what reaches the model layer in one round |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5 — 500 windows make 20 × 25 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
-| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | passage width and how many per video |
+| `--fragment-size` / `--fragments-per-doc` | 600 / 10 | passage width in raw characters (about half is markup, so 600 is about 45 spoken words) and how many per video |
+| `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
 | `--reserve` | 0 | agent slots held by other lanes during the fan-out (`1` when the socials lane is on). Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 500 windows make 19 × 27 rather than 20 × 25 on a 20-agent host |
 | `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
@@ -79,8 +100,11 @@ decided, and it belongs in the run report whenever it reads `regex_fallback`.
   corpus stats over it are a format hint, not a coverage census.
 
 The summary (stdout) and one `FUNNEL stage=fetch_cues …` line (stderr) carry
-`videos_matched`, `passages`, `windows_capped`, `batches`, `sponsor_source`
-and `elapsed_s`. `passages` minus `windows_capped` is what stayed out of this
+`videos_matched`, `passages`, `windows_capped`, `phrase_windows`,
+`generic_fallback` (`ran`, `skipped` or `off`), `generic_windows`, `batches`,
+`sponsor_source` and `elapsed_s`. When the fallback ran, say so in the run
+report: those windows fired no cue, and the coverage header should not count
+them as phrase evidence. `passages` minus `windows_capped` is what stayed out of this
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
 
