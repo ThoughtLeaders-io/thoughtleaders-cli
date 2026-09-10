@@ -1,0 +1,1096 @@
+#!/usr/bin/env python3
+"""Layer 1+2 in one query: pull only the transcript passages around
+first-person cue phrases, straight from Elasticsearch highlights.
+
+This is the model layer's only retrieval flow — there is no local
+full-transcript scan any more. One boolean ``should`` of ``match_phrase``
+clauses (references/cue-phrases.txt, each apostrophe phrase spelled both
+ways the index knows) selects the videos; ES ``highlight`` returns the
+passages around each hit, with the timed-text ``start`` attributes intact,
+so a 5,000-video channel costs a few dozen small queries instead of a full
+transcript download. Nothing but cue phrases joins that query: the host
+terms are read off the window text afterwards (``host_naming``), where a
+self-naming is the host and a third-person naming is a second voice. When
+the phrases leave the window cap short, a SECOND pass over the bare
+first-person markers (``GENERIC_TERMS``) fills what is left, and only what
+is left: a phrase window always outranks a fallback window
+(``--generic-floor``). The cap is taken on the narrow highlight fragment;
+each kept window is then re-read wider from its transcript
+(``widen_windows``, ``--read-before`` / ``--read-after``), so the ranking
+stays sharp and the extractor still sees the sentences before the cue.
+
+Usage:
+    fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
+                  [--max-windows 500] [--batch-size N] [--reserve N]
+                  [--generic-floor N] [--fragment-size 450] [--round N]
+                  [--read-before 20] [--read-after 10]
+                  [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
+
+Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
+``batches/batch-NNN.json`` (the capped model-layer batches, one per extractor
+agent, sized to fill one wave of the host's agent cap) and ``corpus.jsonl.gz``
+— the store shape ``verify_quotes.py`` reads, holding the fetched passages as
+cues. Once the cap is taken, the kept windows' real ad-read spans are
+looked up (``sponsor_segments`` below) and ``in_sponsor_read`` is decided from them;
+the regex heuristic the windows were built with is the fallback when that
+lookup fails, and ``sponsor_source`` in the summary says which one decided.
+One JSON summary on stdout, one FUNNEL line on stderr.
+"""
+from __future__ import annotations
+
+import argparse
+import concurrent.futures as cf
+import gzip
+import html
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+from collections import defaultdict
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import tl_data  # noqa: E402
+from channel_context import TITLE_HINTS, channel_row  # noqa: E402  sibling script, one home for title hints
+
+HERE = pathlib.Path(__file__).resolve().parent
+DEFAULT_PHRASES = HERE.parent / "references" / "cue-phrases.txt"
+SPONSOR_RX = re.compile(
+    r"\b(sponsored by|sponsor(?:ing)? (?:of )?(?:this|today'?s) (?:video|episode)|"
+    r"use (?:my |the )?code|promo code|link in (?:the|my) description|"
+    r"\d\d?% off|free trial|check them out)\b", re.I)
+TAG_RX = re.compile(r"<[^>]+>")
+START_RX = re.compile(r'start="([\d.]+)"')
+EM_RX = re.compile(r"<em>(.*?)</em>", re.S)
+YEARS = list(range(2005, time.gmtime().tm_year + 2))   # YouTube launch → next year
+CUE_RX = re.compile(r'<text start="([\d.]+)"[^>]*>')
+NON_EN_WINDOWS_PER_VIDEO = 3
+NON_EN_WINDOW_WORDS = 80
+WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
+
+# A host term in a window is two different signals. "hey guys it's Eric" or
+# "my name is Eric" is the host naming THEMSELVES: the strongest in-text proof
+# of voice there is, and the only thing ``host_anchor`` means from here on.
+# "with Eric", "Eric asked me", "Eric, one sec" is someone ELSE speaking of or
+# to the host, so a first-person cue beside it is probably not the host's.
+# Airrack (2026-09-10): the top-ranked window was a crew member's "I left my
+# girlfriend and my family to go make YouTube videos with Eric", promoted by
+# the +2 the name used to earn and then handed to Eric by the solo rule; 118
+# of the 300 kept windows had no cue at all and stood on the name alone. So
+# the host terms no longer join the query, a third-person naming earns
+# nothing and is passed to the extractor as ``second_voice_hint``, and only
+# a self-naming scores, at the weight of one ordinary cue.
+SELF_NAME_LEAD = (r"(?:i'm|i am|it's|it is|this is|my name is|my name's|call me|"
+                  r"i go by|it's me|its me|hey guys,? it's|hey,? it's|hi,? i'm|"
+                  r"i,)")
+SELF_NAME_BONUS = 1.0
+
+
+def host_naming(text: str, host_lc: set[str]) -> tuple[list[str], list[str], str | None]:
+    """``(self_named, third_person, hint)`` for the host terms in ``text``:
+    the terms the speaker uses of themselves, the terms spoken of or to
+    someone else, and a short hint quoting the first third-person naming for
+    the extractor (``None`` when there is none). A term named both ways in
+    one window counts as self-named."""
+    low = text.lower()
+    self_named: list[str] = []
+    third_person: list[str] = []
+    hint = None
+    for term in sorted(t for t in host_lc if t):
+        esc = re.escape(term)
+        m = re.search(r"\b" + esc + r"\b", low)
+        if not m:
+            continue
+        if re.search(SELF_NAME_LEAD + r"\s+" + esc + r"\b", low):
+            self_named.append(term)
+            continue
+        third_person.append(term)
+        if hint is None:
+            lo, hi = max(0, m.start() - 30), min(len(text), m.end() + 30)
+            snippet = re.sub(r"\s+", " ", text[lo:hi]).strip()
+            hint = f"host named in the third person: ...{snippet}..."
+    return self_named, third_person, hint
+
+
+# The fallback vocabulary: bare first-person markers, run as a SECOND query
+# only when the cue phrases leave the cap short (``--generic-floor``). They
+# never join the phrase query. At minimum_should_match 1 they match every
+# transcript, and in the highlighter a passage with eight pronouns outscored a
+# passage with one real cue, so pronoun-dense banter took the fragment slots
+# (Airrack 2025: 7 of 30 slots carried a cue with them in, 19 of 19 without).
+# "me" (tell me, let me, look at me), "we" and "our" (group action narration)
+# are out for firing on other people's lines and on stunts; "i am" and "i was"
+# are in for the uncontracted and past-tense self-narration the contractions miss.
+GENERIC_TERMS = ["i", "my", "myself", "i'm", "i am", "i've", "i'd", "i'll", "i was"]
+GENERIC_BOOST = 0.15            # per first-person hit in a fallback window's rank score
+GENERIC_DENSITY_CAP = 12
+# The index runs html_strip once. A double-encoded caption apostrophe
+# (``I&amp;#39;m``) comes out as ``&#39;`` and the standard tokenizer breaks it
+# into ``i`` ``39`` ``m``; a single-encoded one (``I&apos;m``) decodes to
+# ``i'm``. Both spellings live in the same channel (Airrack 2025: 34 videos
+# index ``i'm``, 248 index ``i 39 m``), so every apostrophe phrase is queried
+# both ways. The highlighter's ``<em>`` still reads ``I&amp;#39;m``, which
+# ``clean`` unescapes back to the phrase as written in the file.
+APOSTROPHE_TOKEN = " 39 "
+RECURRING_PREFIX = "~"          # a phrase that fires in most uploads (greeting, sign-off)
+RECURRING_CAP = 12              # max windows any recurring-bit phrase may supply to the cap
+PHRASE_CAP_SHARE = 0.08         # no single phrase supplies more than this share of the cap
+# Per-phrase weight from cue-phrases.txt (``phrase | 3``): how personal and
+# durable the statement behind the phrase usually is, never which life domain
+# it sits in. It is the ES boost (so the highlighter's fragment slots go to
+# the most personal passages of a video) and the window's rank score.
+PHRASE_WEIGHT_DEFAULT = 1.0
+WEAK_WEIGHT = 0.5
+RANK_CAP = 6.0                  # two top-weight cues saturate a window's cue score
+WEAK_CUES = {"i love", "i hate", "i think that", "my life", "my own", "i always", "i never",
+             "personally i", "my favorite", "my favourite", "i believe", "i want", "i play",
+             "i watch", "i read", "i listen to", "i can't stand", "my story", "my journey",
+             "i once", "i remember", "i personally", "in my experience", "i live", "my home",
+             "my whole life", "i've always", "i've never", "i used to", "i'm from", "we launch"}
+EXTRA_GENERIC = ["i've always", "i've never", "i always", "i never", "i used to", "i remember",
+                 "i personally", "for me personally", "i can only speak for myself", "in my experience",
+                 "i live", "i'm from", "my home", "my life", "my whole life", "my own"]
+
+
+def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str], dict[str, float]]:
+    """``(phrases, recurring, weights)``. A line is ``phrase``, ``~phrase``
+    (a recurring bit) or ``phrase | weight``; a phrase with no weight gets
+    WEAK_WEIGHT when it is in WEAK_CUES, else PHRASE_WEIGHT_DEFAULT."""
+    out: list[str] = []
+    recurring: set[str] = set()
+    weights: dict[str, float] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        weight = None
+        if "|" in line:
+            line, _, raw = line.rpartition("|")
+            line = line.strip()
+            try:
+                weight = float(raw.strip())
+            except ValueError:
+                raise SystemExit(f"cue-phrases: bad weight {raw.strip()!r} on {line!r}")
+        if line.startswith(RECURRING_PREFIX):
+            line = line[1:].strip()
+            recurring.add(line.lower())
+        out.append(line)
+        if weight is not None:
+            weights[line.lower()] = weight
+    for g in EXTRA_GENERIC:
+        if g not in out:
+            out.append(g)
+    return out, recurring, weights
+
+
+def phrase_weight(phrase: str, weights: dict[str, float] | None) -> float:
+    p = phrase.lower()
+    if weights and p in weights:
+        return weights[p]
+    return WEAK_WEIGHT if p in WEAK_CUES else PHRASE_WEIGHT_DEFAULT
+
+
+# a highlight fragment can start inside a doubly-escaped caption entity
+# ("&amp;#39;s" cut to "amp;#39;s" or ";#39;s"); the entity is unrecoverable
+# by unescaping, so the stub is resolved by hand — #39 is the apostrophe the
+# captions actually meant, anything else is dropped
+_PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
+# ... or inside a timed-text tag, leaving `start="138" dur="3.78">`,
+# `="664.399" dur="2.801">` or a bare `>` in front of the first words
+_PARTIAL_TAG_RX = re.compile(r'^\s*(?:(?:[\w-]*=)?"[^"]*"\s*)*>\s*')
+# ... or inside the tag NAME, which leaves a suffix of `<text ...>` or
+# `</text>` with its opening `<` gone: `text> move to los angeles`, or with
+# the attributes still attached, `text start="188.94" dur="5.379">[Music]`.
+# Only the timed-text tag name is accepted, so prose that happens to hold a
+# `>` survives.
+_PARTIAL_NAME_RX = re.compile(
+    r'^\s*/?(?:text|ext|xt|t)(?:\s+[\w-]+="[^"]*")*\s*>\s*')
+# The far boundary cuts tags too, and an UNTERMINATED tag matches neither
+# CUE_RX nor TAG_RX (both need the closing `>`), so `<text start="651.279` and
+# a bare `<em` used to survive into the window text. Anchored to the end of the
+# last cue only, where a fragment boundary is the only thing that can produce
+# a `<` with no `>` after it.
+_DANGLING_TAG_RX = re.compile(r"<[^>]*$")
+
+
+def _fix_partial_entity(t: str) -> str:
+    t = _PARTIAL_TAG_RX.sub("", t, count=1)
+    t = _PARTIAL_NAME_RX.sub("", t, count=1)
+    m = _PARTIAL_ENTITY_RX.match(t)
+    if not m:
+        return t
+    code = int(m.group(1))
+    rest = t[m.end():]
+    return ("'" + rest) if code == 39 else rest.lstrip()
+
+
+def _tidy(t: str) -> str:
+    t = TAG_RX.sub(" ", t)
+    t = html.unescape(html.unescape(t))
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def clean(frag: str) -> tuple[str, list[str], float | None, list[str], list[list]]:
+    """Return (text, distinct hits, first start, raw hits, cue pieces).
+
+    ``pieces`` keeps each timed-text cue as ``[start, text]`` so the passage
+    corpus stores the same per-cue shape the verifier expects and a quote
+    from the tail of a passage verifies to its own second, not the passage's
+    first. Text before the first ``<text>`` tag belongs to a cue whose tag the
+    fragment boundary cut; it is attached to the first cue.
+    """
+    hits = [re.sub(r"\s+", " ", html.unescape(html.unescape(TAG_RX.sub(" ", m)))).strip().lower()
+            for m in EM_RX.findall(frag)]
+    body = frag.replace("<em>", "").replace("</em>", "")
+    # Before splitting, and before any unescaping: a `&lt;` in the captions has
+    # not become a `<` yet at this point, so the only `<` with no `>` after it
+    # is a tag the far fragment boundary cut in half.
+    body = _DANGLING_TAG_RX.sub("", body)
+    parts = CUE_RX.split(body)
+    pieces: list[list] = []
+    for k in range(1, len(parts) - 1, 2):
+        t = _tidy(parts[k + 1])
+        if t:
+            pieces.append([round(float(parts[k]), 2), t])
+    pre = _tidy(parts[0]) if parts else ""
+    if pre and pieces:
+        pieces[0][1] = pre + " " + pieces[0][1]
+    if pieces:
+        pieces[0][1] = _fix_partial_entity(pieces[0][1])
+    text = " ".join(pc[1] for pc in pieces)
+    start = pieces[0][0] if pieces else None
+    return text, sorted(set(h for h in hits if h)), start, hits, pieces
+
+
+def format_hint(title: str | None) -> str | None:
+    """Per-video hint the rubric lets override the channel label."""
+    t = title or ""
+    for fmt, rx in TITLE_HINTS.items():  # reaction first, then collab, then staged
+        if rx.search(t):
+            return fmt
+    return None
+
+
+ENGLISH_CODES = {"en", "asr-en"}
+
+
+def channel_language(channel: int) -> str | None:
+    """The channel's own language from its platform record, lower-cased, or
+    None when the record does not say. Reporting only; a failed lookup
+    means "unknown", never a gate."""
+    try:
+        return (str(channel_row(channel).get("language") or "").strip().lower()
+                or None)
+    except Exception as exc:  # the row is a hint, not a requirement
+        print(f"channel language lookup failed: {exc}", file=sys.stderr)
+        return None
+
+
+def is_english(code: str | None) -> bool:
+    """``en``, ``en-US``, ``asr-en`` … are all English captions; missing is
+    treated as English, as the old scan did."""
+    if not code or code in ("None", ""):
+        return True
+    c = code.lower()
+    return c in ENGLISH_CODES or c.startswith("en-") or c.endswith("-en")
+
+
+def census(channel: int) -> tuple[int, dict[str, int]]:
+    """Transcript-bearing uploads for the coverage ratio, split by language."""
+    body = {"size": 0, "track_total_hits": True,
+            "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
+                                          {"term": {"channel.id": channel}},
+                                          {"exists": {"field": "transcript"}}]}},
+            "aggs": {"lang": {"terms": {"field": "transcript_language", "size": 50}}}}
+    data = tl_data._tl_json(["db", "es", "-", "--json"], input_text=json.dumps(body))
+    total = int((data or {}).get("total") or 0)
+    langs: dict[str, int] = {}
+    buckets = (((data or {}).get("aggregations") or {}).get("lang") or {}).get("buckets") or []
+    for b in buckets:
+        langs[str(b.get("key"))] = int(b.get("doc_count") or 0)
+    return total, langs
+
+
+def latest_upload(channel: int) -> str | None:
+    """Date of the channel's newest upload at fetch time. The meta record
+    keeps it so a later run can count uploads since with one query."""
+    body = {"size": 1, "_source": ["id", "publication_date"],
+            "sort": [{"publication_date": "desc"}],
+            "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
+                                          {"term": {"channel.id": channel}}]}}}
+    data = tl_data._tl_json(["db", "es", "-", "--json"], input_text=json.dumps(body))
+    rows = (data or {}).get("results") or []
+    if not rows:
+        return None
+    return (rows[0].get("publication_date") or "")[:10] or None
+
+
+def fetch_non_english(channel: int, size: int = 40, since: str | None = None) -> list[dict]:
+    """Uploads whose captions are not English carry no English cue phrase, so
+    the cue query cannot see them. Pull their transcripts and stride-sample a
+    few windows per video into the same schema; the extractor judges them in
+    the source language (rubric), and they enter the cap at a flat score."""
+    docs: list[dict] = []
+    after = None
+    while True:
+        body = {"size": size,
+                "_source": ["id", "title", "publication_date", "transcript_language",
+                            "content_type", "duration", "transcript"],
+                "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
+                                              {"term": {"channel.id": channel}},
+                                              {"exists": {"field": "transcript"}},
+                                              {"exists": {"field": "transcript_language"}}]
+                                   + ([{"range": {"publication_date": {"gt": since}}}] if since else []),
+                                   "must_not": [{"terms": {"transcript_language": sorted(ENGLISH_CODES)}}]}},
+                "sort": [{"publication_date": "desc"}, {"id": "asc"}]}
+        if after:
+            body["search_after"] = after
+        rows = tl_data.cli_rows(["db", "es", "-", "--json"], input_text=json.dumps(body))
+        docs.extend(r for r in rows if not is_english(r.get("transcript_language")))
+        if len(rows) < size:
+            return docs
+        last = rows[-1]
+        after = [last.get("publication_date"), last.get("id")]
+        if not after[0] or not after[1]:
+            return docs
+
+
+def sample_windows(cue_list: list, per_video: int = NON_EN_WINDOWS_PER_VIDEO,
+                   words: int = NON_EN_WINDOW_WORDS) -> list[list[list]]:
+    """Evenly spaced runs of consecutive cues, each about ``words`` long."""
+    runs: list[list[list]] = []
+    cur: list[list] = []
+    n = 0
+    for st, t in cue_list:
+        cur.append([round(float(st), 2), t])
+        n += len(t.split())
+        if n >= words:
+            runs.append(cur)
+            cur = []
+            n = 0
+    if cur and n >= 8:
+        runs.append(cur)
+    if len(runs) <= per_video:
+        return runs
+    step = len(runs) / per_video
+    return [runs[int(i * step)] for i in range(per_video)]
+
+
+def date_range(year: int, since: str | None) -> dict:
+    """The year bucket's publication window, cut down to uploads after
+    ``since`` when a refresh round only wants what is new."""
+    lo = f"{year}-01-01"
+    rng = {"gte": lo, "lt": f"{year + 1}-01-01"}
+    if since and since >= lo:
+        rng = {"gt": since, "lt": f"{year + 1}-01-01"}
+    return {"range": {"publication_date": rng}}
+
+
+def phrase_variants(phrase: str) -> list[str]:
+    """The phrase as written plus, when it holds an apostrophe, the spelling
+    the index gives a double-encoded caption apostrophe (``i'm`` -> ``i 39 m``)."""
+    out = [phrase]
+    if "'" in phrase:
+        out.append(re.sub(r"\s*'\s*", APOSTROPHE_TOKEN, phrase).strip())
+    return out
+
+
+def query_body(channel: int, phrases: list[str], year: int, size: int,
+               fragment_size: int, fragments: int, after: list | None,
+               since: str | None = None, weights: dict[str, float] | None = None) -> dict:
+    """One year bucket of ``match_phrase`` clauses over ``phrases``: the cue
+    phrases on the main pass, GENERIC_TERMS on the fallback pass. Nothing else
+    joins the ``should``; a single-token phrase is a plain term match. Each
+    clause's boost is the phrase's weight, so with ``order: score`` the
+    highlighter spends a video's fragment slots on its most personal passages."""
+    should = [{"match_phrase": {"transcript": {"query": v, "boost": phrase_weight(p, weights)}}}
+              for p in phrases for v in phrase_variants(p)]
+    body = {
+        "size": size,
+        "_source": ["id", "title", "publication_date", "transcript_language",
+                    "content_type", "duration"],
+        "query": {"bool": {
+            "filter": [
+                {"term": {"doc_type": "article"}},
+                {"term": {"channel.id": channel}},
+                {"exists": {"field": "transcript"}},
+                date_range(year, since),
+            ],
+            "must": [{"bool": {"should": should, "minimum_should_match": 1}}],
+        }},
+        "sort": [{"publication_date": "desc"}, {"id": "asc"}],
+        "highlight": {"fields": {"transcript": {
+            "fragment_size": fragment_size, "number_of_fragments": fragments,
+            "order": "score"}}},
+    }
+    if after:
+        body["search_after"] = after
+    return body
+
+
+def fetch_year(channel: int, phrases: list[str], year: int, size: int,
+               fragment_size: int, fragments: int, since: str | None = None,
+               weights: dict[str, float] | None = None) -> list[dict]:
+    docs: list[dict] = []
+    after = None
+    while True:
+        body = query_body(channel, phrases, year, size, fragment_size, fragments, after, since,
+                          weights=weights)
+        rows = tl_data.cli_rows(["db", "es", "-", "--json", "--highlight"],
+                                input_text=json.dumps(body))
+        docs.extend(rows)
+        if len(rows) < size:
+            return docs
+        last = rows[-1]
+        after = [last.get("publication_date"), last.get("id")]
+        if not after[0] or not after[1]:
+            return docs
+
+
+# --------------------------------------------------------------------------- #
+# ad-read spans: a video's sponsored, in-transcript brand mentions carry the
+# seconds the read occupies; only type == sponsored AND field == transcript
+# counts, and a query failure raises (never a silent empty span list).
+# --------------------------------------------------------------------------- #
+SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
+IDS_CHUNK = 1000
+ES_CONCURRENCY = 4    # parallel id-chunk fetches for the sponsor-span lookup
+
+
+def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """One id-chunk's spans. Any query failure propagates to the caller."""
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "brand_mentions"],
+    })
+    out: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for row in rows:
+        mentions = row.get("brand_mentions") or []
+        if isinstance(mentions, dict):
+            mentions = [mentions]
+        for m in mentions:
+            if m.get("type") != "sponsored" or m.get("field") != "transcript":
+                continue
+            start, end = m.get("start_ts"), m.get("end_ts")
+            if not isinstance(start, (int, float)):
+                continue
+            if not isinstance(end, (int, float)) or end < start:
+                end = start
+            # (0, 0) is a detection with no located position; padded, it
+            # would wrongly claim the opening of the video as an ad read.
+            if start <= 0 and end <= 0:
+                continue
+            out[str(row.get("id"))].append((float(start), float(end)))
+    return out
+
+
+def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """Spoken sponsored segments per video, batched over the id list.
+
+    Every mention is re-checked individually: only ``type == "sponsored"`` AND
+    ``field == "transcript"`` counts. A query failure raises — it is never a
+    silent empty span list.
+
+    Id chunks are fetched concurrently, but merged strictly in chunk order and
+    a video's ids never straddle two chunks, so the resulting span lists are
+    the same lists in the same order as a serial fetch.
+    """
+    chunks = [refs[i:i + IDS_CHUNK] for i in range(0, len(refs), IDS_CHUNK)]
+    if not chunks:
+        return {}
+    out: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    with cf.ThreadPoolExecutor(max_workers=min(ES_CONCURRENCY,
+                                            len(chunks))) as pool:
+        for part in pool.map(_sponsor_chunk, chunks):
+            for ref, spans in part.items():
+                out[ref].extend(spans)
+    return dict(out)
+
+
+def apply_sponsor_spans(kept: list[dict]) -> str:
+    """Re-decide ``in_sponsor_read`` for the kept windows from real ad-read spans.
+
+    The windows are built with a regex heuristic already in the flag, because a
+    span lookup over every passage in the catalogue would cost more than the
+    cap it feeds. Once the cap is taken, the kept windows name a few hundred
+    videos at most, so the spans are looked up for real: a window overlaps an
+    ad read when ``[start, start + WINDOW_SPAN]`` meets a sponsored span padded
+    by ``SPONSOR_PAD`` on both sides.
+
+    The lookup is authoritative when it succeeds — it replaces the heuristic
+    rather than joining it. When it fails, the heuristic stays exactly as it
+    was. Returns the source used, which the summary records as
+    ``sponsor_source`` so a reader always knows which of the two decided.
+    """
+    refs = sorted({w["id"] for w in kept})
+    if not refs:
+        return "none"
+    try:
+        segments = sponsor_segments(refs)
+    except BaseException as exc:              # noqa: BLE001 — reported, not raised
+        print(f"sponsor-span lookup failed ({type(exc).__name__}: "
+              f"{str(exc)[:120]}) — keeping the regex heuristic", file=sys.stderr)
+        return "regex_fallback"
+    pad = SPONSOR_PAD
+    for w in kept:
+        segs = segments.get(w["id"]) or []
+        span = w.get("read_span")           # the widened read when there is one
+        lo, hi = (span[0], span[1]) if span else (w["start"], w["start"] + WINDOW_SPAN)
+        w["in_sponsor_read"] = any(lo <= e + pad and hi >= s - pad
+                                   for s, e in segs)
+    return "brand_mentions"
+
+
+def fetch_all_years(channel: int, phrases: list[str], a, since: str | None,
+                    weights: dict[str, float] | None = None) -> list[dict]:
+    """Every year bucket of one pass, ``a.concurrency`` buckets at a time."""
+    docs: list[dict] = []
+    with cf.ThreadPoolExecutor(max_workers=a.concurrency) as pool:
+        futs = [pool.submit(fetch_year, channel, phrases, y, a.page_size,
+                            a.fragment_size, a.fragments_per_doc, since, weights)
+                for y in YEARS if not since or y >= int(since[:4])]
+        for f in futs:
+            docs.extend(f.result())
+    return docs
+
+
+def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, list[int]],
+                  seen: dict[str, list[float]], host_lc: set[str], recurring: set[str],
+                  retrieval: str, weights: dict[str, float] | None = None) -> list[dict]:
+    """The passages of one pass's highlight docs, in the window schema.
+
+    ``retrieval`` is ``"phrase"`` for the cue-phrase pass, whose windows score
+    on the weights of the cues they fired, or ``"generic"`` for the fallback pass, whose
+    windows fired no cue and score on first-person density alone. ``seen`` is
+    shared across the passes, so a fallback passage within 30 s of one the
+    phrase pass already produced is dropped; ``corpus`` grows in place.
+    """
+    generic = {g.lower() for g in GENERIC_TERMS}
+    windows: list[dict] = []
+    for d in docs:
+        vid = d.get("id") or d.get("_id")
+        if not vid:
+            continue
+        frags = (d.get("highlight") or {}).get("transcript") or []
+        entry = corpus.setdefault(vid, {
+            "id": vid, "title": d.get("title"), "publication_date": d.get("publication_date"),
+            "views": None, "duration": d.get("duration"), "content_type": d.get("content_type"),
+            "transcript_language": d.get("transcript_language"), "cues": []})
+        starts = seen.setdefault(vid, [])
+        for frag in frags:
+            text, hits, start, raw_hits, pieces = clean(frag)
+            if start is None or len(text.split()) < 8:
+                continue
+            if any(abs(start - s) < 30 for s in starts):
+                continue
+            if any(abs(start - s) < 30 for s in done.get(vid, [])):
+                continue
+            starts.append(start)
+            entry["cues"].extend(pieces)
+            self_named, third_person, hint = host_naming(text, host_lc)
+            if retrieval == "generic":
+                cue_hits: list[str] = []
+                specific: list[str] = []
+                rec: list[str] = []
+                density = sum(1 for h in raw_hits if h in generic)
+                heur = round(GENERIC_BOOST * min(density, GENERIC_DENSITY_CAP)
+                             + SELF_NAME_BONUS * min(len(self_named), 1), 2)
+            else:
+                cue_hits = [h for h in hits if h not in host_lc]
+                specific = [h for h in cue_hits if h not in recurring]
+                rec = [h for h in cue_hits if h in recurring]
+                heur = round(min(sum(phrase_weight(h, weights) for h in specific), RANK_CAP)
+                             + 0.5 * min(len(rec), 1)
+                             + SELF_NAME_BONUS * min(len(self_named), 1), 2)
+            windows.append({
+                "id": vid, "video_id": vid.split(":", 1)[-1], "title": d.get("title"),
+                "language": d.get("transcript_language"), "format_hint": format_hint(d.get("title")),
+                "published": (d.get("publication_date") or "")[:10],
+                "start": int(start), "text": text,
+                "cues_fired": cue_hits, "host_anchor": bool(self_named),
+                "host_anchor_terms": [[h, "self_named"] for h in self_named],
+                "host_named_third_person": third_person,
+                "second_voice_hint": hint,
+                "entity_hits": [], "weak_anchor": False, "stage_direction": False,
+                "boilerplate": False,
+                "in_sponsor_read": bool(SPONSOR_RX.search(text)),
+                "recurrence_videos": 0, "recurring_phrase": None,
+                "retrieval": retrieval,
+                "rank_score": heur,
+                "read_span": None, "context_added": False,
+                "_specific": specific, "_recurring": rec,
+                "_weights": weights,
+                "_span": [pieces[0][0], pieces[-1][0]],
+            })
+    return windows
+
+
+# --------------------------------------------------------------------------- #
+# rank narrow, read wide: the highlighter cuts a fragment around the cue, and
+# a disclosure usually ENDS at its cue ("...and film school wasn't going to
+# make me who I wanted to be, so I left my girlfriend and my family"): the
+# biography sits in the sentences before the phrase, where no phrase fires and
+# so no fragment is ever cut. At 450 raw characters that context was gone
+# from the whole candidate pool, not demoted (Airrack 2026-09-10: three of the
+# previous top-20 gems had no passage left anywhere). So the cap is taken on
+# the narrow fragment, which keeps the ranking sharp, and then every KEPT
+# window is re-read from the stored transcript, ``--read-before`` seconds
+# ahead of its first cue to ``--read-after`` seconds past its last, and that
+# wider text is what the extractor sees. The added cues join the corpus so a
+# quote cut from the context still verifies to its own second.
+# --------------------------------------------------------------------------- #
+READ_BEFORE_S = 20
+READ_AFTER_S = 10
+TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
+
+
+def _transcript_chunk(chunk: list[str]) -> dict[str, list[tuple[float, str]]]:
+    import store_io  # sibling; parses the timed-text XML into (start, text) cues
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "transcript"],
+    })
+    return {str(r.get("id")): store_io.cues(r.get("transcript")) for r in rows}
+
+
+def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
+    """Timed cues per video for the kept windows' videos. A failure raises."""
+    chunks = [refs[i:i + TRANSCRIPT_CHUNK] for i in range(0, len(refs), TRANSCRIPT_CHUNK)]
+    if not chunks:
+        return {}
+    out: dict[str, list[tuple[float, str]]] = {}
+    with cf.ThreadPoolExecutor(max_workers=min(ES_CONCURRENCY, len(chunks))) as pool:
+        for part in pool.map(_transcript_chunk, chunks):
+            out.update(part)
+    return out
+
+
+def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
+                  before: float, after: float) -> tuple[str, int]:
+    """Replace each kept window's fragment text with the transcript read around
+    it, and grow the corpus by the cues that read added. Returns the source
+    used (``transcript``, ``fragment_only`` when the lookup failed, ``off``
+    when both margins are 0) and how many windows widened. The lookup is
+    reporting-grade: a failure keeps every fragment exactly as it was."""
+    if before <= 0 and after <= 0:
+        return "off", 0
+    refs = sorted({w["id"] for w in kept})
+    if not refs:
+        return "none", 0
+    try:
+        cues_by_video = fetch_transcripts(refs)
+    except BaseException as exc:              # noqa: BLE001 reported, not raised
+        print(f"transcript read-around failed ({type(exc).__name__}: "
+              f"{str(exc)[:120]}); keeping the highlight fragments", file=sys.stderr)
+        return "fragment_only", 0
+    widened = 0
+    for w in kept:
+        cues = cues_by_video.get(w["id"]) or []
+        if not cues:
+            continue
+        span = w.get("_span") or [w["start"], w["start"]]
+        lo, hi = float(span[0]) - before, float(span[1]) + after
+        run = [(float(s), t) for s, t in cues if lo <= float(s) <= hi and t]
+        if not run:
+            continue
+        text = re.sub(r"\s+", " ", " ".join(t for _, t in run)).strip()
+        if len(text.split()) <= len(w["text"].split()):
+            continue                          # the fragment already had it all
+        w["text"] = text
+        w["read_span"] = [round(run[0][0], 2), round(run[-1][0], 2)]
+        w["context_added"] = True
+        # the speaker signals live in the context, so they are re-read on it
+        self_named, third_person, hint = host_naming(text, host_lc)
+        w["host_anchor"] = bool(self_named)
+        w["host_anchor_terms"] = [[h, "self_named"] for h in self_named]
+        w["host_named_third_person"] = third_person
+        w["second_voice_hint"] = hint
+        w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
+        entry = corpus.get(w["id"])
+        if entry is not None:
+            have = {round(float(c[0]), 2) for c in entry["cues"]}
+            entry["cues"].extend([round(s, 2), t] for s, t in run
+                                 if round(s, 2) not in have)
+        widened += 1
+    return "transcript", widened
+
+
+def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int],
+                   per_phrase: dict[str, int], per_video_cap: int, phrase_cap: int) -> list[dict]:
+    """Take up to ``limit`` windows by rank, under the per-video, per-phrase and
+    recurring-bit ceilings. ``per_video`` and ``per_phrase`` are shared tallies,
+    so the fallback pass keeps honouring what the phrase pass already took.
+
+    Ties are spread across the channel's history: within the same score, one
+    passage per year in turn instead of newest-first, so a profile spans the
+    back catalogue rather than the last twelve months.
+    """
+    windows.sort(key=lambda w: (-w["rank_score"], w["published"]))
+    pos_in_year: dict[str, int] = {}
+    order: list[tuple[float, int, int]] = []
+    for i, w in enumerate(windows):
+        y = w["published"][:4]
+        pos_in_year[y] = pos_in_year.get(y, 0) + 1
+        order.append((-w["rank_score"], pos_in_year[y], i))
+    order.sort()
+
+    def eligible(w):
+        n = per_video.get(w["id"], 0)
+        if n >= per_video_cap:
+            return False
+        strong = [c for c in w["_specific"] if phrase_weight(c, w.get("_weights")) >= 1.0]
+        if w["_recurring"] and len(strong) < 2 and any(
+                per_phrase.get(c, 0) >= RECURRING_CAP for c in w["_recurring"]):
+            return False
+        cues = w["_specific"] or w["_recurring"]
+        if cues and all(per_phrase.get(c, 0) >= phrase_cap for c in cues):
+            return False
+        return True
+
+    kept: list[dict] = []
+    for _, _, i in order:
+        if len(kept) >= limit:
+            break
+        w = windows[i]
+        if not eligible(w):
+            continue
+        for c in (w["_specific"] or w["_recurring"]) + w["_recurring"]:
+            per_phrase[c] = per_phrase.get(c, 0) + 1
+        per_video[w["id"]] = per_video.get(w["id"], 0) + 1
+        kept.append(w)
+    return kept
+
+
+DEFAULT_AGENT_CAP = 20      # concurrent subagents the host runs when nothing says otherwise
+MIN_BATCH_SIZE = 5          # below this the per-agent overhead outweighs the parallelism
+
+
+def env_agent_cap() -> int:
+    """How many extractor agents can run at once: $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
+    when the host sets it, else the default of 20. Garbage falls back with a note."""
+    raw = os.environ.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "").strip()
+    if not raw:
+        return DEFAULT_AGENT_CAP
+    try:
+        n = int(raw)
+    except ValueError:
+        print(f"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS={raw!r} is not an integer; "
+              f"using {DEFAULT_AGENT_CAP}", file=sys.stderr)
+        return DEFAULT_AGENT_CAP
+    return n if n >= 1 else DEFAULT_AGENT_CAP
+
+
+def derived_batch_size(windows: int, agent_cap: int) -> int:
+    """The batch size that spreads the kept windows over every agent the host
+    allows in one wave: ceil(windows / cap), never below MIN_BATCH_SIZE."""
+    if windows <= 0:
+        return MIN_BATCH_SIZE
+    return max(MIN_BATCH_SIZE, -(-windows // max(1, agent_cap)))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--channel", type=int, required=True)
+    ap.add_argument("--out", default="tl-creator-profiles/.corpus",
+                    help="PARENT directory for the corpus; the channel id is appended, "
+                         "so the run writes <out>/<channel>/. Passing a path that already "
+                         "ends in the channel id nests it twice")
+    ap.add_argument("--phrases", default=str(DEFAULT_PHRASES))
+    ap.add_argument("--host-terms", default="")
+    ap.add_argument("--max-windows", type=int, default=300,
+                    help="passages that reach the model layer in one round; fewer, more "
+                         "personal windows beat more, thinner ones (was 500)")
+    ap.add_argument("--batch-size", type=int, default=None,
+                    help="windows per batch file (one extractor each); default: enough batches "
+                         "to use every concurrent agent the host allows, "
+                         "ceil(windows / $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS), cap 20 when unset")
+    ap.add_argument("--reserve", type=int, default=0,
+                    help="agent slots held by other lanes during the fan-out: "
+                         "3 for the brand lanes on a CONNECT build, plus 1 "
+                         "when the socials lane is on. Batches are sized "
+                         "against cap minus this, so the last extractor is "
+                         "not rejected and relaunched a wave later")
+    ap.add_argument("--fragment-size", type=int, default=450,
+                    help="highlight width in RAW characters, of which about half is "
+                         "timed-text markup: 450 is about 30 spoken words, 600 about 45, "
+                         "900 about 70")
+    ap.add_argument("--generic-floor", type=int, default=None,
+                    help="run the first-person fallback pass (GENERIC_TERMS) only when the "
+                         "cue phrases keep fewer windows than this, and fill just the "
+                         "shortfall; default: --max-windows, so the cap is filled; 0 = never")
+    ap.add_argument("--fragments-per-doc", type=int, default=10)
+    ap.add_argument("--read-before", type=float, default=READ_BEFORE_S,
+                    help="once the cap is taken, re-read each kept window from its "
+                         "transcript from this many seconds before its first cue "
+                         "(rank narrow, read wide); 0 with --read-after 0 = off")
+    ap.add_argument("--read-after", type=float, default=READ_AFTER_S,
+                    help="...to this many seconds after its last cue")
+    ap.add_argument("--per-video-cap", type=int, default=8)
+    ap.add_argument("--page-size", type=int, default=150)
+    ap.add_argument("--concurrency", type=int, default=4)
+    ap.add_argument("--round", type=int, default=1, help="additive round number; round N writes "
+                    "batches-rN/ and clears returns-rN/, merges its passages into the existing "
+                    "corpus.jsonl.gz, and keeps earlier rounds' artifacts intact")
+    ap.add_argument("--exclude", default="", help="classified.jsonl from earlier rounds; "
+                    "passages already judged (same video, start within 30 s) are skipped, so a "
+                    "second round deepens the ledger instead of repeating it")
+    ap.add_argument("--since", default="", help="only uploads published after this date "
+                    "(YYYY-MM-DD) — a refresh round passes the ledger's latest_video_date so "
+                    "its cost scales with the new uploads, not the catalogue")
+    a = ap.parse_args()
+    t0 = time.monotonic()
+    since = a.since.strip() or None
+
+    phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
+    host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
+    host_lc = {t.lower() for t in host_terms}
+    # host terms are read off the window text (host_naming), never queried:
+    # a fragment cut around a bare name carried no cue and no disclosure
+    all_phrases = list(phrases)
+
+    docs = fetch_all_years(a.channel, all_phrases, a, since, weights)
+    queries_note = f"{len(YEARS)} year buckets"
+    try:
+        videos_with_transcript, langs = census(a.channel)
+    except Exception as exc:  # census is reporting, never a gate
+        videos_with_transcript, langs = 0, {}
+        print(f"census failed: {exc}", file=sys.stderr)
+    try:
+        latest_video_date = latest_upload(a.channel)
+    except Exception as exc:  # reporting, never a gate
+        latest_video_date = None
+        print(f"latest-upload lookup failed: {exc}", file=sys.stderr)
+    non_en_docs: list[dict] = []
+    non_en_failed = False
+    non_en_total = sum(n for k, n in langs.items() if not is_english(k))
+    # An English-language channel whose index holds Arabic, Portuguese or
+    # Vietnamese transcripts is carrying YouTube's auto-dubbed audio tracks,
+    # not the creator's words: HopeScope (2026-09-09) had 36 Arabic-track
+    # videos among 506, 96 of their windows reached the extractors, and one
+    # became a ledger fact with an Arabic "quote" she never spoke. A dubbed
+    # track can never verify as verbatim, so on an English channel every
+    # non-English track is excluded here and counted, never sampled. A
+    # non-English channel keeps the sampling: there the source language IS
+    # the creator's voice.
+    chan_lang = channel_language(a.channel)
+    dubbed_excluded: dict[str, int] = {}
+    if non_en_total and chan_lang and is_english(chan_lang):
+        dubbed_excluded = {k: n for k, n in langs.items() if not is_english(k)}
+        print(f"channel language is {chan_lang}: {non_en_total} non-English "
+              f"transcript(s) treated as auto-dubbed tracks and excluded "
+              f"({', '.join(f'{k}:{n}' for k, n in sorted(dubbed_excluded.items()))})",
+              file=sys.stderr)
+    elif non_en_total:
+        try:
+            non_en_docs = fetch_non_english(a.channel, since=since)
+        except Exception as exc:
+            non_en_failed = True
+            print(f"non-English fetch failed: {exc}", file=sys.stderr)
+    if non_en_failed:
+        # the round did not read everything after the old watermark, so it
+        # must not advance it: the summary carries no latest_video_date and the
+        # ledger header keeps the previous round's, so the next --since refresh
+        # re-covers the uploads this round missed
+        latest_video_date = None
+
+    done: dict[str, list[int]] = {}
+    if a.exclude and pathlib.Path(a.exclude).exists():
+        for line in open(a.exclude, encoding="utf-8"):
+            if line.strip():
+                w = json.loads(line).get("window") or {}
+                done.setdefault(w.get("id", ""), []).append(int(w.get("start", 0)))
+    corpus: dict[str, dict] = {}
+    seen: dict[str, list[float]] = {}
+    if dubbed_excluded:
+        # the phrase query cannot match an English cue in a dubbed track, but
+        # a code-switched or mis-labelled doc could still slip through: the
+        # exclusion is by language, not by luck
+        docs = [d for d in docs if is_english(d.get("transcript_language"))]
+    windows = build_windows(docs, corpus=corpus, done=done, seen=seen, host_lc=host_lc,
+                            recurring=recurring, retrieval="phrase", weights=weights)
+
+    import store_io  # sibling; parses the timed-text XML into [start, text] cues
+    for d in non_en_docs:
+        vid = d.get("id") or d.get("_id")
+        if not vid or vid in corpus:
+            continue
+        cue_list = store_io.cues(d.get("transcript"))
+        entry = corpus.setdefault(vid, {
+            "id": vid, "title": d.get("title"), "publication_date": d.get("publication_date"),
+            "views": None, "duration": d.get("duration"), "content_type": d.get("content_type"),
+            "transcript_language": d.get("transcript_language"), "cues": []})
+        for run in sample_windows(cue_list):
+            start = run[0][0]
+            if any(abs(start - s_) < 30 for s_ in done.get(vid, [])):
+                continue
+            text = " ".join(t for _, t in run)
+            entry["cues"].extend(run)
+            seen.setdefault(vid, []).append(start)
+            windows.append({
+                "id": vid, "video_id": vid.split(":", 1)[-1], "title": d.get("title"),
+                "language": d.get("transcript_language"), "format_hint": format_hint(d.get("title")),
+                "published": (d.get("publication_date") or "")[:10],
+                "start": int(start), "text": text, "cues_fired": [], "host_anchor": False,
+                "host_anchor_terms": [], "host_named_third_person": [],
+                "second_voice_hint": None, "entity_hits": [], "weak_anchor": False,
+                "stage_direction": False, "boilerplate": False,
+                "in_sponsor_read": bool(SPONSOR_RX.search(text)),
+                "recurrence_videos": 0, "recurring_phrase": None,
+                "retrieval": "non_english_sample", "rank_score": 1.0,
+                "read_span": None, "context_added": False,
+                "_specific": [], "_recurring": [], "_weights": None,
+                "_span": [run[0][0], run[-1][0]],
+            })
+    per_video: dict[str, int] = {}
+    per_phrase: dict[str, int] = {}
+    phrase_cap = max(RECURRING_CAP, int(a.max_windows * PHRASE_CAP_SHARE))
+    kept = select_windows(windows, a.max_windows, per_video=per_video, per_phrase=per_phrase,
+                          per_video_cap=a.per_video_cap, phrase_cap=phrase_cap)
+    phrase_kept = len(kept)
+    phrase_videos = len(corpus)
+
+    # The fallback pass: only when the cue phrases leave the cap short, and only
+    # for the shortfall. A fallback window never displaces a phrase window,
+    # however low that phrase window scored, and never repeats a passage within
+    # 30 s of one the phrase pass produced.
+    floor = a.max_windows if a.generic_floor is None else a.generic_floor
+    fallback = {"ran": False, "floor": floor, "terms": list(GENERIC_TERMS),
+                "videos_added": 0, "passages": 0, "windows_kept": 0}
+    generic_windows: list[dict] = []
+    if floor > 0 and len(kept) < floor:
+        gdocs = fetch_all_years(a.channel, GENERIC_TERMS, a, since)
+        generic_windows = build_windows(gdocs, corpus=corpus, done=done, seen=seen,
+                                        host_lc=host_lc, recurring=recurring,
+                                        retrieval="generic")
+        gkept = select_windows(generic_windows, a.max_windows - len(kept),
+                               per_video=per_video, per_phrase=per_phrase,
+                               per_video_cap=a.per_video_cap, phrase_cap=phrase_cap)
+        kept.extend(gkept)
+        fallback.update(ran=True, videos_added=len(corpus) - phrase_videos,
+                        passages=len(generic_windows), windows_kept=len(gkept))
+        queries_note += " x 2 passes (generic fallback ran)"
+    windows.extend(generic_windows)          # phrase windows first, then the fallback's
+    # the cap is taken on the narrow fragments; what the extractor reads is wider
+    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after)
+    for w in windows:
+        w.pop("_specific", None)
+        w.pop("_recurring", None)
+        w.pop("_weights", None)
+        w.pop("_span", None)
+    sponsor_source = apply_sponsor_spans(kept)
+    third_person_windows = sum(1 for w in kept if w.get("host_named_third_person"))
+    self_named_windows = sum(1 for w in kept if w.get("host_anchor"))
+    third_person_share = round(third_person_windows / len(kept), 2) if kept else 0.0
+
+    out = pathlib.Path(a.out) / str(a.channel)
+    suffix = "" if a.round <= 1 else f"-r{a.round}"
+    bdir = out / f"batches{suffix}"
+    rdir = out / f"returns{suffix}"
+    bdir.mkdir(parents=True, exist_ok=True)
+    if a.round <= 1:
+        # a first round is a fresh build: nothing from an earlier build's
+        # later rounds may leak into this one's counts or its passage store
+        for stale in list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz")) + [
+                out / n for n in ("classified.jsonl", "gems.jsonl", "gems-clustered.jsonl",
+                                  "candidates.jsonl", "respawn.json")]:
+            if stale.exists():
+                stale.unlink()
+        for d in list(out.glob("batches-r*")) + list(out.glob("returns-r*")):
+            for f in d.glob("*"):
+                f.unlink()
+            d.rmdir()
+        if (out / "corpus.jsonl.gz").exists():
+            (out / "corpus.jsonl.gz").unlink()
+    for old in bdir.glob("batch-*.json"):
+        old.unlink()
+    if rdir.exists():                      # a return for a batch that no longer exists is stale
+        for old in rdir.glob("batch-*.extract*.json"):
+            old.unlink()
+    with gzip.open(out / f"windows{suffix}.jsonl.gz", "wt", encoding="utf-8") as fh:
+        for w in windows:
+            fh.write(json.dumps(w, ensure_ascii=False) + "\n")
+    corpus_path = out / "corpus.jsonl.gz"
+    if corpus_path.exists():               # merge, never replace: earlier rounds must still verify
+        with gzip.open(corpus_path, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                e = json.loads(line)
+                cur = corpus.get(e["id"])
+                if cur is None:
+                    corpus[e["id"]] = e
+                else:
+                    have = {round(float(c[0]), 2) for c in cur["cues"]}
+                    cur["cues"].extend(c for c in e["cues"] if round(float(c[0]), 2) not in have)
+    with gzip.open(corpus_path, "wt", encoding="utf-8") as fh:
+        for e in corpus.values():
+            e["cues"].sort(key=lambda c: c[0])
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+    agent_cap = env_agent_cap()
+    # Every running agent counts against the host's cap, so a lane in flight
+    # during the fan-out costs one extractor slot: with 20 batches for a cap of
+    # 20 and the socials lane running, the 20th extractor was rejected and
+    # relaunched a wave later. Size the batches against what is actually free.
+    usable_cap = max(1, agent_cap - max(0, a.reserve))
+    batch_size = a.batch_size or derived_batch_size(len(kept), usable_cap)
+    batches = []
+    for i in range(0, len(kept), batch_size):
+        p = bdir / f"batch-{i // batch_size:03d}.json"
+        p.write_text(json.dumps(kept[i:i + batch_size], ensure_ascii=False))
+        batches.append(str(p))
+    elapsed = round(time.monotonic() - t0, 1)
+    summary = {
+        "channel": a.channel, "round": a.round, "phrases": len(all_phrases), "queries": queries_note,
+        "videos_with_transcript": videos_with_transcript, "languages": langs,
+        "channel_language": chan_lang,
+        "dubbed_excluded": dubbed_excluded,
+        "non_english_videos_sampled": len(non_en_docs),
+        "videos_matched": len(corpus), "passages": len(windows),
+        "windows_batched": len(kept), "videos_in_batches": len(per_video),
+        "phrase_windows_kept": phrase_kept, "generic_fallback": fallback,
+        "fragment_size": a.fragment_size,
+        "batch_size": batch_size, "agent_cap": agent_cap,
+        "reserved_slots": max(0, a.reserve), "usable_cap": usable_cap,
+        "sponsor_flagged": sum(1 for w in kept if w["in_sponsor_read"]),
+        "sponsor_source": sponsor_source,
+        "read_span": {"before_s": a.read_before, "after_s": a.read_after,
+                      "source": read_source, "widened": widened},
+        # voice signals over the kept windows: a self-naming is the host, a
+        # third-person naming is someone speaking of the host. A high share
+        # on a channel labelled solo is a crew channel, and the format call
+        # should say multi_host (SKILL.md, the format step).
+        "host_terms": host_terms,
+        "self_named_windows": self_named_windows,
+        "third_person_host_windows": third_person_windows,
+        "third_person_host_share": third_person_share,
+        "batches": batches, "returns_dir": str(rdir),
+        "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
+        "corpus": str(corpus_path), "latest_video_date": latest_video_date,
+        "non_english_fetch_failed": non_en_failed,
+        "elapsed_s": elapsed,
+    }
+    summary_path = out / f"fetch{suffix}.json"   # ledger_meta.py reads these per round
+    summary["summary_file"] = str(summary_path)
+    summary_path.write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    print(json.dumps(summary, indent=1))
+    print(f"FUNNEL stage=fetch_cues round={a.round} videos_with_transcript={videos_with_transcript} "
+          f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} "
+          f"dubbed_excluded={sum(dubbed_excluded.values())} passages={len(windows)} "
+          f"windows_capped={len(kept)} phrase_windows={phrase_kept} "
+          f"generic_fallback={'ran' if fallback['ran'] else ('off' if floor <= 0 else 'skipped')} "
+          f"generic_windows={fallback['windows_kept']} "
+          f"batches={len(batches)} batch_size={batch_size} "
+          f"agent_cap={agent_cap} sponsor_source={sponsor_source} "
+          f"read_span={read_source} widened={widened} "
+          f"self_named={self_named_windows} third_person_host={third_person_windows} "
+          f"third_person_host_share={third_person_share} elapsed_s={elapsed}",
+          file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

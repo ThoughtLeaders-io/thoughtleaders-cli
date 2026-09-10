@@ -1,0 +1,1098 @@
+"""fetch_cues.py — the model layer's only retrieval flow.
+
+Covers everything the script decides on its own: what a highlight fragment
+means (`clean`, `format_hint`), how it censuses a channel's transcript
+coverage and pulls non-English uploads separately (`census`,
+`fetch_non_english`, `sample_windows`), which passages survive the cap
+(per-video, per-phrase and recurring-bit ceilings, plus `--exclude` from an
+earlier round), the additive `--round` behaviour (suffixed batches/returns,
+merged corpus, stale-return cleanup), and the ad-read lookup (real spans vs
+the regex fallback). No network anywhere: every ES call goes through
+`tl_data.cli_rows` / `tl_data._tl_json`, both stubbed, and the sponsor-span
+lookup is stubbed too.
+"""
+
+import gzip
+import json
+import pathlib
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+_SCRIPTS = (Path(__file__).resolve().parents[1]
+            / "skills" / "tl-creator-brief" / "scripts")
+sys.path.insert(0, str(_SCRIPTS))
+import fetch_cues  # noqa: E402
+
+
+# --------------------------------------------------------------------------- #
+# clean(): a highlight fragment -> (text, hits, first start, raw hits, pieces)
+# --------------------------------------------------------------------------- #
+def test_clean_strips_timing_tags_and_keeps_the_first_start():
+    frag = ('<text start="41.5">so anyway</text>'
+            '<text start="45.25">i grew up in a tiny town</text>')
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert text == "so anyway i grew up in a tiny town"
+    assert start == 41.5            # the passage opens at its earliest cue
+    assert hits == [] and raw == []
+    assert pieces == [[41.5, "so anyway"], [45.25, "i grew up in a tiny town"]]
+
+
+def test_clean_double_unescapes_caption_entities():
+    # captions arrive double-escaped often enough that one pass is not enough
+    frag = '<text start="10">my &amp;#39;dad&amp;#39; ran a bakery</text>'
+    text, _, _, _, pieces = fetch_cues.clean(frag)
+    assert text == "my 'dad' ran a bakery"
+    assert pieces == [[10.0, "my 'dad' ran a bakery"]]
+
+
+@pytest.mark.parametrize("stub, fixed", [
+    ("amp;#39;s right there behind", "'s right there behind"),
+    (";#39;m big into health", "'m big into health"),
+    ("#39;ve got a dog", "'ve got a dog"),
+    ("amp;#34; quoted", "quoted"),
+])
+def test_clean_resolves_a_partial_entity_at_a_fragment_start(stub, fixed):
+    frag = f'<text start="10">{stub} and <em>my dad</em> ran the bakery there</text>'
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert text.startswith(fixed)
+    assert pieces[0][1] == text          # the cue store and the text agree
+    assert "my dad" in hits
+
+
+@pytest.mark.parametrize("stub", [
+    'start="138" dur="3.78">',
+    '="664.399" dur="2.801">',
+    '> ',
+    'start="1.2" dur="2">amp;#39;',
+])
+def test_clean_drops_a_cut_timed_text_tag_at_a_fragment_start(stub):
+    frag = f'<text start="10">{stub}hey friends welcome back and <em>my dad</em> ran it</text>'
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert text.startswith("'hey friends" if "#39" in stub else "hey friends"), text
+    assert pieces[0][1] == text
+    assert start == 10.0
+
+
+@pytest.mark.parametrize("stub", [
+    "text>", "ext>", "xt>", "t>", "/text>",
+    'text start="188.94" dur="5.379">',        # the `<` alone was cut
+    'xt start="53.199">',
+])
+def test_clean_drops_a_tag_NAME_cut_at_a_fragment_start(stub):
+    """The boundary can land inside the tag name, not just its attributes,
+    which leaves `text> move to los angeles` or a whole
+    `text start="188.94" dur="5.379">` at the head of the window."""
+    frag = (f'{stub} move to los angeles and '
+            f'<text start="651.279">so <em>my dad</em> came too</text>')
+    text, hits, start, _, pieces = fetch_cues.clean(frag)
+    assert text == "move to los angeles and so my dad came too", text
+    assert pieces[0][1] == text
+    assert start == 651.28
+    assert "my dad" in hits
+
+
+@pytest.mark.parametrize("tail", [
+    '<text start="651.279',
+    '<text start=',
+    '<tex',
+    '<em',
+    '<',
+])
+def test_clean_drops_an_unterminated_tag_at_a_fragment_end(tail):
+    """Neither CUE_RX nor TAG_RX matches a tag with no closing `>`, so the far
+    boundary used to leave `... my family to go <text start="651.279`."""
+    frag = f'<text start="10">i left my girlfriend my family to go {tail}'
+    text, _, start, _, pieces = fetch_cues.clean(frag)
+    assert text == "i left my girlfriend my family to go", text
+    assert pieces[-1][1] == text
+    assert start == 10.0
+
+
+def test_clean_keeps_an_escaped_less_than_that_is_not_markup():
+    """`&lt;` is prose, not a cut tag: the strip runs before unescaping so a
+    real `<` in the captions survives."""
+    frag = '<text start="10">the answer was &amp;lt;3 honestly</text>'
+    text, _, _, _, _ = fetch_cues.clean(frag)
+    assert text == "the answer was <3 honestly", text
+
+
+def test_clean_reports_em_hits_lowercased_and_deduped():
+    frag = ('<text start="12"><em>I grew up</em> in ohio and '
+            '<em>i grew up</em> poor, <em>my dad</em> worked nights</text>')
+    text, hits, start, raw, pieces = fetch_cues.clean(frag)
+    assert hits == ["i grew up", "my dad"]          # sorted, unique, lowered
+    assert raw == ["i grew up", "i grew up", "my dad"]   # raw keeps repeats
+    assert "<em>" not in text and start == 12
+    assert pieces == [[12.0, text]]                 # one cue -> one piece
+
+
+def test_clean_returns_no_start_and_no_pieces_when_untimed():
+    text, hits, start, raw, pieces = fetch_cues.clean(
+        "i grew up in a tiny town in ohio")
+    assert start is None
+    assert pieces == []
+    assert text == ""
+
+
+def test_clean_attaches_text_before_the_first_tag_to_the_first_cue():
+    # a fragment boundary can cut a cue's opening tag off; the leading text
+    # belongs to the first real cue, not a phantom one
+    frag = 'hello world<text start="10">my dad ran</text>'
+    text, _, start, _, pieces = fetch_cues.clean(frag)
+    assert start == 10.0
+    assert pieces == [[10.0, "hello world my dad ran"]]
+    assert text == "hello world my dad ran"
+
+
+def test_clean_returns_one_piece_per_timed_text_cue():
+    frag = ('<text start="1.0">first cue</text>'
+            '<text start="2.0">second cue</text>'
+            '<text start="3.0">third cue</text>')
+    _, _, start, _, pieces = fetch_cues.clean(frag)
+    assert start == 1.0
+    assert [p[0] for p in pieces] == [1.0, 2.0, 3.0]
+    assert [p[1] for p in pieces] == ["first cue", "second cue", "third cue"]
+
+
+# --------------------------------------------------------------------------- #
+# format_hint(): title -> per-video rubric hint
+# --------------------------------------------------------------------------- #
+def test_format_hint_detects_reaction_titles():
+    assert fetch_cues.format_hint("I REACT to old vlogs") == "reaction"
+    assert fetch_cues.format_hint("Reacting to fan comments") == "reaction"
+    assert fetch_cues.format_hint("Watching my old content") == "reaction"
+
+
+def test_format_hint_detects_interview_or_collab_titles():
+    assert fetch_cues.format_hint("Interview with a chef") == "interview_or_collab"
+    assert fetch_cues.format_hint("Cooking ft. John Doe") == "interview_or_collab"
+    assert fetch_cues.format_hint("A collab video") == "interview_or_collab"
+    assert fetch_cues.format_hint("Special guest: my mum") == "interview_or_collab"
+    assert fetch_cues.format_hint("Q&A with my editor") == "interview_or_collab"
+
+
+def test_format_hint_detects_with_name_and_w_slash_collab_titles():
+    # Live miss (ChippyGaming, 2026-09-03): four-way call titles whose
+    # windows were judged as the solo host, because "w/" never matched and
+    # "with <Name>" was not a pattern at all.
+    for title in (
+        "Terraria w/ JaidenAnimations, AntiDarkHeart & AliceSnowpuff",
+        "Terraria with JaidenAnimations, AntiDarkHeart and AliceSnowpuff",
+        "Teeny Tiny Terraria Bosses! #2 w/ Jaiden Animations & Ant",
+        "I Played Terraria 1.4.5 with The Developers",
+        "I Played 1.4.5 with Terraria’s Creator",
+        "Terraria Livestream with PythonGB and Pedguin!",
+        "Cooking with @chefjane",
+    ):
+        assert fetch_cues.format_hint(title) == "interview_or_collab", title
+
+
+def test_format_hint_marks_in_character_formats_as_staged():
+    # the Airrack top 20 (2026-09-10): a talent-show joke, a hide-in-plain-sight
+    # premise and a comedy format all read as the host's own life
+    for title in ("YOUTUBERS GOT TALENT!", "How Long Could You Secretly Live In A Mall?",
+                  "I Secretly Lived In YouTuber's Houses", "Try Not To Laugh: IRL",
+                  "I Hid in Viral YouTube Videos and Nobody Noticed", "Scammer Payback: Part 2",
+                  "Undercover at a MrBeast event", "How Many Days Can I Secretly Live At 7/11?"):
+        assert fetch_cues.format_hint(title) == "staged", title
+
+
+def test_format_hint_returns_none_for_plain_titles():
+    assert fetch_cues.format_hint("My daily vlog") is None
+    assert fetch_cues.format_hint(None) is None
+    # lower-case "with <thing>" is a mod, a pack or a tool, not a person
+    assert fetch_cues.format_hint("You NEED to replay Terraria with this mod!") is None
+    assert fetch_cues.format_hint("Ocram is FINALLY playable on PC Terraria! (with mods)") is None
+
+
+def test_format_hint_is_the_same_rule_channel_context_counts():
+    # One home: the per-window hint and the context brief's title census must
+    # never disagree on what counts as a second voice.
+    import channel_context
+    titles = ["Terraria with JaidenAnimations", "I REACT to old vlogs",
+              "My daily vlog", "Cooking ft. John Doe"]
+    for title in titles:
+        expected = next((fmt for fmt, rx in channel_context.TITLE_SECOND_VOICE.items()
+                         if rx.search(title)), None)
+        assert fetch_cues.format_hint(title) == expected, title
+
+
+# --------------------------------------------------------------------------- #
+# YEARS: derived, not hard-coded
+# --------------------------------------------------------------------------- #
+def test_years_span_youtube_launch_to_next_year():
+    assert fetch_cues.YEARS[0] == 2005
+    assert fetch_cues.YEARS[-1] == time.gmtime().tm_year + 1
+    assert fetch_cues.YEARS == list(range(2005, time.gmtime().tm_year + 2))
+
+
+# --------------------------------------------------------------------------- #
+# census(): size-0 aggregation over tl_data._tl_json
+# --------------------------------------------------------------------------- #
+def test_census_queries_a_size_zero_language_aggregation(monkeypatch):
+    captured = {}
+
+    def fake(args, input_text=None, timeout=None):
+        captured["body"] = json.loads(input_text)
+        return {"total": 42, "aggregations": {"lang": {"buckets": [
+            {"key": "en", "doc_count": 30}, {"key": "es", "doc_count": 12}]}}}
+
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", fake)
+    total, langs = fetch_cues.census(99)
+    assert total == 42
+    assert langs == {"en": 30, "es": 12}
+    body = captured["body"]
+    assert body["size"] == 0
+    assert body["track_total_hits"] is True
+    filters = body["query"]["bool"]["filter"]
+    assert {"term": {"channel.id": 99}} in filters
+    assert {"term": {"doc_type": "article"}} in filters
+    assert {"exists": {"field": "transcript"}} in filters
+    assert body["aggs"]["lang"]["terms"]["field"] == "transcript_language"
+
+
+def test_census_handles_no_hits(monkeypatch):
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", lambda *a, **k: None)
+    total, langs = fetch_cues.census(1)
+    assert total == 0 and langs == {}
+
+
+# --------------------------------------------------------------------------- #
+# is_english(): which caption-language codes count as English
+# --------------------------------------------------------------------------- #
+def test_is_english_accepts_known_and_regional_codes():
+    assert fetch_cues.is_english("en")
+    assert fetch_cues.is_english("EN")
+    assert fetch_cues.is_english("asr-en")
+    assert fetch_cues.is_english("en-US")
+    assert fetch_cues.is_english("en-GB")
+    assert fetch_cues.is_english(None)          # missing -> treated as English
+    assert fetch_cues.is_english("")
+
+
+def test_is_english_rejects_other_languages():
+    assert not fetch_cues.is_english("es")
+    assert not fetch_cues.is_english("fr")
+    assert not fetch_cues.is_english("pt-BR")
+
+
+# --------------------------------------------------------------------------- #
+# fetch_non_english(): pages non-English transcript docs over tl_data.cli_rows
+# --------------------------------------------------------------------------- #
+def test_fetch_non_english_pages_and_excludes_english(monkeypatch):
+    calls = []
+    page1 = [{"id": f"7:v{i}", "publication_date": "2024-01-01",
+             "transcript_language": "es"} for i in range(3)]
+    page2 = [{"id": "7:v3", "publication_date": "2023-01-01",
+             "transcript_language": "es"}]
+
+    def fake(args, input_text=None, timeout=None):
+        body = json.loads(input_text)
+        calls.append(body)
+        return page1 if len(calls) == 1 else page2
+
+    monkeypatch.setattr(fetch_cues.tl_data, "cli_rows", fake)
+    docs = fetch_cues.fetch_non_english(7, size=3)
+    assert docs == page1 + page2
+    first = calls[0]
+    assert first["query"]["bool"]["must_not"] == [
+        {"terms": {"transcript_language": sorted(fetch_cues.ENGLISH_CODES)}}]
+    assert {"term": {"channel.id": 7}} in first["query"]["bool"]["filter"]
+    assert {"exists": {"field": "transcript"}} in first["query"]["bool"]["filter"]
+    assert "search_after" not in first
+    assert calls[1]["search_after"] == ["2024-01-01", "7:v2"]
+
+
+def test_fetch_non_english_stops_on_a_short_page(monkeypatch):
+    monkeypatch.setattr(fetch_cues.tl_data, "cli_rows",
+                        lambda *a, **k: [{"id": "7:v0",
+                                         "publication_date": "2024-01-01",
+                                         "transcript_language": "fr"}])
+    docs = fetch_cues.fetch_non_english(7, size=40)
+    assert len(docs) == 1
+
+
+# --------------------------------------------------------------------------- #
+# sample_windows(): stride-sampled ~80-word runs of consecutive cues
+# --------------------------------------------------------------------------- #
+def test_sample_windows_groups_by_word_count_then_stride_samples():
+    cue_list = [(float(i), " ".join(["word"] * 10)) for i in range(10)]
+    runs = fetch_cues.sample_windows(cue_list, per_video=3, words=30)
+    # 10 cues of 10 words each form 3 full 30-word runs plus one partial run
+    # of 10 words; stride sampling over per_video=3 keeps the first three
+    assert len(runs) == 3
+    assert [len(r) for r in runs] == [3, 3, 3]
+    assert [r[0][0] for r in runs] == [0.0, 3.0, 6.0]
+
+
+def test_sample_windows_returns_everything_when_under_the_cap():
+    cue_list = [(float(i), " ".join(["word"] * 40)) for i in range(2)]
+    runs = fetch_cues.sample_windows(cue_list, per_video=3, words=30)
+    assert len(runs) == 2
+    assert runs[0] == [[0.0, cue_list[0][1]]]
+
+
+def test_sample_windows_drops_a_too_short_trailing_run():
+    cue_list = [(0.0, " ".join(["word"] * 40)), (1.0, "just a few words")]
+    runs = fetch_cues.sample_windows(cue_list, per_video=3, words=30)
+    assert len(runs) == 1                   # the 4-word trailing run is dropped
+
+
+# --------------------------------------------------------------------------- #
+# main(): the cap, and everything a run leaves behind
+# --------------------------------------------------------------------------- #
+def _frag(cue: str, start: int, filler: str = "and that is the whole story") -> str:
+    return (f'<text start="{start}"><em>{cue}</em> {filler} '
+            f'about the year it happened</text>')
+
+
+def _doc(vid: str, frags: list[str], date: str = "2024-03-02") -> dict:
+    return {"id": vid, "title": f"video {vid}", "publication_date": date,
+            "transcript_language": "en", "content_type": "video",
+            "duration": 600, "highlight": {"transcript": frags}}
+
+
+_GENERIC_QUERIES = {v for g in fetch_cues.GENERIC_TERMS for v in fetch_cues.phrase_variants(g)}
+
+
+def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict],
+                     generic_by_year: dict | None = None):
+    """A ``tl_data.cli_rows`` stub that answers every caller that uses it:
+    the year-bucket cue query (``fetch_year``, no ``must_not``), the same
+    query on the fallback pass (its ``should`` holds only GENERIC_TERMS) and
+    the non-English fetch (``fetch_non_english``, a ``must_not`` clause on
+    ``transcript_language: en``) — distinguished by inspecting the body,
+    exactly the way the queries differ for real."""
+    def fake(args, input_text=None, timeout=None):
+        body = json.loads(input_text)
+        bool_q = body["query"]["bool"]
+        if bool_q.get("must_not"):
+            return [] if "search_after" in body else list(non_en_docs)
+        year = None
+        for f in bool_q.get("filter", []):
+            rng = (f.get("range") or {}).get("publication_date")
+            if rng:
+                year = int(rng["gte"][:4])
+        if "search_after" in body:
+            return []
+        queries = {c["match_phrase"]["transcript"]["query"]
+                   for c in bool_q["must"][0]["bool"]["should"]}
+        if queries <= _GENERIC_QUERIES:
+            return list((generic_by_year or {}).get(year, []))
+        return list(docs_by_year.get(year, []))
+    return fake
+
+
+def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
+        year=2024, langs=None, non_en_docs=(), census_total=None, generic_docs=(),
+        transcripts=None):
+    """Run main() over stubbed ES calls, returning (summary, kept windows).
+    ``generic_docs`` is what the fallback pass's query gets back (nothing by
+    default). ``transcripts`` is what the read-around's transcript lookup
+    returns, ``{video id: [(start, text), ...]}`` (nothing by default, so the
+    fragments stay as cut); a callable raises through to the caller. The
+    FUNNEL line is left on ``_run.last_funnel``."""
+    monkeypatch.setattr(fetch_cues.tl_data, "cli_rows",
+                        _cli_rows_router({year: docs}, list(non_en_docs),
+                                         {year: list(generic_docs)}))
+    _run.last_queries = []
+    monkeypatch.setattr(fetch_cues, "fetch_transcripts",
+                        transcripts if callable(transcripts)
+                        else (lambda refs: dict(transcripts or {})))
+    lang_counts = langs if langs is not None else {"en": len(docs) or 1}
+    total = census_total if census_total is not None else sum(lang_counts.values())
+    monkeypatch.setattr(
+        fetch_cues.tl_data, "_tl_json",
+        lambda args, input_text=None, timeout=None: {
+            "total": total,
+            "aggregations": {"lang": {"buckets": [
+                {"key": k, "doc_count": v} for k, v in lang_counts.items()]}}})
+    monkeypatch.setattr(fetch_cues, "sponsor_segments",
+                        spans or (lambda refs: {}))
+    phrase_file = tmp_path / "phrases.txt"
+    phrase_file.write_text(phrases if phrases is not None
+                           else "i grew up\nmy dad\nmy first job\n")
+    out = tmp_path / "corpus"
+    monkeypatch.setattr(sys, "argv", ["fetch_cues.py", "--channel", "7",
+                                      "--out", str(out), "--phrases",
+                                      str(phrase_file), *map(str, argv)])
+    capture = {}
+    monkeypatch.setattr("builtins.print",
+                        lambda *a, **k: capture.setdefault("lines", []).append((a, k)))
+    assert fetch_cues.main() == 0
+    monkeypatch.undo()
+    summary = json.loads([a[0] for a, k in capture["lines"]
+                          if not k.get("file")][0])
+    _run.last_funnel = next((a[0] for a, k in capture["lines"]
+                             if k.get("file") and str(a[0]).startswith("FUNNEL")), "")
+    round_n = 1
+    argv_list = list(argv)
+    if "--round" in argv_list:
+        round_n = int(argv_list[argv_list.index("--round") + 1])
+    suffix = "" if round_n <= 1 else f"-r{round_n}"
+    kept = []
+    for p in sorted((out / "7" / f"batches{suffix}").glob("batch-*.json")):
+        kept.extend(json.loads(p.read_text()))
+    return summary, kept
+
+
+def test_per_video_cap_stops_one_video_owning_the_batch(tmp_path, monkeypatch):
+    frags = [_frag("i grew up", 100 + 60 * i) for i in range(12)]
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:vid1", frags)],
+                         argv=("--per-video-cap", "3"))
+    assert summary["passages"] == 12          # every passage is still recorded
+    assert len(kept) == 3                     # only three reach the model layer
+    assert summary["videos_in_batches"] == 1
+
+
+def test_one_phrase_cannot_supply_more_than_its_share_of_the_cap(
+        tmp_path, monkeypatch):
+    # 30 videos, one passage each, all firing the same cue: the per-phrase
+    # ceiling (max(12, 8% of the cap)) bounds what that one phrase contributes
+    docs = [_doc(f"7:v{i:02d}", [_frag("i grew up", 100)]) for i in range(30)]
+    _, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "100"))
+    assert len(kept) == fetch_cues.RECURRING_CAP == 12
+
+
+def test_a_recurring_bit_is_capped_harder_than_an_ordinary_cue(
+        tmp_path, monkeypatch):
+    """`~phrase` marks a greeting or sign-off that fires in most uploads; it
+    may seed a few windows, never fill the batch."""
+    docs = [_doc(f"7:v{i:02d}", [_frag("my first job", 100)]) for i in range(30)]
+    _, ordinary = _run(tmp_path, monkeypatch, docs,
+                       argv=("--max-windows", "500"))
+    docs = [_doc(f"7:v{i:02d}", [_frag("welcome back to", 100)])
+            for i in range(30)]
+    _, recurring = _run(tmp_path, monkeypatch, docs,
+                        argv=("--max-windows", "500"),
+                        phrases="i grew up\nmy first job\n~welcome back to\n")
+    # the ordinary cue rides the 8%-of-cap ceiling (40); the recurring bit is
+    # bounded by RECURRING_CAP, which it reaches twice as fast because a
+    # recurring-only window charges its phrase on both passes
+    assert len(ordinary) == 30
+    assert len(recurring) == fetch_cues.RECURRING_CAP // 2 == 6
+
+
+def test_exclude_skips_passages_an_earlier_round_already_judged(
+        tmp_path, monkeypatch):
+    frags = [_frag("i grew up", 100), _frag("my dad", 400)]
+    done = tmp_path / "classified.jsonl"
+    done.write_text(json.dumps({"window": {"id": "7:vid1", "start": 110},
+                                "verdict": {}}) + "\n")
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:vid1", frags)],
+                   argv=("--exclude", str(done)))
+    # 110 is within 30 s of the first passage's start, so only the second one
+    # is new work for this round
+    assert [w["start"] for w in kept] == [400]
+
+
+def test_short_passages_and_untimed_fragments_never_batch(tmp_path, monkeypatch):
+    frags = ['<text start="10"><em>i grew up</em> here</text>',   # < 8 words
+             '<em>my dad</em> ran the bakery for thirty five long years']  # no start
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:vid1", frags)])
+    assert kept == [] and summary["passages"] == 0
+
+
+def test_windows_carry_a_format_hint_from_the_title(tmp_path, monkeypatch):
+    doc = _doc("7:vid1", [_frag("i grew up", 100)])
+    doc["title"] = "I React to my old videos"
+    _, kept = _run(tmp_path, monkeypatch, [doc])
+    assert kept[0]["format_hint"] == "reaction"
+
+
+# --------------------------------------------------------------------------- #
+# the ad-read flag: real spans when the lookup works, the regex when it doesn't
+# --------------------------------------------------------------------------- #
+_AD = ('<text start="300"><em>i grew up</em> broke, and today\'s video is '
+       'sponsored by acme so use code me for 20% off</text>')
+
+
+def test_real_sponsor_spans_decide_the_flag_and_are_recorded(
+        tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch,
+                         [_doc("7:vid1", [_AD, _frag("my dad", 900)])],
+                         spans=lambda refs: {"7:vid1": [(1000.0, 1100.0)]})
+    assert summary["sponsor_source"] == "brand_mentions"
+    flags = {w["start"]: w["in_sponsor_read"] for w in kept}
+    # the index says the read is at 1000-1100: the 900 s passage overlaps it
+    # once padded, the 300 s one does not — whatever the regex thought
+    assert flags == {300: False, 900: True}
+    assert summary["sponsor_flagged"] == 1
+
+
+def test_a_failed_span_lookup_falls_back_to_the_regex_and_says_so(
+        tmp_path, monkeypatch):
+    def boom(refs):
+        raise RuntimeError("es unavailable")
+    summary, kept = _run(tmp_path, monkeypatch,
+                         [_doc("7:vid1", [_AD, _frag("my dad", 900)])],
+                         spans=boom)
+    assert summary["sponsor_source"] == "regex_fallback"
+    flags = {w["start"]: w["in_sponsor_read"] for w in kept}
+    assert flags == {300: True, 900: False}
+
+
+# --------------------------------------------------------------------------- #
+# non-English coverage: sampled in only when the census shows other languages
+# --------------------------------------------------------------------------- #
+def test_non_english_videos_are_sampled_in_when_census_flags_them(
+        tmp_path, monkeypatch):
+    cues_xml = "".join(f'<text start="{i * 2}.0">palabra numero {i}</text>'
+                       for i in range(50))
+    non_en_doc = {"id": "7:vidES", "title": "Un video", "publication_date": "2023-05-01",
+                 "transcript_language": "es", "content_type": "video",
+                 "duration": 400, "transcript": cues_xml}
+    summary, kept = _run(tmp_path, monkeypatch, [], argv=("--max-windows", "500"),
+                         langs={"en": 5, "es": 12}, non_en_docs=[non_en_doc])
+    assert summary["languages"] == {"en": 5, "es": 12}
+    assert summary["non_english_videos_sampled"] == 1
+    es_windows = [w for w in kept if w["id"] == "7:vidES"]
+    assert es_windows
+    assert all(w["language"] == "es" for w in es_windows)
+    assert all(w["rank_score"] == 1.0 for w in es_windows)
+    assert all(w["cues_fired"] == [] for w in es_windows)
+    assert len(es_windows) <= fetch_cues.NON_EN_WINDOWS_PER_VIDEO
+
+
+def test_non_english_fetch_is_skipped_when_census_shows_only_english(
+        tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch,
+                      [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      langs={"en": 10})
+    assert summary["non_english_videos_sampled"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# summary shape and the files a run leaves behind
+# --------------------------------------------------------------------------- #
+def test_run_writes_batches_windows_and_a_reusable_corpus(tmp_path, monkeypatch):
+    docs = [_doc(f"7:v{i}", [_frag("i grew up", 100), _frag("my dad", 400)])
+            for i in range(3)]
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--batch-size", "2"),
+                         census_total=3, langs={"en": 3})
+    assert len(kept) == 6 and len(summary["batches"]) == 3
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        assert len([1 for _ in f]) == 6
+    with gzip.open(summary["corpus"], "rt", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
+    assert len(rows) == 3
+    # corpus rows are the store shape verify_quotes.py reads
+    assert {"id", "title", "publication_date", "cues", "transcript_language"} <= set(rows[0])
+    assert rows[0]["transcript_language"] == "en"
+    assert [c[0] for c in rows[0]["cues"]] == [100.0, 400.0]   # cues are timed
+
+
+def test_summary_reports_round_census_and_returns_dir(tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch,
+                      [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      census_total=77, langs={"en": 77})
+    assert summary["round"] == 1
+    assert summary["videos_with_transcript"] == 77
+    assert summary["languages"] == {"en": 77}
+    assert summary["non_english_videos_sampled"] == 0
+    assert summary["returns_dir"].endswith("returns")
+
+
+def test_run_persists_its_summary_for_the_meta_record(tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch,
+                      [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      census_total=5, langs={"en": 5})
+    path = pathlib.Path(summary["summary_file"])
+    assert path.name == "fetch.json" and path.parent.name == "7"
+    on_disk = json.loads(path.read_text())
+    assert on_disk["videos_with_transcript"] == 5
+    # the census stub answers every count call, so no newest-upload row came back
+    assert on_disk["latest_video_date"] is None
+    summary2, _ = _run(tmp_path, monkeypatch,
+                       [_doc("7:vid1", [_frag("i grew up", 100)])],
+                       argv=("--round", "2"), census_total=5, langs={"en": 5})
+    assert pathlib.Path(summary2["summary_file"]).name == "fetch-r2.json"
+    assert path.exists()                       # round 1's summary survives round 2
+
+
+def test_a_round_1_fetch_clears_an_earlier_builds_round_artifacts(tmp_path, monkeypatch):
+    out = tmp_path / "corpus" / "7"
+    out.mkdir(parents=True)
+    (out / "fetch-r2.json").write_text("{}")
+    (out / "windows-r2.jsonl.gz").write_bytes(b"")
+    (out / "classified.jsonl").write_text("{}\n")
+    (out / "batches-r2").mkdir()
+    (out / "batches-r2" / "batch-000.json").write_text("[]")
+    with gzip.open(out / "corpus.jsonl.gz", "wt") as f:
+        f.write(json.dumps({"id": "7:old", "publication_date": "2001-01-01", "cues": []}) + "\n")
+    summary, _ = _run(tmp_path, monkeypatch, [_doc("7:vid1", [_frag("i grew up", 100)])],
+                      census_total=1, langs={"en": 1})
+    assert not (out / "fetch-r2.json").exists()
+    assert not (out / "windows-r2.jsonl.gz").exists()
+    assert not (out / "classified.jsonl").exists()
+    assert not (out / "batches-r2").exists()
+    with gzip.open(summary["corpus"], "rt") as f:
+        ids = [json.loads(line)["id"] for line in f]
+    assert ids == ["7:vid1"]                   # the old build's passages are gone too
+
+
+def test_latest_upload_is_one_sorted_single_hit_query(monkeypatch):
+    seen = []
+
+    def fake(args, input_text=None, timeout=None):
+        seen.append(json.loads(input_text))
+        return {"results": [{"id": "7:new", "publication_date": "2026-08-29T00:00:00"}],
+                "total": 867}
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", fake)
+    assert fetch_cues.latest_upload(7) == "2026-08-29"
+    body = seen[0]
+    assert body["size"] == 1 and body["sort"] == [{"publication_date": "desc"}]
+    assert {"term": {"channel.id": 7}} in body["query"]["bool"]["filter"]
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json", lambda *a, **k: {"results": []})
+    assert fetch_cues.latest_upload(7) is None
+
+
+def test_phrase_file_marks_recurring_bits_with_a_tilde(tmp_path):
+    path = tmp_path / "p.txt"
+    path.write_text("# a comment\ni grew up\n~my name is\n\n")
+    phrases, recurring, _ = fetch_cues.load_phrases(path)
+    assert "my name is" in phrases and "my name is" in recurring
+    assert "i grew up" in phrases and "i grew up" not in recurring
+    assert "#" not in "".join(phrases)
+
+
+@pytest.mark.parametrize("weak,strong", [("i love", "i grew up")])
+def test_a_weak_cue_scores_below_a_specific_one(weak, strong, tmp_path,
+                                                monkeypatch):
+    docs = [_doc("7:v1", [_frag(weak, 100)]), _doc("7:v2", [_frag(strong, 100)])]
+    _, kept = _run(tmp_path, monkeypatch, docs,
+                   phrases=f"{weak}\n{strong}\n")
+    assert [w["id"] for w in kept] == ["7:v2", "7:v1"]   # ranked, not fetched-order
+
+
+# --------------------------------------------------------------------------- #
+# --round N: additive artifacts, corpus merge, stale-return cleanup
+# --------------------------------------------------------------------------- #
+def test_round_2_merges_the_corpus_and_uses_suffixed_batches_and_returns(
+        tmp_path, monkeypatch):
+    out = tmp_path / "corpus"
+    # round 1: one cue at 100s
+    docs1 = [_doc("7:vid1", [_frag("i grew up", 100)])]
+    summary1, kept1 = _run(tmp_path, monkeypatch, docs1)
+    assert (out / "7" / "batches").exists()
+    assert (out / "7" / "windows.jsonl.gz").exists()
+
+    # stage a stale return for round 2's batch layout; it must be cleared
+    rdir2 = out / "7" / "returns-r2"
+    rdir2.mkdir(parents=True, exist_ok=True)
+    stale = rdir2 / "batch-000.extract.json"
+    stale.write_text("stale")
+
+    # round 2: a different cue on the same video, at a new start
+    docs2 = [_doc("7:vid1", [_frag("my dad", 500)])]
+    summary2, kept2 = _run(tmp_path, monkeypatch, docs2, argv=("--round", "2"))
+
+    assert summary2["round"] == 2
+    assert (out / "7" / "batches-r2").exists()
+    assert (out / "7" / "windows-r2.jsonl.gz").exists()
+    assert not stale.exists()          # stale return for the old layout is gone
+    # round 1's artifacts are untouched
+    assert (out / "7" / "windows.jsonl.gz").exists()
+
+    with gzip.open(summary2["corpus"], "rt", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
+    assert len(rows) == 1
+    starts = sorted(c[0] for c in rows[0]["cues"])
+    assert starts == [100.0, 500.0]    # round 1's cue survives, round 2 merges in
+
+
+def test_date_range_is_the_year_bucket_unless_since_cuts_into_it():
+    assert fetch_cues.date_range(2024, None) == {
+        "range": {"publication_date": {"gte": "2024-01-01", "lt": "2025-01-01"}}}
+    # a since date before the bucket leaves the bucket whole
+    assert fetch_cues.date_range(2024, "2023-06-01") == {
+        "range": {"publication_date": {"gte": "2024-01-01", "lt": "2025-01-01"}}}
+    # inside the bucket: strictly after since, so the ledger's newest video is not refetched
+    assert fetch_cues.date_range(2024, "2024-05-01") == {
+        "range": {"publication_date": {"gt": "2024-05-01", "lt": "2025-01-01"}}}
+
+
+def test_query_body_is_match_phrase_only_with_no_bare_pronouns():
+    """The bare pronouns used to ride along as low-boost ``match`` clauses.
+    They matched every transcript and, in the highlighter, pronoun-dense
+    banter outscored passages holding a real cue. Now only the given phrases
+    are queried, and only as phrases."""
+    body = fetch_cues.query_body(42, ["i grew up", "my dad"], 2026, 10, 600, 10, None)
+    should = body["query"]["bool"]["must"][0]["bool"]["should"]
+    assert [next(iter(c)) for c in should] == ["match_phrase", "match_phrase"]
+    assert [c["match_phrase"]["transcript"]["query"] for c in should] == ["i grew up", "my dad"]
+
+
+def test_query_body_spells_an_apostrophe_phrase_both_ways_the_index_knows():
+    """A double-encoded caption apostrophe indexes as ``i 39 m``; a
+    single-encoded one as ``i'm``. Both live in the same channel."""
+    body = fetch_cues.query_body(42, ["i'm from", "i can't stand", "my dad"], 2026, 10, 600, 10, None)
+    qs = [c["match_phrase"]["transcript"]["query"]
+          for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert qs == ["i'm from", "i 39 m from", "i can't stand", "i can 39 t stand", "my dad"]
+    assert fetch_cues.phrase_variants("my dad") == ["my dad"]
+
+
+def test_generic_terms_carry_no_object_or_group_pronouns():
+    """me / we / our fired on other people's lines and group stunts; the
+    fallback keeps to the creator's own voice, contracted or not."""
+    assert not {"me", "we", "our"} & set(fetch_cues.GENERIC_TERMS)
+    assert {"i", "my", "i'm", "i am", "i was"} <= set(fetch_cues.GENERIC_TERMS)
+
+
+def test_query_body_carries_since_into_the_filter():
+    body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None, since="2026-05-01")
+    assert {"range": {"publication_date": {"gt": "2026-05-01", "lt": "2027-01-01"}}} in \
+        body["query"]["bool"]["filter"]
+    body = fetch_cues.query_body(42, ["i grew up"], 2026, 10, 900, 10, None)
+    assert {"range": {"publication_date": {"gte": "2026-01-01", "lt": "2027-01-01"}}} in \
+        body["query"]["bool"]["filter"]
+
+
+# --------------------------------------------------------------------------- #
+# batch size follows the host's concurrent-agent cap
+# --------------------------------------------------------------------------- #
+def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
+    assert fetch_cues.derived_batch_size(500, 20) == 25
+    assert fetch_cues.derived_batch_size(500, 40) == 13        # 39 batches, one wave of 40
+    assert fetch_cues.derived_batch_size(300, 40) == 8         # from the windows kept, not the cap
+    assert fetch_cues.derived_batch_size(30, 40) == fetch_cues.MIN_BATCH_SIZE
+    assert fetch_cues.derived_batch_size(0, 40) == fetch_cues.MIN_BATCH_SIZE
+
+
+def test_agent_cap_comes_from_the_environment_or_defaults_to_20(monkeypatch, capsys):
+    monkeypatch.delenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", raising=False)
+    assert fetch_cues.env_agent_cap() == fetch_cues.DEFAULT_AGENT_CAP == 20
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "40")
+    assert fetch_cues.env_agent_cap() == 40
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "lots")
+    assert fetch_cues.env_agent_cap() == 20
+    assert "not an integer" in capsys.readouterr().err
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "0")
+    assert fetch_cues.env_agent_cap() == 20
+
+
+def test_run_derives_the_batch_size_from_the_cap_unless_the_flag_is_given(tmp_path, monkeypatch):
+    docs = [_doc(f"7:v{i}", [_frag("i grew up", 100), _frag("my dad", 400)])
+            for i in range(6)]                                   # 12 windows
+    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "2")
+    summary, kept = _run(tmp_path, monkeypatch, docs, census_total=6, langs={"en": 6})
+    assert len(kept) == 12 and summary["batch_size"] == 6 and summary["agent_cap"] == 2
+    assert len(summary["batches"]) == 2
+    summary, _ = _run(tmp_path, monkeypatch, docs, argv=("--batch-size", "5"),
+                      census_total=6, langs={"en": 6})
+    assert summary["batch_size"] == 5 and len(summary["batches"]) == 3
+
+
+def test_reserve_leaves_room_for_lanes_running_beside_the_fan_out():
+    """A lane in flight during the fan-out costs one extractor slot, so the
+    batches are sized against what is actually free. 20 batches for a cap of
+    20 with the socials lane running meant the 20th extractor was rejected and
+    relaunched a wave later."""
+    cap = 20
+    assert fetch_cues.derived_batch_size(500, cap) == 25            # 20 batches
+    assert fetch_cues.derived_batch_size(500, cap - 1) == 27        # 19 batches
+    assert -(-500 // fetch_cues.derived_batch_size(500, cap - 1)) == 19
+    # reserving more than the cap can never produce zero or negative batches
+    assert fetch_cues.derived_batch_size(500, max(1, cap - 99)) >= 1
+
+
+# --------------------------------------------------------------------------- #
+# the generic fallback: a second pass, report-level, fills only the shortfall
+# --------------------------------------------------------------------------- #
+def _pronoun_frag(start: int, hits: int = 1) -> str:
+    """A fallback-pass fragment: bare first-person hits, no cue phrase."""
+    ems = " ".join("<em>i</em> <em>my</em>" for _ in range(hits))
+    return f'<text start="{start}">{ems} was up all night and the day after that too</text>'
+
+
+def test_generic_fallback_is_skipped_when_the_phrases_fill_the_cap(tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "1"),
+                         generic_docs=[_doc("7:v2", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"]["ran"] is False
+    assert summary["generic_fallback"]["floor"] == 1
+    assert [(w["id"], w["retrieval"]) for w in kept] == [("7:v1", "phrase")]
+    assert "generic_fallback=skipped generic_windows=0" in _run.last_funnel
+
+
+def test_generic_fallback_fills_only_the_shortfall_behind_every_phrase_window(
+        tmp_path, monkeypatch):
+    # one phrase window against a cap of 3: the fallback may add two, no more,
+    # and the phrase window stays first
+    generic = [_doc("7:v2", [_pronoun_frag(100)]), _doc("7:v3", [_pronoun_frag(100)]),
+               _doc("7:v4", [_pronoun_frag(100)])]
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "3"), generic_docs=generic)
+    fb = summary["generic_fallback"]
+    assert fb["ran"] is True and fb["floor"] == 3
+    assert fb["passages"] == 3 and fb["windows_kept"] == 2 and fb["videos_added"] == 3
+    assert summary["phrase_windows_kept"] == 1 and summary["windows_batched"] == 3
+    assert [w["retrieval"] for w in kept] == ["phrase", "generic", "generic"]
+    assert kept[1]["cues_fired"] == [] and kept[1]["rank_score"] == pytest.approx(0.3)
+    assert "generic_fallback=ran generic_windows=2" in _run.last_funnel
+    assert "x 2 passes" in summary["queries"]
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        assert [json.loads(line)["retrieval"] for line in f] == ["phrase"] + ["generic"] * 3
+
+
+def test_the_weakest_phrase_window_still_outranks_the_densest_fallback_window(
+        tmp_path, monkeypatch):
+    """Ranking is by pass, never by score across passes: a weak cue (0.5)
+    beats twelve first-person hits (1.8) because the phrase pass is what
+    the cap is for."""
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i love", 100)])],
+                   argv=("--max-windows", "2"), phrases="i love\n",
+                   generic_docs=[_doc("7:v2", [_pronoun_frag(100, hits=6)])])
+    assert [w["retrieval"] for w in kept] == ["phrase", "generic"]
+    assert kept[0]["rank_score"] < kept[1]["rank_score"]
+
+
+def test_a_fallback_passage_near_a_phrase_passage_is_not_repeated(tmp_path, monkeypatch):
+    generic = [_doc("7:v1", [_pronoun_frag(110), _pronoun_frag(400)])]
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "5"), generic_docs=generic)
+    # 110 is within 30 s of the phrase passage at 100: same passage, not new work
+    assert [(w["start"], w["retrieval"]) for w in kept] == [(100, "phrase"), (400, "generic")]
+    assert summary["generic_fallback"]["passages"] == 1
+    assert summary["generic_fallback"]["videos_added"] == 0
+
+
+def test_the_fallback_keeps_honouring_the_per_video_cap(tmp_path, monkeypatch):
+    generic = [_doc("7:v1", [_pronoun_frag(400), _pronoun_frag(500), _pronoun_frag(600)])]
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                   argv=("--max-windows", "10", "--per-video-cap", "2"),
+                   generic_docs=generic)
+    assert [w["start"] for w in kept] == [100, 400]
+
+
+def test_generic_floor_zero_turns_the_fallback_off(tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])],
+                         argv=("--max-windows", "5", "--generic-floor", "0"),
+                         generic_docs=[_doc("7:v2", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"] ["ran"] is False and len(kept) == 1
+    assert "generic_fallback=off" in _run.last_funnel
+
+
+def test_a_lower_generic_floor_leaves_a_modest_shortfall_alone(tmp_path, monkeypatch):
+    # two phrase windows meet a floor of 2 even though the cap of 5 is not full
+    docs = [_doc("7:v1", [_frag("i grew up", 100)]), _doc("7:v2", [_frag("my dad", 100)])]
+    summary, kept = _run(tmp_path, monkeypatch, docs,
+                         argv=("--max-windows", "5", "--generic-floor", "2"),
+                         generic_docs=[_doc("7:v3", [_pronoun_frag(100)])])
+    assert summary["generic_fallback"]["ran"] is False and len(kept) == 2
+
+
+def test_the_fallback_query_is_the_generic_terms_as_phrases(monkeypatch):
+    """The fallback reuses ``query_body`` over GENERIC_TERMS: multi-word
+    markers (``i am``, ``i was``) are phrases, and the contractions carry
+    their encoded-apostrophe spelling like any cue phrase."""
+    body = fetch_cues.query_body(42, fetch_cues.GENERIC_TERMS, 2026, 10, 600, 10, None)
+    qs = [c["match_phrase"]["transcript"]["query"]
+          for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert "i am" in qs and "i was" in qs and "i 39 m" in qs and "i'm" in qs
+    assert all(next(iter(c)) == "match_phrase"
+               for c in body["query"]["bool"]["must"][0]["bool"]["should"])
+
+
+# --------------------------------------------------------------------------- #
+# per-phrase weights: personal-statement weighted, domain-neutral
+# --------------------------------------------------------------------------- #
+def test_phrase_file_weights_are_read_and_default_by_weakness(tmp_path):
+    p = tmp_path / "phrases.txt"
+    p.write_text("i was born | 3\nmy dad | 2\n~welcome back to\ni believe\ni love\n")
+    phrases, recurring, weights = fetch_cues.load_phrases(p)
+    assert phrases[:5] == ["i was born", "my dad", "welcome back to", "i believe", "i love"]
+    assert recurring == {"welcome back to"}
+    assert weights == {"i was born": 3.0, "my dad": 2.0}
+    assert fetch_cues.phrase_weight("i was born", weights) == 3.0
+    assert fetch_cues.phrase_weight("my hometown", weights) == 1.0   # unweighted, not weak
+    assert fetch_cues.phrase_weight("i love", weights) == 0.5        # unweighted, in WEAK_CUES
+
+
+def test_a_bad_weight_is_refused_at_load(tmp_path):
+    p = tmp_path / "phrases.txt"
+    p.write_text("my dad | heavy\n")
+    with pytest.raises(SystemExit):
+        fetch_cues.load_phrases(p)
+
+
+def test_the_shipped_phrase_file_weights_every_ordinary_phrase():
+    phrases, recurring, weights = fetch_cues.load_phrases(fetch_cues.DEFAULT_PHRASES)
+    shipped = [p for p in phrases if p not in fetch_cues.EXTRA_GENERIC]
+    unweighted = [p for p in shipped if p.lower() not in weights and p.lower() not in recurring]
+    assert unweighted == []
+    assert set(weights.values()) <= {0.5, 1.0, 2.0, 3.0}
+    assert weights["i was born"] == 3.0 and weights["my dad"] == 2.0 and weights["i love"] == 0.5
+
+
+def test_query_boost_is_the_phrase_weight():
+    body = fetch_cues.query_body(42, ["i was born", "my dad", "i love"], 2026, 10, 450, 10, None,
+                                 weights={"i was born": 3.0, "my dad": 2.0})
+    boosts = [c["match_phrase"]["transcript"]["boost"]
+              for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert boosts == [3.0, 2.0, 0.5]
+
+
+def test_a_heavier_phrase_outranks_a_lighter_one_and_two_heavy_ones_saturate(tmp_path, monkeypatch):
+    docs = [_doc("7:v1", [_frag("my dad", 100)]),
+            _doc("7:v2", [_frag("i was born", 100)]),
+            _doc("7:v3", ['<text start="100"><em>i was born</em> in ohio and '
+                          '<em>i grew up</em> on a farm <em>my hometown</em> is tiny</text>'])]
+    _, kept = _run(tmp_path, monkeypatch, docs,
+                   phrases="i was born | 3\ni grew up | 3\nmy hometown | 3\nmy dad | 2\n")
+    assert [w["id"] for w in kept] == ["7:v3", "7:v2", "7:v1"]
+    assert kept[0]["rank_score"] == fetch_cues.RANK_CAP == 6.0     # 9 capped at 6
+    assert kept[1]["rank_score"] == 3.0 and kept[2]["rank_score"] == 2.0
+
+
+def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeypatch):
+    summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
+    assert summary["fragment_size"] == 450
+    assert summary["generic_fallback"]["floor"] == 300
+
+
+# --------------------------------------------------------------------------- #
+# host terms: read off the window text, never queried. A self-naming is the
+# anchor; a third-person naming is a second voice (Airrack, 2026-09-10)
+# --------------------------------------------------------------------------- #
+def test_host_naming_tells_a_self_introduction_from_a_third_person_naming():
+    self_named, third, hint = fetch_cues.host_naming(
+        "hey guys it's Eric and I grew up in Utah", {"eric", "airrack"})
+    assert (self_named, third, hint) == (["eric"], [], None)
+    self_named, third, hint = fetch_cues.host_naming(
+        "I left my girlfriend and my family to make videos with Eric", {"eric"})
+    assert (self_named, third) == ([], ["eric"])
+    assert hint.startswith("host named in the third person:") and "with Eric" in hint
+    # named both ways in one window: the self-introduction wins
+    self_named, third, _ = fetch_cues.host_naming(
+        "my name is eric. eric, get over here", {"eric"})
+    assert (self_named, third) == (["eric"], [])
+    assert fetch_cues.host_naming("nothing to see", {"eric"}) == ([], [], None)
+
+
+def test_a_third_person_naming_earns_nothing_and_sets_the_hint(tmp_path, monkeypatch):
+    crew = _doc("7:v1", [_frag("my dad", 100, "asked me to move to LA with eric and the boys")])
+    plain = _doc("7:v2", [_frag("my dad", 100)])
+    summary, kept = _run(tmp_path, monkeypatch, [crew, plain],
+                         argv=("--host-terms", "Eric,Airrack"))
+    by = {w["id"]: w for w in kept}
+    assert by["7:v1"]["rank_score"] == by["7:v2"]["rank_score"] == 1.0   # no +2 for the name
+    assert by["7:v1"]["host_anchor"] is False
+    assert by["7:v1"]["host_named_third_person"] == ["eric"]
+    assert "with eric" in by["7:v1"]["second_voice_hint"]
+    assert by["7:v2"]["second_voice_hint"] is None
+    # the host terms did not join the query: the cue list plus EXTRA_GENERIC only
+    assert summary["phrases"] == 3 + len(fetch_cues.EXTRA_GENERIC)
+    assert summary["host_terms"] == ["Eric", "Airrack"]
+    assert summary["third_person_host_windows"] == 1
+    assert summary["third_person_host_share"] == 0.5
+    assert "third_person_host_share=0.5" in _run.last_funnel
+
+
+def test_a_self_naming_is_the_anchor_and_scores_like_one_cue(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "hey guys it's eric and this is his story")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"))
+    assert kept[0]["host_anchor"] is True
+    assert kept[0]["host_anchor_terms"] == [["eric", "self_named"]]
+    assert kept[0]["second_voice_hint"] is None
+    assert kept[0]["rank_score"] == 1.0 + fetch_cues.SELF_NAME_BONUS
+    assert summary["self_named_windows"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# rank narrow, read wide: the cap is taken on the fragment, the extractor
+# reads the transcript around it
+# --------------------------------------------------------------------------- #
+_TRANSCRIPT = [
+    (60.0, "we started dating in college"),
+    (80.0, "film school was not going to make me who i wanted to be so i left"),
+    (100.0, "my dad and my family behind about the year it happened"),
+    (105.0, "to go make youtube videos with eric"),
+    (140.0, "anyway back to the bunker"),
+]
+
+
+def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"),
+                         transcripts={"7:v1": _TRANSCRIPT})
+    w = kept[0]
+    assert w["start"] == 100                       # the window's identity is unchanged
+    assert w["context_added"] is True and w["read_span"] == [80.0, 105.0]
+    assert w["text"].startswith("film school was not going to make me")
+    assert w["text"].endswith("videos with eric")
+    assert "started dating" not in w["text"]      # 60 s is outside --read-before 20
+    assert "bunker" not in w["text"]              # 140 s is outside --read-after 10
+    # the speaker signals are re-read on the wider text
+    assert w["host_named_third_person"] == ["eric"] and "with eric" in w["second_voice_hint"]
+    # the added cues join the corpus, so a quote from the context verifies
+    with gzip.open(summary["corpus"], "rt", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
+    assert [c[0] for c in rows[0]["cues"]] == [80.0, 100.0, 105.0]
+    # and windows.jsonl.gz carries the same widened text
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        assert json.loads(f.readline())["text"] == w["text"]
+    assert summary["read_span"] == {"before_s": 20.0, "after_s": 10.0,
+                                    "source": "transcript", "widened": 1}
+    assert "read_span=transcript widened=1" in _run.last_funnel
+
+
+def test_a_read_that_adds_nothing_leaves_the_fragment_alone(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    _, kept = _run(tmp_path, monkeypatch, [doc], transcripts={"7:v1": _TRANSCRIPT},
+                   argv=("--read-before", "5", "--read-after", "0"))
+    assert kept[0]["context_added"] is False and kept[0]["read_span"] is None
+    assert kept[0]["text"].startswith("my dad and my family behind")
+
+
+def test_read_around_can_be_switched_off(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100)])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], transcripts={"7:v1": _TRANSCRIPT},
+                         argv=("--read-before", "0", "--read-after", "0"))
+    assert summary["read_span"]["source"] == "off" and kept[0]["context_added"] is False
+
+
+def test_a_failed_transcript_lookup_keeps_the_fragments_and_says_so(tmp_path, monkeypatch):
+    def boom(refs):
+        raise RuntimeError("es down")
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], transcripts=boom)
+    assert summary["read_span"]["source"] == "fragment_only"
+    assert summary["read_span"]["widened"] == 0
+    assert kept[0]["context_added"] is False
+    assert kept[0]["text"].startswith("my dad and my family behind")
+
+
+def test_the_ad_read_overlap_uses_the_widened_span(tmp_path, monkeypatch):
+    # a read ending at 5 s, padded 75, reaches 80 s: it meets the widened
+    # window (80..105) and not the bare fragment (100..130)
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    spans = lambda refs: {"7:v1": [(0.0, 5.0)]}  # noqa: E731
+    _, narrow = _run(tmp_path, monkeypatch, [doc], spans=spans,
+                     argv=("--read-before", "0", "--read-after", "0"))
+    _, wide = _run(tmp_path, monkeypatch, [doc], spans=spans,
+                   transcripts={"7:v1": _TRANSCRIPT})
+    assert narrow[0]["in_sponsor_read"] is False
+    assert wide[0]["in_sponsor_read"] is True
+
+
+def test_fetch_transcripts_parses_timed_text_per_video_across_chunks(monkeypatch):
+    docs = {"7:v1": '<text start="1.5" dur="2">hi &amp;#39;there</text>',
+            "7:v2": '<text start="9" dur="1">second</text>'}
+    calls = []
+
+    def fake_db_es(body, **kw):
+        ids = body["query"]["ids"]["values"]
+        calls.append(ids)
+        assert body["_source"] == ["id", "transcript"]
+        return [{"id": i, "transcript": docs[i]} for i in ids]
+    monkeypatch.setattr(fetch_cues.tl_data, "db_es", fake_db_es)
+    monkeypatch.setattr(fetch_cues, "TRANSCRIPT_CHUNK", 1)
+    out = fetch_cues.fetch_transcripts(["7:v1", "7:v2"])
+    assert out == {"7:v1": [(1.5, "hi 'there")], "7:v2": [(9.0, "second")]}
+    assert sorted(calls) == [["7:v1"], ["7:v2"]]
+    assert fetch_cues.fetch_transcripts([]) == {}
