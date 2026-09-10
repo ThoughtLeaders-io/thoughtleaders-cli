@@ -696,6 +696,60 @@ def test_both_link_stores_empty_is_a_real_answer(tmp_path):
 
 
 
+def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_path):
+    """Alexa Rivera (2026-09-10): the merge pass left three incompatible partner
+    claims unresolved and off the connection cards, then the renderer put two of
+    them back on the page, because recurrence outranked confidence. Confidence
+    ranks first now, so a confirmed fact is never displaced by a repeated
+    unconfirmed one while confirmed material is still unrendered."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "husband paid for the cruise", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 3, "sensitivity": "none"},
+        {"fact_id": "f2", "claim": "has a wife", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 2, "sensitivity": "none"},
+        {"fact_id": "f3", "claim": "is allergic to radish", "domain": "health",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+        {"fact_id": "f4", "claim": "did gymnastics", "domain": "habits",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    order = [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+    assert order[:2] == ["f3", "f4"], order
+    assert order[2:] == ["f1", "f2"], order      # kept, but ranked below
+
+
+def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
+    """`profile-spec.md`: a staged_only fact is never quoted on a brand-facing
+    page, and the connections page is brand-facing. Superseded facts and the
+    withheld tiers were already filtered; this one was not."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "married Ben for 24 hours", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 4, "sensitivity": "none",
+         "staged_only": True},
+        {"fact_id": "f2", "claim": "grew up visiting this mall", "domain": "origin",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2"]
+
+
+def test_an_unconfirmed_fact_on_the_page_is_badged_as_one(tmp_path):
+    """A thin ledger fills the strip with unconfirmed facts legitimately, so
+    they must be visibly unconfirmed: the strip carried a sensitivity badge and
+    nothing about confidence, making an unsettled claim look settled."""
+    import build_html
+    confirmed = {"fact_id": "f1", "claim": "c", "domain": "habits",
+                 "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"}
+    unconfirmed = dict(confirmed, fact_id="f2", claim="u", confidence="unconfirmed")
+    assert build_html.confidence_badge(confirmed) == ""
+    assert 'badge-unconfirmed">unconfirmed<' in build_html.confidence_badge(unconfirmed)
+    who = build_html.who_they_are([confirmed, unconfirmed], _META)
+    assert who.count("badge-unconfirmed") == 1
+    # and it lands on the unconfirmed claim's own row, not loose in the strip
+    row = [li for li in who.split("<li>") if ">u<" in li][0]
+    assert "badge-unconfirmed" in row
+
+
 def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
     """The channel's About text and the AI profile come from the ledger meta
     and sit under the About prose, so the connection pass need not restate

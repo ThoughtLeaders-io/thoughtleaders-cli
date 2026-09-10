@@ -539,6 +539,19 @@ def tier_badge(fact: dict) -> str:
     return badge(label) or ""
 
 
+def confidence_badge(fact: dict) -> str:
+    """``unconfirmed`` on a fact that is not confirmed, nothing otherwise.
+
+    Confirmed is the expected case and goes unmarked, so the badge stays a
+    signal rather than furniture. A thin ledger legitimately fills "who they
+    are" with unconfirmed facts (Brooklyn and Bailey, 2026-09-10: only 32
+    confirmed facts survive the per-domain cap against a render cap of 40), and
+    before this the reader could not tell one from the other: the strip carried
+    a sensitivity badge and nothing about confidence.
+    """
+    return "" if fact.get("confidence") == "confirmed" else (badge("unconfirmed") or "")
+
+
 def tallies(facts: list[dict]) -> list[str]:
     """The honesty tallies ``references/evidence-rules.md`` requires: how many
     facts at which confidence, which sensitivity tiers, and how many of them
@@ -667,15 +680,29 @@ def ledger_footer(facts: list[dict] | None, meta: dict) -> str:
 # --------------------------------------------------------------------------- #
 def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
              per_domain: int = WHO_MAX_PER_DOMAIN) -> list[tuple[str, list[dict]]]:
-    """Top recurring facts by domain: selected first, then recurrence, then
-    confirmed. Superseded facts and the withheld tiers never appear."""
+    """Top facts by domain: selected first, then CONFIRMED, then recurrence.
+
+    Superseded facts, the withheld tiers and `staged_only` facts never appear;
+    the last of those is what `profile-spec.md` means by "never quoted on a
+    brand-facing page", and this page is brand-facing.
+
+    Confidence ranks above recurrence, matching the order `merge_pass expand`
+    already applies when it owns `selected`. It used to rank below, which put
+    a well-repeated unsettled claim ahead of a confirmed one: Alexa Rivera
+    (2026-09-10) rendered "husband paid for the cruise" (unconfirmed, three
+    videos) and "has a wife who picked up dog poop on a plane" (unconfirmed,
+    two) side by side on the page, while 47 confirmed facts survived the
+    per-domain cap and the render cap was 40. The merge pass had deliberately
+    left that contradiction unresolved and off the connection cards; the
+    renderer put it back.
+    """
     usable = [f for f in facts
               if not f.get("superseded_by") and tier_of(f) not in WITHHELD
-              and tier_of(f) != "withheld"]
+              and tier_of(f) != "withheld" and not f.get("staged_only")]
 
     def key(f: dict):
-        return (bool(f.get("selected")), int(f.get("recurrence") or 0),
-                f.get("confidence") == "confirmed")
+        return (bool(f.get("selected")), f.get("confidence") == "confirmed",
+                int(f.get("recurrence") or 0))
 
     usable.sort(key=key, reverse=True)
     by_domain: dict[str, list[dict]] = defaultdict(list)
@@ -710,9 +737,10 @@ def pick_who_flat(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     out: list[dict] = []
     for _, items in pick_who(facts, max_facts=max_facts, per_domain=per_domain):
         out.extend(items)
+    # the same order as pick_who's own key, or the flattening would undo it
     out.sort(key=lambda f: (bool(f.get("selected")),
-                            int(f.get("recurrence") or 0),
-                            f.get("confidence") == "confirmed"), reverse=True)
+                            f.get("confidence") == "confirmed",
+                            int(f.get("recurrence") or 0)), reverse=True)
     return out[:max_facts]
 
 
@@ -767,7 +795,8 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
             if url.lower().startswith(("http://", "https://")):
                 q += f' <a href="{html.escape(url, quote=True)}">watch</a>'
             q = f'<span class="q">“{q}”</span>' if q else ""
-        lis.append(f'<li><span class="claim">{claim}</span>{tier_badge(f)}{q}</li>')
+        lis.append(f'<li><span class="claim">{claim}</span>'
+                   f'{tier_badge(f)}{confidence_badge(f)}{q}</li>')
     return head + f'<ul class="who-run">{"".join(lis)}</ul>'
 
 
