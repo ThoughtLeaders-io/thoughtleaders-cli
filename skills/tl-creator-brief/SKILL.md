@@ -345,6 +345,15 @@ scripts costs more than the scripts.
      > <corpus>/verify.json 2> <corpus>/verify.err
    ```
 
+   **Socials OFF: put step 6's ledger write on the end of this same chain**
+   and the whole tail is one turn. All three are scripts, and the last two
+   stop on the same condition: `verify_quotes.py` exits 1 when any quote is
+   partial, missing or dubbed, and `ledger_meta.py write --from` refuses
+   (exit 2, nothing written) on exactly those facts. So `&&` stops where a
+   fix is needed and nowhere else, and a clean verify writes the ledger
+   without a turn in between. Socials ON keeps step 6 separate, because
+   `--set-socials` has to record the lane's answer before the write.
+
    Expand exits 3 listing offending ids: re-ask for exactly those once as
    another `--decisions` file; on a second failure add `--fallback-original`.
    A supersession that points against the dated evidence (the superseded
@@ -355,7 +364,8 @@ scripts costs more than the scripts.
    none get fixed to the caption text or dropped, and a quote not in the
    channel's language (`dubbed`) never publishes.
 
-6. **Write the ledger.**
+6. **Write the ledger.** *(socials OFF: this is the command you already
+   chained onto step 5, and this step is done.)*
 
    *(socials ON)* First record which linked platforms the lane actually
    opened, since only the lane knows and the honesty strip reports it:

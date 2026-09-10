@@ -872,3 +872,51 @@ def test_the_brand_read_lane_reports_what_it_found():
     assert (line["brands"], line["mention_videos"]) == (2, 40)
     assert (line["reads"], line["with_spoken_words"]) == (15, 11)
     assert line["elapsed_s"] == 31.0
+
+
+# --------------------------------------------------------------------------- #
+# expand && verify && write is one chain on a socials-OFF run, which only
+# holds while the last two stop on the SAME facts.
+# --------------------------------------------------------------------------- #
+def test_verify_and_the_ledger_write_refuse_the_same_run(tmp_path):
+    """SKILL.md step 5 chains the write onto verify with `&&`. That is only
+    safe because a quote verify rejects is a quote the write refuses: if
+    verify ever exited 0 on a partial, the chain would publish it."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import ledger_meta
+
+    proc, summary, _ = _run_verify(tmp_path, [
+        {"fact_id": "f1", "provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Ohio and my dad ran"},
+        {"fact_id": "f2", "provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Texas with my mother"}])
+    assert proc.returncode == 1 and summary["partial"] == 1
+
+    # the chain stops here, so the write never runs. Run it anyway: it has to
+    # refuse the very file verify just wrote, or `&&` is hiding a publish.
+    profiles = tmp_path / "tl-creator-profiles"
+    profiles.mkdir()
+    rc = ledger_meta.main(["write", "--channel", "1", "--profiles-dir", str(profiles),
+                           "--from", str(tmp_path / "candidates.jsonl.verified.jsonl")])
+    assert rc == 2
+    assert not (profiles / "1-facts.jsonl").exists()
+
+
+def test_a_clean_verify_lets_the_chained_write_through(tmp_path):
+    """The other half: nothing in the chain blocks a run with no bad quote."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import ledger_meta
+
+    proc, summary, _ = _run_verify(tmp_path, [
+        {"fact_id": "f1", "claim": "grew up in Ohio", "provenance": "transcript",
+         "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Ohio and my dad ran"}])
+    assert proc.returncode == 0 and summary["exact"] == 1
+
+    profiles = tmp_path / "tl-creator-profiles"
+    profiles.mkdir()
+    rc = ledger_meta.main(["write", "--channel", "1", "--profiles-dir", str(profiles),
+                           "--from", str(tmp_path / "candidates.jsonl.verified.jsonl"),
+                           "--channel-name", "Patterrz"])
+    assert rc == 0
+    assert (profiles / "1-facts.jsonl").exists()
