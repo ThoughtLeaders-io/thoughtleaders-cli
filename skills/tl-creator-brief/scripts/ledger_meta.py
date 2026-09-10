@@ -130,6 +130,13 @@ def load_context(path: str | None) -> dict | None:
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     return {"about_text": _clip(data.get("about_text"), 700),
             "generated_profile": _clip(data.get("generated_profile"), 900),
+            # The creator's own labelled sites, discovered in channel context.
+            # Kept apart from the platform links because they are where the
+            # identity lane starts, and because a reuse that drops them makes
+            # the next run rediscover what this one already knew.
+            "websites": [
+                {k: str(v) for k, v in w.items() if k in ("label", "url")}
+                for w in (data.get("websites") or []) if isinstance(w, dict)],
             "social_links": [str(x) for x in (data.get("social_links") or [])],
             # A time-boxed socials lane reads some linked platforms and not
             # others; carrying the split keeps the page's honesty strip from

@@ -584,9 +584,13 @@ python3 <skill>/scripts/channel_context.py --channel <id> > <corpus>/context-ful
 ```
 
 That is the platform's record of the channel (name, About text, AI profile,
-social links, sibling candidates, language), and it is where the fetch's
-`--host-terms` come from: the surname, company or former role the About
-text or AI profile names. Then, once the passages are local, the stats half:
+sibling candidates, language), plus the creator's own links: `websites`, the
+labelled header links they wrote themselves, and `social_links`, the platform
+keys from Postgres unioned with the index's flat list and deduped. Emails are
+dropped. Both stores are empty on plenty of channels, and an empty pair is a
+real answer. This is also where the fetch's `--host-terms` come from: the
+surname, company or former role the About text or AI profile names. Then, once
+the passages are local, the stats half:
 
 ```bash
 python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus>/corpus.jsonl.gz \
@@ -599,6 +603,17 @@ python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
 
 The second command writes the compact `context.json` every extractor prompt
 takes; nothing about it is typed by hand.
+
+The corpus pass also writes `name_candidates`, the other names the creator
+calls themselves, harvested from the fetched passages by naming cue ("my name
+is", "call me", "my nickname", "my username", "my Instagram"). Each row carries
+its distinct-video count, `said_outright`, and `channel_name_variant`: true
+when the token is a short relative of the channel name, which is what separates
+the host from a guest introducing themselves in a challenge video. The variants
+are the identity lane's search terms, since the channel name is frequently not
+the name the profiles are under (Alexa Rivera is Lexi, Patterrz is Pat, Airrack
+is Eric). They are search terms only; a name enters the ledger solely as a
+transcript fact with its own quote.
 
 After the fetch, format is measured rather than guessed: first-person
 density, interview markers, question density, title hints (including

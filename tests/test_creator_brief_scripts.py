@@ -604,6 +604,97 @@ def test_write_context_carries_the_channels_own_description_to_the_extractors(tm
     assert len(ctx["channel_ai_profile"]) == 900 and ctx["channel_ai_profile"].endswith("…")
 
 
+def test_name_candidates_find_the_nickname_the_channel_name_hides(tmp_path):
+    """Alexa Rivera (2026-09-10): both link stores empty, so the identity lane
+    searched the channel name, hit a same-named creator and rejected the right
+    person. The nickname was in the corpus the run had already fetched, so the
+    harvest hands it over as a search term and ranks it first."""
+    import channel_context
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:a", "cues": [[10, "what are two of my nicknames yeah Lexi "
+                                    "that is my nickname my real name's Alexa"]]},
+        {"id": "1:b", "cues": [[20, "Brooke Lexie Rivera Brooke is my username "
+                                    "I will be posting that on my story"]]},
+        {"id": "1:c", "cues": [[30, "my name is Lexi and welcome back"]]},
+        # the ASR spells it both ways; a variant carries once it recurs
+        {"id": "1:f", "cues": [[60, "tag me my nickname is Lexie on there"]]},
+        # a guest introducing themselves in one challenge video is not the host
+        {"id": "1:d", "cues": [[40, "hi my name is Sienna and I think I will win"]]},
+        # a common word that happens to sit inside the surname is not a name
+        {"id": "1:e", "cues": [[50, "my name is on the drive so we arrived early"]]},
+    ])
+    rows = channel_context.name_candidates(corpus, "Alexa Rivera")
+    names = [r["name"] for r in rows]
+    assert names[0] == "lexi", names
+    assert rows[0]["said_outright"] and rows[0]["channel_name_variant"]
+    assert rows[0]["videos"] == 2           # distinct videos, not cue hits
+    assert "lexie" in names                 # the ASR spelling is its own token
+    assert "sienna" not in names            # said once, and not a name variant
+    assert "drive" not in names and "arrived" not in names
+
+
+def test_name_candidates_need_a_corpus_and_survive_a_nameless_channel(tmp_path):
+    """No cues, no candidates; and a channel whose name is missing still runs,
+    falling back to names said outright across many uploads."""
+    import channel_context
+    empty = _write_jsonl(tmp_path / "empty.jsonl", [{"id": "1:a", "cues": []}])
+    assert channel_context.name_candidates(empty, "Alexa Rivera") == []
+    said = _write_jsonl(tmp_path / "said.jsonl", [
+        {"id": f"1:v{i}", "cues": [[i, "hey guys my name is Eric welcome back"]]}
+        for i in range(5)])
+    rows = channel_context.name_candidates(said, None)
+    assert [r["name"] for r in rows] == ["eric"]
+    assert rows[0]["videos"] == 5 and not rows[0]["channel_name_variant"]
+
+
+def test_websites_come_from_the_creators_labelled_header_links(tmp_path):
+    """Postgres social_links._other holds the creator's own sites under the
+    labels they wrote; the index's list holds bare platform links. The lane
+    starts at the sites, so they are separated out, and emails never travel."""
+    import channel_context
+    pg = {"_other": {"Turn Anything Into Pizza": "https://pizzafy.com/",
+                     "Second channel": "https://youtube.com/@airrack2"},
+          "_emails": ["zack@example.com"],
+          "instagram": "https://www.instagram.com/airrack/",
+          "tiktok": "https://vm.tiktok.com/ZMRDwC6n5/"}
+    es = ["instagram.com/airrack", "pizzafy.com"]
+    websites, socials = channel_context.websites_and_socials(pg, es)
+    assert websites == [{"label": "Turn Anything Into Pizza", "url": "https://pizzafy.com/"}]
+    assert socials == ["instagram.com/airrack", "pizzafy.com", "https://vm.tiktok.com/ZMRDwC6n5/"]
+    assert "zack@example.com" not in json.dumps([websites, socials])
+    # nothing from postgres: the index list stands alone
+    assert channel_context.websites_and_socials(None, es) == ([], es)
+
+
+def test_meta_context_carries_the_creators_own_sites(tmp_path):
+    """The websites step 0 discovers must survive into the ledger meta, or a
+    reuse rediscovers what this run already knew and the honesty strip cannot
+    tell a personal site from a platform link."""
+    import ledger_meta
+    ctx = tmp_path / "context-full.json"
+    ctx.write_text(json.dumps({
+        "about_text": "about", "generated_profile": "profile",
+        "websites": [{"label": "Get In Touch", "url": "https://example.com",
+                      "junk": "dropped"}],
+        "social_links": ["instagram.com/someone"],
+    }), encoding="utf-8")
+    out = ledger_meta.load_context(str(ctx))
+    assert out["websites"] == [{"label": "Get In Touch", "url": "https://example.com"}]
+    assert out["social_links"] == ["instagram.com/someone"]
+    # no websites key, and nothing blows up
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps({"about_text": "a"}), encoding="utf-8")
+    assert ledger_meta.load_context(str(bare))["websites"] == []
+
+
+def test_both_link_stores_empty_is_a_real_answer(tmp_path):
+    """Alexa Rivera (2026-09-10) had {} in Postgres and [] in the index. The
+    lane must be handed an honest empty pair, not a crash and not a guess."""
+    import channel_context
+    assert channel_context.websites_and_socials({}, []) == ([], [])
+    assert channel_context.websites_and_socials(None, None) == ([], [])
+
+
 
 def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
     """The channel's About text and the AI profile come from the ledger meta

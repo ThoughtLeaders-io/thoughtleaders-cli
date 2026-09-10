@@ -125,7 +125,11 @@ def test_write_carries_descriptive_fields_over_from_the_existing_header(tmp_path
     # the read/unread split is carried even when the context file omits it, so
     # the page's honesty strip can say which linked platforms were actually
     # opened rather than reporting every link as read
+    # `websites` is empty here because this context file has no labelled header
+    # links; it is carried regardless, so a reuse never rediscovers the
+    # creator's own sites and the strip can tell a site from a platform link
     assert first["context"] == {"about_text": "long", "generated_profile": None,
+                                "websites": [],
                                 "social_links": ["https://x.com/p"],
                                 "social_links_read": [],
                                 "social_links_unread": [],

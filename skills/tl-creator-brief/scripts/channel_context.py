@@ -116,7 +116,7 @@ TITLE_SECOND_VOICE = TITLE_HINTS
 def channel_row(channel_id: int) -> dict:
     rows = tl_data.db_pg(
         "SELECT id, channel_name, url, external_channel_id, subscribers, "
-        "total_views, num_uploads, country, language, last_published "
+        "total_views, num_uploads, country, language, last_published, social_links "
         f"FROM thoughtleaders_channel WHERE id = {channel_id}"
     )
     if not rows:
@@ -138,6 +138,50 @@ def channel_doc(channel_id: int) -> dict:
         "collapse": {"field": "id"},
     })
     return rows[0] if rows else {}
+
+
+def _bare(link: str) -> str:
+    """``https://www.instagram.com/airrack/`` -> ``instagram.com/airrack``, the
+    form the index keeps, so the two sources dedupe against each other."""
+    link = re.sub(r"^https?://", "", str(link or "").strip(), flags=re.I)
+    link = re.sub(r"^www\.", "", link, flags=re.I)
+    return link.rstrip("/").lower()
+
+
+def websites_and_socials(pg_links, es_links) -> tuple[list[dict], list[str]]:
+    """The creator's own websites and their platform links, from both stores.
+
+    Postgres ``social_links`` is a dict: platform keys (``instagram``,
+    ``tiktok`` …) and an ``_other`` dict of the LABELLED links the creator put
+    in their channel header (``"Get In Touch": "https://pauljlipsky.com"``,
+    ``"Turn Anything Into Pizza": "https://pizzafy.com/"``). Those labelled
+    links are the creator's websites, and they are where the identity lane
+    starts: the site says who the person is and links the socials worth
+    reading. ``_emails`` is dropped here; a contact address is not a fact
+    about the person. The index's ``social_links`` is a flat list, kept and
+    unioned with the platform links so nothing linked is silently missing.
+    YouTube links are not websites; ``second_channel_candidates`` owns them.
+
+    Both stores come back empty on plenty of channels (Alexa Rivera, 2026-09-10:
+    ``{}`` in Postgres and ``[]`` in the index), so an empty result is a real
+    answer and the identity lane is told to expect it: it then has the channel
+    name, the About text and the AI profile to work from, and nothing else.
+    """
+    websites: list[dict] = []
+    socials: list[str] = [str(x) for x in (es_links or []) if x]
+    seen = {_bare(x) for x in socials}
+    if isinstance(pg_links, dict):
+        for label, link in (pg_links.get("_other") or {}).items():
+            if not link or YT_LINK.search(str(link)) or "youtu.be/" in str(link):
+                continue
+            websites.append({"label": str(label).strip(), "url": str(link).strip()})
+        for key, link in pg_links.items():
+            if key.startswith("_") or not isinstance(link, str) or not link:
+                continue
+            if _bare(link) not in seen:
+                socials.append(link.strip())
+                seen.add(_bare(link))
+    return websites, socials
 
 
 def _nested(doc: dict, path: str):
@@ -212,6 +256,118 @@ def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
         out.append({"link": None, "source": "about_text_phrase",
                     "phrases": phrases})
     return out
+
+
+# The creator's OTHER names, harvested from their own cue passages. A channel
+# titled "Alexa Rivera" is searched for as "Alexa Rivera", and the audience,
+# the press and her own Instagram all call her Lexi: the identity lane cannot
+# find a profile under a name nobody uses. These are SEARCH TERMS, never facts;
+# a name reaches the ledger only as a transcript fact with its own quote.
+#
+# Alexa Rivera (2026-09-10) is the case this exists for. Both link stores were
+# empty, so the lane had the channel name and the AI profile, searched "Alexa
+# Rivera", drowned in a same-named creator, and rejected the right person. The
+# nickname was in the corpus the run had already fetched, in seven videos:
+# "my nicknames ... Lexi ... my real name's Alexa", and a garbled reading of
+# her handle, "Brooke Lexie Rivera Brooke is my username" (the real handle is
+# @lexibrookerivera).
+NAME_CUE = re.compile(
+    r"\b(?:my (?:real |full |middle |first )?names?'?s?"
+    r"|call me"
+    r"|my nick ?names?"
+    r"|user ?name|handle"
+    r"|my (?:instagram|insta|tiktok|twitter|snapchat|snap|socials?)"
+    r"|follow me|tag me|dm me)\b", re.I)
+# A name said outright carries further than one that merely sits near a cue.
+NAME_EXPLICIT = re.compile(
+    r"\b(?:my (?:real |full |middle |first )?names?'?s?(?: is)?|call me)\s+"
+    r"([A-Za-z]{2,20})", re.I)
+# Function words and channel-intro filler that sit beside every naming cue.
+NAME_STOP = frozenset("""
+about actually add after all also and another any are around away back because been
+before being best better big but call called came can cause come comes coming could
+day did didn does doing don down each even ever every everyone first for from get gets
+getting girl give goes going gonna good got great guys had half has have her here hey
+him his how i've if insta instagram into it's its just keep kind know last let life
+like likes little look looking lot love make me mean media might mine more most much
+my myself name names never new next nick nickname nicknames not now off oh okay one
+only other our out over own people please post posted posting pretty put really right
+said same say says see she should show social socials some something started stories
+story such super sure take tell than that thats the their them then there these they
+thing things think this those three through time today too two use user username very
+want was watch way welcome well were what when where which while who whole why will
+with would yeah year years yes yet you your yours youtube channel video videos
+followers follow tag
+""".split())
+
+
+def name_candidates(corpus_path: pathlib.Path, channel_name: str | None,
+                    span: int = 80, cap: int = 8) -> list[dict]:
+    """Other names for the creator, ranked, from their own cue passages.
+
+    Each row carries `channel_name_variant`: true when the token is a short
+    relative of the channel name (``Alexa`` -> ``Lexi``, ``Patterrz`` -> ``pat``,
+    and the ASR spellings of both), which is the signal that it is the creator
+    rather than a guest introducing themselves in a challenge video. A name
+    that is neither a variant nor said across four or more uploads is dropped,
+    because "my name is Sienna" is usually not the host.
+    """
+    ch_tokens = [t.lower() for t in re.findall(r"[A-Za-z]{3,}", channel_name or "")]
+
+    def variant(tok: str) -> bool:
+        for ct in ch_tokens:
+            if tok == ct:
+                return True
+            # a nickname is a SHORT relative of the name, so a longer word that
+            # merely contains three of its letters ("Rivera" -> "arrived") is not
+            if len(tok) > len(ct):
+                continue
+            if any(tok[i:i + 3] in ct for i in range(len(tok) - 2)):
+                return True
+        return False
+
+    videos: dict[str, set[str]] = {}
+    cue_example: dict[str, str] = {}
+    explicit: set[str] = set()
+    with open_corpus(corpus_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            v = json.loads(line)
+            vid = str(v.get("id") or "")
+            cues = v.get("cues") or []
+            if not cues:
+                continue
+            text = re.sub(r"\s+", " ", " ".join(c[1] for c in cues))
+            for m in NAME_EXPLICIT.finditer(text):
+                tok = m.group(1).lower()
+                if tok not in NAME_STOP and len(tok) >= 3:
+                    explicit.add(tok)
+            for m in NAME_CUE.finditer(text):
+                lo, hi = max(0, m.start() - span), min(len(text), m.end() + span)
+                window = text[lo:hi]
+                for tok in re.findall(r"\b[A-Za-z]{3,20}\b", window):
+                    tok = tok.lower()
+                    if tok in NAME_STOP:
+                        continue
+                    videos.setdefault(tok, set()).add(vid)
+                    cue_example.setdefault(tok, window[:140])
+
+    rows = []
+    for tok, seen in videos.items():
+        var, exp = variant(tok), tok in explicit
+        # a variant still has to recur or be stated outright, or common words
+        # sitting inside the surname ("Rivera" -> "drive") ride in
+        if not ((var and (exp or len(seen) >= 2)) or (exp and len(seen) >= 4)):
+            continue
+        rows.append({"name": tok, "videos": len(seen),
+                     "channel_name_variant": var, "said_outright": exp,
+                     "cue": cue_example[tok]})
+    rows.sort(key=lambda r: (not (r["said_outright"] and r["channel_name_variant"]),
+                             not r["channel_name_variant"],
+                             -r["videos"], r["name"]))
+    return rows[:cap]
 
 
 def corpus_stats(corpus_path: pathlib.Path) -> dict:
@@ -442,6 +598,8 @@ def main() -> None:
         ap.error("--channel is required")
     row = channel_row(a.channel)
     doc = channel_doc(a.channel)
+    websites, socials = websites_and_socials(row.get("social_links"), doc.get("social_links"))
+
     out = {
         "channel_id": a.channel,
         "name": row.get("channel_name") or doc.get("name"),
@@ -455,9 +613,12 @@ def main() -> None:
         "last_published": str(row.get("last_published") or "")[:10] or None,
         "generated_profile": _nested(doc, "ai.description"),
         "about_text": doc.get("description"),
-        # the identity & socials lane opens these; a profile that cannot be
-        # read is reported "linked but unread", never silently skipped
-        "social_links": doc.get("social_links") or [],
+        # the links on the creator's YouTube page: the labelled header links
+        # (their websites) and the platform links; the identity lane reads
+        # these directly. A profile that cannot be read is reported "linked
+        # but unread", never silently skipped
+        "websites": websites,
+        "social_links": socials,
         "second_channel_candidates": second_channel_candidates(row, doc),
         "topic_descriptions": _nested(doc, "ai.topic_descriptions"),
         "note": ("format label is called by a model read of a small sample "
@@ -473,6 +634,11 @@ def main() -> None:
                             encoding="utf-8")
             stats["per_video_file"] = str(path)
         out["context_stats"] = stats
+        # search terms for the identity lane, from the passages just fetched:
+        # the names the creator calls themselves, which are often not the
+        # name on the channel
+        out["name_candidates"] = name_candidates(
+            pathlib.Path(a.corpus), out.get("name"))
     print(json.dumps(out, indent=1, default=str))
 
 

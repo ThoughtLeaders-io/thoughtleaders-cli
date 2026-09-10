@@ -73,25 +73,28 @@ failure retry once, then continue and say `plan gate: unreachable, continued`.
 
 ## Socials lane (opt-in)
 
-The identity and socials lane (web search on the creator, their linked
-profiles read) runs only when asked for:
+The question is what the fan-out searches, not whether a separate stage runs.
+Finding the creator's links is part of channel context either way (step 0);
+what this gates is whether the fan-out that reads the transcripts also opens
+those links and searches the web. It runs only when asked for:
 
 - `--socials`, "include socials", "add web": ON, no question.
 - `--no-socials`, "transcripts only": OFF, no question.
 - Nothing said and the run is interactive: ask once, before any fetch, the
   default first:
 
-  > **Run the socials/web identity lane?**
-  > - **No, transcripts only** (default): the creator's own videos are the
-  >   only source. Faster, and every fact carries a timestamped quote.
-  > - **Yes, add socials and web**: also search the web for the creator and
-  >   read their linked profiles, for facts the videos never state and for
-  >   cross-lane confirmation.
+  > **What should the fan-out read?**
+  > - **Transcripts only** (default): the creator's own videos are the only
+  >   source. Faster, and every fact carries a timestamped quote.
+  > - **Transcripts, socials and web**: the same fan-out also opens the links
+  >   on the channel page and searches the creator's names, for facts the
+  >   videos never state and for cross-lane confirmation.
 
 - Autonomous, unattended, or a fast run: OFF, nothing asked.
 
-This is the only turn in the run that waits on a person. The completion
-lines say whether the lane ran. *(socials ON)* below means only when it is on.
+This is the only turn in the run that waits on a person, and it comes before
+any fetch so the answer can size `--reserve`. The completion lines say whether
+the socials half ran. *(socials ON)* below means only when it is on.
 
 ## Reuse: every run starts here
 
@@ -124,11 +127,27 @@ command: a turn between two scripts costs more than the scripts.
    ```
 
    This is the platform's own record of the channel: name, About text, the
-   AI profile, social links, sibling-channel candidates, language. Read it
-   and take the host terms from it (surname, company, former role, anything
-   the About text or AI profile names). The old order asked for the surname
-   at fetch time and only produced it afterwards; HopeScope ran with
-   `"HopeScope,Hope"` and 22 anchor soft-mismatches.
+   AI profile, sibling-channel candidates, language, and the creator's own
+   links. Read it and take the host terms from it (surname, company, former
+   role, anything the About text or AI profile names). The old order asked
+   for the surname at fetch time and only produced it afterwards; HopeScope
+   ran with `"HopeScope,Hope"` and 22 anchor soft-mismatches.
+
+   **Identity discovery happens here, not in a lane of its own.** The links
+   come from both stores at once: `websites` is the labelled header links the
+   creator wrote on their own channel page (a personal site, a company), and
+   `social_links` unions the platform keys from Postgres with the index's flat
+   list, deduped. The sites are where the identity lane starts, because the
+   site says who the person is and links the socials worth reading. Emails are
+   dropped; a contact address is not a fact about a person.
+
+   Both stores come back empty on plenty of channels, and an empty pair is a
+   real answer, not a failure. Say so once and carry on: the identity lane
+   then has the channel name, the About text and the AI profile and nothing
+   else, and it must be told that, or it will read the AI profile as the whole
+   truth about the person. Alexa Rivera (2026-09-10) had `{}` in Postgres and
+   `[]` in the index; the lane was handed only the AI profile, whose emphasis
+   on recent uploads led it to rule out the correct creator and return nothing.
 
 1. **Fetch the cue passages**, and spawn the lanes that need only the ids.
 
@@ -151,13 +170,6 @@ command: a turn between two scripts costs more than the scripts.
      (their brief is under "CONNECT pipeline", step 1). They need only the
      channel and brand ids, they run while the fetch and the extraction run,
      and they are in before the merge decisions are.
-   - *(socials ON)* Spawn the identity lane in the same message:
-     `general-purpose`, **`model: sonnet`**, about 8 lookups. It reads
-     `context-full.json`, searches the creator's names and reads the linked
-     profiles. Put the `social`/`web` fact record and its enums from
-     `profile-spec.md` in its prompt, or it invents labels that `expand`
-     rejects. What it has when extraction finishes is what the merge pass
-     gets; the rest is reported "linked but unread".
    - Second channels are reported, never mined, unless the user asks. A
      deeper round (`--exclude <corpus>/classified.jsonl`, `transcript-mining.md`
      "Entity expansion") is never taken on the skill's own initiative.
@@ -170,6 +182,18 @@ command: a turn between two scripts costs more than the scripts.
      --corpus <corpus>/corpus.jsonl.gz --per-video-out <corpus>/per-video.jsonl \
      > <corpus>/context-full.json
    ```
+
+   This pass also writes `name_candidates`: the other names the creator calls
+   themselves, harvested from the passages just fetched. Each row carries the
+   distinct-video count, whether the name was said outright ("my name is …",
+   "call me …") and whether it is a short relative of the channel name. **The
+   variants are the identity lane's search terms**, because the name on the
+   channel is often not the name the audience, the press or their own profiles
+   use: "Alexa Rivera" is Lexi, "Patterrz" is Pat, "Airrack" is Eric. A row
+   that is not a variant is somebody else the creator named on camera, useful
+   for confirming an identity and never for searching one. These are search
+   terms only; a name reaches the ledger solely as a transcript fact with its
+   own quote.
 
    Read `context-full.json` and call the format (`solo`, `interview`,
    `multi_host`, `faceless_scripted`) with one line of evidence that also
@@ -189,14 +213,68 @@ command: a turn between two scripts costs more than the scripts.
    done
    ```
 
-3. **Extraction fan-out: one agent per prompt file, all in ONE message.**
-   One `<plugin>:gem-classifier` agent per `<corpus>/prompts/batch-NNN.md`, all
-   spawned in a single assistant message with nothing else in flight. The
-   prompt is two lines: read that one file and follow it exactly; one Write,
-   then the one-line receipt. Never paste the message in, never two batches
-   per agent, never one at a time, never poll or sleep. If the agent name does
-   not resolve, use `general-purpose` with `model: sonnet` and say so. The cap
-   is `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset).
+3. **One fan-out: transcripts and identity in the SAME message.** One
+   `<plugin>:gem-classifier` agent per `<corpus>/prompts/batch-NNN.md`, plus
+   *(socials ON)* the identity lane, all spawned in a single assistant message
+   with nothing else in flight. This is the run's only extraction fan-out;
+   sourcing the creator is one act, not a transcript stage with a socials
+   stage bolted beside it. The extractors cannot start earlier than this, as
+   their prompt files do not exist until step 2 has rendered them, so this is
+   the first moment all three sources can go out together.
+
+   The extractor prompt is two lines: read that one file and follow it
+   exactly; one Write, then the one-line receipt. Never paste the message in,
+   never two batches per agent, never one at a time, never poll or sleep. If
+   the agent name does not resolve, use `general-purpose` with `model: sonnet`
+   and say so. The cap is `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when
+   unset), which `--reserve` has already been sized against.
+
+   - *(socials ON)* The identity lane: `general-purpose`, **`model: sonnet`**,
+     about 8 lookups. Its prompt carries, from `context-full.json`, the
+     `websites` and `social_links` step 0 found, the channel name, **every
+     `name_candidates` variant**, **the About text and the AI profile**, and
+     the host terms and format label the run has called. It opens the sites
+     first, then the socials they link, then a web search. Put the
+     `social`/`web` fact record and its enums from `profile-spec.md` in its
+     prompt, or it invents labels that `expand` rejects.
+   - **Search the names the creator uses, not only the channel's.** Spend the
+     first lookups on `<variant> <surname>` before the channel name, because
+     the channel name is what a namesake will outrank you on and the nickname
+     is what the profiles are actually under. A link-in-bio aggregator
+     (Linktree, hoo.be, Beacons) found this way is the highest-value hit on a
+     channel that lists nothing, since it is the creator's own index of every
+     profile they own: read it and take the links from it. Searching "Alexa
+     Rivera Instagram" returns a same-named creator; "Lexi Rivera Instagram"
+     returns `@lexibrookerivera` and a Linktree at `AlexaBrookeRivera`, which
+     is the name on the channel and the nickname in one string.
+   - **Confirm the identity before reporting a single fact.** The cheapest
+     proof is a link back: an aggregator or profile that points at the channel
+     under investigation has identified itself, and no further checking is
+     needed. Alexa Rivera's aggregator lists Instagram, TikTok, X, Facebook and
+     Patreon, and its YouTube link is `/c/AlexaRivera`, the channel the run
+     started from. Failing a link back, confirm against the non-variant
+     `name_candidates` and the recurring co-stars in the titles: a profile is
+     the right person when the people around it are the people in the videos.
+     Say in one line which candidate you accepted and what confirmed it. On a
+     mismatch return no facts and name the candidate you rejected and why, so
+     the run reports an empty lane rather than a wrong one.
+   - A contact address found on any of these pages is not a fact about the
+     person and never travels, matching the rule the link harvest already
+     applies to the channel's own header.
+   - **Tell it what the platform record is worth.** The About text is often
+     YouTube's default placeholder, and the AI profile describes the recent
+     catalogue, not the person: both are context to search from, never the
+     identity itself, and neither is a fact. A lane that treats the AI profile
+     as the description of the creator will reject the right person for not
+     matching it.
+   - **It is the one lane with transcript evidence available**, because it now
+     runs beside the extractors rather than ahead of them. When the linked
+     stores were empty, name the recurring people, places and formats the run
+     has already seen in the titles, so the lane has something to disambiguate
+     a common name against. A wrong identity is worse than an empty lane: on a
+     mismatch it returns no facts and says which candidate it rejected and why.
+   - What it has when the extractors finish is what the merge pass gets; the
+     rest is reported "linked but unread".
 
 4. **Assemble, cluster, prepare, authenticate: one command.** As soon as the
    receipts are in:
@@ -287,7 +365,14 @@ command: a turn between two scripts costs more than the scripts.
 
    Refuses (exit 2, nothing written) any transcript fact whose verification
    is not `exact`. PROFILE ends here, with two lines: the ledger's absolute
-   path and its fact count (plus "socials lane: on/off").
+   path and its fact count.
+
+   The second line reports the socials half by what it actually did, never
+   just on or off: `off, N linked platforms listed unread`, or `on, N websites
+   opened, N sources read, N facts`. "On" with zero facts is a result the
+   reader has to see, because the lane can run, read a source, reject the
+   identity and return nothing; a bare "on" reads as though socials
+   corroborated the ledger when it contributed nothing to it.
 
 ## Fast run
 
