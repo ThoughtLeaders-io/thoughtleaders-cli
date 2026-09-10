@@ -1427,6 +1427,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if fact_id in eligible and fact_id not in picked:
             picked.append(fact_id)
     chosen = set(picked)
+    # a pick refused as unconfirmed that the floor then filled in anyway is
+    # on the page after all; only a refusal that stuck is worth reporting
+    ignored = {k: v for k, v in ignored.items()
+               if pick_map.get(k, k) not in chosen}
     for fact in facts:
         fact["selected"] = str(fact.get("fact_id")) in chosen
 

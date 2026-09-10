@@ -483,7 +483,7 @@ _FULL_MD = (
     "He already lives the thing Acme sells, and says so unprompted.\n\n"
     "## About Acme\n\n"
     "Acme is a direct-to-consumer dog food brand [web: product pages].\n\n"
-    "## Adopted a rescue dog — **direct**\n\n"
+    "## Adopted a rescue dog — **direct** · **strong**\n\n"
     "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n"
     "Acme sells dog food [web]\n\n"
     "**Do.** Let him tell the adoption story first.\n\n"

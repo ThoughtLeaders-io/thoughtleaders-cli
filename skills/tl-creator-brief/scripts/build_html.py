@@ -918,16 +918,16 @@ def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | No
     contained by it), or None. Normalised on words, never on punctuation."""
     if not facts:
         return None
-    q = _norm_words(re.sub(r"<[^>]+>", " ", quote_html))
-    # the blockquote holds the quote paragraph then the attribution paragraph;
-    # compare against the first 30 words, which is where the quote is
+    # the attribution (a link's anchor text, a dash, a name and a date) sits
+    # inside the blockquote too; drop the anchors, then compare the quote's
+    # leading words against every ledger quote, shortening from the tail
+    stripped = re.sub(r"<a\b[^>]*>.*?</a>", " ", quote_html, flags=re.S)
+    q = _norm_words(re.sub(r"<[^>]+>", " ", stripped))
     q_words = q.split()
-    for n in (len(q_words), 30, 20, 12, 8):
+    quotes = [_norm_words(str(f.get("quote") or "")) for f in facts]
+    for n in range(min(len(q_words), 40), 3, -1):
         head = " ".join(q_words[:n])
-        if len(head.split()) < 4:
-            continue
-        for f in facts:
-            fq = _norm_words(str(f.get("quote") or ""))
+        for f, fq in zip(facts, quotes):
             if fq and (head in fq or fq in head):
                 return f
     return None

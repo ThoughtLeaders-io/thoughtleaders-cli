@@ -138,7 +138,8 @@ def test_prepare_line_is_compact_and_leaks_no_text_or_members(tmp_path):
     assert row["c"] == "c001"
     assert set(row) == {"c", "domain", "speaker", "tier", "conf", "claim",
                         "quote", "title", "published", "videos", "occ",
-                        "ad_read", "anchor", "format_hint", "lang", "notable"}
+                        "ad_read", "anchor", "format_hint", "staged", "lang",
+                        "notable"}
     assert row["videos"] == 2 and row["occ"] == 2
     blob = json.dumps(row)
     assert "surrounding chatter" not in blob      # no window text
@@ -548,7 +549,10 @@ def test_superseding_an_existing_fact_marks_it_and_keeps_it(tmp_path):
     assert facts["f004"]["claim"] == "moved to Austin"
 
 
-def test_selected_fills_to_twenty_across_the_whole_active_ledger(tmp_path):
+def test_selected_fills_to_forty_across_the_whole_active_ledger(tmp_path):
+    """The target is 40 and the fill reaches across the existing ledger too:
+    with 25 confirmed, eligible facts every one is selected, and with 50 the
+    fill stops at 40."""
     existing = _existing(tmp_path, [_fact(f"f{i:03d}", video=f"o{i}", recurrence=9)
                                     for i in range(1, 16)])
     clustered = _write_clusters(tmp_path, [
@@ -559,8 +563,40 @@ def test_selected_fills_to_twenty_across_the_whole_active_ledger(tmp_path):
     facts = _facts(out)
     assert len(facts) == 25
     chosen = [f for f in facts.values() if f["selected"]]
-    assert len(chosen) == 20
+    assert len(chosen) == 25
     assert facts["f016"]["selected"] is True      # the agent's own pick, c001
+
+
+def test_selected_stops_at_forty_when_the_ledger_holds_more(tmp_path):
+    existing = _existing(tmp_path, [_fact(f"f{i:03d}", video=f"o{i}", recurrence=9)
+                                    for i in range(1, 41)])
+    clustered = _write_clusters(tmp_path, [
+        _cluster(f"new {i}", video=f"v{i}") for i in range(10)])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out, existing=existing, selected=["c001"])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert len(facts) == 50
+    assert sum(1 for f in facts.values() if f["selected"]) == 40
+
+
+def test_an_unconfirmed_pick_is_refused_while_confirmed_facts_would_be_left_off(tmp_path):
+    """The shard nominated an unconfirmed fact over confirmed ones: the
+    refusal is visible, and the page fills with confirmed facts first. Below
+    the floor an unconfirmed fact may still be filled in, and then it is not
+    reported as refused."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("guess", video="v0", conf="likely")]
+        + [_cluster(f"sure {i}", video=f"v{i + 1}") for i in range(45)])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out, selected=["c001"])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert facts["f001"]["confidence"] == "unconfirmed"
+    assert facts["f001"]["selected"] is False
+    assert json.loads(proc.stdout)["selected_ignored"] == {
+        "f001": "unconfirmed: the page leads with confirmed facts"}
+    assert sum(1 for f in facts.values() if f["selected"]) == 40
 
 
 def test_selected_is_trimmed_to_twenty_by_confidence_then_recurrence(tmp_path):
@@ -618,7 +654,8 @@ def test_an_agent_nomination_of_a_withheld_tier_is_ignored_visibly(tmp_path):
     out = tmp_path / "facts.jsonl"
     proc = _keep_all(clustered, out, selected=["c001"])
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert json.loads(proc.stdout)["selected_ignored"] == ["c001"]
+    assert json.loads(proc.stdout)["selected_ignored"] == {
+        "c001": "withheld tier location"}
     assert not any(f["selected"] for f in _facts(out).values())
 
 
@@ -881,7 +918,7 @@ def test_an_identity_fact_derives_the_sensitive_boolean_and_is_selectable(tmp_pa
     fact = _facts(out)["f002"]
     assert fact["sensitivity"] == "clinical" and fact["sensitive"] is True
     assert fact["selected"] is True
-    assert json.loads(proc.stdout)["selected_ignored"] == []
+    assert json.loads(proc.stdout)["selected_ignored"] == {}
 
 
 def test_corroboration_lifts_both_lanes_to_confirmed(tmp_path):
