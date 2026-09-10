@@ -61,6 +61,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 from collections import Counter, defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -978,10 +979,10 @@ _MONEY = re.compile(r"(?<![\w-])(?:[$€£]\s?\d|\d+\s?(?:usd|eur|gbp)\b"
 _TIMED_LINK = re.compile(r'href="[^"]*(?:\?|&amp;|&)t=\d', re.I)
 
 
-def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
-    """Contract problems with the deliverable, as one line each. Empty means
-    the page is publishable."""
-    problems: list[str] = []
+def section_kinds(md_text: str, meta: dict) -> dict[str, list]:
+    """The page's sections, split by what each one is. ``conn`` is the ranked
+    connections, so ``len(kinds["conn"])`` is the connection count and an
+    empty one is the no-fit verdict."""
     fm, body = parse_frontmatter(md_text)
     creator = fm.get("channel_name") or meta.get("channel_name") or ""
     _, sections = split_sections(render_markdown(body))
@@ -996,6 +997,16 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
             kinds["creator" if names_creator(sec[0], creator) else "brand"].append(sec)
         else:
             kinds["conn"].append(sec)
+    return kinds
+
+
+def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
+    """Contract problems with the deliverable, as one line each. Empty means
+    the page is publishable."""
+    problems: list[str] = []
+    fm, body = parse_frontmatter(md_text)
+    creator = fm.get("channel_name") or meta.get("channel_name") or ""
+    kinds = section_kinds(md_text, meta)
 
     no_fit = not kinds["conn"]
     for key, label in (("creator", f"## About {creator or '<creator>'}"),
@@ -1064,7 +1075,14 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
     return problems
 
 
+def funnel(**fields) -> None:
+    """One machine-parseable stage line for debugging (stderr)."""
+    print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
+          file=sys.stderr)
+
+
 def main() -> None:
+    t0 = time.monotonic()
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--in", dest="infile", required=True,
                     help="the connection map's markdown, e.g. "
@@ -1094,6 +1112,8 @@ def main() -> None:
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))
+        funnel(stage="check", problems=len(problems),
+               elapsed_s=round(time.monotonic() - t0, 1))
         raise SystemExit(3 if problems else 0)
 
     out_path = (pathlib.Path(a.out) if a.out
@@ -1108,6 +1128,11 @@ def main() -> None:
         result["fragment"] = str(frag_path.resolve())
     # absolute paths only: a relative path is what the user could not open
     print(json.dumps(result))
+    connections = len(section_kinds(text, meta)["conn"])
+    funnel(stage="render", facts=len(facts or []), connections=connections,
+           no_fit=not connections, problems=len(problems),
+           bytes=len(page.encode("utf-8")),
+           elapsed_s=round(time.monotonic() - t0, 1))
     if problems:
         print("PAGE CONTRACT: " + "; ".join(problems), file=sys.stderr)
 

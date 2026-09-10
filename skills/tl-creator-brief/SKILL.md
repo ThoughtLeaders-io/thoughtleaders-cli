@@ -117,8 +117,13 @@ Never reuse silently; never refuse `--rebuild`.
 ## PROFILE pipeline
 
 Every stage prints a `FUNNEL` line to stderr; they are for debugging, not a
-deliverable. Scripts that take under a second are chained with `&&` in one
-command: a turn between two scripts costs more than the scripts.
+deliverable. The stages are `identity` and `context` (both
+`channel_context.py`), `fetch_cues`, `assemble`, `cluster`, `merge-prepare`,
+`merge`, `authenticate`, `verify`, and on the CONNECT side `brand_read`
+(`brand_reads.py`) and `render` or `check` (`build_html.py`). Read them off
+the command you just ran rather than opening the file it wrote. Scripts that
+take under a second are chained with `&&` in one command: a turn between two
+scripts costs more than the scripts.
 
 0. **Channel context first.** Before anything is fetched:
 
@@ -195,11 +200,19 @@ command: a turn between two scripts costs more than the scripts.
    terms only; a name reaches the ledger solely as a transcript fact with its
    own quote.
 
-   Read `context-full.json` and call the format (`solo`, `interview`,
-   `multi_host`, `faceless_scripted`) with one line of evidence that also
-   names `context_stats.staged_share` when it is above 0.1 ("solo, 22% of
-   titles are staged premises"); the stats are a hint, never a gate. Then
-   write the context block and render every batch's message in one chain:
+   **Call the format from that command's own `FUNNEL stage=context` line**,
+   not from a Read of the file it just wrote: the line carries every number
+   the call is made from (`videos`, `fp_density_median`,
+   `interview_marker_videos`, `question_density`, `title_hint_videos`,
+   `staged_share`, `likely_faceless`). Open `context-full.json` only when the
+   line is genuinely ambiguous, since that Read is a turn of its own and a
+   turn costs more than the stage did.
+
+   Call the format (`solo`, `interview`, `multi_host`, `faceless_scripted`)
+   with one line of evidence that also names `staged_share` when it is above
+   0.1 ("solo, 22% of titles are staged premises"); the stats are a hint,
+   never a gate. Then write the context block and render every batch's
+   message in one chain:
 
    ```bash
    python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \

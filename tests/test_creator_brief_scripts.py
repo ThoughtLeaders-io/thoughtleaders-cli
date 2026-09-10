@@ -763,3 +763,112 @@ def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
     assert "$40" not in html
     # the honesty strip still counts the ledger, and no context means no block
     assert "platform" not in _render_conn(tmp_path, _CONN_MD).split("<h2>Who they are</h2>")[1].split("<h2>")[0]
+
+
+# --------------------------------------------------------------------------- #
+# FUNNEL stage lines. SKILL.md promises one per stage on stderr, and until
+# now `channel_context.py`, `brand_reads.py` and `build_html.py` printed none,
+# so the whole CONNECT side of a run was untimed.
+# --------------------------------------------------------------------------- #
+def _funnel_lines(stderr: str) -> dict[str, dict[str, str]]:
+    """Every FUNNEL line in stderr, keyed by stage, as a field dict."""
+    out = {}
+    for line in stderr.splitlines():
+        if not line.startswith("FUNNEL "):
+            continue
+        fields = dict(kv.split("=", 1) for kv in line[len("FUNNEL "):].split())
+        out[fields["stage"]] = fields
+    return out
+
+
+def test_the_render_reports_its_own_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path))],
+        capture_output=True, text=True, check=True)
+    line = _funnel_lines(proc.stderr)["render"]
+    # the two ranked cards, not the About or the caveat sections
+    assert line["connections"] == "2"
+    assert line["no_fit"] == "False"
+    assert line["facts"] == "6"
+    assert int(line["bytes"]) > 0
+    assert "elapsed_s" in line
+
+
+def test_a_no_fit_page_says_so_on_its_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD.split("## 1. Adopted")[0])
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src)],
+        capture_output=True, text=True, check=True)
+    line = _funnel_lines(proc.stderr)["render"]
+    assert line["connections"] == "0"
+    assert line["no_fit"] == "True"
+
+
+def test_the_check_run_reports_its_own_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src), "--check"],
+        capture_output=True, text=True)
+    line = _funnel_lines(proc.stderr)["check"]
+    assert int(line["problems"]) == len(json.loads(proc.stdout)["problems"])
+
+
+def test_the_context_stage_line_carries_what_the_format_call_needs():
+    """Step 2 calls the format from this line, so every number that call is
+    made from has to be on it; opening context-full.json is the fallback."""
+    import channel_context
+    out = {
+        "channel_id": 42,
+        "name_candidates": [{"name": "Pat"}],
+        "context_stats": {
+            "videos_measured": 283,
+            "fp_per_1k_words_median": 41.0,
+            "videos_with_interview_markers": 12,
+            "questions_per_1k_words_median": 8.2,
+            "title_hints": {"staged": 60, "interview": 3, "reaction": 0},
+            "staged_share": 0.22,
+            "likely_faceless": False,
+        },
+    }
+    line = channel_context.funnel_fields(out, 19.4)
+    assert line["stage"] == "context"
+    assert line["videos"] == 283
+    assert line["fp_density_median"] == 41.0
+    assert line["interview_marker_videos"] == 12
+    assert line["question_density"] == 8.2
+    assert line["title_hint_videos"] == 63
+    assert line["staged_share"] == 0.22
+    assert line["likely_faceless"] is False
+    assert line["name_candidates"] == 1
+    assert line["elapsed_s"] == 19.4
+    # no space in any value, or the line does not parse back into fields
+    assert all(" " not in str(v) for v in line.values())
+
+
+def test_the_pre_fetch_read_is_its_own_stage_not_an_empty_context_line():
+    """Step 0 runs the same script with no corpus. One stage name for both
+    would put two different lines under one label."""
+    import channel_context
+    line = channel_context.funnel_fields(
+        {"channel_id": 42, "websites": [{"url": "https://a.com"}],
+         "social_links": ["https://instagram.com/x", "https://x.com/x"],
+         "second_channel_candidates": [{"url": "https://youtube.com/@vlog"}]}, 2.1)
+    assert line["stage"] == "identity"
+    assert (line["websites"], line["social_links"], line["second_channels"]) == (1, 2, 1)
+    assert "videos" not in line
+
+
+def test_the_brand_read_lane_reports_what_it_found():
+    import brand_reads
+    line = brand_reads.funnel_fields(
+        {"brand_ids": [8787, 8788], "mention_videos_found": 40,
+         "reads_returned": 15, "reads_with_spoken_words": 11}, 31.0)
+    assert line["stage"] == "brand_read"
+    assert (line["brands"], line["mention_videos"]) == (2, 40)
+    assert (line["reads"], line["with_spoken_words"]) == (15, 11)
+    assert line["elapsed_s"] == 31.0

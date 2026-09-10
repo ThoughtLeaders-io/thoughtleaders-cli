@@ -25,6 +25,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data
@@ -114,7 +115,27 @@ def channel_names(channel_ids: list[int]) -> dict[int, str]:
     return {int(r["id"]): r.get("channel_name") for r in rows if r.get("id")}
 
 
+def funnel(**fields) -> None:
+    """One machine-parseable stage line for debugging (stderr)."""
+    print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
+          file=sys.stderr)
+
+
+def funnel_fields(summary: dict, elapsed: float) -> dict:
+    """The TL-data lane's stage line. CONNECT had no timing of its own, so a
+    slow brand read looked like a slow merge."""
+    return {
+        "stage": "brand_read",
+        "brands": len(summary.get("brand_ids") or []),
+        "mention_videos": summary.get("mention_videos_found"),
+        "reads": summary.get("reads_returned"),
+        "with_spoken_words": summary.get("reads_with_spoken_words"),
+        "elapsed_s": elapsed,
+    }
+
+
 def main() -> None:
+    t0 = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", type=int, action="append", required=True,
                     help="brand id from `tl brands find`; repeat for a rebrand")
@@ -189,7 +210,7 @@ def main() -> None:
     kept = reads[:a.max]
     with_words = sum(1 for r in kept if r["read_words"])
 
-    print(json.dumps({
+    summary = {
         "brand_ids": a.brand,
         "mention_videos_found": len(videos),
         "reads_returned": len(kept),
@@ -202,7 +223,9 @@ def main() -> None:
         "excluded_by_design": ["price", "cost", "rate cards",
                                "performance grades"],
         "reads": kept,
-    }, indent=1, default=str))
+    }
+    print(json.dumps(summary, indent=1, default=str))
+    funnel(**funnel_fields(summary, round(time.monotonic() - t0, 1)))
 
 
 if __name__ == "__main__":

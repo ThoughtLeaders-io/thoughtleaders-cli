@@ -49,6 +49,7 @@ import pathlib
 import re
 import statistics
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -462,6 +463,48 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
 FORMAT_LABELS = ("solo", "interview", "multi_host", "faceless_scripted")
 
 
+def funnel(**fields) -> None:
+    """One machine-parseable stage line for debugging (stderr)."""
+    print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
+          file=sys.stderr)
+
+
+def funnel_fields(out: dict, elapsed: float) -> dict:
+    """The stage line for a ``--channel`` run, as an ordered field dict.
+
+    Two shapes, because this script runs at two points in the pipeline and one
+    stage name for both would put two different lines under one label:
+    ``stage=identity`` before the fetch (the links the identity lane starts
+    from), ``stage=context`` after it (the measured stats the format call is
+    made from). The second carries every number that call needs, so the
+    orchestrator reads the line instead of opening ``context-full.json`` in a
+    turn of its own.
+    """
+    stats = out.get("context_stats")
+    if not stats:
+        return {
+            "stage": "identity",
+            "channel": out.get("channel_id"),
+            "websites": len(out.get("websites") or []),
+            "social_links": len(out.get("social_links") or []),
+            "second_channels": len(out.get("second_channel_candidates") or []),
+            "elapsed_s": elapsed,
+        }
+    return {
+        "stage": "context",
+        "channel": out.get("channel_id"),
+        "videos": stats.get("videos_measured"),
+        "fp_density_median": stats.get("fp_per_1k_words_median"),
+        "interview_marker_videos": stats.get("videos_with_interview_markers"),
+        "question_density": stats.get("questions_per_1k_words_median"),
+        "title_hint_videos": sum((stats.get("title_hints") or {}).values()),
+        "staged_share": stats.get("staged_share"),
+        "likely_faceless": stats.get("likely_faceless"),
+        "name_candidates": len(out.get("name_candidates") or []),
+        "elapsed_s": elapsed,
+    }
+
+
 def _split(raw: str | None, sep: str) -> list[str]:
     return [x.strip() for x in (raw or "").split(sep) if x.strip()]
 
@@ -522,6 +565,7 @@ def set_socials(path: pathlib.Path, read: list[str], unread: list[str]) -> dict:
 
 
 def main() -> None:
+    t0 = time.monotonic()
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", type=int, default=None,
                     help="internal TL channel id, from `tl channels find`")
@@ -640,6 +684,7 @@ def main() -> None:
         out["name_candidates"] = name_candidates(
             pathlib.Path(a.corpus), out.get("name"))
     print(json.dumps(out, indent=1, default=str))
+    funnel(**funnel_fields(out, round(time.monotonic() - t0, 1)))
 
 
 if __name__ == "__main__":
