@@ -503,7 +503,10 @@ dropped=… selected=… elapsed_s=…`.
 
 ### Incremental round
 
-Decision `refresh` from `ledger_meta.py check` (round `N` = its `next_round`):
+Decision `refresh` from `ledger_meta.py check` (round `N` = its `next_round`),
+which `start_run.py` runs and reports under `check`. Given `--host-terms`,
+`start_run.py` runs the bounded fetch itself with these flags already filled
+in from that decision; the rest of the round is unchanged:
 
 ```bash
 python3 <skill>/scripts/fetch_cues.py --channel <id> --host-terms "…" --round N \

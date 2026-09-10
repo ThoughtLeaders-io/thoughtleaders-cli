@@ -27,8 +27,8 @@ Two modes, one contract:
 
 `<skill>` is this skill's own directory (the installed plugin's copy); every
 command is `python3 <skill>/scripts/…`. Outputs land under the **invocation
-directory**, never inside the skill. At Resolve, print that directory's
-absolute path once; if it sits inside a git checkout, say so once (the
+directory**, never inside the skill. At the start of the run, print that
+directory's absolute path once; if it sits inside a git checkout, say so once (the
 outputs are client-adjacent data and must not be committed). `<corpus>` is
 `tl-creator-profiles/.corpus/<channel_id>/`, the working directory.
 
@@ -46,30 +46,53 @@ Agent names below are written `<plugin>:gem-classifier` and
 `<plugin>:merge-shard`, where `<plugin>` is the installed plugin's namespace
 (`tl-cli` in production, `tl-cli-pr91` on a side-by-side test install).
 
-## Resolve
+## Start the run
 
-A URL, @handle or YouTube ID resolves directly with `tl channels find`. A bare
-name gets one fuzzy search: auto-pick a clearly dominant candidate and say so,
-otherwise show the top 3 or 4 and ask once. Localized sister channels are
-excluded and listed. Brand: `tl brands find`; a rebrand, or a name that
-resolves to more than one record (an apostrophe variant, a stub next to an
-enriched record), returns several IDs: carry them all into every brand lane.
-
-**Plan gate**, bounded in the command because macOS has no `timeout`:
+Resolve, plan gate, channel context and the reuse check were four turns with
+no judgment between them, and a turn between two stages costs more than most
+of these stages do. They are one command:
 
 ```bash
-python3 -c "
-import subprocess, sys
-try:
-    sys.exit(subprocess.run(['tl','whoami','--json'], timeout=20).returncode)
-except subprocess.TimeoutExpired:
-    sys.exit(124)
-"
+python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
+  [--host-terms "<surname>,<company>"] [--reserve <N>] \
+  [--lanes transcripts+socials] [--rebuild] [--no-refresh]
 ```
 
-`organization.plan` of `Intelligence` or `Superuser` proceeds; a known lower
-tier stops with a message; an unrecognised value is named and continues. On
-failure retry once, then continue and say `plan gate: unreachable, continued`.
+`<ref>` is a URL, @handle, YouTube ID, numeric TL id or a name. One JSON
+summary on stdout, every stage's own `FUNNEL` line on stderr.
+
+- **Exit 4: a name did not resolve to one record, and nothing else ran.**
+  The candidates are on stdout under `ask` and `candidates`: show the top 3
+  or 4, ask once, call again with the id. A channel that already resolved is
+  handed back with them, so the re-ask does not pay for it twice. Resolution
+  itself belongs to `tl channels find` / `tl brands find`, which auto-pick a
+  dominant candidate; never match a name in a query. A rebrand, or a name
+  that resolves to more than one record (an apostrophe variant, a stub next
+  to an enriched record), returns several brand IDs: carry them all into
+  every brand lane.
+- **`plan` and `plan_ok` are on the summary, and the rule is still yours**:
+  `Intelligence` or `Superuser` proceeds, a known lower tier stops with a
+  message, an unrecognised value is named and continues. The gate is bounded
+  at 20 s with one retry inside the script (macOS has no `timeout`); when it
+  cannot be reached, `plan_note` is `plan gate: unreachable, continued` and
+  the run goes on.
+- **`announcement` is the ledger's own line**: repeat it to the user
+  verbatim. `decision` is `reuse`, `refresh` or `build`, and it is never
+  silent. See "Reuse" below for what each one means.
+- **Host terms are the one judgment in the opening, so they are not
+  guessed.** With no `--host-terms` the command stops after the reuse check
+  and hands back `identity`: the channel name, the About text, the generated
+  profile, the websites, the social links and the second-channel candidates.
+  Take the terms from it (surname, company, former role, anything the About
+  text or the profile names) and run PROFILE step 1 in your next message.
+  The channel name alone is not host terms: HopeScope ran with
+  `"HopeScope,Hope"` and took 22 anchor soft mismatches.
+- **`--host-terms` given, the opening is one turn**: the command runs the
+  bounded fetch and the context stats too, and `ran` says which stages went.
+  Pass it only when the request already names the terms.
+
+The full context is written to `<corpus>/context-full.json` either way, so
+anything `identity` leaves out is one Read away.
 
 ## Socials lane (opt-in)
 
@@ -98,13 +121,10 @@ the socials half ran. *(socials ON)* below means only when it is on.
 
 ## Reuse: every run starts here
 
-```bash
-python3 <skill>/scripts/ledger_meta.py check --channel <id> \
-  [--lanes transcripts+socials] [--rebuild] [--no-refresh]
-```
-
-A found ledger prints one announcement line, which you repeat to the user
-verbatim, and a JSON `decision`:
+`start_run.py` runs the check (`ledger_meta.py check --channel <id>
+[--lanes …] [--rebuild] [--no-refresh]`, if you ever need it on its own).
+A found ledger gives one announcement line, which you repeat to the user
+verbatim, and a `decision`:
 
 - `reuse`: CONNECT goes straight to the brand read; PROFILE reports the
   ledger as it is.
@@ -125,11 +145,10 @@ the command you just ran rather than opening the file it wrote. Scripts that
 take under a second are chained with `&&` in one command: a turn between two
 scripts costs more than the scripts.
 
-0. **Channel context first.** Before anything is fetched:
-
-   ```bash
-   python3 <skill>/scripts/channel_context.py --channel <id> > <corpus>/context-full.json
-   ```
+0. **Channel context first.** `start_run.py` has already done this
+   (`channel_context.py --channel <id> > <corpus>/context-full.json`, if you
+   ever need it on its own) and handed back the `identity` block. Read that
+   block, not the file, unless it leaves out something you need.
 
    This is the platform's own record of the channel: name, About text, the
    AI profile, sibling-channel candidates, language, and the creator's own
@@ -155,11 +174,17 @@ scripts costs more than the scripts.
    on recent uploads led it to rule out the correct creator and return nothing.
 
 1. **Fetch the cue passages**, and spawn the lanes that need only the ids.
+   *(Already run if you passed `--host-terms` to `start_run.py`: check `ran`
+   on its summary and go to step 2.)*
 
    ```bash
    python3 <skill>/scripts/fetch_cues.py --channel <id> \
      --host-terms "<surname>,<company>" --reserve <N>
    ```
+
+   On a `refresh` decision, add the round flags from the start summary's
+   `check`: `--round <next_round> --since <latest_video_date> --exclude
+   <corpus>/classified.jsonl` (`transcript-mining.md`, "Incremental round").
 
    Writes `<corpus>/windows.jsonl.gz`, `<corpus>/batches/batch-NNN.json` (one
    file per extractor agent, sized to fill one wave of the host's agent cap)
