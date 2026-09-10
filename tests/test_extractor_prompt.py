@@ -177,3 +177,16 @@ def test_cli_creates_the_prompt_and_returns_directories(tmp_path):
                            "--write-to", str(ret), "--out", str(out)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert out.exists() and ret.parent.is_dir() and not ret.exists()
+
+
+def test_second_voice_hint_reaches_the_extractor_and_ranking_terms_do_not():
+    windows = _windows(2)
+    windows[0]["second_voice_hint"] = "host named in the third person: ...videos with Eric..."
+    windows[0]["host_named_third_person"] = ["eric"]
+    windows[0]["read_span"] = [80.0, 105.0]
+    msg = ep.render(windows, _context(), RUBRIC, EVIDENCE, batch="000")
+    rows = json.loads(msg.split("=== WINDOWS")[1].split("\n", 1)[1].split("\n\n")[0])
+    assert rows[0]["second_voice_hint"].endswith("with Eric...")
+    assert rows[1]["second_voice_hint"] is None
+    for bad in ("host_named_third_person", "read_span", "context_added"):
+        assert bad not in rows[0]

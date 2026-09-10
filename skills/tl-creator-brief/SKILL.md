@@ -236,8 +236,12 @@ scripts costs more than the scripts.
    Call the format (`solo`, `interview`, `multi_host`, `faceless_scripted`)
    with one line of evidence that also names `staged_share` when it is above
    0.1 ("solo, 22% of titles are staged premises"); the stats are a hint,
-   never a gate. Then write the context block and render every batch's
-   message in one chain:
+   never a gate. Read `third_person_host_share` off the fetch's own FUNNEL
+   line too: above about 0.25 the kept windows are largely other people
+   speaking of the host (a crew channel), and the label is `multi_host`
+   however solo the thumbnails look ("multi_host: 41% of kept windows name
+   Eric in the third person"). Then write the context block and render every
+   batch's message in one chain:
 
    ```bash
    python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \

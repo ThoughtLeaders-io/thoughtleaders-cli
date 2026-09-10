@@ -53,18 +53,46 @@ counts raw characters and 600 buys about 45 spoken words. `clean()` strips
 the markup and keeps each cue's `start` in the corpus; nothing the extractor
 reads carries a tag.
 
+**Rank narrow, read wide.** The highlighter cuts its fragment around the cue
+phrase, and a disclosure usually ends at its cue: "film school wasn't going
+to make me who I wanted to be, so I left my girlfriend and my family" fires
+on the last clause, while the biography sits in the sentences before it,
+where no phrase fires and no fragment is ever cut. At 450 characters that
+context is not demoted, it is absent from the whole candidate pool (Airrack,
+2026-09-10: three of the previous top-20 gems had no passage left anywhere).
+So the cap is taken on the narrow fragment, which keeps the ranking sharp,
+and then every kept window is re-read from its stored transcript, from
+`--read-before` seconds ahead of its first cue to `--read-after` seconds past
+its last (20 / 10 by default), and that wider text is what the extractor
+sees. The cues the read added join `corpus.jsonl.gz`, so a quote cut from the
+context verifies to its own second. A window says `context_added` and
+`read_span`; the summary says `read_span.source` (`transcript`, or
+`fragment_only` when the lookup failed and the fragments stayed as they were).
+
+**Host terms are read, not queried.** A host name in a window is two
+different signals, and the old "+2, host anchor" treated them as one. "Hey
+guys it's Eric" is the host naming themselves: `host_anchor`, the strongest
+in-text proof of voice, worth one ordinary cue in the rank. "With Eric",
+"Eric asked me", "Eric, one sec" is someone else speaking of or to the host,
+so the first-person cue beside it is probably theirs: worth nothing in the
+rank, and passed to the extractor as `second_voice_hint`, quoting the
+naming. Putting the names in the query cut fragments around a bare name that
+carried no cue and no disclosure (Airrack 2026-09-10: 118 of 300 kept
+windows stood on the name alone), so they no longer join it.
+
 **Flags:**
 
 | flag | default | what it does |
 |---|---|---|
 | `--channel` | required | internal TL channel id, from `tl channels find` |
-| `--host-terms` | none | comma-separated names/companies; a hit on one is a strong host anchor and scores double |
+| `--host-terms` | none | comma-separated names/companies, read off the window text (never queried): a self-naming ("it's Eric") is `host_anchor` and scores like one cue; a third-person naming ("with Eric") scores nothing and sets `second_voice_hint` |
+| `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
 | `--max-windows` | 300 | the cap on what reaches the model layer in one round; fewer, more personal windows beat more, thinner ones |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
-| `--fragment-size` / `--fragments-per-doc` | 450 / 10 | passage width in raw characters (about half is markup, so 450 is about 30 spoken words, a sentence or two around the cue) and how many per video |
+| `--fragment-size` / `--fragments-per-doc` | 450 / 10 | RANKING width in raw characters (about half is markup, so 450 is about 30 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
 | `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |
@@ -115,13 +143,19 @@ decided; when it reads `regex_fallback` the ad-read flags are heuristic only.
 - `batches/batch-NNN.json` — the capped set, one file per extractor agent,
   sized to fill one wave of the host's agent cap (`--batch-size`).
 - `corpus.jsonl.gz` — the same store shape the verifiers read, holding the
-  fetched passages as cues, so `verify_quotes.py` runs unchanged. It is **passages, not transcripts**: `channel_context.py`'s
+  fetched passages as cues (plus the cues the read-around added to the kept
+  windows), so `verify_quotes.py` runs unchanged. It is **passages, not transcripts**: `channel_context.py`'s
   corpus stats over it are a format hint, not a coverage census.
 
 The summary (stdout) and one `FUNNEL stage=fetch_cues …` line (stderr) carry
 `videos_matched`, `passages`, `windows_capped`, `phrase_windows`,
 `generic_fallback` (`ran`, `skipped` or `off`), `generic_windows`, `batches`,
-`sponsor_source` and `elapsed_s`. When the fallback ran, those windows fired no
+`sponsor_source`, `read_span` (source and how many windows widened),
+`self_named`, `third_person_host`, `third_person_host_share` and `elapsed_s`.
+The voice counts are over the kept windows: `self_named` windows carry a
+`host_anchor`, `third_person_host` windows carry a `second_voice_hint`, and
+the share feeds the format call (a solo-looking channel above about 0.25 is a
+crew channel and is labelled `multi_host`). When the fallback ran, those windows fired no
 cue, and the coverage header should not count them as phrase evidence. `passages` minus `windows_capped` is what stayed out of this
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
@@ -628,7 +662,14 @@ format hint on the material the profile is actually built from, never a
 coverage census. A model
 read of a small sample (3–5 videos' worth of windows) plus these stats calls
 the label — solo / interview / multi-host / faceless-scripted — **with
-evidence**. The label exists for two reasons only:
+evidence**. One number from the fetch summary joins the call:
+`third_person_host_share`, the share of kept windows that name the host in
+the third person ("with Eric", "Eric asked me"). A channel with one face on
+the thumbnail and a crew behind the camera reads as solo on every other stat
+while other people hold the microphone for much of the transcript; above
+about 0.25 the label is `multi_host` and the evidence line says so
+("multi_host: 41% of kept windows name Eric in the third person"). The label
+exists for two reasons only:
 
 1. It is the attribution context handed to the classifier: interview means
    guest voices contaminate; solo means everything is the host.

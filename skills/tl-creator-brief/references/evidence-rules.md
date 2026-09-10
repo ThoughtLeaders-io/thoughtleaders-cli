@@ -36,12 +36,22 @@ judgement the classifier makes from the format and the deterministic features
   `speaker_guess: "unclear"` on a declared-solo channel therefore publishes
   as the host — with confidence capped at `unconfirmed` — unless the window
   text itself names or implies another voice (a guest, a quoted person, a
-  clip), in which case it is dropped as unattributable.
+  clip), in which case it is dropped as unattributable. A window carrying a
+  `second_voice_hint` (the host named in the third person or spoken to, next
+  to the first-person line) IS that case, found deterministically: on a solo
+  label it takes the shared-voice rules below, never the solo rule.
 - **Interview / multi-host / reaction**: most self-disclosure in the
-  transcript belongs to the other voice. `host_anchor` (a fuzzy hit on a fact
-  distinctive to the host) and `in_sponsor_read` argue host. Guest-ambiguous
+  transcript belongs to the other voice. `host_anchor` (the host naming
+  themselves in the window: "it's Eric", "my name is") and `in_sponsor_read`
+  argue host. A `second_voice_hint` argues the other way. Guest-ambiguous
   windows drop; `speaker_guess: "unclear"` is an honest answer, and unclear
   windows never publish as the host's.
+- **A crew channel is multi-host, whatever the label says.** When a large
+  share of the kept windows name the host in the third person
+  (`third_person_host_share` in the fetch summary, above about a quarter),
+  other people hold the microphone for much of the transcript, and the solo
+  rule would hand their lives to the host. The format call says `multi_host`
+  and the shared-voice rules apply.
 - **Recurrence** (the same rare phrase across several uploads) argues host on
   an interview channel — guests change between uploads, the host does not.
   **On a multi-host channel recurrence alone must never confirm**: both hosts

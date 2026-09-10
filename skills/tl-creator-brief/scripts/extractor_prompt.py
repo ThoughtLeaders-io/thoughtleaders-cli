@@ -41,8 +41,8 @@ EVIDENCE_SECTIONS = ("What counts as self-disclosure", "Attribution")
 # The window fields the rubric lists as inputs; ranking internals (``id``,
 # ``rank_score``, ``host_anchor_terms``, ``recurring_phrase``) stay out.
 WINDOW_FIELDS = ("start", "video_id", "title", "published", "language",
-                 "format_hint", "cues_fired", "host_anchor", "entity_hits",
-                 "weak_anchor", "in_sponsor_read", "recurrence_videos",
+                 "format_hint", "cues_fired", "host_anchor", "second_voice_hint",
+                 "entity_hits", "weak_anchor", "in_sponsor_read", "recurrence_videos",
                  "stage_direction", "boilerplate", "text")
 
 HEADER = """\

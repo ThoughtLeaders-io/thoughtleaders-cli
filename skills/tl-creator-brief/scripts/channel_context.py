@@ -108,7 +108,20 @@ TITLE_HINTS = {
         # genuine one is probed and confirmed by its recurrence, never dropped
         r"\bhoneymoon\b|\bgot married\b|\bwedding\b|\bbroke up\b|\bpregnant\b|"
         r"\bmoving (away|out)\b|\bquitting\b|\bwe eloped\b|\bnew boyfriend\b|"
-        r"\bnew girlfriend\b)", re.I),
+        r"\bnew girlfriend\b|"
+        # in-character formats: a talent show joke ("I got fired from my job
+        # at the bank"), an undercover or hide-in-plain-sight premise ("I
+        # Secretly Lived In A Mall", "I live with a giant mouse as my
+        # roommate"), scam-bait (a scammer's "I grew up in Florida" was
+        # published as the host's, run G 2026-09-09), comedy and roast
+        # formats. The line is a bit until the rest of the channel says
+        # otherwise; the probe decides, never the title alone.
+        r"\bgot talent\b|\btalent show\b|\btry not to laugh\b|"
+        r"\bscam(mer|mers|s|ming|med)?\b|\bscam[- ]?bait\w*\b|\bsecretly\b|"
+        r"\bundercover\b|\bin disguise\b|\bdisguised\b|\bhid(e|ing|den)? in\b|"
+        r"\bhow (long|many days) (can|could) (i|you|we)\b|\bstand[- ]?up\b|"
+        r"\bcomedy\b|\bjokes?\b|\broast(ed|ing)?\b|\bimpost[eo]rs?\b|"
+        r"\bcatfish\w*\b|\bsneak(ing|ed)? into\b)", re.I),
 }
 # The old name, kept so a script written against it keeps importing.
 TITLE_SECOND_VOICE = TITLE_HINTS

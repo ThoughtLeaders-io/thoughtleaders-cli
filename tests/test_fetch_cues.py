@@ -190,6 +190,16 @@ def test_format_hint_detects_with_name_and_w_slash_collab_titles():
         assert fetch_cues.format_hint(title) == "interview_or_collab", title
 
 
+def test_format_hint_marks_in_character_formats_as_staged():
+    # the Airrack top 20 (2026-09-10): a talent-show joke, a hide-in-plain-sight
+    # premise and a comedy format all read as the host's own life
+    for title in ("YOUTUBERS GOT TALENT!", "How Long Could You Secretly Live In A Mall?",
+                  "I Secretly Lived In YouTuber's Houses", "Try Not To Laugh: IRL",
+                  "I Hid in Viral YouTube Videos and Nobody Noticed", "Scammer Payback: Part 2",
+                  "Undercover at a MrBeast event", "How Many Days Can I Secretly Live At 7/11?"):
+        assert fetch_cues.format_hint(title) == "staged", title
+
+
 def test_format_hint_returns_none_for_plain_titles():
     assert fetch_cues.format_hint("My daily vlog") is None
     assert fetch_cues.format_hint(None) is None
@@ -377,13 +387,21 @@ def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict],
 
 
 def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
-        year=2024, langs=None, non_en_docs=(), census_total=None, generic_docs=()):
+        year=2024, langs=None, non_en_docs=(), census_total=None, generic_docs=(),
+        transcripts=None):
     """Run main() over stubbed ES calls, returning (summary, kept windows).
     ``generic_docs`` is what the fallback pass's query gets back (nothing by
-    default). The FUNNEL line is left on ``_run.last_funnel``."""
+    default). ``transcripts`` is what the read-around's transcript lookup
+    returns, ``{video id: [(start, text), ...]}`` (nothing by default, so the
+    fragments stay as cut); a callable raises through to the caller. The
+    FUNNEL line is left on ``_run.last_funnel``."""
     monkeypatch.setattr(fetch_cues.tl_data, "cli_rows",
                         _cli_rows_router({year: docs}, list(non_en_docs),
                                          {year: list(generic_docs)}))
+    _run.last_queries = []
+    monkeypatch.setattr(fetch_cues, "fetch_transcripts",
+                        transcripts if callable(transcripts)
+                        else (lambda refs: dict(transcripts or {})))
     lang_counts = langs if langs is not None else {"en": len(docs) or 1}
     total = census_total if census_total is not None else sum(lang_counts.values())
     monkeypatch.setattr(
@@ -935,3 +953,146 @@ def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeyp
     summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
     assert summary["fragment_size"] == 450
     assert summary["generic_fallback"]["floor"] == 300
+
+
+# --------------------------------------------------------------------------- #
+# host terms: read off the window text, never queried. A self-naming is the
+# anchor; a third-person naming is a second voice (Airrack, 2026-09-10)
+# --------------------------------------------------------------------------- #
+def test_host_naming_tells_a_self_introduction_from_a_third_person_naming():
+    self_named, third, hint = fetch_cues.host_naming(
+        "hey guys it's Eric and I grew up in Utah", {"eric", "airrack"})
+    assert (self_named, third, hint) == (["eric"], [], None)
+    self_named, third, hint = fetch_cues.host_naming(
+        "I left my girlfriend and my family to make videos with Eric", {"eric"})
+    assert (self_named, third) == ([], ["eric"])
+    assert hint.startswith("host named in the third person:") and "with Eric" in hint
+    # named both ways in one window: the self-introduction wins
+    self_named, third, _ = fetch_cues.host_naming(
+        "my name is eric. eric, get over here", {"eric"})
+    assert (self_named, third) == (["eric"], [])
+    assert fetch_cues.host_naming("nothing to see", {"eric"}) == ([], [], None)
+
+
+def test_a_third_person_naming_earns_nothing_and_sets_the_hint(tmp_path, monkeypatch):
+    crew = _doc("7:v1", [_frag("my dad", 100, "asked me to move to LA with eric and the boys")])
+    plain = _doc("7:v2", [_frag("my dad", 100)])
+    summary, kept = _run(tmp_path, monkeypatch, [crew, plain],
+                         argv=("--host-terms", "Eric,Airrack"))
+    by = {w["id"]: w for w in kept}
+    assert by["7:v1"]["rank_score"] == by["7:v2"]["rank_score"] == 1.0   # no +2 for the name
+    assert by["7:v1"]["host_anchor"] is False
+    assert by["7:v1"]["host_named_third_person"] == ["eric"]
+    assert "with eric" in by["7:v1"]["second_voice_hint"]
+    assert by["7:v2"]["second_voice_hint"] is None
+    # the host terms did not join the query: the cue list plus EXTRA_GENERIC only
+    assert summary["phrases"] == 3 + len(fetch_cues.EXTRA_GENERIC)
+    assert summary["host_terms"] == ["Eric", "Airrack"]
+    assert summary["third_person_host_windows"] == 1
+    assert summary["third_person_host_share"] == 0.5
+    assert "third_person_host_share=0.5" in _run.last_funnel
+
+
+def test_a_self_naming_is_the_anchor_and_scores_like_one_cue(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "hey guys it's eric and this is his story")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"))
+    assert kept[0]["host_anchor"] is True
+    assert kept[0]["host_anchor_terms"] == [["eric", "self_named"]]
+    assert kept[0]["second_voice_hint"] is None
+    assert kept[0]["rank_score"] == 1.0 + fetch_cues.SELF_NAME_BONUS
+    assert summary["self_named_windows"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# rank narrow, read wide: the cap is taken on the fragment, the extractor
+# reads the transcript around it
+# --------------------------------------------------------------------------- #
+_TRANSCRIPT = [
+    (60.0, "we started dating in college"),
+    (80.0, "film school was not going to make me who i wanted to be so i left"),
+    (100.0, "my dad and my family behind about the year it happened"),
+    (105.0, "to go make youtube videos with eric"),
+    (140.0, "anyway back to the bunker"),
+]
+
+
+def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"),
+                         transcripts={"7:v1": _TRANSCRIPT})
+    w = kept[0]
+    assert w["start"] == 100                       # the window's identity is unchanged
+    assert w["context_added"] is True and w["read_span"] == [80.0, 105.0]
+    assert w["text"].startswith("film school was not going to make me")
+    assert w["text"].endswith("videos with eric")
+    assert "started dating" not in w["text"]      # 60 s is outside --read-before 20
+    assert "bunker" not in w["text"]              # 140 s is outside --read-after 10
+    # the speaker signals are re-read on the wider text
+    assert w["host_named_third_person"] == ["eric"] and "with eric" in w["second_voice_hint"]
+    # the added cues join the corpus, so a quote from the context verifies
+    with gzip.open(summary["corpus"], "rt", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
+    assert [c[0] for c in rows[0]["cues"]] == [80.0, 100.0, 105.0]
+    # and windows.jsonl.gz carries the same widened text
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        assert json.loads(f.readline())["text"] == w["text"]
+    assert summary["read_span"] == {"before_s": 20.0, "after_s": 10.0,
+                                    "source": "transcript", "widened": 1}
+    assert "read_span=transcript widened=1" in _run.last_funnel
+
+
+def test_a_read_that_adds_nothing_leaves_the_fragment_alone(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    _, kept = _run(tmp_path, monkeypatch, [doc], transcripts={"7:v1": _TRANSCRIPT},
+                   argv=("--read-before", "5", "--read-after", "0"))
+    assert kept[0]["context_added"] is False and kept[0]["read_span"] is None
+    assert kept[0]["text"].startswith("my dad and my family behind")
+
+
+def test_read_around_can_be_switched_off(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag("my dad", 100)])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], transcripts={"7:v1": _TRANSCRIPT},
+                         argv=("--read-before", "0", "--read-after", "0"))
+    assert summary["read_span"]["source"] == "off" and kept[0]["context_added"] is False
+
+
+def test_a_failed_transcript_lookup_keeps_the_fragments_and_says_so(tmp_path, monkeypatch):
+    def boom(refs):
+        raise RuntimeError("es down")
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc], transcripts=boom)
+    assert summary["read_span"]["source"] == "fragment_only"
+    assert summary["read_span"]["widened"] == 0
+    assert kept[0]["context_added"] is False
+    assert kept[0]["text"].startswith("my dad and my family behind")
+
+
+def test_the_ad_read_overlap_uses_the_widened_span(tmp_path, monkeypatch):
+    # a read ending at 5 s, padded 75, reaches 80 s: it meets the widened
+    # window (80..105) and not the bare fragment (100..130)
+    doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
+    spans = lambda refs: {"7:v1": [(0.0, 5.0)]}  # noqa: E731
+    _, narrow = _run(tmp_path, monkeypatch, [doc], spans=spans,
+                     argv=("--read-before", "0", "--read-after", "0"))
+    _, wide = _run(tmp_path, monkeypatch, [doc], spans=spans,
+                   transcripts={"7:v1": _TRANSCRIPT})
+    assert narrow[0]["in_sponsor_read"] is False
+    assert wide[0]["in_sponsor_read"] is True
+
+
+def test_fetch_transcripts_parses_timed_text_per_video_across_chunks(monkeypatch):
+    docs = {"7:v1": '<text start="1.5" dur="2">hi &amp;#39;there</text>',
+            "7:v2": '<text start="9" dur="1">second</text>'}
+    calls = []
+
+    def fake_db_es(body, **kw):
+        ids = body["query"]["ids"]["values"]
+        calls.append(ids)
+        assert body["_source"] == ["id", "transcript"]
+        return [{"id": i, "transcript": docs[i]} for i in ids]
+    monkeypatch.setattr(fetch_cues.tl_data, "db_es", fake_db_es)
+    monkeypatch.setattr(fetch_cues, "TRANSCRIPT_CHUNK", 1)
+    out = fetch_cues.fetch_transcripts(["7:v1", "7:v2"])
+    assert out == {"7:v1": [(1.5, "hi 'there")], "7:v2": [(9.0, "second")]}
+    assert sorted(calls) == [["7:v1"], ["7:v2"]]
+    assert fetch_cues.fetch_transcripts([]) == {}

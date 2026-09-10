@@ -4,20 +4,26 @@ first-person cue phrases, straight from Elasticsearch highlights.
 
 This is the model layer's only retrieval flow — there is no local
 full-transcript scan any more. One boolean ``should`` of ``match_phrase``
-clauses (references/cue-phrases.txt plus the host terms, each apostrophe
-phrase spelled both ways the index knows) selects the videos; ES
-``highlight`` returns the passages around each hit, with the timed-text
-``start`` attributes intact, so a 5,000-video channel costs a few dozen small
-queries instead of a full transcript download. Nothing but cue phrases joins
-that query. When the phrases leave the window cap short, a SECOND pass over
-the bare first-person markers (``GENERIC_TERMS``) fills what is left, and
-only what is left: a phrase window always outranks a fallback window
-(``--generic-floor``).
+clauses (references/cue-phrases.txt, each apostrophe phrase spelled both
+ways the index knows) selects the videos; ES ``highlight`` returns the
+passages around each hit, with the timed-text ``start`` attributes intact,
+so a 5,000-video channel costs a few dozen small queries instead of a full
+transcript download. Nothing but cue phrases joins that query: the host
+terms are read off the window text afterwards (``host_naming``), where a
+self-naming is the host and a third-person naming is a second voice. When
+the phrases leave the window cap short, a SECOND pass over the bare
+first-person markers (``GENERIC_TERMS``) fills what is left, and only what
+is left: a phrase window always outranks a fallback window
+(``--generic-floor``). The cap is taken on the narrow highlight fragment;
+each kept window is then re-read wider from its transcript
+(``widen_windows``, ``--read-before`` / ``--read-after``), so the ranking
+stays sharp and the extractor still sees the sentences before the cue.
 
 Usage:
     fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
                   [--max-windows 500] [--batch-size N] [--reserve N]
                   [--generic-floor N] [--fragment-size 450] [--round N]
+                  [--read-before 20] [--read-after 10]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
@@ -63,6 +69,49 @@ CUE_RX = re.compile(r'<text start="([\d.]+)"[^>]*>')
 NON_EN_WINDOWS_PER_VIDEO = 3
 NON_EN_WINDOW_WORDS = 80
 WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
+
+# A host term in a window is two different signals. "hey guys it's Eric" or
+# "my name is Eric" is the host naming THEMSELVES: the strongest in-text proof
+# of voice there is, and the only thing ``host_anchor`` means from here on.
+# "with Eric", "Eric asked me", "Eric, one sec" is someone ELSE speaking of or
+# to the host, so a first-person cue beside it is probably not the host's.
+# Airrack (2026-09-10): the top-ranked window was a crew member's "I left my
+# girlfriend and my family to go make YouTube videos with Eric", promoted by
+# the +2 the name used to earn and then handed to Eric by the solo rule; 118
+# of the 300 kept windows had no cue at all and stood on the name alone. So
+# the host terms no longer join the query, a third-person naming earns
+# nothing and is passed to the extractor as ``second_voice_hint``, and only
+# a self-naming scores, at the weight of one ordinary cue.
+SELF_NAME_LEAD = (r"(?:i'm|i am|it's|it is|this is|my name is|my name's|call me|"
+                  r"i go by|it's me|its me|hey guys,? it's|hey,? it's|hi,? i'm|"
+                  r"i,)")
+SELF_NAME_BONUS = 1.0
+
+
+def host_naming(text: str, host_lc: set[str]) -> tuple[list[str], list[str], str | None]:
+    """``(self_named, third_person, hint)`` for the host terms in ``text``:
+    the terms the speaker uses of themselves, the terms spoken of or to
+    someone else, and a short hint quoting the first third-person naming for
+    the extractor (``None`` when there is none). A term named both ways in
+    one window counts as self-named."""
+    low = text.lower()
+    self_named: list[str] = []
+    third_person: list[str] = []
+    hint = None
+    for term in sorted(t for t in host_lc if t):
+        esc = re.escape(term)
+        m = re.search(r"\b" + esc + r"\b", low)
+        if not m:
+            continue
+        if re.search(SELF_NAME_LEAD + r"\s+" + esc + r"\b", low):
+            self_named.append(term)
+            continue
+        third_person.append(term)
+        if hint is None:
+            lo, hi = max(0, m.start() - 30), min(len(text), m.end() + 30)
+            snippet = re.sub(r"\s+", " ", text[lo:hi]).strip()
+            hint = f"host named in the third person: ...{snippet}..."
+    return self_named, third_person, hint
 
 
 # The fallback vocabulary: bare first-person markers, run as a SECOND query
@@ -488,7 +537,8 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     pad = SPONSOR_PAD
     for w in kept:
         segs = segments.get(w["id"]) or []
-        lo, hi = w["start"], w["start"] + WINDOW_SPAN
+        span = w.get("read_span")           # the widened read when there is one
+        lo, hi = (span[0], span[1]) if span else (w["start"], w["start"] + WINDOW_SPAN)
         w["in_sponsor_read"] = any(lo <= e + pad and hi >= s - pad
                                    for s, e in segs)
     return "brand_mentions"
@@ -540,37 +590,133 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 continue
             starts.append(start)
             entry["cues"].extend(pieces)
-            anchor_hits = [h for h in hits if h in host_lc]
+            self_named, third_person, hint = host_naming(text, host_lc)
             if retrieval == "generic":
                 cue_hits: list[str] = []
                 specific: list[str] = []
                 rec: list[str] = []
                 density = sum(1 for h in raw_hits if h in generic)
                 heur = round(GENERIC_BOOST * min(density, GENERIC_DENSITY_CAP)
-                             + 2 * len(anchor_hits), 2)
+                             + SELF_NAME_BONUS * min(len(self_named), 1), 2)
             else:
                 cue_hits = [h for h in hits if h not in host_lc]
                 specific = [h for h in cue_hits if h not in recurring]
                 rec = [h for h in cue_hits if h in recurring]
                 heur = round(min(sum(phrase_weight(h, weights) for h in specific), RANK_CAP)
-                             + 0.5 * min(len(rec), 1) + 2 * len(anchor_hits), 2)
+                             + 0.5 * min(len(rec), 1)
+                             + SELF_NAME_BONUS * min(len(self_named), 1), 2)
             windows.append({
                 "id": vid, "video_id": vid.split(":", 1)[-1], "title": d.get("title"),
                 "language": d.get("transcript_language"), "format_hint": format_hint(d.get("title")),
                 "published": (d.get("publication_date") or "")[:10],
                 "start": int(start), "text": text,
-                "cues_fired": cue_hits, "host_anchor": bool(anchor_hits),
-                "host_anchor_terms": [[h, "strong"] for h in anchor_hits],
+                "cues_fired": cue_hits, "host_anchor": bool(self_named),
+                "host_anchor_terms": [[h, "self_named"] for h in self_named],
+                "host_named_third_person": third_person,
+                "second_voice_hint": hint,
                 "entity_hits": [], "weak_anchor": False, "stage_direction": False,
                 "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
                 "recurrence_videos": 0, "recurring_phrase": None,
                 "retrieval": retrieval,
                 "rank_score": heur,
+                "read_span": None, "context_added": False,
                 "_specific": specific, "_recurring": rec,
                 "_weights": weights,
+                "_span": [pieces[0][0], pieces[-1][0]],
             })
     return windows
+
+
+# --------------------------------------------------------------------------- #
+# rank narrow, read wide: the highlighter cuts a fragment around the cue, and
+# a disclosure usually ENDS at its cue ("...and film school wasn't going to
+# make me who I wanted to be, so I left my girlfriend and my family"): the
+# biography sits in the sentences before the phrase, where no phrase fires and
+# so no fragment is ever cut. At 450 raw characters that context was gone
+# from the whole candidate pool, not demoted (Airrack 2026-09-10: three of the
+# previous top-20 gems had no passage left anywhere). So the cap is taken on
+# the narrow fragment, which keeps the ranking sharp, and then every KEPT
+# window is re-read from the stored transcript, ``--read-before`` seconds
+# ahead of its first cue to ``--read-after`` seconds past its last, and that
+# wider text is what the extractor sees. The added cues join the corpus so a
+# quote cut from the context still verifies to its own second.
+# --------------------------------------------------------------------------- #
+READ_BEFORE_S = 20
+READ_AFTER_S = 10
+TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
+
+
+def _transcript_chunk(chunk: list[str]) -> dict[str, list[tuple[float, str]]]:
+    import store_io  # sibling; parses the timed-text XML into (start, text) cues
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "transcript"],
+    })
+    return {str(r.get("id")): store_io.cues(r.get("transcript")) for r in rows}
+
+
+def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
+    """Timed cues per video for the kept windows' videos. A failure raises."""
+    chunks = [refs[i:i + TRANSCRIPT_CHUNK] for i in range(0, len(refs), TRANSCRIPT_CHUNK)]
+    if not chunks:
+        return {}
+    out: dict[str, list[tuple[float, str]]] = {}
+    with cf.ThreadPoolExecutor(max_workers=min(ES_CONCURRENCY, len(chunks))) as pool:
+        for part in pool.map(_transcript_chunk, chunks):
+            out.update(part)
+    return out
+
+
+def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
+                  before: float, after: float) -> tuple[str, int]:
+    """Replace each kept window's fragment text with the transcript read around
+    it, and grow the corpus by the cues that read added. Returns the source
+    used (``transcript``, ``fragment_only`` when the lookup failed, ``off``
+    when both margins are 0) and how many windows widened. The lookup is
+    reporting-grade: a failure keeps every fragment exactly as it was."""
+    if before <= 0 and after <= 0:
+        return "off", 0
+    refs = sorted({w["id"] for w in kept})
+    if not refs:
+        return "none", 0
+    try:
+        cues_by_video = fetch_transcripts(refs)
+    except BaseException as exc:              # noqa: BLE001 reported, not raised
+        print(f"transcript read-around failed ({type(exc).__name__}: "
+              f"{str(exc)[:120]}); keeping the highlight fragments", file=sys.stderr)
+        return "fragment_only", 0
+    widened = 0
+    for w in kept:
+        cues = cues_by_video.get(w["id"]) or []
+        if not cues:
+            continue
+        span = w.get("_span") or [w["start"], w["start"]]
+        lo, hi = float(span[0]) - before, float(span[1]) + after
+        run = [(float(s), t) for s, t in cues if lo <= float(s) <= hi and t]
+        if not run:
+            continue
+        text = re.sub(r"\s+", " ", " ".join(t for _, t in run)).strip()
+        if len(text.split()) <= len(w["text"].split()):
+            continue                          # the fragment already had it all
+        w["text"] = text
+        w["read_span"] = [round(run[0][0], 2), round(run[-1][0], 2)]
+        w["context_added"] = True
+        # the speaker signals live in the context, so they are re-read on it
+        self_named, third_person, hint = host_naming(text, host_lc)
+        w["host_anchor"] = bool(self_named)
+        w["host_anchor_terms"] = [[h, "self_named"] for h in self_named]
+        w["host_named_third_person"] = third_person
+        w["second_voice_hint"] = hint
+        w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
+        entry = corpus.get(w["id"])
+        if entry is not None:
+            have = {round(float(c[0]), 2) for c in entry["cues"]}
+            entry["cues"].extend([round(s, 2), t] for s, t in run
+                                 if round(s, 2) not in have)
+        widened += 1
+    return "transcript", widened
 
 
 def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int],
@@ -677,6 +823,12 @@ def main() -> int:
                          "cue phrases keep fewer windows than this, and fill just the "
                          "shortfall; default: --max-windows, so the cap is filled; 0 = never")
     ap.add_argument("--fragments-per-doc", type=int, default=10)
+    ap.add_argument("--read-before", type=float, default=READ_BEFORE_S,
+                    help="once the cap is taken, re-read each kept window from its "
+                         "transcript from this many seconds before its first cue "
+                         "(rank narrow, read wide); 0 with --read-after 0 = off")
+    ap.add_argument("--read-after", type=float, default=READ_AFTER_S,
+                    help="...to this many seconds after its last cue")
     ap.add_argument("--per-video-cap", type=int, default=8)
     ap.add_argument("--page-size", type=int, default=150)
     ap.add_argument("--concurrency", type=int, default=4)
@@ -696,7 +848,9 @@ def main() -> int:
     phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
     host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
     host_lc = {t.lower() for t in host_terms}
-    all_phrases = phrases + host_terms
+    # host terms are read off the window text (host_naming), never queried:
+    # a fragment cut around a bare name carried no cue and no disclosure
+    all_phrases = list(phrases)
 
     docs = fetch_all_years(a.channel, all_phrases, a, since, weights)
     queries_note = f"{len(YEARS)} year buckets"
@@ -781,12 +935,15 @@ def main() -> int:
                 "language": d.get("transcript_language"), "format_hint": format_hint(d.get("title")),
                 "published": (d.get("publication_date") or "")[:10],
                 "start": int(start), "text": text, "cues_fired": [], "host_anchor": False,
-                "host_anchor_terms": [], "entity_hits": [], "weak_anchor": False,
+                "host_anchor_terms": [], "host_named_third_person": [],
+                "second_voice_hint": None, "entity_hits": [], "weak_anchor": False,
                 "stage_direction": False, "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
                 "recurrence_videos": 0, "recurring_phrase": None,
                 "retrieval": "non_english_sample", "rank_score": 1.0,
+                "read_span": None, "context_added": False,
                 "_specific": [], "_recurring": [], "_weights": None,
+                "_span": [run[0][0], run[-1][0]],
             })
     per_video: dict[str, int] = {}
     per_phrase: dict[str, int] = {}
@@ -817,11 +974,17 @@ def main() -> int:
                         passages=len(generic_windows), windows_kept=len(gkept))
         queries_note += " x 2 passes (generic fallback ran)"
     windows.extend(generic_windows)          # phrase windows first, then the fallback's
+    # the cap is taken on the narrow fragments; what the extractor reads is wider
+    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after)
     for w in windows:
         w.pop("_specific", None)
         w.pop("_recurring", None)
         w.pop("_weights", None)
+        w.pop("_span", None)
     sponsor_source = apply_sponsor_spans(kept)
+    third_person_windows = sum(1 for w in kept if w.get("host_named_third_person"))
+    self_named_windows = sum(1 for w in kept if w.get("host_anchor"))
+    third_person_share = round(third_person_windows / len(kept), 2) if kept else 0.0
 
     out = pathlib.Path(a.out) / str(a.channel)
     suffix = "" if a.round <= 1 else f"-r{a.round}"
@@ -894,6 +1057,16 @@ def main() -> int:
         "reserved_slots": max(0, a.reserve), "usable_cap": usable_cap,
         "sponsor_flagged": sum(1 for w in kept if w["in_sponsor_read"]),
         "sponsor_source": sponsor_source,
+        "read_span": {"before_s": a.read_before, "after_s": a.read_after,
+                      "source": read_source, "widened": widened},
+        # voice signals over the kept windows: a self-naming is the host, a
+        # third-person naming is someone speaking of the host. A high share
+        # on a channel labelled solo is a crew channel, and the format call
+        # should say multi_host (SKILL.md, the format step).
+        "host_terms": host_terms,
+        "self_named_windows": self_named_windows,
+        "third_person_host_windows": third_person_windows,
+        "third_person_host_share": third_person_share,
         "batches": batches, "returns_dir": str(rdir),
         "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
         "corpus": str(corpus_path), "latest_video_date": latest_video_date,
@@ -911,7 +1084,10 @@ def main() -> int:
           f"generic_fallback={'ran' if fallback['ran'] else ('off' if floor <= 0 else 'skipped')} "
           f"generic_windows={fallback['windows_kept']} "
           f"batches={len(batches)} batch_size={batch_size} "
-          f"agent_cap={agent_cap} sponsor_source={sponsor_source} elapsed_s={elapsed}",
+          f"agent_cap={agent_cap} sponsor_source={sponsor_source} "
+          f"read_span={read_source} widened={widened} "
+          f"self_named={self_named_windows} third_person_host={third_person_windows} "
+          f"third_person_host_share={third_person_share} elapsed_s={elapsed}",
           file=sys.stderr)
     return 0
 
