@@ -11,6 +11,8 @@ env
 .claude/settings.local.json
 
 # Run output: creator ledgers and connection pages, plus the working corpus.
-# Real client-adjacent data, never committed.
+# Real client-adjacent data, never committed. The skill writes under the
+# invocation directory, so a run started from the repo root lands here too.
+tl-creator-profiles/
 skills/tl-creator-brief/tl-creator-profiles/
 .DS_Store

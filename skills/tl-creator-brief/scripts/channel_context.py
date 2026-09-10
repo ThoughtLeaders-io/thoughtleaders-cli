@@ -62,7 +62,7 @@ INTERVIEW = re.compile(
     r"podcast)|please welcome|thanks for (coming on|joining|having me)|"
     r"joining me today|great to have you|tell (us|me) about yourself)\b", re.I)
 
-# The ONE home for title -> second-voice hints. `fetch_cues.format_hint` reads
+# The ONE home for title -> format hints. `fetch_cues.format_hint` reads
 # this dict too, so a title that counts as a collab here is the same title
 # whose windows carry `format_hint` into the extractor and the merge pass.
 # "with <Name>" counts only when what follows is shaped like a person: an
@@ -72,7 +72,20 @@ INTERVIEW = re.compile(
 # Creator"). That branch is case-sensitive on purpose: "with this mod",
 # "With These Mods", "with Calamity's latest update", "with DEATH mode" are
 # things, not voices, and the rest of the pattern stays case-insensitive.
-TITLE_SECOND_VOICE = {
+#
+# `staged` is the third hint and comes LAST so a "reaction" or collab title
+# keeps its second-voice hint. It marks a video whose premise is a set-up:
+# pranks, challenges, 24-hour stunts, fake or pretend scenarios, dating shows,
+# skits. One voice still holds the transcript, so attribution is unchanged;
+# what changes is that a relationship, marriage, move or job stated inside
+# the premise may be the bit, not the person. Alexa Rivera (2026-09-09): 37
+# PRANK, 21 CHALLENGE and 20 "24 HOURS" titles among 355 windowed videos, and
+# a "my husband" line from a fake-honeymoon video reached the page as fact.
+# The hint never drops a window: the extractor reports the claim with the
+# hint in its evidence, `merge_pass.py prepare` has `authenticate.py` look
+# for the same claim in non-staged uploads, and the merge shard decides with
+# that evidence in front of it.
+TITLE_HINTS = {
     "reaction": re.compile(
         r"(\breact(s|ing|ion|ions)?\b|\breact to\b|\bwatching\b|\bresponds? to\b|"
         r"\bfirst time (watching|hearing|playing|seeing)\b)", re.I),
@@ -82,7 +95,22 @@ TITLE_SECOND_VOICE = {
         r"\bft\.?\s|\bfeat\.?\s|\bfeaturing\b|\bw/\s?\w|\bwith @\w|\bvs\.?\s)"
         r"|\b[Ww]ith (?:[A-Z][a-z]+[A-Z]\w*|[A-Z]\w+(?:,| and | & )|The [A-Z]\w+"
         r"|[A-Z]\w+['’]s [A-Z]\w+)"),
+    "staged": re.compile(
+        r"(\bpranks?\b|\bpranked\b|\bpranking\b|\bchallenges?\b|\b24 hours?\b|"
+        r"\b\d+ hours? (in|at|inside|overnight)\b|\bovernight\b|\bfake\b|"
+        r"\bpretend(s|ed|ing)?\b|\bsocial experiment\b|\bdating show\b|"
+        r"\blast to (leave|stop|fall)\b|\bskit\b|\brole ?play\b|"
+        r"\b(married|adopted|dated|was a \w+) for (a|24) (day|week|hours?)\b|"
+        r"\bfor 24 hours\b|\bfor a (day|week)\b|\bsurprising my\b|"
+        # life-event titles are the classic stunt premise on prank channels
+        # ("CAN'T BELIEVE THIS HAPPENED ON OUR HONEYMOON!!" was a bit); a
+        # genuine one is probed and confirmed by its recurrence, never dropped
+        r"\bhoneymoon\b|\bgot married\b|\bwedding\b|\bbroke up\b|\bpregnant\b|"
+        r"\bmoving (away|out)\b|\bquitting\b|\bwe eloped\b|\bnew boyfriend\b|"
+        r"\bnew girlfriend\b)", re.I),
 }
+# The old name, kept so a script written against it keeps importing.
+TITLE_SECOND_VOICE = TITLE_HINTS
 
 
 def channel_row(channel_id: int) -> dict:
@@ -210,7 +238,7 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
                 "questions_per_1k_words": round(
                     1000 * text.count("?") / words, 1),
                 "title_hint": next(
-                    (fmt for fmt, rx in TITLE_SECOND_VOICE.items()
+                    (fmt for fmt, rx in TITLE_HINTS.items()
                      if v.get("title") and rx.search(v["title"])), None),
             })
     if not per_video:
@@ -243,8 +271,11 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
                 v["questions_per_1k_words"] for v in per_video), 1),
             "title_hints": {
                 fmt: sum(1 for v in per_video if v["title_hint"] == fmt)
-                for fmt in TITLE_SECOND_VOICE
+                for fmt in TITLE_HINTS
             },
+            "staged_share": round(
+                sum(1 for v in per_video if v["title_hint"] == "staged")
+                / len(per_video), 2),
             "per_video": per_video,
         }
     return {
@@ -259,8 +290,14 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
             v["questions_per_1k_words"] for v in per_video), 1),
         "title_hints": {
             fmt: sum(1 for v in per_video if v["title_hint"] == fmt)
-            for fmt in TITLE_SECOND_VOICE
+            for fmt in TITLE_HINTS
         },
+        # share of measured videos whose title reads as a staged premise; the
+        # format call names it ("solo, 22% staged premises") so the merge
+        # shard knows how much of the channel is a set-up
+        "staged_share": round(
+            sum(1 for v in per_video if v["title_hint"] == "staged")
+            / len(per_video), 2),
         "likely_faceless": statistics.median(fp) < 2.0,
         "per_video": per_video,
     }
@@ -339,9 +376,11 @@ def main() -> None:
                     help="write the compact extractor context block here "
                          "(needs --format-label; --format-evidence recommended)")
     ap.add_argument("--set-socials", dest="set_socials", default=None,
-                    help="patch an existing context.json with which linked "
-                         "platforms the socials lane read; pass the lane's "
-                         "answer as --social-read / --social-unread")
+                    help="patch an existing context-full.json (this script's "
+                         "own --channel output, the file ledger_meta.py write "
+                         "--context reads) with which linked platforms the "
+                         "socials lane read; pass the lane's answer as "
+                         "--social-read / --social-unread")
     ap.add_argument("--social-read", dest="social_read", default=None,
                     help="comma-separated links the socials lane opened")
     ap.add_argument("--social-unread", dest="social_unread", default=None,

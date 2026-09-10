@@ -47,7 +47,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data  # noqa: E402
-from channel_context import TITLE_SECOND_VOICE  # noqa: E402  — sibling script, one home for title hints
+from channel_context import TITLE_HINTS, channel_row  # noqa: E402  sibling script, one home for title hints
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_PHRASES = HERE.parent / "references" / "cue-phrases.txt"
@@ -218,13 +218,25 @@ def clean(frag: str) -> tuple[str, list[str], float | None, list[str], list[list
 def format_hint(title: str | None) -> str | None:
     """Per-video hint the rubric lets override the channel label."""
     t = title or ""
-    for fmt, rx in TITLE_SECOND_VOICE.items():  # reaction first, then collab
+    for fmt, rx in TITLE_HINTS.items():  # reaction first, then collab, then staged
         if rx.search(t):
             return fmt
     return None
 
 
 ENGLISH_CODES = {"en", "asr-en"}
+
+
+def channel_language(channel: int) -> str | None:
+    """The channel's own language from its platform record, lower-cased, or
+    None when the record does not say. Reporting only; a failed lookup
+    means "unknown", never a gate."""
+    try:
+        return (str(channel_row(channel).get("language") or "").strip().lower()
+                or None)
+    except Exception as exc:  # the row is a hint, not a requirement
+        print(f"channel language lookup failed: {exc}", file=sys.stderr)
+        return None
 
 
 def is_english(code: str | None) -> bool:
@@ -651,8 +663,9 @@ def main() -> int:
                          "to use every concurrent agent the host allows, "
                          "ceil(windows / $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS), cap 20 when unset")
     ap.add_argument("--reserve", type=int, default=0,
-                    help="agent slots held by other lanes during the fan-out "
-                         "(1 when the socials lane is on). Batches are sized "
+                    help="agent slots held by other lanes during the fan-out: "
+                         "3 for the brand lanes on a CONNECT build, plus 1 "
+                         "when the socials lane is on. Batches are sized "
                          "against cap minus this, so the last extractor is "
                          "not rejected and relaunched a wave later")
     ap.add_argument("--fragment-size", type=int, default=450,
@@ -700,7 +713,24 @@ def main() -> int:
     non_en_docs: list[dict] = []
     non_en_failed = False
     non_en_total = sum(n for k, n in langs.items() if not is_english(k))
-    if non_en_total:
+    # An English-language channel whose index holds Arabic, Portuguese or
+    # Vietnamese transcripts is carrying YouTube's auto-dubbed audio tracks,
+    # not the creator's words: HopeScope (2026-09-09) had 36 Arabic-track
+    # videos among 506, 96 of their windows reached the extractors, and one
+    # became a ledger fact with an Arabic "quote" she never spoke. A dubbed
+    # track can never verify as verbatim, so on an English channel every
+    # non-English track is excluded here and counted, never sampled. A
+    # non-English channel keeps the sampling: there the source language IS
+    # the creator's voice.
+    chan_lang = channel_language(a.channel)
+    dubbed_excluded: dict[str, int] = {}
+    if non_en_total and chan_lang and is_english(chan_lang):
+        dubbed_excluded = {k: n for k, n in langs.items() if not is_english(k)}
+        print(f"channel language is {chan_lang}: {non_en_total} non-English "
+              f"transcript(s) treated as auto-dubbed tracks and excluded "
+              f"({', '.join(f'{k}:{n}' for k, n in sorted(dubbed_excluded.items()))})",
+              file=sys.stderr)
+    elif non_en_total:
         try:
             non_en_docs = fetch_non_english(a.channel, since=since)
         except Exception as exc:
@@ -721,6 +751,11 @@ def main() -> int:
                 done.setdefault(w.get("id", ""), []).append(int(w.get("start", 0)))
     corpus: dict[str, dict] = {}
     seen: dict[str, list[float]] = {}
+    if dubbed_excluded:
+        # the phrase query cannot match an English cue in a dubbed track, but
+        # a code-switched or mis-labelled doc could still slip through: the
+        # exclusion is by language, not by luck
+        docs = [d for d in docs if is_english(d.get("transcript_language"))]
     windows = build_windows(docs, corpus=corpus, done=done, seen=seen, host_lc=host_lc,
                             recurring=recurring, retrieval="phrase", weights=weights)
 
@@ -848,6 +883,8 @@ def main() -> int:
     summary = {
         "channel": a.channel, "round": a.round, "phrases": len(all_phrases), "queries": queries_note,
         "videos_with_transcript": videos_with_transcript, "languages": langs,
+        "channel_language": chan_lang,
+        "dubbed_excluded": dubbed_excluded,
         "non_english_videos_sampled": len(non_en_docs),
         "videos_matched": len(corpus), "passages": len(windows),
         "windows_batched": len(kept), "videos_in_batches": len(per_video),
@@ -868,7 +905,8 @@ def main() -> int:
     summary_path.write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))
     print(f"FUNNEL stage=fetch_cues round={a.round} videos_with_transcript={videos_with_transcript} "
-          f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} passages={len(windows)} "
+          f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} "
+          f"dubbed_excluded={sum(dubbed_excluded.values())} passages={len(windows)} "
           f"windows_capped={len(kept)} phrase_windows={phrase_kept} "
           f"generic_fallback={'ran' if fallback['ran'] else ('off' if floor <= 0 else 'skipped')} "
           f"generic_windows={fallback['windows_kept']} "

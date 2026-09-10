@@ -32,7 +32,7 @@ Output (``--out``, default ``<in>.verified.jsonl``): every input line with a
 * ``{"match": "n/a"}`` — non-transcript provenance, passed through.
 
 Exit 0 when every transcript quote matched exactly, 1 otherwise. Summary JSON
-on stdout and one ``FUNNEL`` line on stderr for the run report; the verified
+on stdout and one ``FUNNEL`` line on stderr for debugging; the verified
 file holds the detail.
 """
 from __future__ import annotations
@@ -51,6 +51,27 @@ from store_io import open_corpus, read_ledger, write_ledger  # sibling module
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", s.lower())).strip()
+
+
+_LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
+_LETTER = re.compile(r"[^\W\d_]")
+ENGLISH_CODES = {"en", "asr-en"}
+
+
+def looks_dubbed(quote: str, channel_language: str | None) -> bool:
+    """A quote whose letters are mostly outside the Latin script on an
+    English-language channel is a YouTube auto-dub track, not the creator's
+    words: it can match the stored captions exactly and still not be
+    verbatim speech. `fetch_cues.py` excludes those tracks upstream; this is
+    the backstop for a corpus fetched before it did."""
+    lang = (channel_language or "").lower()
+    if not lang or not (lang in ENGLISH_CODES or lang.startswith("en")):
+        return False
+    letters = _LETTER.findall(quote or "")
+    if len(letters) < 8:
+        return False
+    latin = sum(1 for ch in letters if _LATIN.match(ch))
+    return latin / len(letters) < 0.5
 
 
 def locate(cues: list[tuple[float, str]], quote: str,
@@ -108,7 +129,7 @@ def locate(cues: list[tuple[float, str]], quote: str,
 
 
 def funnel(**fields) -> None:
-    """One machine-parseable stage line for the run report (stderr)."""
+    """One machine-parseable stage line for debugging (stderr)."""
     print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
           file=sys.stderr)
 
@@ -138,6 +159,10 @@ def main() -> None:
                          "(a plain .jsonl corpus is read too)")
     ap.add_argument("--out", default=None,
                     help="default: <in>.verified.jsonl")
+    ap.add_argument("--channel-language", dest="channel_language", default=None,
+                    help="the channel's own language (context-full.json `language`); "
+                         "on an English channel a non-Latin quote is a dubbed track "
+                         "and reports match: dubbed, which never publishes")
     a = ap.parse_args()
 
     in_path = pathlib.Path(a.infile)
@@ -145,7 +170,7 @@ def main() -> None:
         in_path.suffix + ".verified.jsonl")
     cues_by_video = load_cues(pathlib.Path(a.corpus))
 
-    counts = {"exact": 0, "partial": 0, "none": 0, "n/a": 0}
+    counts = {"exact": 0, "partial": 0, "none": 0, "dubbed": 0, "n/a": 0}
     header, candidates = read_ledger(in_path)
     verified: list[dict] = []
     for fact in candidates:
@@ -167,6 +192,10 @@ def main() -> None:
                        "error": "video has no stored transcript"}
             elif not quote:
                 hit = {"match": "none", "error": "empty quote"}
+            elif looks_dubbed(quote, a.channel_language):
+                hit = {"match": "dubbed",
+                       "error": ("quote is not in the channel's language: an "
+                                 "auto-dubbed track, not the creator's words")}
             else:
                 hint = fact.get("start")
                 hit = locate(cues, quote,
@@ -174,7 +203,7 @@ def main() -> None:
                              if isinstance(hint, (int, float)) else None)
             verify = {"match": hit["match"],
                       "found": hit["match"] == "exact"}
-            if hit["match"] != "none":
+            if hit["match"] not in ("none", "dubbed"):
                 verify["start"] = hit["start"]
                 vid = video.split(":")[-1]
                 verify["url"] = (f"https://www.youtube.com/watch"
@@ -202,7 +231,7 @@ def main() -> None:
                                               default=str)))
     write_ledger(out_path, header, verified)
 
-    failed = counts["partial"] + counts["none"]
+    failed = counts["partial"] + counts["none"] + counts["dubbed"]
     elapsed = round(time.monotonic() - started, 1)
     print(json.dumps({
         "candidates": sum(counts.values()),
@@ -210,6 +239,7 @@ def main() -> None:
         "exact": counts["exact"],
         "partial": counts["partial"],
         "none": counts["none"],
+        "dubbed": counts["dubbed"],
         "passed_through_non_transcript": counts["n/a"],
         "verified_file": str(out_path),
         "note": ("only exact matches publish as verbatim; partial/none must "

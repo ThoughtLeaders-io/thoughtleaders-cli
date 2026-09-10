@@ -39,7 +39,7 @@ overlap heavily on content words. Every member must match every other member
 (complete linkage), so near-misses cannot chain two unrelated claims together,
 and the result does not depend on the order the gems arrive in.
 
-Summary JSON on stdout and one ``FUNNEL`` line on stderr for the run report;
+Summary JSON on stdout and one ``FUNNEL`` line on stderr for debugging;
 the clustered file holds the detail. Exit 0.
 """
 from __future__ import annotations
@@ -100,7 +100,7 @@ _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def funnel(**fields) -> None:
-    """One machine-parseable stage line for the run report (stderr)."""
+    """One machine-parseable stage line for debugging (stderr)."""
     print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
           file=sys.stderr)
 

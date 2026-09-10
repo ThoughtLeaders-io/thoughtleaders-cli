@@ -57,6 +57,53 @@ So `"action": "tier"`, `"action": "confidence"` and
 `"action": "supersedes"` are all wrong. The action stays `keep`; the
 judgment goes in its own key.
 
+## Never drop, demote or supersede because you are unsure
+
+A drop is for a claim its quote does not support, a voice that is not the
+host's, or an ad read. It is never for a claim you suspect is a bit, a
+contradiction you cannot resolve from two lines, or a fact that "feels"
+stale. Those get checked, and the check is already in your input:
+
+- **`staged: true`** on a line means the window came from a prank, challenge,
+  stunt or skit upload (the title says so). The words are the host's; the
+  fact may be the premise.
+- **`conflicts_with: ["c058"]`** names clusters in the same domain that
+  cannot all be current (two homes, a husband and a boyfriend).
+- **`probe`** is what `authenticate.py` found when it searched the whole
+  channel for the same claim: `videos` saying it, `newest` and `oldest`
+  upload dates, `non_staged_videos`, `staged_videos`, and a `sample` of
+  titles with dates. `{"skipped": ...}` or `{"error": ...}` means nothing
+  was checked; treat it as no evidence either way.
+
+Read the probe and decide:
+
+- Found in one or more **non-staged** uploads: the claim is the person's.
+  `keep` it at the confidence the format gives it.
+- Found **only** in staged uploads, or a staged line with no probe: `keep`
+  it, `"confidence": "unconfirmed"`. Expand marks it `staged_only`, so it
+  stays in the ledger and off the brand-facing page. Do not `drop` it.
+- **A conflict is settled by the newest dated evidence**, `probe.newest` on
+  each side, then the identity lane's `seen_date` when a lane record
+  corroborates one side (the creator's own bio this year outranks a video
+  from four years ago). The newer fact `supersedes` the older; the older
+  stays as history. When neither side has newer evidence than the other, or
+  both recur into the present, `keep` both at `unconfirmed` and supersede
+  nothing.
+- **Be consistent across the conflict set.** If you drop one "husband" line
+  as a scripted premise, every other line in its `conflicts_with` set that
+  says the same thing gets the same reading, and none of them is `selected`
+  or a `supersedes` source. Alexa Rivera (2026-09-09): two "my husband" lines
+  dropped as a fake honeymoon, a third kept, folded, made to supersede the
+  boyfriend fact and selected onto the page.
+
+`expand` refuses a `supersedes` that points against the dates (the target's
+evidence is newer than the source's) and hands the ids back for a re-ask
+with the dates in the message. It never edits your decision.
+
+**Folds are normal.** The clusterer merges only near-identical wording, so
+at 300 windows expect 10 to 20 folds per 100 clusters. A fold is not a
+sign the clusterer failed.
+
 **A `fold` may cross a life domain.** The extractor files each passage on its
 own, so one fact often arrives as two candidates in two domains: "his real
 name is X" under `other` and "real name is X" under `origin`. Fold them. The
@@ -124,7 +171,14 @@ ONE JSON object as your entire final message, no prose and no code fence:
             "corroborates": "c001"}]}
 ```
 
-`selected` nominates only from the domains your shard actually saw.
+`selected` nominates only from the domains your shard actually saw, and
+only clusters you kept at `confirmed`: the script ranks your picks, refuses
+an unconfirmed one with a reason, and fills to 40 across the whole ledger
+by confidence and recurrence. Nominate the facts a stranger would need to
+know the person, not the ones that happened to be judged last.
 `facts` carries the identity lane's records when that lane ran, and is
 `[]` when it did not. Every record keeps its `ref` and carries
-`sensitivity`, as above.
+`sensitivity`, as above. A lane record that names a person a transcript
+fact already put at tier `children` or `location` is the same person: give
+it the same tier (the script raises it if you do not, and reports that it
+had to).

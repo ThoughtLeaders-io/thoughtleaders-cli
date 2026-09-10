@@ -66,6 +66,23 @@ judgement the classifier makes from the format and the deterministic features
   profile (`ai.description`) is the identity field worth reading.
   `channel_context.py` returns both, labelled.
 
+- **A staged premise is a format hint, not a verdict.** A prank, challenge,
+  stunt or skit upload (`format_hint: staged`, from the title) is still one
+  voice, so attribution is unchanged. But a durable claim stated inside it
+  (a spouse, a pregnancy, a move, a new job) may be the premise. The
+  extractor reports it at `likely`; `authenticate.py` searches the channel
+  for the same claim in non-staged uploads before the merge; the merge shard
+  decides with that evidence. Found elsewhere: the fact is the person's.
+  Found only inside staged uploads: kept in the ledger at `unconfirmed`,
+  marked `staged_only`, never on a brand-facing page. **Nothing is dropped
+  for being uncertain.**
+- **Contradictions are settled on dated evidence, not on the two lines in
+  view.** Two facts in one domain that cannot both be current (two homes, a
+  husband and a boyfriend) are probed the same way, and the newest dated
+  evidence wins: the newest upload saying each, then the identity lane's
+  `seen_date` when the creator's own profile corroborates one side. The
+  older fact stays as history. When neither side is newer, or both recur
+  into the present, both stay at `unconfirmed` and neither supersedes.
 - **Merging quotes into one fact requires one speaker.** Two windows from
   the same interview video are not the same voice by default — a host's
   origin story at minute 6 and a guest's at minute 90 sit in one transcript.

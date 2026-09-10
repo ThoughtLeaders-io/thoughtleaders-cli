@@ -58,6 +58,17 @@ Applying them to a window batch:
   for windows with no hint.
 - `in_sponsor_read` proves host voice. What it disqualifies is narrower than
   the whole window — see the ad-read rule below.
+- **`format_hint: "staged"`** marks a prank, challenge, 24-hour stunt, fake or
+  pretend scenario, dating show or skit (from the title). One voice still
+  holds the transcript, so the solo attribution rule stands. What changes is
+  the third test: a relationship, marriage, pregnancy, move, job or death
+  stated inside the premise may be the bit. Report it anyway, as a gem, with
+  `confidence: "likely"` and `speaker_evidence` naming the staged hint
+  ("staged premise, solo voice"); a later stage searches the rest of the
+  channel for the same claim and decides with that evidence. Never withhold
+  it and never mark it `hypothetical` on the title alone: durable tastes,
+  family names and childhood stories told inside a challenge are still the
+  person's.
 - When genuinely unsure whose voice it is, say `speaker_guess: "unclear"` —
   never guess "host" to save a gem. Whatever you decide, `speaker_evidence`
   says in a few words what decided it (the format, a flag, a name in the

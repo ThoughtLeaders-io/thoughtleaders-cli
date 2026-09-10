@@ -22,11 +22,13 @@ skill's own directory):
   Rendered by `scripts/build_html.py` from a working markdown source that
   lives in the corpus directory, never in the deliverable directory.
 
-There is no pure-profile human surface: PROFILE mode's human output is the
-run report in chat (the funnel, the counts, the selected facts as a short
-list, and the ledger path). There is no `<channel_id>-meta.json`, no
-`<channel_id>-profile-ledger.html`, and no markdown twin of the page in
-`tl-creator-profiles/`. Working files — the passage store, batches, returns,
+There is no pure-profile human surface: PROFILE mode ends with the ledger's
+absolute path and its fact count in chat, nothing more. There is no
+`<channel_id>-meta.json`, no `<channel_id>-profile-ledger.html`, and no
+markdown twin of the page in `tl-creator-profiles/`. The only other file
+CONNECT writes beside the page is its body-only twin,
+`<channel_id>-<brand_id>-connections.fragment.html`, for hosts that publish
+artifacts from a fragment. Working files, the passage store, batches, returns,
 clusters, merge input and decisions, the verified working facts, the
 connections markdown — live under `tl-creator-profiles/.corpus/<channel_id>/`
 and are the cache the reuse path depends on.
@@ -78,7 +80,7 @@ by `scripts/ledger_meta.py write --from`:
   `social`/`web` facts, so cross-lane corroboration is unavailable: a fact
   reaches `confirmed` only on a transcript-side rule (solo format, or a
   host-anchored window), never by corroboration. That is a ceiling on the
-  evidence, not a defect in the run — say so in the run report.
+  evidence, not a defect in the run; the page's honesty strip says so.
 - `sensitivity`: `none` | `lifestyle` | `clinical` | `children` | `location`,
   per `evidence-rules.md`. `sensitive` is the **derived** boolean — true
   exactly for the withheld tiers (`clinical`, `children`, `location`) — kept
@@ -87,12 +89,22 @@ by `scripts/ledger_meta.py write --from`:
   the connections page renders it as a badge and tallies it.
 - `superseded_by`: the `fact_id` of the newer fact when latest-wins applies;
   superseded facts stay in the ledger as history.
-- `selected`: true on at most 20 facts. The merge pass proposes the picks
+- `staged` / `staged_only` (transcript facts only, present when the window
+  came from a staged-premise upload): `staged: true` says the title read as a
+  prank, challenge, stunt or skit; `staged_only: true` says `authenticate.py`
+  found the claim in no non-staged upload, so the fact is `unconfirmed`,
+  never `selected`, and never quoted on a brand-facing page. It stays in the
+  ledger: nothing is dropped for being uncertain. A `probe` object
+  (`videos`, `non_staged_videos`, `newest`) records what the check found.
+- `selected`: true on at most 40 facts. The merge pass proposes the picks
   (confirmed, recurring, cross-lane-corroborated, connection-fertile); the
-  expand script owns the final set across the whole active ledger — it fills
-  to 20 by recurrence and confidence and trims past 20 the same way, so a
-  refresh never leaves 40 selected or none. The connections page's "who they
-  are" section takes `selected` facts first, then the most recurring.
+  expand script ranks them, refuses an `unconfirmed` pick with a reason
+  (`selected_ignored` in its summary), and owns the final set across the
+  whole active ledger: confirmed facts seen in two or more videos first,
+  then confirmed by rank, then `unconfirmed` only up to a floor of 20, and
+  trims past 40 the same way, so a refresh never leaves every fact selected
+  or none. The connections page's "who they are" section takes `selected`
+  facts first, then the most recurring.
 - `members`: the passage keys (`<video_id>:<window start>`) the fact was
   built from — its identity across rounds. A refresh matches re-clustered
   passages to existing facts by these keys (`transcript-mining.md`, Layer 4),
@@ -179,7 +191,7 @@ python3 scripts/ledger_meta.py check --channel <id> [--lanes transcripts+socials
 ```
 
 When `<channel_id>-facts.jsonl` exists with its meta header it prints one
-announcement line, which the run report repeats verbatim —
+announcement line, which is repeated to the user verbatim,
 
 > Found a ledger for Sydney Watson built 2026-09-01 over 2016-03 → 2026-08-20,
 > 91 facts. 3 videos uploaded since.
@@ -250,8 +262,9 @@ this paragraph is forwarded with the page. The renderer shows it as prose, not
 as a card.
 
 **One `## ` section per connection**, strongest first — the section order IS
-the ranking and the page numbers them — with the type as a bold tag on the
-heading line: `## Runs on four hours of sleep — **direct**`. Each section
+the ranking and the page numbers them, with the type AND the strength as
+bold tags on the heading line:
+`## Runs on four hours of sleep — **direct** · **strong**`. Each section
 holds, in this order:
 
 1. **The creator's own words** (or the social/web fact, labelled as such) —
@@ -260,7 +273,9 @@ holds, in this order:
    page, so it carries the connection on its own: pick the line that makes
    the fit obvious, not the longest one. The renderer requires a timestamped
    link INSIDE the blockquote, so put the attribution on a `>` continuation
-   line, not below the quote.
+   line, not below the quote. `--check` also requires the quote to be a
+   ledger fact's verified quote (or a probe window, on a category-precedent
+   card), and refuses a superseded or `staged_only` fact.
 2. **What the brand offers that meets it**, and which brand-read lane that
    came from (`[web]`, `[social: instagram]`, ad-read sample, sponsorship
    patterns).
@@ -286,7 +301,23 @@ numbered connections so it can never be mistaken for an angle.
 
 Types: **direct** (fact ↔ product), **adjacent** (lifestyle/context fit),
 **category precedent** (the creator already does what the product enables,
-from the confirm-only probe). In the connection sections, facts at
+from the confirm-only probe).
+
+**Strength**, the second tag, is the rule the 2026-09-09 test runs were
+missing: **the connection is the fact, not the format.** A card is
+**strong** when the quoted fact itself names the thing the brand offers (a
+creator who has driven to 47 branches of a restaurant chain, for that chain;
+a creator who names four family members, for a family plan). It is **thin**
+when the link runs through the channel's premise ("her format is unboxing,
+the brand ships collectible drops", quoting a fact about her parents'
+collection) or a generic trait any brand could borrow ("she prices things
+out loud"). Thin cards are capped at two, and a map whose every card is thin
+must say **thin fit** in its Thesis: the ledger connects weakly, here are the
+one or two honest angles and what to confirm before building on them. The
+renderer prints that verdict above the cards. Thin fit is a third outcome
+between fit and no fit, and it is the honest description of most pairings a
+brand did not choose for the creator's own material. In the connection
+sections, facts at
 sensitivity tier `children` or `location` do not appear unless a human
 opted one in; `clinical` facts appear only when the creator discusses them
 repeatedly (three or more videos) or frames them as part of their own story,
@@ -309,25 +340,30 @@ python3 scripts/build_html.py \
   [--out tl-creator-profiles/<id>-<brand>-connections.html]
 ```
 
-`--out` defaults to `<facts dir>/<channel_id>-<brand_id>-connections.html`.
-The meta record comes from the ledger's header (`--meta <file>` only fills
-in for a legacy headerless ledger). Top to bottom:
+`--out` defaults to `<facts dir>/<channel_id>-<brand_id>-connections.html`,
+and a body-only twin `…-connections.fragment.html` (title, styles and
+content, no document shell) is written beside it unless `--no-fragment`; the
+script prints both as absolute paths. The meta record comes from the ledger's
+header (`--meta <file>` only fills in for a legacy headerless ledger). Top to
+bottom:
 
 1. **Header** — creator × brand, with the brand-read date and the ledger's
    build date.
 2. **Who they are** — the markdown's `## About <creator>` prose, followed by
-   the `selected` facts as a short readable run rather than a grid of
-   domain-labelled subsections. Facts at tier `children` or `location` never
-   enter this section; `clinical` and `lifestyle` facts appear with their tier
-   badge; superseded facts stay in the ledger only.
+   the `selected` facts (up to 40, at most 8 per domain) as a readable run
+   rather than a grid of domain-labelled subsections. Facts at tier
+   `children` or `location` never enter this section, nor do `staged_only`
+   facts; `clinical` and `lifestyle` facts appear with their tier badge;
+   superseded facts stay in the ledger only.
 3. **The thesis** — the markdown's `## Thesis` section, rendered as the
    page's lead block, above the brand. This is what the reader came for.
 4. **About the brand** — the markdown's `## About <brand>` section, as prose.
 5. **Connections** — one numbered card per connection section with its type
-   badge, each carrying its quote, what the brand offers, the use case, the
-   optional labelled sample read, and the do / do-not pair. Provenance labels
-   in the markdown are kept: a connection map names its lanes. A no-fit map
-   renders its verdict as prose, no cards.
+   and strength badges, each carrying its quote, what the brand offers, the
+   use case, the optional labelled sample read, and the do / do-not pair.
+   Provenance labels in the markdown are kept: a connection map names its
+   lanes. A thin-fit map carries the verdict as a banner above its cards; a
+   no-fit map renders its verdict as prose, no cards.
 6. **Where this could go wrong** — its own block after the cards, never
    numbered among them, so an honest mismatch is never mistaken for an angle.
 7. **About this ledger** — the honesty strip:
@@ -337,10 +373,13 @@ in for a legacy headerless ledger). Top to bottom:
    `<matched>/<with transcript> transcript videos matched, <N> passages
    judged — absence is not evidence`; format, corpus window, rounds, lanes;
    and the other channels and platforms from `context` (each platform read
-   or "linked but unread", each sibling "not mined").
+   or "linked but unread", including a link the lane found and flagged as
+   unread that the channel record never listed; each sibling "not mined").
 
-When the host supports publishing artifacts, publish the page so the user
-gets a link; the files in `tl-creator-profiles/` are the durable copies.
+When the host supports publishing artifacts, publish the **fragment** so the
+user gets a link (the full page carries its own document shell and cannot be
+wrapped by an artifact host); the files in `tl-creator-profiles/` are the
+durable copies, and the user is always given the page's absolute path.
 
 ## Never in any file
 

@@ -71,6 +71,13 @@ BADGES = {
     "adjacent": "adjacent",
     "category precedent": "precedent",
     "category-precedent": "precedent",
+    # strength: `strong` when the quoted fact itself names what the brand
+    # offers; `thin` when the link runs through the channel's premise or a
+    # generic trait. The heading carries both: `— **adjacent** · **thin**`.
+    "strong": "strong",
+    "thin": "thin",
+    "thin fit": "thinfit",
+    "thin-fit": "thinfit",
     "confirmed": "confirmed",
     "unconfirmed": "unconfirmed",
     "lifestyle": "lifestyle",
@@ -89,8 +96,16 @@ DOMAIN_LABELS = {
     "tastes": "Tastes", "beliefs": "Beliefs", "relationships": "Relationships",
     "other": "Other",
 }
-WHO_MAX_FACTS = 12
-WHO_MAX_PER_DOMAIN = 3
+# The "who they are" run renders the ledger's `selected` facts; the merge
+# pass owns that pick (SELECTED_TARGET, 40 since the 2026-09-10 review) and
+# this is only the render cap, so it matches. The per-domain cap stops one
+# talkative domain owning the strip; 8 of 12 domains at most.
+WHO_MAX_FACTS = 40
+WHO_MAX_PER_DOMAIN = 8
+# Connections: at most this many `thin` cards, and none at all unless a
+# `strong` card exists or the Thesis declares a thin fit.
+MAX_THIN = 2
+STRENGTHS = ("strong", "thin")
 
 FONTS = ("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600"
          "&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500"
@@ -265,6 +280,13 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
 .platform .k { font-weight: 600; color: inherit; }
 .platform .k::after { content: ":"; }
 .badge-nofit { background: var(--badge-nofit); }
+.badge-strong { background: var(--badge-confirmed); }
+.badge-thin { background: var(--badge-nofit); }
+.badge-thinfit { background: var(--badge-unconfirmed); }
+.thinfit {
+  border: 1px solid var(--line); border-left: 3px solid var(--badge-unconfirmed);
+  padding: .6rem 1rem; margin: 0 0 1rem; background: var(--surface); font-size: .95rem;
+}
 .empty { color: var(--ink-2); font-style: italic; }
 .links { list-style: none; padding: 0; margin: 0; font-size: .92rem; color: var(--ink-2); }
 .links li { margin: .3rem 0; word-break: break-word; }
@@ -587,7 +609,7 @@ def context_section(meta: dict) -> str:
     ctx = meta.get("context") or {}
     links = ctx.get("social_links") or []
     sibs = ctx.get("second_channel_candidates") or []
-    if not links and not sibs:
+    if not links and not sibs and not ctx.get("social_links_unread"):
         return ""
     lane_ran = str(meta.get("lanes") or "") == "transcripts+socials"
     # A lane that ran is not a lane that read everything: it is time-boxed, and
@@ -597,6 +619,12 @@ def context_section(meta: dict) -> str:
         return re.sub(r"^(?:https?://)?(?:www\.)?", "", str(u).strip().rstrip("/")).lower()
     were_read = {_norm(u) for u in (ctx.get("social_links_read") or [])}
     per_link = bool(ctx.get("social_links_read") or ctx.get("social_links_unread"))
+    # A link the lane flagged as unread but that the channel record never
+    # listed (a LinkedIn in the About text, say) must still appear: the
+    # strip exists to name what was not read.
+    listed = {_norm(u) for u in links}
+    extra = [u for u in (ctx.get("social_links_unread") or []) if _norm(u) not in listed]
+    links = list(links) + extra
     items = []
     for link in links:
         raw = str(link)
@@ -746,6 +774,20 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
 # --------------------------------------------------------------------------- #
 # page
 # --------------------------------------------------------------------------- #
+def page_body(title: str, eyebrow: str, header_extra: str, body: str) -> str:
+    """The page's content without the document shell: what an Artifact host
+    wraps in its own doctype/head/body."""
+    return f"""<main>
+<header>
+<p class="eyebrow">{html.escape(eyebrow)}</p>
+<h1>{html.escape(title)}</h1>
+{header_extra}
+</header>
+{body}
+</main>
+"""
+
+
 def page_html(title: str, eyebrow: str, header_extra: str, body: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -757,17 +799,21 @@ def page_html(title: str, eyebrow: str, header_extra: str, body: str) -> str:
 <style>{CSS}</style>
 </head>
 <body>
-<main>
-<header>
-<p class="eyebrow">{html.escape(eyebrow)}</p>
-<h1>{html.escape(title)}</h1>
-{header_extra}
-</header>
-{body}
-</main>
-</body>
+{page_body(title, eyebrow, header_extra, body)}</body>
 </html>
 """
+
+
+def page_fragment(title: str, eyebrow: str, header_extra: str, body: str) -> str:
+    """The same page as a body fragment: `<title>` and `<style>` first (the
+    Artifact tool reads the title from the first 8 KB and supplies the
+    document shell itself), then the content. Publishing the full document
+    through that tool nests one HTML document inside another, which is why
+    the 2026-09-09 runs could not publish the page at all."""
+    return (f"<title>{html.escape(title)}</title>\n"
+            f'<link rel="stylesheet" href="{FONTS}">\n'
+            f"<style>{CSS}</style>\n"
+            + page_body(title, eyebrow, header_extra, body))
 
 
 def default_out(in_path: pathlib.Path, facts_path: pathlib.Path | None,
@@ -829,14 +875,62 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
     creator_intro = "".join(rest for _, rest in creator_about)
     who = who_they_are(facts, meta, creator_intro) if facts is not None else (
         about_block(creator_about))
+    # A thin fit is a third verdict between fit and no fit: the map says so in
+    # its Thesis and the page says so above the cards, so two thin angles are
+    # never read as a full brief.
+    thin_banner = ""
+    if conns and is_thin_fit(thesis):
+        thin_banner = ('<div class="thinfit"><strong>Thin fit.</strong> The ledger '
+                       'connects to this brand weakly: the angles below are the '
+                       'honest ones, and each names what to confirm first.</div>')
     body_out = (who
                 + thesis_block(thesis)
                 + about_block(brand_about)
                 + ("<h2>Connections</h2>" if conns or intro else "")
+                + thin_banner
                 + connection_cards(conns, intro)
                 + caveat_block(caveats)
                 + ledger_footer(facts, meta))
-    return title, page_html(title, "creator × brand connection map", header_extra, body_out)
+    return title, (page_html(title, "creator × brand connection map", header_extra, body_out),
+                   page_fragment(title, "creator × brand connection map", header_extra, body_out))
+
+
+def is_thin_fit(thesis: list[tuple[str, str]]) -> bool:
+    text = plain(" ".join(rest for _, rest in thesis)).lower()
+    return "thin fit" in text or "thin-fit" in text
+
+
+def strength_of(title_html: str) -> str | None:
+    """The strength tag on a connection heading, or None when it carries none."""
+    t = plain(title_html).lower()
+    for s in STRENGTHS:
+        if re.search(rf"\b{s}\b", t):
+            return s
+    return None
+
+
+def _norm_words(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", (text or "").lower())).strip()
+
+
+def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | None:
+    """The ledger fact whose verified quote contains this card's quote (or is
+    contained by it), or None. Normalised on words, never on punctuation."""
+    if not facts:
+        return None
+    q = _norm_words(re.sub(r"<[^>]+>", " ", quote_html))
+    # the blockquote holds the quote paragraph then the attribution paragraph;
+    # compare against the first 30 words, which is where the quote is
+    q_words = q.split()
+    for n in (len(q_words), 30, 20, 12, 8):
+        head = " ".join(q_words[:n])
+        if len(head.split()) < 4:
+            continue
+        for f in facts:
+            fq = _norm_words(str(f.get("quote") or ""))
+            if fq and (head in fq or fq in head):
+                return f
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -884,7 +978,13 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
         problems.append("missing section: ## Where this could go wrong — an "
                         "honest mismatch is required even on a strong fit")
 
-    # every connection card must carry its evidence
+    # every connection card must carry its evidence, and the evidence must be
+    # the ledger's: a quote that matches no verified fact is the channel's
+    # premise or the writer's memory, not a connection (HopeScope 2026-09-09:
+    # the lead card quoted a fact about her parents' Barbie collection to
+    # argue that her format is unboxing drops)
+    thin = 0
+    strong = 0
     for title, rest in kinds["conn"]:
         name = plain(title)[:60]
         quote = _BLOCKQUOTE.search(rest)
@@ -892,6 +992,32 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
             problems.append(f"connection carries no quote: {name}")
         elif not _TIMED_LINK.search(quote.group(0)):
             problems.append(f"connection quote has no timestamped link: {name}")
+        is_precedent = "precedent" in plain(title).lower()
+        if quote and facts and not is_precedent:
+            fact = quote_matches_ledger(quote.group(0), facts)
+            if fact is None:
+                problems.append(f"connection quote matches no ledger fact: {name}")
+            elif fact.get("superseded_by"):
+                problems.append(f"connection quotes a superseded fact "
+                                f"({fact.get('fact_id')}): {name}")
+            elif fact.get("staged_only"):
+                problems.append(f"connection quotes a staged-only fact "
+                                f"({fact.get('fact_id')}): {name}")
+        strength = strength_of(title)
+        if strength is None:
+            problems.append(f"connection heading has no strength tag "
+                            f"(**strong** or **thin**): {name}")
+        elif strength == "thin":
+            thin += 1
+        else:
+            strong += 1
+    if thin > MAX_THIN:
+        problems.append(f"{thin} thin connections; at most {MAX_THIN}. Fold the rest "
+                        "into 'Where this could go wrong' or the Thesis")
+    if kinds["conn"] and not strong and not is_thin_fit(kinds["thesis"]):
+        problems.append("every connection is thin and the Thesis does not declare "
+                        "a thin fit: say 'thin fit' in the Thesis, or find a strong one, "
+                        "or write a no-fit verdict")
 
     # the bans that survive the sample-read exception
     for m in _MONEY.finditer(html.unescape(re.sub(r"<[^>]+>", " ", body))):
@@ -925,6 +1051,9 @@ def main() -> None:
     ap.add_argument("--check", action="store_true",
                     help="validate the map against the page contract and exit "
                          "3 if it fails; writes nothing")
+    ap.add_argument("--no-fragment", action="store_true",
+                    help="skip the .fragment.html twin (written by default beside "
+                         "the page, for hosts that publish body-only artifacts)")
     a = ap.parse_args()
 
     facts_path = pathlib.Path(a.facts) if a.facts else None
@@ -940,11 +1069,16 @@ def main() -> None:
 
     out_path = (pathlib.Path(a.out) if a.out
                 else default_out(in_path, facts_path, parse_frontmatter(text)[0]))
-    title, page = render_connections(text, facts, meta)
+    title, (page, fragment) = render_connections(text, facts, meta)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(page, encoding="utf-8")
-    print(json.dumps({"html": str(out_path), "title": title,
-                      "problems": problems}))
+    result = {"html": str(out_path.resolve()), "title": title, "problems": problems}
+    if not a.no_fragment:
+        frag_path = out_path.with_name(out_path.stem + ".fragment.html")
+        frag_path.write_text(fragment, encoding="utf-8")
+        result["fragment"] = str(frag_path.resolve())
+    # absolute paths only: a relative path is what the user could not open
+    print(json.dumps(result))
     if problems:
         print("PAGE CONTRACT: " + "; ".join(problems), file=sys.stderr)
 

@@ -36,7 +36,15 @@ Usage:
     merge_pass.py prepare --clustered <corpus>/gems-clustered.jsonl
         --format <solo|interview|multi_host|faceless_scripted>
         [--existing <profiles>/<id>-facts.jsonl]
-        [--state <corpus>/merge-state.json] [--shards N] --out <corpus>
+        [--state <corpus>/merge-state.json] [--shards N | auto]
+        [--channel <id>] --out <corpus>
+
+    ``--shards`` defaults to clusters / 40 (floor 1, ceiling 6), so the
+    cluster -> prepare chain runs as one command. With ``--channel``,
+    ``authenticate.py`` runs on the written shard files: staged-premise
+    claims and contradicting clusters get one channel-scoped query each and
+    carry the evidence (``probe``, ``conflicts_with``, ``staged``) into the
+    shard's input; ``probe.json`` is left for ``expand``.
 
     merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl
         --decisions <file> [--decisions <patch> …]
@@ -156,8 +164,19 @@ SINGLE_VOICE = {"solo", "faceless_scripted"}
 _HINT_NON_SOLO = re.compile(r"interview|collab|reaction", re.I)
 
 # Facts the connections page leads with. The agent proposes, the script owns
-# the final count (revision 3 of the plan): never a contract violation.
-SELECTED_TARGET = 20
+# the final count (revision 3 of the plan): never a contract violation. 40
+# since the 2026-09-10 review: the ledger keeps every verified fact whatever
+# this says, and the page's "who they are" run reads fine at 40; 20 was a
+# page-length guess that left real gems off the page.
+SELECTED_TARGET = 40
+# Below this many confirmed picks the fill may add `unconfirmed` facts so a
+# thin ledger still introduces the person; above it, unconfirmed never pads.
+SELECTED_MIN = 20
+# Shards for the merge pass when `prepare` is not told: clusters / 40, floor
+# 1, ceiling 6, so 86 and 98 clusters become two agents rather than one 4-minute
+# one (the merge shard was the longest single agent in both 2026-09-09 runs).
+SHARD_DIVISOR = 40
+SHARD_MAX = 6
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
@@ -289,9 +308,50 @@ def compact(line: dict, index: int) -> dict:
         "ad_read": ad_read_only(line),
         "anchor": anchored(line),
         "format_hint": w.get("format_hint"),
+        # a staged premise (prank, challenge, skit title): the words are the
+        # host's, the fact may be the bit; `authenticate.py` checks and the
+        # shard decides with its `probe`
+        "staged": str(w.get("format_hint") or "") == "staged",
         "lang": w.get("language"),
         "notable": v.get("notable"),
     }
+
+
+def newest_evidence(line: dict, probe_entry: dict | None) -> str | None:
+    """The newest date any evidence gives a cluster's claim: its members'
+    upload dates, and the newest upload `authenticate.py` found saying the
+    same thing anywhere in the catalogue."""
+    dates = [str(m.get("published") or "")[:10] for m in members_of(line)]
+    w = line.get("window") or {}
+    dates.append(str(w.get("published") or "")[:10])
+    if probe_entry:
+        dates.append(str(((probe_entry.get("probe") or {}).get("newest")) or "")[:10])
+    dates = [d for d in dates if d]
+    return max(dates) if dates else None
+
+
+def load_probe(path: pathlib.Path | None) -> dict[str, dict]:
+    """`probe.json` from `authenticate.py`, keyed by cluster id; {} when the
+    probe did not run (a refresh with nothing staged, or an older corpus)."""
+    if not path or not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    results = data.get("results") if isinstance(data, dict) else None
+    return {k: v for k, v in (results or {}).items() if isinstance(v, dict)}
+
+
+def staged_only(line: dict, probe_entry: dict | None) -> bool:
+    """A claim from a staged window that the probe could not find in any
+    non-staged upload (or that no probe reached). It is kept, never dropped,
+    but it does not confirm and does not reach a brand-facing page."""
+    w = line.get("window") or {}
+    if str(w.get("format_hint") or "") != "staged":
+        return False
+    p = (probe_entry or {}).get("probe") or {}
+    return int(p.get("non_staged_videos") or 0) == 0
 
 
 # --------------------------------------------------------------------------- #
@@ -442,16 +502,39 @@ def cmd_prepare(a: argparse.Namespace) -> int:
             row["dropped_members"] = rec["dropped_members"]
         rows.append(row)
 
+    # --shards auto (the default): the count follows the clusters, so the
+    # cluster -> prepare chain runs as one command. Both 2026-09-09 runs had to
+    # break the chain by hand to read the cluster count first.
+    shards = a.shards if a.shards and a.shards > 0 else max(
+        1, min(SHARD_MAX, -(-len(rows) // SHARD_DIVISOR)))
     files: list[str] = []
-    if a.shards and a.shards > 1:
-        for n, bucket in enumerate(shard_rows(rows, a.shards), 1):
+    shard_sizes: list[int] = []
+    if shards > 1:
+        for n, bucket in enumerate(shard_rows(rows, shards), 1):
             path = out_dir / f"merge-input-{n}.jsonl"
             write_jsonl(path, bucket)
             files.append(str(path))
+            shard_sizes.append(len(bucket))
     else:
         path = out_dir / "merge-input.jsonl"
         write_jsonl(path, rows)
         files.append(str(path))
+        shard_sizes.append(len(rows))
+
+    # Authenticate before the shard reads: staged-premise claims and
+    # contradicting clusters get one channel-scoped query each, and the
+    # evidence lands on the merge-input line. The shard decides with it.
+    probe_summary: dict | None = None
+    if a.channel is not None and not a.no_probe:
+        import authenticate  # sibling; imported here so prepare without --channel needs no tl CLI
+        probe_summary = authenticate.run(
+            a.channel, [pathlib.Path(f) for f in files], pathlib.Path(a.clustered),
+            a.max_queries)
+        probe_path = out_dir / "probe.json"
+        probe_path.write_text(json.dumps(probe_summary, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+        probe_summary = {k: v for k, v in probe_summary.items() if k != "results"}
+        probe_summary["probe_file"] = str(probe_path)
 
     if existing_facts:
         rejudge_ids = {f for rec in records if rec["status"] == "judge"
@@ -469,12 +552,14 @@ def cmd_prepare(a: argparse.Namespace) -> int:
               "carry_dropped": sum(1 for r in records if r["status"] == "carry_dropped"),
               "existing_facts": len(existing_facts)}
     elapsed = round(time.monotonic() - t0, 1)
-    print(json.dumps({**counts, "files": files, "format": a.format,
+    print(json.dumps({**counts, "files": files, "shards": shards,
+                      "shard_sizes": shard_sizes, "format": a.format,
+                      "probe": probe_summary,
                       "elapsed_s": elapsed,
                       "note": ("one line per cluster the agent must judge; "
                                "auto-dropped and additive clusters never "
                                "reach it")}, indent=1))
-    funnel(stage="merge-prepare", elapsed_s=elapsed, **counts)
+    funnel(stage="merge-prepare", elapsed_s=elapsed, shards=shards, **counts)
     return 0
 
 
@@ -818,7 +903,8 @@ def capped_confidence(line: dict, fmt: str, override: str | None) -> str:
 
 def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: str,
                       videos: list[str], keys: list[str],
-                      use_original_claim: bool) -> dict:
+                      use_original_claim: bool,
+                      probe_entry: dict | None = None) -> dict:
     v = line.get("verdict") or {}
     w = line.get("window") or {}
     claim = cluster_claim(line)
@@ -828,6 +914,13 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
     tier = tier if tier in SENSITIVITY else "none"
     vid = w.get("video_id")
     start = w.get("start")
+    staged = str(w.get("format_hint") or "") == "staged"
+    only_staged = staged_only(line, probe_entry)
+    confidence = capped_confidence(line, fmt, dec.get("confidence"))
+    if only_staged:
+        # said inside a set-up and found nowhere else: kept, never dropped,
+        # never confirmed, never on a brand-facing page
+        confidence = "unconfirmed"
     fact = {
         "fact_id": fact_id,
         "claim": claim,
@@ -839,13 +932,21 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
         "published": w.get("published"),
         "recurrence": len(videos),
-        "confidence": capped_confidence(line, fmt, dec.get("confidence")),
+        "confidence": confidence,
         "sensitivity": tier,
         "sensitive": tier in WITHHELD,
         "superseded_by": None,
         "selected": False,
         "members": keys,
     }
+    if staged:
+        fact["staged"] = True
+        fact["staged_only"] = only_staged
+        p = (probe_entry or {}).get("probe") or {}
+        if p.get("videos") is not None:
+            fact["probe"] = {"videos": p.get("videos"),
+                             "non_staged_videos": p.get("non_staged_videos"),
+                             "newest": p.get("newest")}
     if str(dec.get("gloss") or "").strip():
         fact["gloss"] = str(dec["gloss"]).strip()
     return fact
@@ -907,9 +1008,29 @@ def selectable(fact: dict) -> bool:
     tier = fact.get("sensitivity")
     if tier in ("children", "location"):
         return False
+    if fact.get("staged_only"):
+        return False
     if tier == "clinical" and fact.get("provenance") == "transcript":
         return int(fact.get("recurrence") or 0) >= 3
     return True
+
+
+def unselectable_reason(fact: dict) -> str:
+    tier = fact.get("sensitivity")
+    if tier in ("children", "location"):
+        return f"withheld tier {tier}"
+    if fact.get("staged_only"):
+        return "said only inside staged premises; no non-staged upload confirms it"
+    if tier == "clinical":
+        return "clinical below three videos"
+    return "not eligible"
+
+
+def _name_tokens(text: str) -> set[str]:
+    return {t.lower() for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", text or "")
+            if t not in ("The", "She", "He", "They", "Her", "His", "Their", "YouTube",
+                         "Instagram", "TikTok", "Currently", "Real", "Has", "Is",
+                         "Was", "Married", "Grew", "Launched", "Worked", "Operates")}
 
 
 def rank_key(fact: dict) -> tuple:
@@ -934,6 +1055,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     state_path = pathlib.Path(a.state) if a.state else out_path.parent / "merge-state.json"
     prior_state = load_state(state_path if (a.existing or a.state) else None)
+    probe_path = pathlib.Path(a.probe) if a.probe else out_path.parent / "probe.json"
+    probes = load_probe(probe_path)
 
     records = plan(clusters, a.format, prior_state, existing_ids)
     by_c = {r["c"]: r for r in records}
@@ -1014,6 +1137,39 @@ def cmd_expand(a: argparse.Namespace) -> int:
                 f"supersedes resolves to the fact itself ({target})")
             continue
         sup_edges[assigned[key]] = target
+        # Latest wins, on evidence, not on the two lines the shard happened to
+        # see. If the superseded cluster's newest evidence (its own uploads,
+        # or what authenticate.py found saying the same thing) is newer than
+        # the superseder's, the decision points the wrong way. Refused as a
+        # re-ask with the dates, never edited here: the shard decides.
+        if not str(raw).startswith("f") and str(raw) in by_c:
+            newer = newest_evidence(clusters[by_c[str(raw)]["index"]], probes.get(str(raw)))
+            older = newest_evidence(clusters[by_c[key]["index"]], probes.get(key))
+            if newer and older and newer > older:
+                post.setdefault(key, []).append(
+                    f"supersedes {raw}, but {raw}'s evidence is dated {newer} and "
+                    f"{key}'s {older}: the newer fact stands. Reverse the "
+                    f"supersession, or keep both with neither superseding")
+    # The identity lane is dated evidence too: a lane record seen this year
+    # that corroborates a cluster another cluster just superseded says the
+    # superseded fact is the current one (HopeScope 2026-09-09: Utah 2020
+    # superseded Idaho 2020 while the creator's own bio said Idaho).
+    for rec in identity:
+        corr = rec.get("corroborates")
+        if corr is None:
+            continue
+        corr = str(corr)
+        seen = str(rec.get("seen_date") or "")[:10]
+        for key in kept:
+            if str(decisions[key].get("supersedes")) != corr:
+                continue
+            older = newest_evidence(clusters[by_c[key]["index"]], probes.get(key))
+            if seen and older and seen > older:
+                post.setdefault(key, []).append(
+                    f"supersedes {corr}, but identity fact {rec.get('ref') or '?'} "
+                    f"(seen {seen}) corroborates {corr} and is newer than {key}'s "
+                    f"evidence ({older}): {corr} is the current fact. Reverse the "
+                    f"supersession or drop the corroboration, with a reason")
     for src in sup_edges:
         node, seen = src, {src}
         while node in sup_edges:
@@ -1064,7 +1220,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     folded_into: dict[str, list[str]] = {}
     # Folds that merged two domains. Legal, and reported so the extractor's
-    # disagreement with itself stays visible in the run report.
+    # disagreement with itself stays visible in the expand summary.
     crossed_domains: list[str] = []
     for key, target in terminal.items():
         fact_id = assigned.get(target) if not target.startswith("f") else target
@@ -1113,7 +1269,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
         fact = fact_from_cluster(line, fact_id, decisions[key], a.format,
                                  a.channel, videos_by_fact.get(fact_id, []),
                                  keys_by_fact.get(fact_id, []),
-                                 key in fallback_ids)
+                                 key in fallback_ids, probes.get(key))
         facts.append(fact)
         fact_index[fact_id] = fact
 
@@ -1161,6 +1317,36 @@ def cmd_expand(a: argparse.Namespace) -> int:
         fact_index[target]["confidence"] = "confirmed"
         corroborated.append([fact_id, target])
 
+    # A lane record naming the same person as a withheld-tier transcript fact
+    # inherits that tier. HopeScope 2026-09-09: the sister was `children` on
+    # both transcript facts (co-host, 15 years old) and `none` on the bio-page
+    # record that named her; the two records are one person.
+    tier_rank = {"none": 0, "lifestyle": 1, "clinical": 2, "children": 3, "location": 3}
+    withheld_names: dict[str, str] = {}
+    for f in facts:
+        if f.get("provenance") == "transcript" and f.get("sensitivity") in WITHHELD:
+            for tok in _name_tokens(str(f.get("claim") or "")):
+                withheld_names.setdefault(tok, str(f["sensitivity"]))
+    tier_inherited: list[list[str]] = []
+    for rec, fact_id in zip(identity, identity_ids):
+        fact = fact_index[fact_id]
+        candidates: list[str] = []
+        raw = rec.get("corroborates")
+        if raw is not None:
+            target = assigned.get(str(raw), str(raw))
+            if target in fact_index and fact_index[target].get("sensitivity") in WITHHELD:
+                candidates.append(str(fact_index[target]["sensitivity"]))
+        for tok in _name_tokens(str(fact.get("claim") or "")):
+            if tok in withheld_names:
+                candidates.append(withheld_names[tok])
+        if not candidates:
+            continue
+        new_tier = max(candidates, key=lambda t: tier_rank.get(t, 0))
+        if tier_rank.get(new_tier, 0) > tier_rank.get(str(fact.get("sensitivity")), 0):
+            tier_inherited.append([fact_id, str(fact.get("sensitivity")), new_tier])
+            fact["sensitivity"] = new_tier
+            fact["sensitive"] = new_tier in WITHHELD
+
     # a re-judged cluster's other inherited facts stay as history
     for old, new in reconciled.items():
         if old in fact_index:
@@ -1179,31 +1365,67 @@ def cmd_expand(a: argparse.Namespace) -> int:
     facts.sort(key=lambda f: str(f.get("fact_id")))
 
     # ---- selected: the agent proposes, the script owns the count ---------- #
+    # Quality first (2026-09-10 review): the agent's picks are ranked before
+    # they are taken, an `unconfirmed` pick is refused while confirmed facts
+    # would otherwise be left off the page, and every refusal carries its
+    # reason. Alexa Rivera 2026-09-09: the shard's picks put a garbled-caption
+    # name and "says something predates her birth" on the page ahead of
+    # confirmed, recurring facts.
     active = [f for f in facts if not f.get("superseded_by")]
-    # A withheld tier is not selectable however it was nominated: an agent
-    # pick lands in `selected_ignored` so the refusal is visible, and the
-    # fill loop below never sees it at all.
     eligible = {str(f["fact_id"]) for f in active if selectable(f)}
+    confirmed_eligible = [str(f["fact_id"]) for f in active
+                          if str(f["fact_id"]) in eligible
+                          and f.get("confidence") == "confirmed"]
     picked: list[str] = []
-    ignored: list[str] = []
+    ignored: dict[str, str] = {}
     # the agent names c* ids, f* ids, and an identity fact's own `ref`
     pick_map = {**assigned, **identity_by_ref}
+    proposed: list[dict] = []
     for raw in agent_selected:
         fact_id = pick_map.get(raw, raw)
+        if fact_id not in fact_index:
+            ignored[raw] = "unknown id"
+        elif fact_index[fact_id].get("superseded_by"):
+            ignored[raw] = f"superseded by {fact_index[fact_id]['superseded_by']}"
+        elif fact_id not in eligible:
+            ignored[raw] = unselectable_reason(fact_index[fact_id])
+        elif fact_id not in [str(p["fact_id"]) for p in proposed]:
+            proposed.append(fact_index[fact_id])
+    for fact in sorted(proposed, key=rank_key):
+        fact_id = str(fact["fact_id"])
+        if fact.get("confidence") != "confirmed":
+            # an agent pick never puts an unconfirmed fact on the page; the
+            # fill below may, and only when confirmed facts run short
+            ignored[fact_id] = "unconfirmed: the page leads with confirmed facts"
+            continue
+        if len(picked) >= SELECTED_TARGET:
+            ignored[fact_id] = f"over the {SELECTED_TARGET}-fact target"
+            continue
+        picked.append(fact_id)
+    # fill: confirmed facts seen in two or more videos first, then confirmed
+    # by rank; unconfirmed only up to the floor, so a thin ledger still
+    # introduces the person and a rich one never pads with guesses
+    for fact in sorted(active, key=rank_key):
+        if len(picked) >= SELECTED_TARGET:
+            break
+        fact_id = str(fact["fact_id"])
+        if (fact_id in eligible and fact_id not in picked
+                and fact.get("confidence") == "confirmed"
+                and int(fact.get("recurrence") or 0) >= 2):
+            picked.append(fact_id)
+    for fact in sorted(active, key=rank_key):
+        if len(picked) >= SELECTED_TARGET:
+            break
+        fact_id = str(fact["fact_id"])
+        if (fact_id in eligible and fact_id not in picked
+                and fact.get("confidence") == "confirmed"):
+            picked.append(fact_id)
+    for fact in sorted(active, key=rank_key):
+        if len(picked) >= SELECTED_MIN:
+            break
+        fact_id = str(fact["fact_id"])
         if fact_id in eligible and fact_id not in picked:
             picked.append(fact_id)
-        elif fact_id not in eligible:
-            ignored.append(raw)
-    if len(picked) > SELECTED_TARGET:
-        ranked = sorted((fact_index[p] for p in picked), key=rank_key)
-        picked = [str(f["fact_id"]) for f in ranked[:SELECTED_TARGET]]
-    if len(picked) < SELECTED_TARGET:
-        for fact in sorted(active, key=rank_key):
-            if len(picked) >= SELECTED_TARGET:
-                break
-            fact_id = str(fact["fact_id"])
-            if fact_id in eligible and fact_id not in picked:
-                picked.append(fact_id)
     chosen = set(picked)
     for fact in facts:
         fact["selected"] = str(fact.get("fact_id")) in chosen
@@ -1260,6 +1482,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "superseded": sum(1 for f in facts if f.get("superseded_by")),
         "claim_fallbacks": fallbacks,
         "selected_ignored": ignored,
+        "staged_facts": sum(1 for f in facts if f.get("staged")),
+        "staged_only": [str(f["fact_id"]) for f in facts if f.get("staged_only")],
+        "tier_inherited": tier_inherited,
+        "probe_file": str(probe_path) if probes else None,
         "facts_file": str(out_path),
         "state_file": str(state_path),
         "elapsed_s": elapsed,
@@ -1270,6 +1496,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
            facts=len(facts), folded=len(terminal),
            folded_across_domains=len(crossed_domains), dropped=dropped,
            selected=len(chosen), identity_facts=len(identity_ids),
+           staged_only=len(summary["staged_only"]),
+           tier_inherited=len(tier_inherited),
            enum_aliases=len(enum_aliases), elapsed_s=elapsed)
     if enum_aliases:
         print("near-miss enum values aliased: "
@@ -1288,8 +1516,16 @@ def main() -> int:
     p.add_argument("--state", default=None,
                    help="merge-state.json from the previous round "
                         "(default: <out>/merge-state.json)")
-    p.add_argument("--shards", type=int, default=1,
-                   help="split the input across N agents, whole domains only")
+    p.add_argument("--shards", type=int, default=None,
+                   help="split the input across N agents, whole domains only; "
+                        f"default: clusters / {SHARD_DIVISOR}, floor 1, ceiling {SHARD_MAX}")
+    p.add_argument("--channel", type=int, default=None,
+                   help="channel id; when given, authenticate.py probes staged-premise "
+                        "and contradicting clusters and writes probe.json")
+    p.add_argument("--no-probe", action="store_true",
+                   help="skip the authentication probe even with --channel")
+    p.add_argument("--max-queries", type=int, default=30,
+                   help="probe budget, one ES query per flagged cluster")
     p.add_argument("--out", required=True, help="directory for merge-input*.jsonl")
     p.set_defaults(fn=cmd_prepare)
 
@@ -1306,6 +1542,9 @@ def main() -> int:
     e.add_argument("--fallback-original", action="store_true",
                    help="use the cluster's own claim for claims that fail the "
                         "tripwire instead of exiting 3")
+    e.add_argument("--probe", default=None,
+                   help="probe.json from prepare (default: beside --out); the "
+                        "dated evidence behind the supersession check")
     e.set_defaults(fn=cmd_expand)
 
     a = ap.parse_args()

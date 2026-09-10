@@ -67,7 +67,7 @@ reads carries a tag.
 | `--fragment-size` / `--fragments-per-doc` | 450 / 10 | passage width in raw characters (about half is markup, so 450 is about 30 spoken words, a sentence or two around the cue) and how many per video |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
-| `--reserve` | 0 | agent slots held by other lanes during the fan-out (`1` when the socials lane is on). Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 19 × 16 rather than 20 × 15 on a 20-agent host |
+| `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |
 | `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
 | `--round` / `--since` | 1 / none | an incremental round: `--round N` batches into `batches-rN/`, `--since <YYYY-MM-DD>` bounds the fetch to uploads after the ledger's `latest_video_date` (without it a round re-pulls every unjudged passage in the catalogue) |
 
@@ -88,13 +88,24 @@ larger of 12 windows or 8% of the cap; no single video passes
 `--per-video-cap`; ties are spread across the channel's years, so a profile
 spans the back catalogue rather than the last twelve months.
 
+**Dubbed tracks.** On an English-language channel (the channel record's
+`language`), a non-English `transcript_language` is a YouTube auto-dubbed
+audio track, not the creator's words: HopeScope carried 36 Arabic-track
+videos among 506, 96 of their windows reached the extractors, and one became
+a ledger fact with an Arabic "quote" she never spoke. The fetch excludes
+those tracks (no windows, no sampling) and reports them as `dubbed_excluded`
+in the summary and the FUNNEL line; `verify_quotes.py --channel-language`
+is the backstop for a corpus fetched before this rule, reporting `dubbed`,
+which never publishes. A non-English channel keeps the own-language
+sampling: there the source language is the creator's voice.
+
 **Ad reads.** Windows are built with a regex heuristic in `in_sponsor_read`,
 and once the cap is taken the kept windows' real sponsored spans are looked up
 by video id (`sponsor_segments` in `fetch_cues.py`) and the flag is decided from them —
 a window overlaps a read when `[start, start+30]` meets a sponsored span
 padded 75 s either side. The lookup is authoritative when it succeeds; the
 heuristic stays when it fails. The summary's `sponsor_source` says which one
-decided, and it belongs in the run report whenever it reads `regex_fallback`.
+decided; when it reads `regex_fallback` the ad-read flags are heuristic only.
 
 **Output**, under `<out>/<channel_id>/`:
 
@@ -110,9 +121,8 @@ decided, and it belongs in the run report whenever it reads `regex_fallback`.
 The summary (stdout) and one `FUNNEL stage=fetch_cues …` line (stderr) carry
 `videos_matched`, `passages`, `windows_capped`, `phrase_windows`,
 `generic_fallback` (`ran`, `skipped` or `off`), `generic_windows`, `batches`,
-`sponsor_source` and `elapsed_s`. When the fallback ran, say so in the run
-report: those windows fired no cue, and the coverage header should not count
-them as phrase evidence. `passages` minus `windows_capped` is what stayed out of this
+`sponsor_source` and `elapsed_s`. When the fallback ran, those windows fired no
+cue, and the coverage header should not count them as phrase evidence. `passages` minus `windows_capped` is what stayed out of this
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
 
@@ -125,8 +135,11 @@ of repeating. Do not raise `--max-windows` past what one round can extract.
 
 ## Layer 3: extraction — one fan-out, one message per agent
 
-Every batch file is judged by exactly one extractor: the `tl-cli:gem-classifier`
-agent (the file name is historical; the role is a **gem extractor**,
+Every batch file is judged by exactly one extractor: the `<plugin>:gem-classifier`
+agent, `<plugin>` being the installed plugin's namespace (`tl-cli` in
+production, `tl-cli-pr91` on a side-by-side test install; a literal `tl-cli:`
+on a test install resolves to nothing and falls back silently). The file name
+is historical; the role is a **gem extractor**,
 `model: sonnet` — haiku truncated its output at this size in testing). One
 pass decides whether the window is self-disclosure AND writes what it says:
 the third-person claim, the span of the window that proves it, the life
@@ -193,7 +206,7 @@ verification scripts, no Bash, no other Reads, no second Write.
   external state uses `Monitor` with an until-condition.
 - **No sequential spawning**, no batching-of-batches, no "start with two and
   see how it goes".
-- **No default-model stand-ins.** If `tl-cli:gem-classifier` does not resolve
+- **No default-model stand-ins.** If `<plugin>:gem-classifier` does not resolve
   (running from a checkout rather than an installed plugin), copy
   `agents/gem-classifier.md` into `~/.claude/agents/` before the session
   starts and spawn `gem-classifier`; failing that, spawn `general-purpose`
@@ -205,7 +218,12 @@ verification scripts, no Bash, no other Reads, no second Write.
 
 **Concurrency.** The host runs at most `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`
 agents at once, 20 when unset, and 20 is the standard: leave the variable
-unset. Raising it to 40 was tested and slowed the run down (a second wave
+unset. On a CONNECT build the three brand lanes are spawned with the fetch
+and are still running during this fan-out, which is what `--reserve 3` is
+for: they need only the two ids, and starting them here instead of beside the
+merge shard took the brand read off the CONNECT critical path (both
+2026-09-09 runs spent 6 to 8 of their 16 minutes waiting on lanes spawned
+after extraction). Raising it to 40 was tested and slowed the run down (a second wave
 queued behind the cap instead of one wave finishing together).
 `fetch_cues.py` reads the cap and sizes the batches to fill one wave
 (Layer 1+2).
@@ -235,8 +253,11 @@ it claims (a hard check — a verdict about a different window is not a
 verdict); that the enums are valid; and that the `quote_span` resolves to a
 contiguous substring of the window text, which it **cuts mechanically**, so
 every published quote is verbatim by construction rather than by trust. The
-five-word `anchor` is advisory — agents normalise punctuation — and mismatches
-are only counted.
+five-word `anchor` is advisory (agents normalise punctuation) and mismatches
+are only counted, as `anchor_soft_mismatches` in the summary: a verdict whose
+echoed anchor did not match the window's first five words after
+normalisation, most often a caption apostrophe or a host term the agent
+re-spelled. Informational, never a failure, and never a reason to re-judge.
 
 It writes `classified.jsonl` (every judged window, and the `--exclude` input
 for a later round), `gems.jsonl` (the cluster step's input), `candidates.jsonl`
@@ -300,7 +321,7 @@ script expands them into the ledger.
 
 ```bash
 python3 <skill>/scripts/merge_pass.py prepare \
-  --clustered <corpus>/gems-clustered.jsonl --format <label> --out <corpus> \
+  --clustered <corpus>/gems-clustered.jsonl --format <label> --channel <id> --out <corpus> \
   [--existing tl-creator-profiles/<channel_id>-facts.jsonl --state <corpus>/merge-state.json] \
   [--shards N]
 ```
@@ -321,12 +342,34 @@ channels `unclear` and `narration` stay in as the host, capped at
 lift a capped cluster to `confirmed`. Those never reach the agent and are counted as
 `auto_dropped`.
 
-**Shard by default.** With `--shards N` the input is split by life domain into
-N files for N agents (a fold may cross a domain, but an agent can only fold
-what it can see, so a shard holding whole domains keeps the findable folds
-inside one agent's read), spawned in ONE message like the extraction fan-out. Size N as
-`clusters / 60`, floor 1, ceiling 6. One agent on 226 clusters measured 475 s
-and is the single slowest pass in the pipeline after extraction.
+**Shard by default.** The input is split by life domain into N files for N
+agents (a fold may cross a domain, but an agent can only fold what it can
+see, so a shard holding whole domains keeps the findable folds inside one
+agent's read), spawned in ONE message like the extraction fan-out. `prepare`
+sizes N itself as `clusters / 40`, floor 1, ceiling 6, so the cluster and
+prepare scripts chain in one command (the old `clusters / 60` had to be
+computed by hand between them, and gave one 4-minute agent for 86 and 98
+clusters); `--shards N` overrides it. One agent on 226 clusters measured
+475 s and is the single slowest pass in the pipeline after extraction.
+
+**Authenticate before the shard reads.** With `--channel`, `prepare` runs
+`scripts/authenticate.py` over the shard files it just wrote. Two kinds of
+line get one channel-scoped `match_phrase` query each (the cue phrase the
+quote holds plus the claim's entity, `size` 50, at most `--max-queries` 30
+per run): a claim in a durable domain (home, relationships, family, work,
+origin, health) whose window carries `format_hint: staged`, and every pair of
+clusters that cannot both be current (two homes naming different places; a
+husband and a boyfriend), which are also marked `conflicts_with` on both
+lines. The result lands on the line as `probe`: how many uploads say it, the
+newest and oldest dates, how many of those uploads are staged, and a sample
+of titles. `probe.json` beside the shard files holds the same, keyed by
+cluster id, for `expand`. Measured: 3 queries in 3 s on HopeScope, 8 in 6 s
+on Alexa Rivera. The shard decides with that evidence in front of it; the
+rules it applies are in `agents/merge-shard.md` and `evidence-rules.md`:
+found in a non-staged upload is the person's, found only in staged uploads
+is kept `unconfirmed` and marked `staged_only`, a conflict goes to the newest
+dated evidence (the identity lane's `seen_date` counts), and **nothing is
+dropped for being uncertain**.
 
 **The biggest domain sets the floor.** Shards hold whole domains, so a channel
 whose clusters pile into one domain cannot split below that domain's size. A
@@ -356,7 +399,9 @@ what a script cannot, per `evidence-rules.md`:
   `lifestyle`, not `none` and not `clinical`;
 - **dropping any candidate whose claim asserts more than its quote
   supports** — or narrowing the claim to what the quote says; never the
-  wider claim;
+  wider claim. A drop is never for doubt: a staged or contradicted claim is
+  judged on its `probe`, and kept at `unconfirmed` when the probe settles
+  nothing;
 - superseded-fact resolution (latest wins, history kept), confidence
   overrides where a rule above changes the default, and its proposed
   `selected` picks.
@@ -421,9 +466,13 @@ python3 <skill>/scripts/merge_pass.py expand \
 
 `expand` validates first: totality, unknown ids, targets (a fold must name a
 kept cluster, or an existing fact when refreshing), fold cycles, a
-supersession that resolves to the fact itself or a cycle, enums, identity
-records, and a narrowed claim that introduces a number token its quote and
-cluster claim lack — and exits **3** with the offending ids and reasons. The
+supersession that resolves to the fact itself or a cycle, **a supersession
+that points against the dated evidence** (the superseded cluster's newest
+upload in `probe.json`, or an identity-lane record corroborating it, is
+newer than the superseder's; HopeScope's Utah-over-Idaho decision is the
+case, refused with both dates in the message), enums, identity records, and
+a narrowed claim that introduces a number token its quote and cluster claim
+lack, and exits **3** with the offending ids and reasons. The
 orchestrator re-asks the agent for exactly those ids ONCE and passes the
 reply as a second `--decisions` file (later files override earlier ones per
 id); on a second failure it runs with `--fallback-original`, which keeps the
@@ -440,8 +489,13 @@ window hinting interview/reaction: confirmed only with a host anchor; a
 cluster entirely inside sponsor reads, or a solo `unclear`/narration voice,
 caps at unconfirmed; the tier and its derived `sensitive` flag;
 `superseded_by`; `members` (the passage keys the fact was built from);
-`selected` — the agent's picks first, then filled to 20 across the active
-ledger by confidence and recurrence, trimmed past 20 the same way. fact_ids
+`selected`: the agent's picks ranked and taken while `confirmed` (an
+`unconfirmed` pick is refused, with its reason in `selected_ignored`), then
+filled to 40 across the active ledger: confirmed facts seen in two or more
+videos first, then confirmed by rank, then `unconfirmed` only up to a floor
+of 20; `staged_only` facts and the withheld tiers are never eligible. A lane
+record naming a person a withheld-tier transcript fact already names is
+raised to that tier (`tier_inherited`). fact_ids
 are `f001…` in cluster order on a fresh build. It writes `facts.jsonl`
 (working file, no header), `merge-state.json`, and prints
 `FUNNEL stage=merge clusters=… judged=… auto_dropped=… facts=… folded=…
@@ -523,6 +577,17 @@ known family name anchors the host).
 
 ## The channel context brief
 
+The identity half runs **before the fetch**, with no corpus:
+
+```bash
+python3 <skill>/scripts/channel_context.py --channel <id> > <corpus>/context-full.json
+```
+
+That is the platform's record of the channel (name, About text, AI profile,
+social links, sibling candidates, language), and it is where the fetch's
+`--host-terms` come from: the surname, company or former role the About
+text or AI profile names. Then, once the passages are local, the stats half:
+
 ```bash
 python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus>/corpus.jsonl.gz \
   --per-video-out <corpus>/per-video.jsonl > <corpus>/context-full.json
@@ -536,7 +601,10 @@ The second command writes the compact `context.json` every extractor prompt
 takes; nothing about it is typed by hand.
 
 After the fetch, format is measured rather than guessed: first-person
-density, interview markers, question density, title hints. The corpus it reads
+density, interview markers, question density, title hints (including
+`staged_share`, the share of titles that read as a prank, challenge, stunt
+or skit; the format call names it when it is above a tenth, because it
+tells the merge shard how much of the channel is a set-up). The corpus it reads
 is now the fetched **passages**, not whole transcripts, so the densities are a
 format hint on the material the profile is actually built from, never a
 coverage census. A model
