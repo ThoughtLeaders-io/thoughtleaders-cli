@@ -3,7 +3,6 @@
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import keyring
 from keyring.errors import NoKeyringError
@@ -56,6 +55,9 @@ class StoredTokens:
 
     @classmethod
     def from_json(cls, data: str) -> "StoredTokens":
+        """Rebuild a stored record. Only the keys below are read, so a record
+        written by an older version of the CLI — carrying keys this one no
+        longer knows — still loads."""
         parsed = json.loads(data)
         return cls(
             access_token=parsed["access_token"],
