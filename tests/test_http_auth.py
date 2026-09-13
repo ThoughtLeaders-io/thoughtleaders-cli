@@ -8,8 +8,24 @@ Covers the three credential sources TLClient knows about:
 
 from unittest.mock import patch
 
+import httpx
+import pytest
+
 from tl_cli.auth.token_store import KIND_API_KEY, KIND_BEARER, StoredTokens
+from tl_cli.client.errors import ApiError
 from tl_cli.client.http import TLClient
+
+
+@pytest.fixture(autouse=True)
+def _no_developer_env(monkeypatch):
+    """Run against the CLI's own defaults, never the developer's shell.
+
+    `TL_API_KEY` and `TL_API_URL` are exported in day-to-day development and
+    the HTTP client reads both, so a test that does not set them itself must
+    not inherit them.
+    """
+    monkeypatch.delenv("TL_API_KEY", raising=False)
+    monkeypatch.delenv("TL_API_URL", raising=False)
 
 
 def _make_client(api_key_env: str | None = None) -> TLClient:
@@ -58,5 +74,140 @@ class TestAuthHeaders:
                 headers = client._auth_headers()
         finally:
             client.close()
-        assert headers["Authorization"] == "Bearer bearer-jwt-xyz"
-        assert "X-TL-Auth" not in headers
+        # A bearer request carries the token and nothing else about the session.
+        assert headers == {"Authorization": "Bearer bearer-jwt-xyz"}
+
+
+class TestSignedOutElsewhere:
+    """A 401 carrying code=signed_out means the user ended this session on
+    another surface: the client must drop its credentials, not refresh."""
+
+    def _stored(self, kind=KIND_BEARER):
+        return StoredTokens(
+            access_token="old-jwt", refresh_token="rt" if kind == KIND_BEARER else None,
+            expires_at=9_999_999_999.0, kind=kind,
+        )
+
+    def _resp(self, status, body):
+        req = httpx.Request("GET", "https://x/whoami")
+        if isinstance(body, str):
+            return httpx.Response(status, text=body, request=req)
+        return httpx.Response(status, json=body, request=req)
+
+    def _run(self, *responses, stored=None, api_key_env=None, refreshed_headers=None):
+        """Feed `responses` to successive requests; return (calls, error)."""
+        calls = {"forgot": None, "refreshed": False, "requests": []}
+        client = _make_client(api_key_env=api_key_env)
+        queue = list(responses)
+
+        def fake_request(method, path, **kwargs):
+            calls["requests"].append(kwargs["headers"])
+            return queue.pop(0)
+
+        def fake_refresh():
+            calls["refreshed"] = True
+            return refreshed_headers
+
+        error: ApiError | None = None
+        try:
+            with (
+                patch("tl_cli.client.http.load_tokens", return_value=stored or self._stored()),
+                patch.object(client._client, "request", fake_request),
+                patch(
+                    "tl_cli.client.http.forget_session",
+                    lambda rejected_access_token: calls.__setitem__("forgot", rejected_access_token),
+                ),
+                patch.object(client, "_refresh_and_get_headers", fake_refresh),
+            ):
+                try:
+                    client.get("/whoami")
+                except ApiError as e:
+                    error = e
+        finally:
+            client.close()
+        return calls, error
+
+    def test_signed_out_drops_the_refused_token_without_refreshing(self):
+        body = {"detail": "You signed out of ThoughtLeaders.", "code": "signed_out"}
+        calls, error = self._run(self._resp(401, body))
+        assert calls["forgot"] == "old-jwt"     # the exact token that was refused
+        assert calls["refreshed"] is False
+        assert error is not None and error.status_code == 401
+        assert error.raw == body
+
+    def test_a_plain_401_still_tries_a_refresh(self):
+        calls, error = self._run(self._resp(401, {"detail": "Token has expired"}))
+        assert calls["refreshed"] is True
+        assert calls["forgot"] is None
+        assert error is not None and error.status_code == 401
+
+    def test_a_non_json_401_is_treated_as_a_plain_one(self):
+        calls, error = self._run(self._resp(401, "<html>challenge</html>"))
+        assert calls["refreshed"] is True
+        assert calls["forgot"] is None
+        assert error is not None and error.status_code == 401
+
+    def test_signed_out_on_the_retry_is_honoured(self):
+        # First 401 is a plain expiry, the refreshed token is then refused as
+        # signed out: the verdict is read off the final response, and it is the
+        # token the retry actually sent that gets dropped.
+        calls, error = self._run(
+            self._resp(401, {"detail": "Token has expired"}),
+            self._resp(401, {"detail": "You signed out.", "code": "signed_out"}),
+            refreshed_headers={"Authorization": "Bearer fresh-jwt"},
+        )
+        assert calls["refreshed"] is True
+        assert calls["forgot"] == "fresh-jwt"
+        assert calls["requests"][1]["Authorization"] == "Bearer fresh-jwt"
+        assert error is not None and error.raw["code"] == "signed_out"
+
+    def test_env_api_key_never_refreshes_or_forgets(self):
+        calls, error = self._run(
+            self._resp(401, {"code": "signed_out"}), api_key_env="ci-key",
+        )
+        assert calls["refreshed"] is False
+        assert calls["forgot"] is None      # the keychain session is not what was refused
+        assert error is not None and error.status_code == 401
+
+    def test_stored_api_key_never_refreshes_or_forgets(self):
+        calls, error = self._run(
+            self._resp(401, {"code": "signed_out"}), stored=self._stored(KIND_API_KEY),
+        )
+        assert calls["refreshed"] is False
+        assert calls["forgot"] is None
+        assert error is not None and error.status_code == 401
+
+
+class TestStoredSessionOnly:
+    def test_the_sign_out_call_speaks_for_the_stored_session_not_the_env_key(self, monkeypatch) -> None:
+        # `tl auth logout` ends the stored session; TL_API_KEY in the shell must
+        # not be what the platform hears from.
+        monkeypatch.setenv("TL_API_KEY", "env-key")
+        stored = StoredTokens(access_token="session-token", refresh_token="rt", expires_at=9e9, kind=KIND_BEARER)
+        with patch("tl_cli.client.http.load_tokens", return_value=stored):
+            only = TLClient(stored_session_only=True)
+            default = TLClient()
+            try:
+                stored_headers = only._auth_headers()
+                default_headers = default._auth_headers()
+            finally:
+                only.close()
+                default.close()
+        assert stored_headers == {"Authorization": "Bearer session-token"}
+        assert default_headers["Authorization"] == "Bearer env-key"
+        assert default_headers["X-TL-Auth"] == "API-KEY"
+
+
+class TestEmptySuccessBody:
+    def test_a_bodiless_2xx_is_an_empty_result_not_an_error(self) -> None:
+        stored = StoredTokens(access_token="t", refresh_token="rt", expires_at=9e9, kind=KIND_BEARER)
+        client = TLClient()
+        client._client = httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(204)),
+            base_url="https://api.test",
+        )
+        try:
+            with patch("tl_cli.client.http.load_tokens", return_value=stored):
+                assert client.post("/auth/sign-out", json_body={}) == {}
+        finally:
+            client.close()

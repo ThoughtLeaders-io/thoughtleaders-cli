@@ -94,9 +94,15 @@ tl setup codex         # install Codex CLI skill (optional)
 
 `tl auth login` offers three options:
 
-1. **OAuth2 in a local browser** (default) — opens a URL on this machine.
+1. **OAuth2 in a local browser** (default) — opens a URL on this machine. If that browser is already signed in to the web platform, no password is asked; either way the browser ends up signed in to the platform too, and the Chrome extension follows. Pass `--no-browser` to print the URL instead of opening a window.
 2. **Device code** — for headless environments; complete the flow on another device.
-3. **API key** — paste a pre-issued `APIKey` from Django admin. The CLI verifies it via `/whoami` and stores it tagged so every request sends `X-TL-Auth: API-KEY`.
+3. **API key** — paste an API key issued to you by ThoughtLeaders. The CLI verifies it via `/whoami` and stores it tagged so every request sends `X-TL-Auth: API-KEY`.
+
+Pass `--method browser|device|api-key` to skip the menu; without a terminal the menu is an error, so agents must pass it. Without a terminal the browser method prints the URL instead of opening a window (`--no-browser` does the same at a terminal).
+
+`tl auth logout` signs you out everywhere — this machine, the web platform, the Chrome extension and any other machine running `tl`. It is always global: there is no local-only logout. If ThoughtLeaders can't be reached, this machine's credentials are still cleared, but your other sessions stay signed in until you sign out on the web platform.
+
+`tl auth status` prints who you are signed in as; `--quiet` prints nothing and just exits 0 when the next command will authenticate and 2 when it will not, which is what agent hooks check.
 
 ## Quick Start
 
