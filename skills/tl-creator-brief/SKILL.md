@@ -192,6 +192,10 @@ scripts costs more than the scripts.
    directory. `--reserve` is one slot per agent that will be running during
    the extraction fan-out: **3 for the brand lanes on a CONNECT build**, plus
    1 when the socials lane is on, 0 on a plain PROFILE run.
+   - A channel with no transcripts indexed (`videos_with_transcript=0` and
+     no windows) exits 4 here and writes no batches: there is nothing to
+     extract, and no later stage can make a page. Report it as a corpus gap,
+     not a run failure, and do not build a socials-only ledger for it.
    - On an English-language channel, non-English transcript tracks are
      YouTube auto-dubs, not the creator's words: the fetch excludes them and
      reports `dubbed_excluded`. A non-English channel keeps its own-language
@@ -302,7 +306,13 @@ scripts costs more than the scripts.
      the run reports an empty lane rather than a wrong one.
    - A contact address found on any of these pages is not a fact about the
      person and never travels, matching the rule the link harvest already
-     applies to the channel's own header.
+     applies to the channel's own header. The same goes for every personal
+     identifier: date of birth, a legal or middle name not used on camera,
+     a company registration number, a home or business address, an email.
+     None of these has a sensitivity tier because none of them is a fact for
+     the ledger; a lane that finds one leaves it out and does not
+     cross-reference it against other sources (run H pulled a date of birth
+     off a company register that way).
    - **Tell it what the platform record is worth.** The About text is often
      YouTube's default placeholder, and the AI profile describes the recent
      catalogue, not the person: both are context to search from, never the
@@ -371,17 +381,21 @@ scripts costs more than the scripts.
      > <corpus>/expand.json 2> <corpus>/expand.err && \
    python3 <skill>/scripts/verify_quotes.py --in <corpus>/facts.jsonl \
      --corpus <corpus>/corpus.jsonl.gz --channel-language <language from context-full.json> \
-     > <corpus>/verify.json 2> <corpus>/verify.err
+     --drop-unverified > <corpus>/verify.json 2> <corpus>/verify.err
    ```
 
    **Socials OFF: put step 6's ledger write on the end of this same chain**
-   and the whole tail is one turn. All three are scripts, and the last two
-   stop on the same condition: `verify_quotes.py` exits 1 when any quote is
-   partial, missing or dubbed, and `ledger_meta.py write --from` refuses
-   (exit 2, nothing written) on exactly those facts. So `&&` stops where a
-   fix is needed and nowhere else, and a clean verify writes the ledger
-   without a turn in between. Socials ON keeps step 6 separate, because
-   `--set-socials` has to record the lane's answer before the write.
+   and the whole tail is one turn. With `--drop-unverified`, verify writes
+   only the facts that may publish (exact matches and the lane records) to
+   `facts.jsonl.verified.jsonl`, the rejects to `facts.jsonl.rejected.jsonl`,
+   re-fills `selected` from the remaining confirmed facts so the page keeps
+   its count, and exits 0; `ledger_meta.py write --from` then has nothing to
+   refuse. Report the `dropped` count and the rejected file in the run
+   report; never rewrite a rejected quote by hand. Without the flag every
+   candidate is written, rejects included, verify exits 1 and the write
+   refuses (exit 2), which is the mode for inspecting the rejects. Socials
+   ON keeps step 6 separate, because `--set-socials` has to record the
+   lane's answer before the write.
 
    Expand exits 3 listing offending ids: re-ask for exactly those once as
    another `--decisions` file; on a second failure add `--fallback-original`.
@@ -444,19 +458,26 @@ Run the reuse check first. Then:
    is background, not research. Each writes one file under `<corpus>/` and
    returns one line.
    - **TL data** (target under 60 s), writes `<corpus>/brand-tl.json`. Exactly
-     these, nothing improvised: `tl brands find` for every brand id (category,
-     product description, stated audience, sponsored topics);
+     these, nothing improvised: `tl brands show <id> --json` for every brand
+     id (`description`, `audience`, `type`, `sponsored_topics`; `tl brands
+     find` returns only id and name, and there is no `category` field, `type`
+     is the nearest). Treat `sponsored_topics` as a hint to check against the
+     sponsored reads, never as a fact: on Matiks it listed craft beer and
+     vintage car restoration beside mental maths;
      `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` for
      the newest sponsored reads (those reads ARE the sponsorship patterns:
      what creators already say about the product on camera and the moments
      they tie it to their own lives); and for the eras, one `tl db es`
      aggregation, a `date_histogram` on `publication_date` by year over
-     `sponsored_brand_mentions` for the brand ids with a `terms` sub-aggregation
-     on `channel.name` (size 20). `tl brands history` is deprecated; do not
-     use it. No web lookups.
+     `sponsored_brand_mentions` for the brand ids (a `term` filter, the id as
+     a STRING: `{"term": {"sponsored_brand_mentions": "50485"}}`; there is no
+     `brand.id` field) with a `terms` sub-aggregation on `channel.id` (size
+     20; `channel.name` is not a field on article docs and returns empty
+     buckets silently), then resolve the ids to names. `tl brands history` is
+     deprecated; do not use it. No web lookups.
    - **Brand site** (target under 90 s), writes `<corpus>/brand-site.json`
      with `status: read | fallback | unreachable`. The brand's own website
-     (`website` from `tl brands find`) and ONLY the social accounts linked
+     (`website` from `tl brands show <id> --json`) and ONLY the social accounts linked
      directly from that site: positioning, product lines, stated audience,
      founder story or cause, current campaign themes, how it uses creators.
      **One WebFetch per URL, and stop at the first failure per host**: no

@@ -1033,6 +1033,10 @@ def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatc
     with gzip.open(summary["corpus"], "rt", encoding="utf-8") as f:
         rows = [json.loads(line) for line in f]
     assert [c[0] for c in rows[0]["cues"]] == [80.0, 100.0, 105.0]
+    # and at a shared start the corpus carries the transcript's whole cue, not
+    # the piece the highlighter cut at its fragment boundary: the extractor
+    # quotes from the wider text, and verify reads the corpus
+    assert rows[0]["cues"][1][1] == "my dad and my family behind about the year it happened"
     # and windows.jsonl.gz carries the same widened text
     with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
         assert json.loads(f.readline())["text"] == w["text"]
@@ -1096,3 +1100,49 @@ def test_fetch_transcripts_parses_timed_text_per_video_across_chunks(monkeypatch
     assert out == {"7:v1": [(1.5, "hi 'there")], "7:v2": [(9.0, "second")]}
     assert sorted(calls) == [["7:v1"], ["7:v2"]]
     assert fetch_cues.fetch_transcripts([]) == {}
+
+
+def test_a_colliding_start_keeps_the_transcript_cue_over_the_cut_fragment(tmp_path, monkeypatch):
+    """PleasantKenobi 2026-09-14: the fragment ended mid-cue on "i'm bad at",
+    the transcript cue at the same start read "i'm bad at maths", the window
+    text carried "maths" and the corpus did not, so a faithful quote failed
+    verification. Three channels, 69 of 69 rejects, one cause."""
+    frag = '<text start="180"><em>i grew up</em> poor and i know</text><text start="183">i\'m bad at</text>'
+    transcript = {"7:v1": [(180.0, "i grew up poor and i know"),
+                           (183.0, "i'm bad at maths honestly"),
+                           (185.0, "but it never mattered much")]}
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])],
+                         transcripts=transcript)
+    assert "maths" in kept[0]["text"]
+    with gzip.open(summary["corpus"], "rt", encoding="utf-8") as f:
+        cues = json.loads(f.readline())["cues"]
+    assert [c[0] for c in cues] == [180.0, 183.0, 185.0]
+    assert cues[1][1] == "i'm bad at maths honestly"
+    assert "maths" in " ".join(c[1] for c in cues)
+
+
+def test_a_channel_with_no_transcripts_stops_at_fetch_with_exit_4(tmp_path, monkeypatch):
+    """BocaBola 2026-09-14: 176 uploads indexed, 0 transcripts, and eight
+    downstream stages exited 0 on empty input before verify refused an empty
+    corpus. The fetch owns that answer."""
+    monkeypatch.setattr(fetch_cues.tl_data, "cli_rows",
+                        _cli_rows_router({2024: []}, [], {2024: []}))
+    monkeypatch.setattr(fetch_cues, "fetch_transcripts", lambda refs: {})
+    monkeypatch.setattr(fetch_cues.tl_data, "_tl_json",
+                        lambda args, input_text=None, timeout=None: {
+                            "total": 0, "aggregations": {"lang": {"buckets": []}}})
+    monkeypatch.setattr(fetch_cues, "sponsor_segments", lambda refs: {})
+    phrase_file = tmp_path / "phrases.txt"
+    phrase_file.write_text("i grew up\nmy dad\n")
+    out = tmp_path / "corpus"
+    monkeypatch.setattr(sys, "argv", ["fetch_cues.py", "--channel", "7",
+                                      "--out", str(out), "--phrases", str(phrase_file)])
+    capture = {}
+    monkeypatch.setattr("builtins.print",
+                        lambda *a, **k: capture.setdefault("lines", []).append((a, k)))
+    assert fetch_cues.main() == 4
+    monkeypatch.undo()
+    summary = json.loads([a[0] for a, k in capture["lines"] if not k.get("file")][0])
+    assert summary["exit"] == 4 and summary["windows_batched"] == 0
+    assert not (out / "7" / "batches").exists()
+    assert any("exit=4" in a[0] for a, k in capture["lines"] if k.get("file"))

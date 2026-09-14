@@ -163,6 +163,13 @@ def main() -> None:
                     help="the channel's own language (context-full.json `language`); "
                          "on an English channel a non-Latin quote is a dubbed track "
                          "and reports match: dubbed, which never publishes")
+    ap.add_argument("--drop-unverified", action="store_true",
+                    help="write only the facts that may publish (exact matches and "
+                         "non-transcript records) to --out, the rejects to "
+                         "<in>.rejected.jsonl, and re-fill `selected` from the "
+                         "remaining confirmed facts so the page keeps its count; "
+                         "exit 0 on a clean output. Without it every candidate is "
+                         "written and a reject exits 1")
     a = ap.parse_args()
 
     in_path = pathlib.Path(a.infile)
@@ -229,9 +236,32 @@ def main() -> None:
         # (a date, say) is stringified here rather than crashing the writer
         verified.append(json.loads(json.dumps(fact, ensure_ascii=False,
                                               default=str)))
+    failed = counts["partial"] + counts["none"] + counts["dubbed"]
+    dropped: list[dict] = []
+    refilled: list[str] = []
+    rejected_file = None
+    if a.drop_unverified and failed:
+        # `selected` was decided in expand, before any quote was checked, so a
+        # reject that was selected leaves the page short (PleasantKenobi
+        # 2026-09-14: 40 picked, 12 rejected, 28 shipped). The same ranking
+        # expand used fills the gap from what did verify.
+        keep = [f for f in verified if f["verify"]["match"] in ("exact", "n/a")]
+        dropped = [f for f in verified if f["verify"]["match"] not in ("exact", "n/a")]
+        lost = sum(1 for f in dropped if f.get("selected"))
+        if lost:
+            import merge_pass  # sibling module, the owner of the rule
+            pool = [f for f in keep if not f.get("selected")
+                    and not f.get("superseded_by")
+                    and f.get("confidence") == "confirmed"
+                    and merge_pass.selectable(f)]
+            for f in sorted(pool, key=merge_pass.rank_key)[:lost]:
+                f["selected"] = True
+                refilled.append(str(f.get("fact_id")))
+        rejected_file = in_path.with_suffix(in_path.suffix + ".rejected.jsonl")
+        write_ledger(rejected_file, header, dropped)
+        verified = keep
     write_ledger(out_path, header, verified)
 
-    failed = counts["partial"] + counts["none"] + counts["dubbed"]
     elapsed = round(time.monotonic() - started, 1)
     print(json.dumps({
         "candidates": sum(counts.values()),
@@ -241,14 +271,19 @@ def main() -> None:
         "none": counts["none"],
         "dubbed": counts["dubbed"],
         "passed_through_non_transcript": counts["n/a"],
+        "dropped": len(dropped),
+        "selected_refilled": refilled,
+        "rejected_file": str(rejected_file) if rejected_file else None,
         "verified_file": str(out_path),
         "note": ("only exact matches publish as verbatim; partial/none must "
-                 "be fixed to the caption text or dropped"),
+                 "be fixed to the caption text or dropped"
+                 + (" (dropped here: --drop-unverified)" if a.drop_unverified else "")),
     }, indent=1))
     funnel(stage="verify", candidates=sum(counts.values()),
-           verified=counts["exact"], rejected=failed,
+           verified=counts["exact"], rejected=failed, dropped=len(dropped),
+           selected_refilled=len(refilled),
            passed_through=counts["n/a"], elapsed_s=elapsed)
-    sys.exit(1 if failed else 0)
+    sys.exit(0 if a.drop_unverified else (1 if failed else 0))
 
 
 if __name__ == "__main__":

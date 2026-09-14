@@ -580,8 +580,15 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
     the same reason: a sharded merge gives each shard its own slice of the
     lane, so replacing would keep only the last file read and silently drop
     the rest, along with every ``corroborates`` call the earlier shards made.
-    Later files win per ``ref``; a record with no ``ref`` cannot be keyed, so
-    it is appended. An empty or omitted ``facts`` leaves the union standing,
+    Later files win per ``ref`` when they are a PATCH of the file that set it
+    (they re-decide at least one of its clusters, or carry no decisions at
+    all); a later SHARD that reuses the ref (its decisions are disjoint, so it
+    is judging other clusters and numbered its own slice from ``s1`` again)
+    has its ref namespaced ``s<shard>-<ref>`` and appended, and its own
+    ``selected`` picks follow the rename. Run H and run I (2026-09-14) both
+    lost lane facts to that collision with no violation raised, since every
+    file's ``facts`` was non-empty. A record with no ``ref`` cannot be keyed,
+    so it is appended. An empty or omitted ``facts`` leaves the union standing,
     which is what a shard whose domains hold no lane record returns. A file
     that changes nothing at all is still a violation: a patch that no-ops is
     the failure mode that costs a stage a manual diagnosis."""
@@ -590,8 +597,11 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
     identity: list[dict] = []
     problems: list[str] = []
     ref_slot: dict[str, int] = {}
-    for p in paths:
+    ref_keys: dict[str, set[str]] = {}     # ref -> decision keys of the file that set it
+    for n, p in enumerate(paths, 1):
         path = pathlib.Path(p)
+        m = re.search(r"(?:^|-)s(\d+)\b", path.stem)
+        shard = f"s{m.group(1)}" if m else f"f{n}"
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "",
                      path.read_text(encoding="utf-8").strip())
         try:
@@ -607,17 +617,15 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
             problems.append(f"{path.name}: no `decisions` object")
             continue
         touched = False
+        own_keys: set[str] = set()
         for key, value in got.items():
             if not isinstance(value, dict):
                 problems.append(f"{path.name}: decision for {key} is not an object")
                 continue
             decisions[str(key)] = value
+            own_keys.add(str(key))
             touched = True
-        if isinstance(data.get("selected"), list):
-            for x in data["selected"]:
-                if str(x) not in selected:
-                    selected.append(str(x))
-            touched = True
+        renamed: dict[str, str] = {}
         if "facts" in data:
             if not isinstance(data["facts"], list):
                 problems.append(f"{path.name}: `facts` is not a list")
@@ -629,13 +637,28 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
                     ref = str(rec.get("ref") or "").strip()
                     if not ref:
                         identity.append(rec)
-                    elif ref in ref_slot:
+                        continue
+                    if (ref in ref_slot and own_keys
+                            and not (own_keys & ref_keys.get(ref, set()))):
+                        # another shard's numbering, not a patch of this record
+                        new_ref = f"{shard}-{ref}"
+                        renamed[ref] = new_ref
+                        rec = dict(rec, ref=new_ref)
+                        ref = new_ref
+                    if ref in ref_slot:
                         identity[ref_slot[ref]] = rec
                     else:
                         ref_slot[ref] = len(identity)
                         identity.append(rec)
+                    ref_keys[ref] = ref_keys.get(ref, set()) | own_keys
                 if recs:
                     touched = True
+        if isinstance(data.get("selected"), list):
+            for x in data["selected"]:
+                pick = renamed.get(str(x), str(x))
+                if pick not in selected:
+                    selected.append(pick)
+            touched = True
         if not touched:
             problems.append(
                 f"{path.name}: carries no decisions, no `selected` and no "

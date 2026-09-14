@@ -406,6 +406,12 @@ def render_markdown(md: str) -> str:
                 in_list = "ol"
             out.append(f"<li>{inline(m.group(1))}</li>")
             continue
+        if in_list and out and out[-1].endswith("</li>"):
+            # a wrapped bullet: the continuation line belongs to the item, not
+            # to a paragraph after the list (run H shredded "Where this could
+            # go wrong" into one-line <li>s with orphan <p>s between them)
+            out[-1] = out[-1][:-len("</li>")] + " " + inline(stripped) + "</li>"
+            continue
         close_list()
         para.append(stripped)
     close_para(), close_list(), close_quote()
@@ -699,7 +705,15 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     """
     usable = [f for f in facts
               if not f.get("superseded_by") and tier_of(f) not in WITHHELD
-              and tier_of(f) != "withheld" and not f.get("staged_only")]
+              and tier_of(f) != "withheld" and not f.get("staged_only")
+              # the merge pass's own rule for `selected`: a clinical fact is
+              # public only where the creator made it so, three or more videos
+              # for a transcript fact; the fall-back to most-recurring facts
+              # must not route around it (Hossenfelder 2026-09-14 rendered a
+              # two-video clinical fact on a brand-facing strip)
+              and not (tier_of(f) == "clinical"
+                       and (f.get("provenance") or "transcript") == "transcript"
+                       and int(f.get("recurrence") or 0) < 3)]
 
     def key(f: dict):
         return (bool(f.get("selected")), f.get("confidence") == "confirmed",
@@ -754,6 +768,25 @@ def no_money_sentences(text: str) -> str:
     return " ".join(p for p in parts if p and not _MONEY.search(p)).strip()
 
 
+_ADDRESS = re.compile(
+    r"\b(?:p\.?\s?o\.?\s?box|po\s?box|postbus|postfach)\b"       # a mail box
+    r"|\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b"                      # a UK postcode
+    r"|\b\d{1,5}\s+[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s"
+    r"(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd|"
+    r"suite|ste|unit|floor)\b\.?"                                       # a street line
+    r"|[\w.+-]+@[\w-]+\.[\w.]+",                                       # an email
+    re.I)
+
+
+def no_address_sentences(text: str) -> str:
+    """The text minus any sentence carrying a postal address, PO box or
+    email. The ledger enforces "a contact address never travels" fact by fact;
+    the channel's own About text is printed whole, and Real Civil Engineer's
+    (2026-09-14) carried a fan-mail PO box onto a brand-facing page."""
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
+    return " ".join(p for p in parts if p and not _ADDRESS.search(p)).strip()
+
+
 def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     picks = pick_who_flat(facts)
     fmt = meta.get("format")
@@ -775,7 +808,7 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     platform = []
     for key, label in (("about_text", "From the channel"),
                        ("generated_profile", "Platform profile")):
-        text = no_money_sentences(str(ctx.get(key) or ""))
+        text = no_address_sentences(no_money_sentences(str(ctx.get(key) or "")))
         if text:
             platform.append(f'<p class="platform"><span class="k">{label}</span> '
                             f'{html.escape(text)}</p>')

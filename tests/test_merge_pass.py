@@ -1319,3 +1319,45 @@ def test_an_unplaceable_identity_domain_still_exits_3(tmp_path):
                       facts=[_identity(ref="s1", domain="gardening")])
     v = _violations(_expand(clustered, dpath, tmp_path / "facts.jsonl"))
     assert "domain must be" in v["s1"][0]
+
+
+def test_two_shards_that_both_number_their_lane_facts_from_s1_keep_both(tmp_path):
+    """Run H and run I (2026-09-14): every shard numbered its slice of the
+    identity lane from `s1`, the union keyed on `ref`, and 2 of 4 (then 2 of
+    8) lane facts vanished with no violation. A later file that judges OTHER
+    clusters is a shard, not a patch: its ref is namespaced and kept, and
+    its own `selected` pick follows the rename."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("one", video="v1"), _cluster("two", video="v2", domain="home")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity(ref="s1", claim="runs a pottery studio")],
+                   name="merge-decisions-r1-s1.json")
+    s2 = _envelope(tmp_path, {"c002": {"action": "keep"}},
+                   facts=[_identity(ref="s1", claim="spent a decade as a drainage engineer",
+                                    domain="work")],
+                   selected=["s1"],
+                   name="merge-decisions-r1-s2.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, s2], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["identity_facts"] == 2
+    lane = {f["claim"]: f for f in _facts(out).values() if f.get("provenance") == "social"}
+    assert set(lane) == {"runs a pottery studio", "spent a decade as a drainage engineer"}
+    assert lane["spent a decade as a drainage engineer"]["selected"] is True
+
+
+def test_a_patch_of_the_same_shard_still_overrides_its_ref(tmp_path):
+    """The re-ask flow is unchanged: a file that re-decides one of the shard's
+    own clusters is a patch and its record replaces the shard's."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    s1 = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                   facts=[_identity(ref="s1")], name="merge-decisions-r1-s1.json")
+    patch = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_identity(ref="s1", claim="runs a pottery studio")],
+                      name="merge-decisions-r1-s1b.json")
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, [s1, patch], out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["identity_facts"] == 1
+    social = [f for f in _facts(out).values() if f.get("provenance") == "social"]
+    assert social[0]["claim"] == "runs a pottery studio"

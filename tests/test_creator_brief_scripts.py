@@ -920,3 +920,107 @@ def test_a_clean_verify_lets_the_chained_write_through(tmp_path):
                            "--channel-name", "Patterrz"])
     assert rc == 0
     assert (profiles / "1-facts.jsonl").exists()
+
+
+# --------------------------------------------------------------------------- #
+# verify_quotes.py --drop-unverified: the chain hands on a clean file
+# --------------------------------------------------------------------------- #
+def test_drop_unverified_writes_a_clean_file_and_refills_selected(tmp_path):
+    """Run I (2026-09-14): verify exited 1 but wrote every candidate, so the
+    ledger write refused and the operator hand-filtered. PleasantKenobi the
+    same day: 12 of the 40 selected facts were rejects, the page shipped 28.
+    With the flag the rejects go to their own file and the count is
+    re-filled from what did verify, by the merge pass's own ranking."""
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:vid1", "cues": [
+            [10, "so before we start"],
+            [14, "I grew up in a tiny town in Ohio"],
+            [19, "and my dad ran the bakery there"]]}])
+    infile = _write_jsonl(tmp_path / "facts.jsonl", [
+        {"fact_id": "f001", "provenance": "transcript", "video": "1:vid1", "start": 14,
+         "quote": "I grew up in a tiny town in Ohio", "confidence": "confirmed",
+         "recurrence": 1, "sensitivity": "none", "selected": True},
+        {"fact_id": "f002", "provenance": "transcript", "video": "1:vid1", "start": 19,
+         "quote": "my dad ran the bakery there for years", "confidence": "confirmed",
+         "recurrence": 2, "sensitivity": "none", "selected": True},
+        {"fact_id": "f003", "provenance": "transcript", "video": "1:vid1", "start": 10,
+         "quote": "so before we start", "confidence": "confirmed",
+         "recurrence": 3, "sensitivity": "none", "selected": False},
+        {"fact_id": "f004", "provenance": "transcript", "video": "1:vid1", "start": 10,
+         "quote": "before we start", "confidence": "confirmed",
+         "recurrence": 1, "sensitivity": "location", "selected": False},
+        {"fact_id": "f005", "provenance": "web", "source_url": "https://x.example",
+         "claim": "co-hosts a podcast", "confidence": "confirmed", "selected": False}])
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "verify_quotes.py"), "--in", str(infile),
+         "--corpus", str(corpus), "--drop-unverified"], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    summary = json.loads(proc.stdout)
+    assert summary["partial"] == 1 and summary["dropped"] == 1
+    kept = {r["fact_id"]: r for r in
+            (json.loads(l) for l in (tmp_path / "facts.jsonl.verified.jsonl").read_text().splitlines())}
+    assert set(kept) == {"f001", "f003", "f004", "f005"}
+    rejected = [json.loads(l) for l in (tmp_path / "facts.jsonl.rejected.jsonl").read_text().splitlines()]
+    assert [r["fact_id"] for r in rejected] == ["f002"]
+    assert rejected[0]["verify"]["match"] == "partial"
+    # the lost pick is re-filled by the strongest eligible confirmed fact:
+    # f003 (three videos), never f004 (a withheld tier)
+    assert summary["selected_refilled"] == ["f003"]
+    assert kept["f003"]["selected"] is True and kept["f004"]["selected"] is False
+    assert "dropped=1 selected_refilled=1" in proc.stderr
+
+
+def test_without_the_flag_verify_still_writes_every_candidate_and_exits_1(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Texas with my mother"}])
+    assert proc.returncode == 1 and len(rows) == 1
+    assert summary["dropped"] == 0 and summary["rejected_file"] is None
+
+
+# --------------------------------------------------------------------------- #
+# build_html.py: wrapped bullets, addresses, and the clinical fall-back
+# --------------------------------------------------------------------------- #
+def test_a_wrapped_bullet_stays_one_list_item():
+    """Run H (2026-09-14): every multi-line bullet under "Where this could go
+    wrong" rendered as a one-line <li> plus an orphan <p> outside the list."""
+    import build_html
+    out = build_html.render_markdown(
+        "## Where this could go wrong\n"
+        "- His relationship status is unreconciled in the ledger.\n"
+        "  Two facts describe a girlfriend and a wife.\n"
+        "- A second bullet.\n")
+    assert out.count("<li>") == 2 and out.count("<ul>") == 1
+    assert ("<li>His relationship status is unreconciled in the ledger. "
+            "Two facts describe a girlfriend and a wife.</li>") in out
+    assert "<p>Two facts" not in out
+
+
+def test_the_platform_about_text_never_carries_an_address():
+    """Run H: the channel's About text printed a fan-mail PO box onto a
+    brand-facing page; the never-travels rule was enforced on facts only."""
+    import build_html
+    about = ("Hello fellow engineers, welcome to the channel. Fan mail: PO Box 123, "
+             "Cardiff, CF10 1AA. Business: hello@example.com. "
+             "I build things in games and sometimes in real life.")
+    text = build_html.no_address_sentences(about)
+    assert "PO Box" not in text and "CF10" not in text and "@" not in text
+    assert text.startswith("Hello fellow engineers") and "I build things" in text
+    assert build_html.no_address_sentences("I live in Wales.") == "I live in Wales."
+
+
+def test_who_they_are_fall_back_never_routes_around_the_clinical_rule():
+    """Run I (2026-09-14): with fewer than 40 selected facts the strip fell
+    back to the most-recurring facts and rendered a two-video clinical fact
+    the merge pass had refused to select. The strip applies the same
+    three-video rule `merge_pass.selectable` does."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "was diagnosed with ADHD", "domain": "health",
+         "confidence": "confirmed", "recurrence": 2, "sensitivity": "clinical"},
+        {"fact_id": "f2", "claim": "is sober", "domain": "health",
+         "confidence": "confirmed", "recurrence": 3, "sensitivity": "clinical"},
+        {"fact_id": "f3", "claim": "grew up in Wales", "domain": "origin",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2", "f3"]

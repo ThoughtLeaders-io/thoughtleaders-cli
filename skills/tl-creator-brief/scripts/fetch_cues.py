@@ -712,9 +712,23 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
         w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
         entry = corpus.get(w["id"])
         if entry is not None:
-            have = {round(float(c[0]), 2) for c in entry["cues"]}
-            entry["cues"].extend([round(s, 2), t] for s, t in run
-                                 if round(s, 2) not in have)
+            # The highlighter cuts a fragment mid-cue at its 450-char boundary,
+            # so the piece already stored at a start time can be the first
+            # words of the cue only ("i'm bad at" for "i'm bad at maths"). The
+            # extractor reads the wider text above, so the corpus must carry
+            # the same words at the same start or verify_quotes rejects a
+            # faithful quote: on 2026-09-14, over three channels, 69 of 69
+            # rejected quotes were verbatim in the window text and absent
+            # from the corpus. A colliding start takes the transcript's cue.
+            slot = {round(float(c[0]), 2): i for i, c in enumerate(entry["cues"])}
+            for s, t in run:
+                key = round(s, 2)
+                i = slot.get(key)
+                if i is None:
+                    slot[key] = len(entry["cues"])
+                    entry["cues"].append([key, t])
+                else:
+                    entry["cues"][i][1] = t
         widened += 1
     return "transcript", widened
 
@@ -974,6 +988,20 @@ def main() -> int:
                         passages=len(generic_windows), windows_kept=len(gkept))
         queries_note += " x 2 passes (generic fallback ran)"
     windows.extend(generic_windows)          # phrase windows first, then the fallback's
+    if not kept and videos_with_transcript == 0 and a.round <= 1:
+        # BocaBola 2026-09-14: 176 indexed uploads, 0 transcripts. Every later
+        # stage exits 0 on empty input (assemble reports coverage 1.0 over 0
+        # windows), so a `&&` chain ran eight clean stages before verify
+        # finally refused an empty corpus. There is nothing to extract; say so
+        # once, here, with its own exit code.
+        print(f"FUNNEL stage=fetch_cues round={a.round} videos_with_transcript=0 "
+              f"passages={len(windows)} windows_capped=0 exit=4 "
+              f"reason=no_transcripts_indexed", file=sys.stderr)
+        print(json.dumps({"channel": a.channel, "videos_with_transcript": 0,
+                          "passages": len(windows), "windows_batched": 0,
+                          "exit": 4, "reason": "no transcripts indexed for this "
+                          "channel; nothing to extract"}, indent=1))
+        return 4
     # the cap is taken on the narrow fragments; what the extractor reads is wider
     read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after)
     for w in windows:
