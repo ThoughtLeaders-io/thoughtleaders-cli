@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""The bio lane: the creator's own written self-description, as evidence.
+
+Bios go first, transcripts verify them. The channel About text (and, when the
+opt-in socials lane is on, the profile bios it read) is the most explicit thing
+a creator ever says about themselves, and until now it was context to search
+from and never a fact. This lane makes it a first-class *candidate* source —
+never a trusted one. Three gates stand between an About box and a brand-facing
+page, and nothing here is one of them on its own:
+
+1. ``strip_boilerplate`` — regex, no judgment. YouTube's placeholder copy,
+   business-inquiry lines, bare emails/URLs/hashtags/handles and subscribe
+   calls never reach a model. A segment with no first-person token is NOT
+   dropped (a real bio writes "Doctor. Author. Dad of two."); it is flagged
+   ``weak_anchor``, which the rubric already knows how to weigh.
+2. the existing ``gem-classifier`` rubric — the surviving segments become ONE
+   extra batch in the existing window schema, so "the best gaming channel on
+   YouTube" and a link list fail the same first-person-with-a-span test every
+   transcript window faces.
+3. corroboration — ``terms`` derives 1-3 search terms per bio fact for an
+   additive ``fetch_cues.py --round N`` pass over the channel's OWN
+   transcripts. Only a transcript fact can lift a bio fact to ``confirmed``
+   (``merge_pass.py``); uncorroborated non-sensitive facts render in a
+   separate "In their own words (unverified)" block, and uncorroborated
+   sensitive ones are dropped entirely.
+
+A bio window is not a transcript window and must never be able to pretend it
+is: it carries no video and no timestamp, ``assemble_extracts.py`` refuses it
+outright, and its excerpt is cut from the stored bio text by the same
+mechanical span cutter transcripts use — a model never authors the words that
+render as the creator's own.
+
+Usage:
+  bio_lane.py batch --from context-full.json --channel <id> --out <dir>
+                    [--socials-bio socials-bio.json] [--seen-date YYYY-MM-DD]
+  bio_lane.py facts --batch <bio/batch-000.json> --returns <extract.json>
+                    --out bio-facts.json
+  bio_lane.py terms --facts bio-facts.json --channel <id> --out <dir>
+                    [--round 2]
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import json
+import pathlib
+import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import assemble_extracts as _ax  # noqa: E402  sibling: the mechanical span cutter
+import tier_hint  # noqa: E402  sibling: the same keyword tier hint transcripts get
+
+DOMAINS = _ax.DOMAINS
+SPEAKERS = _ax.SPEAKERS
+WITHHELD = _ax.WITHHELD
+
+# --------------------------------------------------------------------------- #
+# the boilerplate filter
+# --------------------------------------------------------------------------- #
+EMAIL_RX = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}")
+URL_RX = re.compile(r"(?:https?://|www\.)\S+")
+HASHTAG_RX = re.compile(r"^#[\w.]+$")
+HANDLE_RX = re.compile(r"^@[\w.]+$")
+PHONE_RX = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+YT_DEFAULT_RX = re.compile(
+    r"^(?:welcome to (?:my|our|the)\b|this is (?:the |my |our )?official\b"
+    r"|thanks for (?:watching|stopping by|being here)\b|no description(?: available)?\b"
+    r"|check out (?:my|our) (?:videos|channel)\b|(?:my|our) (?:official )?youtube channel\b)",
+    re.I)
+BUSINESS_RX = re.compile(
+    r"\b(?:business|bookings?|inquiries|enquiries|sponsorships?|partnerships?"
+    r"|collabs?|collaborations?|press|pr|management|manager|agency|representation)\b"
+    r"[^.]{0,40}?(?:@|:|\bcontact\b|\bemail\b|\breach\b|\bplease\b)", re.I)
+CONTACT_RX = re.compile(r"\b(?:contact|e-?mail|reach|dm) (?:me|us|my team|our team)\b", re.I)
+CTA_RX = re.compile(
+    r"\b(?:subscribe|hit the bell|turn on notifications|smash that like|like and subscribe"
+    r"|comment below|join (?:my|our) (?:patreon|channel|discord|membership)"
+    r"|check out (?:my|our) (?:merch|store|shop)|use code|link (?:in|below)"
+    r"|new videos? every|uploads? every)\b", re.I)
+FIRST_PERSON_RX = re.compile(
+    r"\b(?:i|i'?m|i'?ve|i'?ll|i'?d|me|my|mine|myself|we|we'?re|we'?ve|our|ours|us)\b", re.I)
+# Personal identifiers never become search terms: SKILL.md's identity lane
+# excludes them, and a corroboration query that searches a creator's email
+# address or phone number is a different lane's job and a worse idea.
+IDENTIFIER_RX = re.compile(
+    rf"{EMAIL_RX.pattern}|{URL_RX.pattern}|{PHONE_RX.pattern}|[@#][\w.]+")
+
+MIN_WORDS = 3
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _residual(text: str) -> str:
+    """The text with the machine-readable furniture removed."""
+    return IDENTIFIER_RX.sub(" ", text)
+
+
+def drop_reason(segment: str) -> str | None:
+    """Why this segment never reaches a model, or ``None`` to keep it.
+
+    Regex only: every rule here is a shape, not a judgment about whether the
+    creator is telling the truth or talking about themselves. That question
+    belongs to the extractor rubric, which is why a third-person brag and an
+    off-topic claim are KEPT here and rejected there."""
+    text = segment.strip()
+    if not text:
+        return "empty"
+    words = text.split()
+    if YT_DEFAULT_RX.match(text):
+        return "youtube_default"
+    if BUSINESS_RX.search(text) or CONTACT_RX.search(text):
+        return "business_inquiry"
+    if words and all(HASHTAG_RX.match(w) for w in words):
+        return "hashtags_only"
+    if words and all(HANDLE_RX.match(w) for w in words):
+        return "handles_only"
+    residual_words = _residual(text).split()
+    if EMAIL_RX.search(text) and len(residual_words) < 4:
+        return "email"
+    if URL_RX.search(text) and len(residual_words) < 4:
+        return "url_only"
+    if CTA_RX.search(text):
+        return "cta"
+    if len(words) < MIN_WORDS:
+        return "too_short"
+    return None
+
+
+def segments(text: str) -> list[tuple[int, str]]:
+    """``(character offset, segment)`` for each atomic piece of a bio.
+
+    Lines first, then sentences, because a bio is written as a list as often
+    as it is written as prose — and because the rubric's count contract gives
+    one window at most one gem, so "I'm a doctor in London with two kids" must
+    arrive as its own window or the second and third facts are lost."""
+    out: list[tuple[int, str]] = []
+    pos = 0
+    for line in (text or "").splitlines(keepends=True):
+        base = pos
+        pos += len(line)
+        stripped = line.strip("\n")
+        if not stripped.strip():
+            continue
+        off = base + (len(stripped) - len(stripped.lstrip()))
+        for piece in _SENTENCE_SPLIT.split(stripped.strip()):
+            if not piece.strip():
+                continue
+            at = text.find(piece, off)
+            out.append((at if at >= 0 else off, piece.strip()))
+            off = (at + len(piece)) if at >= 0 else off
+    return out
+
+
+def strip_boilerplate(text: str) -> tuple[list[tuple[int, str]], list[dict]]:
+    """``(kept, dropped)``. ``kept`` is ``(offset, segment)``; every dropped
+    segment is reported with its reason, so the run summary can show a creator
+    exactly what was thrown away and why."""
+    kept: list[tuple[int, str]] = []
+    dropped: list[dict] = []
+    for off, seg in segments(text):
+        why = drop_reason(seg)
+        if why:
+            dropped.append({"offset": off, "text": seg, "reason": why})
+        else:
+            kept.append((off, seg))
+    return kept, dropped
+
+
+# --------------------------------------------------------------------------- #
+# the bio batch
+# --------------------------------------------------------------------------- #
+def bio_sources(full: dict, socials_bio: list[dict] | None,
+                *, seen_date: str) -> tuple[list[dict], list[dict]]:
+    """``(sources, refused)``. The channel About text always; the socials
+    lane's profile bios only when that lane confirmed the profile belongs to
+    this creator — SKILL.md's identity lane owns that question, and a bio from
+    an unmatched profile is another person's self-description.
+
+    The ES ``ai.description`` profile is NEVER a source: it describes the
+    recent catalogue, and it is not the creator's words."""
+    sources: list[dict] = []
+    refused: list[dict] = []
+    about = str(full.get("about_text") or "").strip()
+    if about:
+        sources.append({"kind": "about", "platform": "youtube",
+                        "url": str(full.get("url") or "").strip(),
+                        "seen_date": seen_date, "text": about})
+    for rec in socials_bio or []:
+        text = str(rec.get("text") or rec.get("bio") or "").strip()
+        url = str(rec.get("url") or rec.get("source_url") or "").strip()
+        if not text or not url:
+            refused.append({"url": url, "reason": "no bio text or no source url"})
+            continue
+        if not rec.get("match_confirmed"):
+            refused.append({"url": url, "reason": "socials lane did not confirm the profile "
+                                                  "belongs to this creator"})
+            continue
+        sources.append({"kind": "social", "platform": str(rec.get("platform") or "").strip()
+                        or "social", "url": url,
+                        "seen_date": str(rec.get("seen_date") or seen_date), "text": text})
+    return sources, refused
+
+
+def build_windows(sources: list[dict], *, channel: int | str,
+                  language: str | None = None) -> tuple[list[dict], list[dict]]:
+    """The bio batch, in the window schema ``extractor_prompt.py`` renders.
+
+    ``video_id`` is None and ``start`` is a CHARACTER offset into the bio, not
+    a timestamp: there is no video behind these words and nothing downstream
+    may pretend there is. ``assemble_extracts.py`` refuses a window shaped
+    like this, so the only way a bio return becomes a fact is
+    ``bio_lane.py facts``, which mints identity-lane records."""
+    windows: list[dict] = []
+    dropped: list[dict] = []
+    for si, src in enumerate(sources):
+        kept, gone = strip_boilerplate(src["text"])
+        for d in gone:
+            d["source"] = src["url"] or src["kind"]
+            d["kind"] = src["kind"]
+        dropped.extend(gone)
+        for off, seg in kept:
+            windows.append({
+                "id": f"bio:{channel}:{src['kind']}:{si}",
+                "video_id": None,
+                "start": off,
+                "title": f"{src['kind']} text ({src['platform']})",
+                "published": src["seen_date"],
+                "language": language,
+                "format_hint": "bio",
+                "cues_fired": [],
+                "host_anchor": True,
+                "second_voice_hint": None,
+                "entity_hits": [],
+                # no first-person token: kept, flagged, and left to the rubric
+                "weak_anchor": not bool(FIRST_PERSON_RX.search(seg)),
+                "in_sponsor_read": False,
+                "recurrence_videos": 0,
+                "stage_direction": False,
+                "boilerplate": False,
+                "text": seg,
+                "retrieval": "bio",
+                "bio_source": {"kind": src["kind"], "platform": src["platform"],
+                               "url": src["url"], "seen_date": src["seen_date"]},
+            })
+    return windows, dropped
+
+
+# The refusal that keeps a bio window out of the transcript ledger lives with
+# the assembly it protects, so the two can never drift apart.
+is_bio_window = _ax.is_bio_window
+
+
+def cmd_batch(a: argparse.ArgumentParser) -> int:
+    full = json.loads(pathlib.Path(a.from_file).read_text(encoding="utf-8")) if a.from_file else {}
+    if a.about_text:
+        full = dict(full)
+        full["about_text"] = a.about_text
+    socials = None
+    if a.socials_bio:
+        socials = json.loads(pathlib.Path(a.socials_bio).read_text(encoding="utf-8"))
+        if isinstance(socials, dict):
+            socials = socials.get("profiles") or socials.get("bios") or []
+    seen = a.seen_date or _dt.date.today().isoformat()
+    channel = a.channel or full.get("channel_id")
+    if channel is None:
+        print("--channel is required (or a context file carrying channel_id)", file=sys.stderr)
+        return 2
+    sources, refused = bio_sources(full, socials, seen_date=seen)
+    windows, dropped = build_windows(sources, channel=channel, language=full.get("language"))
+    out = pathlib.Path(a.out) / str(channel) / "bio"
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("batch-*.json"):
+        old.unlink()
+    batch_path = out / "batch-000.json"
+    summary = {
+        "channel": channel,
+        "seen_date": seen,
+        "sources": [{k: v for k, v in s.items() if k != "text"} | {"chars": len(s["text"])}
+                    for s in sources],
+        "refused_sources": refused,
+        "windows": len(windows),
+        "dropped": len(dropped),
+        "dropped_by_reason": {r: sum(1 for d in dropped if d["reason"] == r)
+                              for r in sorted({d["reason"] for d in dropped})},
+        "dropped_segments": dropped,
+        "batch": str(batch_path) if windows else None,
+        "batches": [str(batch_path)] if windows else [],
+    }
+    if windows:
+        batch_path.write_text(json.dumps(windows, ensure_ascii=False), encoding="utf-8")
+    summary_path = out / "bio.json"
+    summary["summary_file"] = str(summary_path)
+    summary_path.write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+    print(f"FUNNEL stage=bio_lane channel={channel} sources={len(sources)} "
+          f"windows={len(windows)} dropped={len(dropped)}", file=sys.stderr)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    b = sub.add_parser("batch", help="filter the bio and write the one extractor batch")
+    b.add_argument("--from", dest="from_file", default=None,
+                   help="context-full.json from channel_context.py --channel")
+    b.add_argument("--about-text", default=None, help="bio text directly, instead of --from")
+    b.add_argument("--socials-bio", default=None,
+                   help="JSON list of profile bios from the socials lane; each needs "
+                        "match_confirmed, url and text")
+    b.add_argument("--channel", default=None)
+    b.add_argument("--out", default="tl-creator-profiles/.corpus",
+                   help="PARENT directory; the run writes <out>/<channel>/bio/")
+    b.add_argument("--seen-date", default=None)
+
+    a = ap.parse_args(argv)
+    if a.cmd == "batch":
+        return cmd_batch(a)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -59,6 +59,21 @@ WITHHELD = {"clinical", "children", "location"}   # excluded from connection ang
 DEFAULT_MIN_COVERAGE = 0.95
 
 
+def is_bio_window(window: dict) -> bool:
+    """A window from the bio lane, which this assembly must never touch.
+
+    Everything assembled here is stamped ``provenance: "transcript"`` and given
+    ``video``/``start`` from its window, so a bio window (no video, a character
+    offset where a timestamp belongs) would be minted as a quote at
+    ``watch?v=None&t=0s``. ``bio_lane.py facts`` mints identity-lane records for
+    those instead. Both marks are checked because ``extractor_prompt.py`` strips
+    them from what the model sees, so an extractor's return cannot forge them."""
+    return (window.get("retrieval") == "bio"
+            or window.get("bio_source") is not None
+            or window.get("format_hint") == "bio"
+            or not window.get("video_id"))
+
+
 def first5(t: str) -> str:
     return " ".join(t.split()[:5])
 
@@ -169,6 +184,14 @@ def main() -> int:
     for bf in sorted(glob.glob(os.path.join(a.batches, "batch-*.json"))):
         n = os.path.basename(bf)[6:9]
         wins = json.load(open(bf, encoding="utf-8"))
+        bio = [i for i, w in enumerate(wins) if isinstance(w, dict) and is_bio_window(w)]
+        if bio:
+            print(f"{bf}: windows {bio[:5]}{'…' if len(bio) > 5 else ''} are bio-lane windows "
+                  "(or carry no video_id). The transcript assembly stamps every row "
+                  "provenance=transcript with a video and a start, so a bio window would "
+                  "publish as a quote at a timestamp that does not exist. Run "
+                  "`bio_lane.py facts` on that batch's returns instead.", file=sys.stderr)
+            return 2
         efs = sorted(pathlib.Path(a.returns).glob(f"batch-{n}.extract*.json"))
         r = {"expected": len(wins), "file": bool(efs), "gems": 0, "problems": []}
         if not efs:
