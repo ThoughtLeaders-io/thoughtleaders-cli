@@ -21,6 +21,8 @@ _SCRIPTS = (Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_SCRIPTS))
 import assemble_extracts  # noqa: E402
 import bio_lane  # noqa: E402
+import extractor_prompt  # noqa: E402
+import fetch_cues  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -305,3 +307,129 @@ def test_facts_cli_writes_the_records(tmp_path):
     written = json.loads(out.read_text())
     assert written["counts"] == {"facts": 1, "skipped": 0, "sensitive": 0}
     assert written["facts"][0]["provenance"] == "bio"
+
+
+# --------------------------------------------------------------------------- #
+# corroboration: terms, probe, round recipe
+# --------------------------------------------------------------------------- #
+def test_terms_prefer_proper_nouns_then_content_pairs():
+    assert bio_lane.corroboration_terms("runs a pottery studio in Lisbon")[0] == "Lisbon"
+    assert "pottery studio" in bio_lane.corroboration_terms("runs a pottery studio in Lisbon")
+
+
+def test_terms_never_include_a_pronoun_or_an_identifier():
+    terms = bio_lane.corroboration_terms(
+        "I tell my viewers to email me at hi@example.com about my channel")
+    assert terms == [t for t in terms if "@" not in t]
+    for stop in ("i", "my", "me", "channel", "the", "about"):
+        assert stop not in [t.lower() for t in terms]
+
+
+def test_terms_are_capped_at_three():
+    terms = bio_lane.corroboration_terms(
+        "trained as a paediatric surgeon in Manchester before moving to Berlin "
+        "to start a bakery with his brother")
+    assert 1 <= len(terms) <= 3
+
+
+def test_a_claim_with_no_usable_term_is_reported_not_guessed():
+    assert bio_lane.corroboration_terms("is who they are") == []
+
+
+def test_terms_are_deterministic():
+    claim = "was diagnosed with coeliac disease after moving to Lisbon"
+    assert bio_lane.corroboration_terms(claim) == bio_lane.corroboration_terms(claim)
+
+
+def test_the_probe_uses_the_retrieval_filter_shape():
+    body = bio_lane.probe_body(1125633, ["pottery studio"])
+    filters = body["query"]["bool"]["filter"]
+    assert {"term": {"doc_type": "article"}} in filters
+    assert {"term": {"channel.id": 1125633}} in filters
+    assert {"exists": {"field": "transcript"}} in filters
+    clauses = body["query"]["bool"]["must"][0]["bool"]["should"]
+    assert all("match_phrase" in c for c in clauses)
+
+
+def test_the_probe_expands_apostrophes_the_way_the_index_spells_them():
+    """A probe that finds nothing must mean the channel never said it, not that
+    the query was spelled differently from the captions."""
+    body = bio_lane.probe_body(7, ["i'm coeliac"])
+    queries = [c["match_phrase"]["transcript"]["query"]
+               for c in body["query"]["bool"]["must"][0]["bool"]["should"]]
+    assert len(queries) > 1
+
+
+def _facts_file(tmp_path, claims):
+    path = tmp_path / "bio-facts.json"
+    path.write_text(json.dumps({"facts": [
+        {"ref": f"b{i + 1}", "claim": c, "provenance": "bio", "sensitivity": "none"}
+        for i, c in enumerate(claims)]}))
+    return path
+
+
+def test_terms_cli_writes_a_generated_phrases_file_and_the_round_recipe(tmp_path):
+    facts = _facts_file(tmp_path, ["runs a pottery studio in Lisbon", "is who they are"])
+    proc = subprocess.run([sys.executable, str(_SCRIPTS / "bio_lane.py"), "terms",
+                           "--facts", str(facts), "--channel", "7",
+                           "--out", str(tmp_path)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    summary = json.loads(proc.stdout)
+    assert summary["no_terms"] == ["b2"]          # a fact that cannot be corroborated
+    assert summary["with_terms"] == 1
+    phrases = Path(summary["phrases_file"]).read_text()
+    assert "Lisbon | 3" in phrases
+    assert "bio-terms-r2.txt" in summary["phrases_file"]
+    recipe = " ".join(summary["recipe"])
+    assert "--round 2" in recipe and "--exclude" in recipe and "--generic-floor 0" in recipe
+    # without --append the round REPLACES classified.jsonl and round 1 is lost
+    assert "--append" in recipe
+
+
+def test_terms_refuses_round_one(tmp_path):
+    facts = _facts_file(tmp_path, ["runs a pottery studio in Lisbon"])
+    proc = subprocess.run([sys.executable, str(_SCRIPTS / "bio_lane.py"), "terms",
+                           "--facts", str(facts), "--channel", "7", "--round", "1",
+                           "--out", str(tmp_path)], capture_output=True, text=True)
+    assert proc.returncode == 2
+    assert "clears the corpus" in proc.stderr
+
+
+def test_the_generated_phrases_file_is_readable_by_the_retrieval_pass(tmp_path):
+    """The terms ride in on `--phrases`, the existing transport; the shared
+    cue-phrases file is never touched."""
+    facts = _facts_file(tmp_path, ["runs a pottery studio in Lisbon"])
+    proc = subprocess.run([sys.executable, str(_SCRIPTS / "bio_lane.py"), "terms",
+                           "--facts", str(facts), "--channel", "7",
+                           "--out", str(tmp_path)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    path = Path(json.loads(proc.stdout)["phrases_file"])
+    phrases, recurring, weights = fetch_cues.load_phrases(path)
+    assert "Lisbon" in phrases
+    assert weights["lisbon"] == 3.0
+
+
+# --------------------------------------------------------------------------- #
+# the extractor message
+# --------------------------------------------------------------------------- #
+def test_the_bio_lane_message_says_these_are_written_words():
+    windows = _bio_batch()
+    msg = extractor_prompt.render(windows, {"channel_name": "x"}, "RUBRIC", "EVIDENCE",
+                                  batch="000", lane="bio")
+    assert "CREATOR'S OWN WRITTEN BIO" in msg
+    assert "The rubric is applied UNCHANGED" in msg
+    assert '"lane": "bio"' in msg
+
+
+def test_the_transcript_lane_message_is_unchanged():
+    msg = extractor_prompt.render([], {"channel_name": "x"}, "RUBRIC", "EVIDENCE",
+                                  batch="000")
+    assert "CREATOR'S OWN WRITTEN BIO" not in msg
+
+
+def test_the_classifier_never_sees_the_bio_marks():
+    """`retrieval` and `bio_source` stay out of the rendered window, so an
+    extractor's return cannot forge the marks the assembly refuses on."""
+    windows = _bio_batch()
+    rows = extractor_prompt.slim(windows)
+    assert "retrieval" not in rows[0] and "bio_source" not in rows[0]

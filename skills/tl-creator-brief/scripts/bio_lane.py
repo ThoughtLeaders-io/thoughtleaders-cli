@@ -49,6 +49,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import assemble_extracts as _ax  # noqa: E402  sibling: the mechanical span cutter
+import fetch_cues as _fc  # noqa: E402  sibling: the retrieval pass's own query shapes
 import tier_hint  # noqa: E402  sibling: the same keyword tier hint transcripts get
 
 DOMAINS = _ax.DOMAINS
@@ -397,6 +398,141 @@ def cmd_facts(a: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# corroboration: the terms, the probe, and the round that runs them
+# --------------------------------------------------------------------------- #
+# Words that cannot narrow a search on one channel's own transcripts: pronouns
+# (every transcript matches), auxiliaries, and the nouns every creator says.
+TERM_STOP = {
+    "i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "he", "him", "his",
+    "she", "her", "hers", "they", "them", "their", "theirs", "it", "its", "you", "your",
+    "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "can", "could", "should", "may", "might",
+    "the", "a", "an", "and", "or", "but", "if", "then", "than", "as", "at", "by",
+    "for", "from", "in", "into", "of", "on", "to", "with", "about", "after", "before",
+    "since", "during", "while", "when", "where", "who", "that", "this", "these", "those",
+    "now", "still", "also", "very", "more", "most", "own", "same", "just", "back",
+    "channel", "channels", "video", "videos", "youtube", "content", "subscribers",
+    "people", "thing", "things", "time", "times", "year", "years", "day", "days",
+    "started", "starting", "started", "make", "makes", "making", "made", "get", "gets",
+    "like", "likes", "love", "loves", "really", "always", "never", "every",
+}
+_WORD_RX = re.compile(r"[A-Za-z][A-Za-z'’-]*")
+MAX_TERMS = 3
+MIN_TERM_LEN = 4
+
+
+def corroboration_terms(claim: str, *, limit: int = MAX_TERMS) -> list[str]:
+    """1 to ``limit`` search terms for one bio fact, derived from its claim.
+
+    What a corroboration query needs is the specific noun the creator would say
+    out loud: the place, the job, the diagnosis, the family word, the
+    milestone. Proper nouns first (they are the least ambiguous thing in a
+    claim), then adjacent content pairs — "pottery studio" finds the passage
+    "pottery" alone would bury — then the remaining content words, longest
+    first. Pronouns are excluded by construction: on a single channel's
+    transcripts they match everything. Personal identifiers are scrubbed before
+    any of this, because a query for a creator's email address is a different
+    lane's business and a worse idea.
+
+    A claim that yields nothing is reported, never guessed at: that fact simply
+    cannot be corroborated, so it stays unverified or is dropped."""
+    text = IDENTIFIER_RX.sub(" ", claim or "")
+    tokens = _WORD_RX.findall(text)
+    content_ix = [i for i, t in enumerate(tokens)
+                  if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN]
+    proper = [(0, -len(t), i, t) for i, t in enumerate(tokens)
+              if i in set(content_ix) and (t[:1].isupper() or t.isupper())]
+    pairs = [(1, -len(f"{tokens[i]} {tokens[i + 1]}"), i, f"{tokens[i]} {tokens[i + 1]}")
+             for i in content_ix if (i + 1) in content_ix]
+    singles = [(2, -len(tokens[i]), i, tokens[i]) for i in content_ix]
+    out: list[str] = []
+    for _, _, _, term in sorted(proper + pairs + singles):
+        low = term.lower()
+        if any(low == o.lower() or low in o.lower() for o in out):
+            continue
+        # a single word already covered by a chosen pair adds nothing
+        out.append(term)
+        if len(out) == limit:
+            break
+    return out
+
+
+def probe_body(channel: int | str, terms: list[str], *, size: int = 5) -> dict:
+    """One narrow ES body for a fact's terms, in the shape the retrieval pass
+    uses: the same ``doc_type``/``channel.id``/``exists: transcript`` filter and
+    the same apostrophe-variant expansion, so a probe that finds nothing means
+    the channel never said it — not that the query was spelled differently.
+
+    No year bucketing: a probe answers "is this anywhere in this channel", and
+    the round that follows is what actually fetches windows."""
+    should = [{"match_phrase": {"transcript": {"query": v}}}
+              for t in terms for v in _fc.phrase_variants(t)]
+    return {
+        "size": size,
+        "_source": ["id", "title", "publication_date"],
+        "query": {"bool": {
+            "filter": [
+                {"term": {"doc_type": "article"}},
+                {"term": {"channel.id": int(channel)}},
+                {"exists": {"field": "transcript"}},
+            ],
+            "must": [{"bool": {"should": should, "minimum_should_match": 1}}],
+        }},
+    }
+
+
+def cmd_terms(a: argparse.Namespace) -> int:
+    data = json.loads(pathlib.Path(a.facts).read_text(encoding="utf-8"))
+    records = data.get("facts") if isinstance(data, dict) else data
+    out = pathlib.Path(a.out) / str(a.channel) / "bio"
+    out.mkdir(parents=True, exist_ok=True)
+    per_fact, no_terms, all_terms = [], [], []
+    for rec in records or []:
+        terms = corroboration_terms(str(rec.get("claim") or ""))
+        entry = {"ref": rec.get("ref"), "claim": rec.get("claim"), "terms": terms,
+                 "sensitivity": rec.get("sensitivity")}
+        if not terms:
+            entry["note"] = "no term survives the stoplist: this fact cannot be corroborated"
+            no_terms.append(rec.get("ref"))
+        else:
+            entry["probe"] = probe_body(a.channel, terms)
+            all_terms.extend(t for t in terms if t not in all_terms)
+        per_fact.append(entry)
+    # A generated phrases file, not an edit to the cue list: `fetch_cues.py
+    # --phrases` is the existing way terms reach retrieval (`--host-terms` is
+    # read off window text and never queried), and references/cue-phrases.txt
+    # is a shared, hand-weighted file this lane has no business touching.
+    phrases_path = out / f"bio-terms-r{a.round}.txt"
+    phrases_path.write_text(
+        "# generated by bio_lane.py terms — corroboration round for this channel's\n"
+        "# bio facts. Weight 3 = a specific, durable fact about the person.\n"
+        + "".join(f"{t} | 3\n" for t in all_terms), encoding="utf-8")
+    corpus = f"{a.out}/{a.channel}"
+    recipe = [
+        f"python3 fetch_cues.py --channel {a.channel} --out {a.out} --round {a.round} "
+        f"--phrases {phrases_path} --exclude {corpus}/classified.jsonl --generic-floor 0",
+        "# then the usual extractor fan-out over batches-r"
+        f"{a.round}/, and:",
+        f"python3 assemble_extracts.py --batches {corpus}/batches-r{a.round} "
+        f"--returns {corpus}/returns-r{a.round} --out {corpus} --append",
+        "# --append is REQUIRED: without it the round replaces classified.jsonl "
+        "and round 1's ledger is lost.",
+    ]
+    summary = {"channel": a.channel, "round": a.round, "facts": len(per_fact),
+               "with_terms": len(per_fact) - len(no_terms), "no_terms": no_terms,
+               "terms": all_terms, "per_fact": per_fact,
+               "phrases_file": str(phrases_path), "recipe": recipe}
+    probe_path = out / "bio-probe.json"
+    probe_path.write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
+    summary["probe_file"] = str(probe_path)
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+    print(f"FUNNEL stage=bio_terms channel={a.channel} round={a.round} "
+          f"facts={len(per_fact)} with_terms={summary['with_terms']} "
+          f"terms={len(all_terms)}", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -419,11 +555,26 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--returns", required=True, help="batch-000.extract.json from the extractor")
     f.add_argument("--out", default=None, help="write the records here as well as stdout")
 
+    t = sub.add_parser("terms", help="corroboration terms, the probe, and the round recipe")
+    t.add_argument("--facts", required=True, help="bio-facts.json from `bio_lane.py facts`")
+    t.add_argument("--channel", required=True)
+    t.add_argument("--out", default="tl-creator-profiles/.corpus",
+                   help="the same PARENT directory the corpus uses")
+    t.add_argument("--round", type=int, default=2,
+                   help="the additive fetch_cues round this feeds; never 1, which "
+                        "would clear the existing corpus")
+
     a = ap.parse_args(argv)
     if a.cmd == "batch":
         return cmd_batch(a)
     if a.cmd == "facts":
         return cmd_facts(a)
+    if a.cmd == "terms":
+        if a.round < 2:
+            print("--round must be 2 or higher: round 1 clears the corpus this lane "
+                  "is trying to deepen", file=sys.stderr)
+            return 2
+        return cmd_terms(a)
     return 2
 
 
