@@ -297,6 +297,106 @@ def cmd_batch(a: argparse.ArgumentParser) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# the identity-lane records
+# --------------------------------------------------------------------------- #
+def facts_from_returns(windows: list[dict], returns: dict) -> tuple[list[dict], list[dict]]:
+    """``(facts, skipped)``. The classifier's gems become identity-lane records
+    the merge pass already knows how to hold — never transcript candidates.
+
+    Two things are deliberately NOT taken from the model: the words and the
+    tier. The excerpt is cut from the stored bio by ``extract_span``, the same
+    mechanical cutter that makes every transcript quote verbatim by
+    construction, so a model can never author text that renders as the
+    creator's own; and the sensitivity comes from ``tier_hint.tier_for``, the
+    same keyword hint the transcript assembly applies, because the extractor
+    does not tier and a bio fact that reached the ledger untiered would default
+    to ``none`` and publish a diagnosis."""
+    facts: list[dict] = []
+    skipped: list[dict] = []
+    seen: set[int] = set()
+    for v in returns.get("gems") or []:
+        i = v.get("i")
+        if not isinstance(i, int) or not (0 <= i < len(windows)):
+            skipped.append({"i": i, "reason": "index"})
+            continue
+        if i in seen:
+            skipped.append({"i": i, "reason": "duplicate index"})
+            continue
+        seen.add(i)
+        w = windows[i]
+        src = w.get("bio_source") or {}
+        if v.get("start") != w.get("start"):
+            skipped.append({"i": i, "reason": "start does not match the window"})
+            continue
+        if v.get("speaker_guess") not in SPEAKERS:
+            skipped.append({"i": i, "reason": "speaker"})
+            continue
+        if v.get("speaker_guess") not in ("host", "unclear"):
+            # a bio quoting someone else about the creator is not the creator
+            skipped.append({"i": i, "reason": f"voice {v.get('speaker_guess')}"})
+            continue
+        if v.get("life_domain") not in DOMAINS:
+            skipped.append({"i": i, "reason": "domain"})
+            continue
+        claim = str(v.get("claim") or "").strip()
+        if not claim:
+            skipped.append({"i": i, "reason": "no claim"})
+            continue
+        excerpt = _ax.extract_span(w.get("text") or "", v.get("quote_span"))
+        if excerpt is None:
+            skipped.append({"i": i, "reason": "span"})
+            continue
+        tier = v.get("sensitivity")
+        if tier is None:
+            tier = tier_hint.tier_for(claim, v.get("notable"), excerpt)
+            tier_source = "heuristic"
+        elif tier in _ax.SENSITIVITY:
+            tier_source = "extractor"
+        else:
+            # an unresolved tier never publishes: defaulting it to `none` is
+            # how a clinical fact reaches a page
+            skipped.append({"i": i, "reason": f"sensitivity {tier!r}"})
+            continue
+        if not str(src.get("url") or "").strip():
+            skipped.append({"i": i, "reason": "the window carries no bio source url"})
+            continue
+        facts.append({
+            "ref": f"b{len(facts) + 1}",
+            "provenance": "bio",
+            "claim": claim,
+            "domain": v.get("life_domain"),
+            "sensitivity": tier,
+            "sensitivity_source": tier_source,
+            "source_url": str(src.get("url")).strip(),
+            "seen_date": str(src.get("seen_date") or "").strip(),
+            "source_excerpt": excerpt,
+            "source_kind": src.get("kind"),
+            "corroborates": None,
+            "window_index": i,
+        })
+    return facts, skipped
+
+
+def cmd_facts(a: argparse.Namespace) -> int:
+    windows = json.loads(pathlib.Path(a.batch).read_text(encoding="utf-8"))
+    returns = json.loads(pathlib.Path(a.returns).read_text(encoding="utf-8"))
+    facts, skipped = facts_from_returns(windows, returns)
+    out = {"batch": str(a.batch), "returns": str(a.returns),
+           "windows": len(windows), "facts": facts, "skipped": skipped,
+           "counts": {"facts": len(facts), "skipped": len(skipped),
+                      "sensitive": sum(1 for f in facts if f["sensitivity"] in WITHHELD)}}
+    if a.out:
+        pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.out).write_text(json.dumps(out, indent=1, ensure_ascii=False),
+                                       encoding="utf-8")
+        out["facts_file"] = str(a.out)
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    print(f"FUNNEL stage=bio_facts windows={len(windows)} facts={len(facts)} "
+          f"skipped={len(skipped)}", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -314,9 +414,16 @@ def main(argv: list[str] | None = None) -> int:
                    help="PARENT directory; the run writes <out>/<channel>/bio/")
     b.add_argument("--seen-date", default=None)
 
+    f = sub.add_parser("facts", help="the classifier's returns as identity-lane records")
+    f.add_argument("--batch", required=True, help="the bio batch those returns judged")
+    f.add_argument("--returns", required=True, help="batch-000.extract.json from the extractor")
+    f.add_argument("--out", default=None, help="write the records here as well as stdout")
+
     a = ap.parse_args(argv)
     if a.cmd == "batch":
         return cmd_batch(a)
+    if a.cmd == "facts":
+        return cmd_facts(a)
     return 2
 
 
