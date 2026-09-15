@@ -108,7 +108,11 @@ def output(
         return
 
     if columns is None:
-        columns = _auto_columns(results)
+        # Only the terminal table is width-constrained. Machine-readable
+        # formats (csv/md/toon) must carry every column the query returned.
+        columns = _auto_columns(
+            results, limit=_TABLE_MAX_AUTO_COLUMNS if fmt == "table" else None
+        )
 
     column_types = data.get("column_types")
 
@@ -161,13 +165,22 @@ def output_single(data: dict, fmt: str) -> None:
     _print_breadcrumbs(breadcrumbs)
 
 
-def _auto_columns(results: list[dict]) -> list[str]:
-    """Pick columns from the first result, limiting to a reasonable set."""
+# Auto-detected columns shown in table mode; wider tables wrap and become
+# unreadable in a terminal. Never applied to csv/md/toon output.
+_TABLE_MAX_AUTO_COLUMNS = 8
+
+
+def _auto_columns(results: list[dict], limit: int | None = None) -> list[str]:
+    """Pick columns from the first result.
+
+    ``limit`` caps the count (table mode); ``None`` keeps every key.
+    """
     if not results:
         return []
     keys = list(results[0].keys())
-    # Show at most 8 columns in table mode to keep it readable
-    return keys[:8]
+    if limit is not None:
+        return keys[:limit]
+    return keys
 
 
 _NUMERIC_DATA_TYPES = {"number", "num_days", "currency"}
