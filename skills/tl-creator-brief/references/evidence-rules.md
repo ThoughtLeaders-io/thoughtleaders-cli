@@ -104,9 +104,43 @@ output:
 
 | Bucket | What puts it here |
 |---|---|
-| **Confirmed** | Solo-format pass, a host-anchored window, or a fact corroborated across lanes (a transcript mention AND the creator's own social profile) — cross-lane corroboration is the top tier. |
+| **Confirmed** | Solo-format pass, a host-anchored window, or a fact corroborated across lanes (a transcript mention AND the creator's own social profile or written bio) — cross-lane corroboration is the top tier. |
 | **Unconfirmed** | The classifier believes it is the host but no rule above settles it (e.g. weak-anchor material on an interview channel). Kept, and labelled. Never silently dropped, never silently promoted. |
 | **Dropped** | Speaker unclear on a shared-voice format, or ad-read-only. Counted in the profile's caveats, never shown as a fact. |
+
+## The bio lane — the creator's own written words
+
+The channel About box (and, when the socials lane is on, the profile bios it
+read and confirmed) is a **provenance of its own: `bio`**. It is the most
+explicit thing a creator ever says about themselves and the least verified —
+people write untrue, stale and aspirational things about themselves, and
+nobody edits an About box. So the lane treats it as a lead with a source, not
+as a fact:
+
+| A bio fact that is… | at tier | becomes |
+|---|---|---|
+| corroborated by a transcript fact | `none`, `lifestyle` | **`confirmed`**, both sides, and usable like any confirmed fact |
+| corroborated by a transcript fact | `clinical` | `confirmed`; the transcript side still answers to the repetition rule below, and the bio side is never `selected` |
+| corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual — the tier decides the page, not the confidence |
+| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)" |
+| **uncorroborated** | `clinical`, `children`, `location` | **dropped from the ledger entirely** |
+
+- **Only a transcript fact corroborates a bio fact.** A second written source
+  agreeing with the first is one source twice. A mention inside a staged
+  premise does not count either: that is a cap the transcript lane already
+  applied, and corroboration may not lift it from outside.
+- **A written-source excerpt is not a quote.** A `bio` fact carries
+  `source_excerpt` — the creator's own words, cut mechanically from the stored
+  bio text, never written by a model — plus `source_url` and `seen_date` where
+  a transcript fact carries `quote`, `video` and `start`. It publishes without
+  quote marks around a timestamp and without a watch link, because there is no
+  video behind it. The ban on `quote`/`video`/`start`/`url` on a non-transcript
+  fact stands.
+- **The About box is not a second, unfiltered channel to the page.** Once the
+  lane has run, the raw About text is no longer reprinted beside the ledger:
+  a claim the lane dropped must not arrive by the back door.
+- The ES `ai.description` profile is NOT a bio source. It describes the recent
+  catalogue, not the person, and it is not the creator's words.
 
 ## Quotes
 

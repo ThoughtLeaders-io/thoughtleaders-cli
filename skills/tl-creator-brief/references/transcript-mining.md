@@ -642,6 +642,50 @@ and would have cost another full fan-out.) Confirmed entities
 also feed CONNECT's connection probes and improve attribution (a fact tied to a
 known family name anchors the host).
 
+### The bio lane and its corroboration round
+
+The creator's own written bio is retrieved, filtered and judged separately
+(`scripts/bio_lane.py`; `SKILL.md` has the flow, `evidence-rules.md` has what a
+`bio` fact is worth). Two things about it belong here, because they are
+retrieval:
+
+**The bio batch is not a transcript batch.** Its windows carry no `video_id`
+and their `start` is a character offset into the written text, not a playback
+position. `assemble_extracts.py` refuses them outright: that path stamps every
+row `provenance: transcript` with the window's video and start, so an
+unguarded bio window would publish as a quote at a timestamp that does not
+exist. `bio_lane.py facts` mints identity-lane records from those returns
+instead.
+
+**Corroboration is this same additive round, not a new mechanism.** Terms come
+from the bio facts themselves, one to three per fact, and ride in on
+`--phrases` — `--host-terms` is read off window text and never queried, so it
+cannot carry them, and `references/cue-phrases.txt` is shared and hand-weighted
+and is never edited for one channel:
+
+```bash
+python3 <skill>/scripts/bio_lane.py terms --facts bio-facts.json \
+  --channel <id> --out <corpus-parent> --round 2      # writes bio-terms-r2.txt
+python3 <skill>/scripts/fetch_cues.py --channel <id> --out <corpus-parent> --round 2 \
+  --phrases <corpus>/<id>/bio/bio-terms-r2.txt \
+  --exclude <corpus>/<id>/classified.jsonl --generic-floor 0
+# …the usual fan-out over batches-r2/, then:
+python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/<id>/batches-r2 \
+  --returns <corpus>/<id>/returns-r2 --out <corpus>/<id> --append
+```
+
+`--generic-floor 0` keeps the round from filling its cap with first-person
+fallback passages that have nothing to do with the terms. `--append` is
+REQUIRED: without it the round REPLACES `classified.jsonl` and round 1's ledger
+is lost. `bio_lane.py terms` also writes `bio-probe.json`, one narrow ES body
+per fact (the retrieval filter shape, same apostrophe variants) for checking
+whether a term appears on the channel at all before paying for a round.
+
+Two known limits, neither worth a retrieval change on its own: the round's
+phrase list still picks up `EXTRA_GENERIC`, and all terms share one window
+budget, so a common term can eat coverage another fact needed. `terms` records
+the terms per fact so a starved fact is visible in the summary.
+
 ## The channel context brief
 
 The identity half runs **before the fetch**, with no corpus:

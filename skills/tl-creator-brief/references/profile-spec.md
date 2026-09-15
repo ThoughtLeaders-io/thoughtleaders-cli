@@ -67,9 +67,15 @@ by `scripts/ledger_meta.py write --from`:
 
 - `domain`: one of `origin`, `family`, `pets`, `home`, `work`, `money`,
   `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`.
-- `provenance`: `transcript` | `social` | `web`, per `evidence-rules.md` —
-  lanes never masquerade. `social`/`web` facts carry `source_url` and
-  `seen_date` instead of `quote`/`video`/`start`/`url`.
+- `provenance`: `transcript` | `social` | `web` | `bio`, per
+  `evidence-rules.md` — lanes never masquerade. `social`/`web`/`bio` facts
+  carry `source_url` and `seen_date` instead of
+  `quote`/`video`/`start`/`url`. A `bio` fact (the creator's own written
+  self-description) additionally carries `source_excerpt`, their own words cut
+  mechanically from the stored bio, and `corroborated_by` when a transcript
+  fact confirmed it. An uncorroborated `bio` fact carries
+  `unverified_bio: true`, is never `selected`, and at `clinical`, `children`
+  or `location` never reaches the ledger at all.
 - `quote`: verbatim, in the source language; exact-verified by
   `scripts/verify_quotes.py` before it lands here. A non-English quote may
   carry a `gloss` (English translation, labelled — never the quote itself).
@@ -354,8 +360,16 @@ bottom:
    the `selected` facts (up to 40, at most 8 per domain) as a readable run
    rather than a grid of domain-labelled subsections. Facts at tier
    `children` or `location` never enter this section, nor do `staged_only`
-   facts; `clinical` and `lifestyle` facts appear with their tier badge;
-   superseded facts stay in the ledger only.
+   facts, nor an uncorroborated `bio` fact; `clinical` and `lifestyle` facts
+   appear with their tier badge; superseded facts stay in the ledger only.
+   Once the bio lane has run, the raw About box is NOT reprinted here — the
+   block below is what the creator's own page contributes.
+2b. **In their own words (unverified)** — present only when the bio lane left
+   uncorroborated, non-sensitive facts. Each row is the claim, the creator's
+   own excerpt, and the page and date it was read: no quote marks around a
+   timestamp, no watch link, because nothing in the uploads confirms it. It is
+   labelled as a lead to check, never as a fact, and nothing in it may support
+   a connection card.
 3. **The thesis** — the markdown's `## Thesis` section, rendered as the
    page's lead block, above the brand. This is what the reader came for.
 4. **About the brand** — the markdown's `## About <brand>` section, as prose.
