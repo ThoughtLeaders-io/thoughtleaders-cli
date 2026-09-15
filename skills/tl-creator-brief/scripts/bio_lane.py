@@ -439,20 +439,35 @@ def corroboration_terms(claim: str, *, limit: int = MAX_TERMS) -> list[str]:
     cannot be corroborated, so it stays unverified or is dropped."""
     text = IDENTIFIER_RX.sub(" ", claim or "")
     tokens = _WORD_RX.findall(text)
-    content_ix = [i for i, t in enumerate(tokens)
-                  if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN]
-    proper = [(0, -len(t), i, t) for i, t in enumerate(tokens)
-              if i in set(content_ix) and (t[:1].isupper() or t.isupper())]
-    pairs = [(1, -len(f"{tokens[i]} {tokens[i + 1]}"), i, f"{tokens[i]} {tokens[i + 1]}")
-             for i in content_ix if (i + 1) in content_ix]
-    singles = [(2, -len(tokens[i]), i, tokens[i]) for i in content_ix]
+    content = {i for i, t in enumerate(tokens)
+               if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN}
+
+    def is_proper(i: int) -> bool:
+        return tokens[i][:1].isupper() or tokens[i].isupper()
+
+    # Ranked: a named phrase ("Cambridge University") beats the bare name,
+    # which beats an unnamed phrase, which beats a lone word. Longest first
+    # inside a class, then the order the claim wrote them, so the same claim
+    # always yields the same query.
+    cands: list[tuple[int, int, int, str]] = []
+    for i in sorted(content):
+        if (i + 1) in content:
+            pair = f"{tokens[i]} {tokens[i + 1]}"
+            cands.append((0 if (is_proper(i) or is_proper(i + 1)) else 2,
+                          -len(pair), i, pair))
+        cands.append((1 if is_proper(i) else 3, -len(tokens[i]), i, tokens[i]))
     out: list[str] = []
-    for _, _, _, term in sorted(proper + pairs + singles):
-        low = term.lower()
-        if any(low == o.lower() or low in o.lower() for o in out):
+    taken: set[str] = set()
+    for _, _, _, term in sorted(cands):
+        words = {w.lower() for w in term.split()}
+        # Anything whose every word is already searched adds nothing: on one
+        # channel's transcripts "Cambridge" already returns every passage
+        # "Cambridge University" could, so spending a second of three slots on
+        # it buys nothing while a different term goes unsearched.
+        if words <= taken:
             continue
-        # a single word already covered by a chosen pair adds nothing
         out.append(term)
+        taken |= words
         if len(out) == limit:
             break
     return out
