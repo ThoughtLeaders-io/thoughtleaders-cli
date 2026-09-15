@@ -591,7 +591,8 @@ class TestAutoColumnsWideResults:
         out = capsys.readouterr().out
         assert all(c in out for c in self.COLS)
 
-    def test_table_caps_auto_columns_at_eight(self, capsys):
+    def test_table_caps_auto_columns_at_eight(self, capsys, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "200")  # keep Rich from ellipsizing headers
         output(self._data(), "table")
         out = capsys.readouterr().out
         assert "col08" in out
