@@ -918,10 +918,11 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
                     if chips else "")
     intro, sections = split_sections(body_html)
 
-    # One deliverable, in the order the reader needs it: who this is, the
-    # argument, the evidence, then the brand, then the ranked angles, then the
-    # honest mismatch. The thesis and the quotes sit ABOVE the brand strip
-    # deliberately — the reader wants the case before the background.
+    # One deliverable, in the order the reader needs it: the argument first,
+    # then who this is, then the evidence, then the ranked angles, then the
+    # honest mismatch. The thesis leads the page deliberately, above both the
+    # creator strip and the brand strip: the reader wants the case before any
+    # background.
     creator_about, brand_about, thesis, caveats, conns = [], [], [], [], []
     for sec in sections:
         if is_thesis(sec[0]):
@@ -946,8 +947,8 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
         thin_banner = ('<div class="thinfit"><strong>Thin fit.</strong> The ledger '
                        'connects to this brand weakly: the angles below are the '
                        'honest ones, and each names what to confirm first.</div>')
-    body_out = (who
-                + thesis_block(thesis)
+    body_out = (thesis_block(thesis)
+                + who
                 + about_block(brand_about)
                 + ("<h2>Connections</h2>" if conns or intro else "")
                 + thin_banner

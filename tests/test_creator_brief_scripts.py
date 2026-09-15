@@ -503,17 +503,18 @@ def _check_conn(tmp_path: Path, md: str, name: str = "42-7-connections.md"):
     return proc.returncode, json.loads(proc.stdout)
 
 
-def test_the_page_puts_the_thesis_above_the_brand(tmp_path):
+def test_the_page_leads_with_the_thesis_above_the_creator_and_the_brand(tmp_path):
     html = _render_conn(tmp_path, _FULL_MD)
-    # the reader wants the argument before the background
-    order = [html.index(x) for x in ('<h2>Who they are</h2>',
-                                     '<h2>The thesis</h2>',
+    # the reader wants the argument before any background, the creator's included
+    order = [html.index(x) for x in ('<h2>The thesis</h2>',
+                                     '<h2>Who they are</h2>',
                                      '<div class="about"><h3>About Acme</h3>',
                                      '<h2>Connections</h2>')]
     assert order == sorted(order)
     assert "already lives the thing Acme sells" in html
     # the creator introduction is prose inside "Who they are", not a card
-    assert "posting since 2019" in html.split('<h2>The thesis</h2>')[0]
+    who = html.split('<h2>Who they are</h2>')[1].split('<div class="about"><h3>About Acme</h3>')[0]
+    assert "posting since 2019" in who
     conn = html.split("<h2>Connections</h2>")[1]
     assert "About Patterrz" not in conn
 
@@ -525,10 +526,10 @@ def test_each_quote_appears_once_inside_its_own_card(tmp_path):
     html = _render_conn(tmp_path, _FULL_MD)
     assert "In their own words" not in html
     assert 'class="bridges"' not in html
-    # nothing repeats a card's quote above the brand any more
-    above_brand = html.split('<div class="about"><h3>About Acme</h3>')[0]
-    assert "we finally adopted luna" not in above_brand.split(
-        '<h2>The thesis</h2>')[1]
+    # nothing repeats a card's quote between the thesis and the creator strip
+    # any more (the strip itself cites the fact once, as its evidence)
+    thesis = html.split('<h2>The thesis</h2>')[1].split('<h2>Who they are</h2>')[0]
+    assert "we finally adopted luna" not in thesis
     # the quote still renders, once, inside its own card, with its link
     cards = html.split('<h2>Connections</h2>')[1]
     assert cards.count("we finally adopted luna") == 1
