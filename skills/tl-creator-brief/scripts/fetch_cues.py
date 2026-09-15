@@ -14,7 +14,13 @@ self-naming is the host and a third-person naming is a second voice. When
 the phrases leave the window cap short, a SECOND pass over the bare
 first-person markers (``GENERIC_TERMS``) fills what is left, and only what
 is left: a phrase window always outranks a fallback window
-(``--generic-floor``). The cap is taken on the narrow highlight fragment;
+(``--generic-floor``). The cap is a ceiling, not a target: the selection
+takes every window at or above ``--min-score``, fills down to
+``--min-windows`` when that is short, and stops there rather than spending
+the rest of the cap on a tie of one-cue windows. One passage takes one seat:
+a window that repeats a kept passage from another upload (the same segment
+re-cut into a retitled video) is collapsed into it and counted on its
+``recurrence_videos``. The cap is taken on the narrow highlight fragment;
 each kept window is then re-read wider from its transcript
 (``widen_windows``, ``--read-before`` / ``--read-after``), so the ranking
 stays sharp and the extractor still sees the sentences before the cue.
@@ -24,6 +30,7 @@ Usage:
                   [--max-windows 500] [--batch-size N] [--reserve N]
                   [--generic-floor N] [--fragment-size 450] [--round N]
                   [--read-before 20] [--read-after 10]
+                  [--min-score 2.5] [--min-windows 150]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
@@ -43,6 +50,7 @@ import concurrent.futures as cf
 import gzip
 import html
 import json
+import math
 import os
 import pathlib
 import re
@@ -144,6 +152,28 @@ PHRASE_CAP_SHARE = 0.08         # no single phrase supplies more than this share
 PHRASE_WEIGHT_DEFAULT = 1.0
 WEAK_WEIGHT = 0.5
 RANK_CAP = 6.0                  # two top-weight cues saturate a window's cue score
+# The cap is a ceiling, not a target. Alexa Rivera (35765, 2026-09-14): of
+# 1,396 candidate passages, 122 scored 2.5 or better (more than one personal
+# signal in the window), then 303 sat tied at exactly one weight-2 cue and
+# 970 below that. Filling the default 300 spent 179 seats inside that tie,
+# which the rank can only break by publish year; from seat 151 on, every
+# kept window was single-cue. So the selection takes everything at or above
+# MIN_SCORE, fills down to MIN_WINDOWS when a thin channel leaves that
+# short, and stops. --max-windows still bounds a channel with more strong
+# windows than one round can extract.
+MIN_SCORE = 2.5
+MIN_WINDOWS = 150
+# One passage, one seat. A creator re-cuts a segment into a retitled upload
+# and the highlighter returns it once per video, at full score each time:
+# Alexa Rivera's four 6.0 windows were two pairs, and her top 14 held about
+# five distinct anecdotes. Two windows from different videos are the same
+# passage when more than DUP_SHARE of the shorter one's DUP_SHINGLE_WORDS-
+# word runs appear in the other (never fewer than DUP_MIN_SHINGLES, so a
+# shared greeting alone does not match). The first-kept copy stays, the
+# later ones fold into its ``recurrence_videos``.
+DUP_SHINGLE_WORDS = 8
+DUP_SHARE = 0.5
+DUP_MIN_SHINGLES = 3
 WEAK_CUES = {"i love", "i hate", "i think that", "my life", "my own", "i always", "i never",
              "personally i", "my favorite", "my favourite", "i believe", "i want", "i play",
              "i watch", "i read", "i listen to", "i can't stand", "my story", "my journey",
@@ -733,11 +763,61 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
     return "transcript", widened
 
 
+def _shingles(text: str) -> set[str]:
+    """The DUP_SHINGLE_WORDS-word runs of ``text``, lowercased, punctuation
+    dropped; a text shorter than one run is one shingle of itself."""
+    words = re.sub(r"[^a-z0-9 ]", " ", text.lower()).split()
+    n = DUP_SHINGLE_WORDS
+    return {" ".join(words[i:i + n]) for i in range(max(1, len(words) - n + 1))}
+
+
+def new_dup_index() -> dict:
+    """Shared across the selection passes, like the per-video tally: which
+    kept window owns each shingle, how many shingles each owner has, and how
+    many windows were folded away."""
+    return {"index": {}, "owners": {}, "sizes": {}, "collapsed": 0}
+
+
+def same_passage(w: dict, dupes: dict) -> dict | None:
+    """The kept window from ANOTHER video that ``w`` repeats, or ``None``.
+    Same-video repeats are already dropped at 30 s by the fetch."""
+    sh = _shingles(w["text"])
+    hits: dict[int, int] = {}
+    for s in sh:
+        o = dupes["index"].get(s)
+        if o is not None and o["id"] != w["id"]:
+            hits[id(o)] = hits.get(id(o), 0) + 1
+    if not hits:
+        return None
+    key = max(hits, key=hits.get)
+    shorter = min(len(sh), dupes["sizes"][key])
+    need = max(DUP_MIN_SHINGLES, math.ceil(DUP_SHARE * shorter))
+    return dupes["owners"][key] if hits[key] >= need else None
+
+
+def _register_passage(w: dict, dupes: dict) -> None:
+    sh = _shingles(w["text"])
+    dupes["owners"][id(w)] = w
+    dupes["sizes"][id(w)] = len(sh)
+    for s in sh:
+        dupes["index"].setdefault(s, w)
+
+
 def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int],
-                   per_phrase: dict[str, int], per_video_cap: int, phrase_cap: int) -> list[dict]:
+                   per_phrase: dict[str, int], per_video_cap: int, phrase_cap: int,
+                   min_score: float | None = None, min_count: int = 0,
+                   dupes: dict | None = None, stats: dict | None = None) -> list[dict]:
     """Take up to ``limit`` windows by rank, under the per-video, per-phrase and
     recurring-bit ceilings. ``per_video`` and ``per_phrase`` are shared tallies,
     so the fallback pass keeps honouring what the phrase pass already took.
+
+    The cap is a ceiling: with ``min_score`` set, the pass stops at the first
+    window below it once ``min_count`` are kept, instead of filling ``limit``
+    from the tie beneath the floor. With ``dupes`` (``new_dup_index()``,
+    shared across passes) a window that repeats a kept passage from another
+    video is folded into that passage's ``recurrence_videos`` and skipped;
+    the skipped window says ``duplicate_of``. ``stats`` receives
+    ``stop_reason``: ``cap``, ``score_floor`` or ``exhausted``.
 
     Ties are spread across the channel's history: within the same score, one
     passage per year in turn instead of newest-first, so a profile spans the
@@ -766,16 +846,36 @@ def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int]
         return True
 
     kept: list[dict] = []
+    stop = "exhausted"
     for _, _, i in order:
         if len(kept) >= limit:
+            stop = "cap"
             break
         w = windows[i]
+        if min_score is not None and len(kept) >= min_count and w["rank_score"] < min_score:
+            stop = "score_floor"
+            break
         if not eligible(w):
             continue
+        if dupes is not None:
+            owner = same_passage(w, dupes)
+            if owner is not None:
+                vids = owner.setdefault("_dup_videos", set())
+                vids.add(w["id"])
+                owner["recurrence_videos"] = len(vids)
+                w["duplicate_of"] = f'{owner["id"]}@{owner["start"]}'
+                dupes["collapsed"] += 1
+                continue
         for c in (w["_specific"] or w["_recurring"]) + w["_recurring"]:
             per_phrase[c] = per_phrase.get(c, 0) + 1
         per_video[w["id"]] = per_video.get(w["id"], 0) + 1
         kept.append(w)
+        if dupes is not None:
+            _register_passage(w, dupes)
+    if len(kept) >= limit:
+        stop = "cap"
+    if stats is not None:
+        stats["stop_reason"] = stop
     return kept
 
 
@@ -843,6 +943,14 @@ def main() -> int:
                          "(rank narrow, read wide); 0 with --read-after 0 = off")
     ap.add_argument("--read-after", type=float, default=READ_AFTER_S,
                     help="...to this many seconds after its last cue")
+    ap.add_argument("--min-score", type=float, default=MIN_SCORE,
+                    help="the selection stops at the first window below this score once "
+                         "--min-windows are kept, instead of filling --max-windows from "
+                         "the one-cue tie beneath it; 2.5 is one strong cue plus another "
+                         "signal in the same window")
+    ap.add_argument("--min-windows", type=int, default=MIN_WINDOWS,
+                    help="keep at least this many windows before --min-score may stop the "
+                         "pass, so a thin channel still gets coverage")
     ap.add_argument("--per-video-cap", type=int, default=8)
     ap.add_argument("--page-size", type=int, default=150)
     ap.add_argument("--concurrency", type=int, default=4)
@@ -962,8 +1070,12 @@ def main() -> int:
     per_video: dict[str, int] = {}
     per_phrase: dict[str, int] = {}
     phrase_cap = max(RECURRING_CAP, int(a.max_windows * PHRASE_CAP_SHARE))
+    dupes = new_dup_index()
+    selection: dict = {}
     kept = select_windows(windows, a.max_windows, per_video=per_video, per_phrase=per_phrase,
-                          per_video_cap=a.per_video_cap, phrase_cap=phrase_cap)
+                          per_video_cap=a.per_video_cap, phrase_cap=phrase_cap,
+                          min_score=a.min_score, min_count=a.min_windows,
+                          dupes=dupes, stats=selection)
     phrase_kept = len(kept)
     phrase_videos = len(corpus)
 
@@ -971,18 +1083,26 @@ def main() -> int:
     # for the shortfall. A fallback window never displaces a phrase window,
     # however low that phrase window scored, and never repeats a passage within
     # 30 s of one the phrase pass produced.
+    # A phrase pass that stopped on the score floor did not run short: it
+    # chose to stop, and the fallback's bare markers score below any floor.
+    # So by default it runs only when the phrases were exhausted; an explicit
+    # --generic-floor still fills to that number.
     floor = a.max_windows if a.generic_floor is None else a.generic_floor
     fallback = {"ran": False, "floor": floor, "terms": list(GENERIC_TERMS),
-                "videos_added": 0, "passages": 0, "windows_kept": 0}
+                "videos_added": 0, "passages": 0, "windows_kept": 0,
+                "phrase_stop": selection.get("stop_reason")}
     generic_windows: list[dict] = []
-    if floor > 0 and len(kept) < floor:
+    stopped_on_floor = (a.generic_floor is None
+                        and selection.get("stop_reason") == "score_floor")
+    if floor > 0 and len(kept) < floor and not stopped_on_floor:
         gdocs = fetch_all_years(a.channel, GENERIC_TERMS, a, since)
         generic_windows = build_windows(gdocs, corpus=corpus, done=done, seen=seen,
                                         host_lc=host_lc, recurring=recurring,
                                         retrieval="generic")
         gkept = select_windows(generic_windows, a.max_windows - len(kept),
                                per_video=per_video, per_phrase=per_phrase,
-                               per_video_cap=a.per_video_cap, phrase_cap=phrase_cap)
+                               per_video_cap=a.per_video_cap, phrase_cap=phrase_cap,
+                               dupes=dupes)
         kept.extend(gkept)
         fallback.update(ran=True, videos_added=len(corpus) - phrase_videos,
                         passages=len(generic_windows), windows_kept=len(gkept))
@@ -1009,6 +1129,7 @@ def main() -> int:
         w.pop("_recurring", None)
         w.pop("_weights", None)
         w.pop("_span", None)
+        w.pop("_dup_videos", None)
     sponsor_source = apply_sponsor_spans(kept)
     third_person_windows = sum(1 for w in kept if w.get("host_named_third_person"))
     self_named_windows = sum(1 for w in kept if w.get("host_anchor"))
@@ -1080,6 +1201,10 @@ def main() -> int:
         "videos_matched": len(corpus), "passages": len(windows),
         "windows_batched": len(kept), "videos_in_batches": len(per_video),
         "phrase_windows_kept": phrase_kept, "generic_fallback": fallback,
+        "selection": {"min_score": a.min_score, "min_windows": a.min_windows,
+                      "max_windows": a.max_windows,
+                      "stop_reason": selection.get("stop_reason"),
+                      "duplicates_collapsed": dupes["collapsed"]},
         "fragment_size": a.fragment_size,
         "batch_size": batch_size, "agent_cap": agent_cap,
         "reserved_slots": max(0, a.reserve), "usable_cap": usable_cap,
@@ -1109,6 +1234,8 @@ def main() -> int:
           f"videos_matched={len(corpus)} non_english_sampled={len(non_en_docs)} "
           f"dubbed_excluded={sum(dubbed_excluded.values())} passages={len(windows)} "
           f"windows_capped={len(kept)} phrase_windows={phrase_kept} "
+          f"stop_reason={selection.get('stop_reason')} "
+          f"duplicates_collapsed={dupes['collapsed']} "
           f"generic_fallback={'ran' if fallback['ran'] else ('off' if floor <= 0 else 'skipped')} "
           f"generic_windows={fallback['windows_kept']} "
           f"batches={len(batches)} batch_size={batch_size} "

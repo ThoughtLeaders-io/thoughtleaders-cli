@@ -443,7 +443,8 @@ scripts costs more than the scripts.
 ## Fast run
 
 A run shape, not a flag: PROFILE only, the primary channel only, socials OFF
-without asking, the default 300-window cap, one extraction round.
+without asking, the default selection (every window above the 2.5 score
+floor, at least 150, at most 300), one extraction round.
 
 ## CONNECT pipeline
 

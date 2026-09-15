@@ -80,6 +80,34 @@ naming. Putting the names in the query cut fragments around a bare name that
 carried no cue and no disclosure (Airrack 2026-09-10: 118 of 300 kept
 windows stood on the name alone), so they no longer join it.
 
+**The cap is a ceiling, not a target.** Alexa Rivera (35765, 2026-09-14):
+of 1,396 candidate passages, 122 scored 2.5 or better, meaning more than one
+personal signal in the window. Then a cliff: 303 tied at exactly one
+weight-2 cue ("my mom" and nothing else), and 970 below that. Filling the
+default 300 spent 179 seats inside that tie, which the rank can only break
+by publish year, and from seat 151 on every kept window was single-cue. So
+the selection takes every window at or above `--min-score` (2.5), fills
+down to `--min-windows` (150) when a thin channel leaves that short, and
+stops. `--max-windows` still bounds a channel with more strong windows than
+one round can extract. The summary's `selection.stop_reason` says which
+rule ended the pass: `score_floor`, `cap`, or `exhausted` (the pool ran
+out). A pass that stopped on the floor did not run short, so the generic
+fallback does not treat it as a shortfall; an explicit `--generic-floor`
+still fills to that number.
+
+**One passage, one seat.** A creator re-cuts a segment into a retitled
+upload and the highlighter returns it once per video, at full score each
+time: Alexa Rivera's four 6.0 windows were two pairs, and her top 14 held
+about five distinct anecdotes. Two windows from different videos are the
+same passage when more than half of the shorter one's eight-word runs appear
+in the other (never fewer than three, so a shared greeting alone does not
+match). The first-kept copy stays and its `recurrence_videos` counts the
+uploads it recurs in, which the extractor reads as "said more than once";
+the folded copies stay in `windows.jsonl.gz` with `duplicate_of` pointing at
+the seat they lost to. Repeats inside one video are not this: the fetch
+already drops a repeat within 30 s, and a creator repeating herself five
+minutes later is two passages.
+
 **Flags:**
 
 | flag | default | what it does |
@@ -89,7 +117,8 @@ windows stood on the name alone), so they no longer join it.
 | `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
-| `--max-windows` | 300 | the cap on what reaches the model layer in one round; fewer, more personal windows beat more, thinner ones |
+| `--max-windows` | 300 | the ceiling on what reaches the model layer in one round; the selection usually stops earlier, at `--min-score` |
+| `--min-score` / `--min-windows` | 2.5 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the one-cue tie beneath it; 2.5 is one strong cue plus another signal in the same window |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
 | `--fragment-size` / `--fragments-per-doc` | 450 / 10 | RANKING width in raw characters (about half is markup, so 450 is about 30 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
@@ -160,8 +189,9 @@ cue, and the coverage header should not count them as phrase evidence. `passages
 round — carry it into the profile's coverage header, because "absence is not
 evidence" needs it.
 
-**A second round is additive, never a re-run.** One round is the 300-window
-cap spread over every agent the host runs at once. To go deeper —
+**A second round is additive, never a re-run.** One round is what the
+selection keeps (every window above the score floor, at least 150, at most
+the 300 cap) spread over every agent the host runs at once. To go deeper —
 or to use host terms the socials lane turned up after the fetch — run
 `fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
 are skipped, so the new batches are new material and the ledger grows instead

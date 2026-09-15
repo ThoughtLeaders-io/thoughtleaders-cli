@@ -13,6 +13,7 @@ lookup is stubbed too.
 """
 
 import gzip
+import itertools
 import json
 import pathlib
 import sys
@@ -344,7 +345,16 @@ def test_sample_windows_drops_a_too_short_trailing_run():
 # --------------------------------------------------------------------------- #
 # main(): the cap, and everything a run leaves behind
 # --------------------------------------------------------------------------- #
-def _frag(cue: str, start: int, filler: str = "and that is the whole story") -> str:
+_FILLER_N = itertools.count(1)
+
+
+def _frag(cue: str, start: int, filler: str | None = None) -> str:
+    """A cue-phrase fragment. The default filler is different on every call,
+    because two windows from different videos that share most of their words
+    ARE the same passage to the selection (``same_passage``) and fold into
+    one; a test that wants that folding passes the same ``filler`` twice."""
+    if filler is None:
+        filler = f"and that is story number {next(_FILLER_N)} of the whole tale"
     return (f'<text start="{start}"><em>{cue}</em> {filler} '
             f'about the year it happened</text>')
 
@@ -804,9 +814,11 @@ def test_reserve_leaves_room_for_lanes_running_beside_the_fan_out():
 # the generic fallback: a second pass, report-level, fills only the shortfall
 # --------------------------------------------------------------------------- #
 def _pronoun_frag(start: int, hits: int = 1) -> str:
-    """A fallback-pass fragment: bare first-person hits, no cue phrase."""
+    """A fallback-pass fragment: bare first-person hits, no cue phrase. Like
+    ``_frag``, its words differ on every call so no two are one passage."""
     ems = " ".join("<em>i</em> <em>my</em>" for _ in range(hits))
-    return f'<text start="{start}">{ems} was up all night and the day after that too</text>'
+    return (f'<text start="{start}">{ems} was up all night number {next(_FILLER_N)} '
+            f'and the day after that too</text>')
 
 
 def test_generic_fallback_is_skipped_when_the_phrases_fill_the_cap(tmp_path, monkeypatch):
@@ -953,6 +965,126 @@ def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeyp
     summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
     assert summary["fragment_size"] == 450
     assert summary["generic_fallback"]["floor"] == 300
+    assert summary["selection"] == {"min_score": 2.5, "min_windows": 150, "max_windows": 300,
+                                    "stop_reason": "exhausted", "duplicates_collapsed": 0}
+
+
+# --------------------------------------------------------------------------- #
+# the cap is a ceiling, not a target (Alexa Rivera 35765, 2026-09-14: 122 of
+# 1,396 passages scored 2.5+, then 303 tied at one weight-2 cue; the default
+# 300 spent 179 seats inside that tie)
+# --------------------------------------------------------------------------- #
+_WEIGHTED = "i was born | 3\nmy dad | 2\n"
+
+
+def _floor_docs():
+    strong = [_doc(f"7:s{i}", [_frag("i was born", 100)]) for i in range(4)]     # 3.0 each
+    weak = [_doc(f"7:w{i}", [_frag("my dad", 100)]) for i in range(6)]           # 2.0 each
+    return strong + weak
+
+
+def test_the_selection_stops_at_the_score_floor_once_the_minimum_is_kept(tmp_path, monkeypatch):
+    summary, kept = _run(tmp_path, monkeypatch, _floor_docs(), phrases=_WEIGHTED,
+                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "2.5"),
+                         generic_docs=[_doc("7:g1", [_pronoun_frag(100)])])
+    # four windows clear the floor; one more fills the minimum; the other
+    # five weak ones stay behind even though the cap of 50 has room
+    assert [w["rank_score"] for w in kept] == [3.0, 3.0, 3.0, 3.0, 2.0]
+    assert summary["selection"]["stop_reason"] == "score_floor"
+    assert summary["windows_batched"] == 5 and summary["passages"] == 10
+    # and the fallback does not treat that stop as a shortfall to fill
+    assert summary["generic_fallback"]["ran"] is False
+    assert summary["generic_fallback"]["phrase_stop"] == "score_floor"
+    assert "stop_reason=score_floor" in _run.last_funnel
+    assert "generic_fallback=skipped" in _run.last_funnel
+
+
+def test_an_explicit_generic_floor_still_fills_past_a_score_floor_stop(tmp_path, monkeypatch):
+    generic = [_doc(f"7:g{i}", [_pronoun_frag(100)]) for i in range(3)]
+    summary, kept = _run(tmp_path, monkeypatch, _floor_docs(), phrases=_WEIGHTED,
+                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "2.5",
+                               "--generic-floor", "7"),
+                         generic_docs=generic)
+    assert summary["generic_fallback"]["ran"] is True
+    # and, as ever, the fallback fills toward the cap, not just to the floor
+    assert [w["retrieval"] for w in kept] == ["phrase"] * 5 + ["generic"] * 3
+
+
+def test_the_minimum_is_kept_even_when_every_window_is_below_the_floor(tmp_path, monkeypatch):
+    weak = [_doc(f"7:w{i}", [_frag("my dad", 100)]) for i in range(6)]
+    summary, kept = _run(tmp_path, monkeypatch, weak, phrases=_WEIGHTED,
+                         argv=("--max-windows", "50", "--min-windows", "4", "--min-score", "2.5"))
+    assert len(kept) == 4 and summary["selection"]["stop_reason"] == "score_floor"
+
+
+def test_stop_reason_is_cap_when_the_ceiling_binds_and_exhausted_when_the_pool_ends(
+        tmp_path, monkeypatch):
+    docs = [_doc(f"7:v{i}", [_frag("i grew up", 100)]) for i in range(3)]
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "2"))
+    assert len(kept) == 2 and summary["selection"]["stop_reason"] == "cap"
+    # three windows at 1.0, all below the default floor, but far under the
+    # default minimum of 150: every one is kept and the fallback runs as before
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "5"),
+                         generic_docs=[_doc("7:g1", [_pronoun_frag(100)])])
+    assert len(kept) == 4 and summary["selection"]["stop_reason"] == "exhausted"
+    assert summary["generic_fallback"]["ran"] is True
+
+
+# --------------------------------------------------------------------------- #
+# one passage, one seat: a segment re-cut into a retitled upload comes back
+# once per video at full score (Alexa Rivera: four 6.0 windows were two pairs)
+# --------------------------------------------------------------------------- #
+def test_a_passage_repeated_in_another_upload_takes_one_seat(tmp_path, monkeypatch):
+    same = "and my brother and i would wakeboard at the lake every single summer"
+    docs = [_doc("7:v1", [_frag("i grew up", 100, same)], date="2021-06-01"),
+            _doc("7:v2", [_frag("i grew up", 340, same)], date="2023-06-01"),
+            _doc("7:v3", [_frag("i grew up", 90, same)], date="2024-06-01")]
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "10"))
+    assert len(kept) == 1
+    assert kept[0]["id"] == "7:v1"                       # the earliest copy stays
+    assert kept[0]["recurrence_videos"] == 2             # and says how often it recurs
+    assert "_dup_videos" not in kept[0]
+    assert summary["selection"]["duplicates_collapsed"] == 2
+    assert summary["passages"] == 3                      # the copies are still recorded
+    assert "duplicates_collapsed=2" in _run.last_funnel
+    with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
+        rows = {json.loads(line)["id"]: json.loads(line) for line in f}
+    assert rows["7:v2"]["duplicate_of"] == "7:v1@100"
+    assert rows["7:v3"]["duplicate_of"] == "7:v1@100"
+    assert "duplicate_of" not in rows["7:v1"]
+
+
+def test_a_shared_greeting_alone_is_not_the_same_passage(tmp_path, monkeypatch):
+    # both open the same way; the disclosure that follows is different, so
+    # they are two passages and both keep their seat
+    a = "hey guys welcome back to the channel today i moved across the country alone"
+    b = "hey guys welcome back to the channel today my mom said i would end up on stage"
+    docs = [_doc("7:v1", [_frag("i grew up", 100, a)]), _doc("7:v2", [_frag("i grew up", 100, b)])]
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "10"))
+    assert len(kept) == 2 and summary["selection"]["duplicates_collapsed"] == 0
+    assert all(w["recurrence_videos"] == 0 for w in kept)
+
+
+def test_the_same_video_repeating_itself_is_not_a_cross_upload_duplicate(tmp_path, monkeypatch):
+    # within one video the fetch already drops a repeat within 30 s; two
+    # copies 5 minutes apart are the creator repeating herself, kept both
+    same = "and my brother and i would wakeboard at the lake every single summer"
+    docs = [_doc("7:v1", [_frag("i grew up", 100, same), _frag("i grew up", 400, same)])]
+    summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "10"))
+    assert len(kept) == 2 and summary["selection"]["duplicates_collapsed"] == 0
+
+
+def test_same_passage_needs_more_than_half_the_shorter_window():
+    dupes = fetch_cues.new_dup_index()
+    owner = {"id": "7:v1", "start": 10,
+             "text": "one two three four five six seven eight nine ten eleven twelve"}
+    fetch_cues._register_passage(owner, dupes)
+    whole = dict(owner, id="7:v2")
+    assert fetch_cues.same_passage(whole, dupes) is owner
+    half = {"id": "7:v2", "text": "one two three four five six seven eight nine and then"
+                                  " something else entirely happened after that"}
+    assert fetch_cues.same_passage(half, dupes) is None
+    assert fetch_cues.same_passage(dict(owner), dupes) is None    # same video: not a duplicate
 
 
 # --------------------------------------------------------------------------- #
