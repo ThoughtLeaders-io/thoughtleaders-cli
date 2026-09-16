@@ -96,12 +96,8 @@ def load_labels(path: pathlib.Path) -> dict[str, int]:
 
 
 def density(text: str) -> int:
-    """First-person marker hits in the window, the fallback pass's own score."""
-    low = f" {text.lower()} "
-    n = 0
-    for term in fc.GENERIC_TERMS:
-        n += low.count(f" {term} ")
-    return min(n, fc.GENERIC_DENSITY_CAP)
+    """First-person marker hits in the window, fetch_cues.py's own count."""
+    return fc.first_person_density(text)
 
 
 def featurize(rows: list[dict], phrases: list[str], extra: list[str]) -> None:
@@ -163,14 +159,16 @@ def bands(coefs: dict[str, float]) -> dict[str, float]:
 def rank_score(w: dict, weights: dict[str, float], recurring: set[str],
                fired: set[str] | None = None) -> float:
     """fetch_cues.py's own formula, recomputed offline over a weight table."""
+    density_term = fc.DENSITY_WEIGHT * w["density"]
     if w.get("retrieval") == "generic":
-        return round(fc.GENERIC_BOOST * w["density"]
+        return round(density_term
                      + fc.SELF_NAME_BONUS * (1 if w.get("host_anchor") else 0), 2)
     cues = fired if fired is not None else {c.lower() for c in (w.get("cues_fired") or [])}
     live = [c for c in cues if weights.get(c, 0.0) > 0]
     specific = [c for c in live if c not in recurring]
     rec = [c for c in live if c in recurring]
-    return round(min(sum(weights.get(c, 0.0) for c in specific), fc.RANK_CAP)
+    return round(density_term
+                 + min(sum(weights.get(c, 0.0) for c in specific), fc.RANK_CAP)
                  + 0.5 * min(len(rec), 1)
                  + fc.SELF_NAME_BONUS * (1 if w.get("host_anchor") else 0), 2)
 
@@ -246,8 +244,8 @@ def main() -> int:
     phrases = [p.lower() for p in phrases]
     extra = []
     if a.extra_phrases:
-        extra = [l.strip().lower() for l in open(a.extra_phrases) if l.strip()
-                 and not l.startswith("#") and l.strip().lower() not in phrases]
+        extra = [ln.strip().lower() for ln in open(a.extra_phrases) if ln.strip()
+                 and not ln.startswith("#") and ln.strip().lower() not in phrases]
     all_phrases = phrases + extra
 
     rows = load_windows(pathlib.Path(a.windows))

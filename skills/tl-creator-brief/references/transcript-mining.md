@@ -86,7 +86,7 @@ personal signal in the window. Then a cliff: 303 tied at exactly one
 weight-2 cue ("my mom" and nothing else), and 970 below that. Filling the
 default 300 spent 179 seats inside that tie, which the rank can only break
 by publish year, and from seat 151 on every kept window was single-cue. So
-the selection takes every window at or above `--min-score` (2.5), fills
+the selection takes every window at or above `--min-score` (8.0), fills
 down to `--min-windows` (150) when a thin channel leaves that short, and
 stops. `--max-windows` still bounds a channel with more strong windows than
 one round can extract. The summary's `selection.stop_reason` says which
@@ -115,10 +115,11 @@ minutes later is two passages.
 | `--channel` | required | internal TL channel id, from `tl channels find` |
 | `--host-terms` | none | comma-separated names/companies, read off the window text (never queried): a self-naming ("it's Eric") is `host_anchor` and scores like one cue; a third-person naming ("with Eric") scores nothing and sets `second_voice_hint` |
 | `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
+| `--anchor-before` / `--anchor-after` | 30 / 15 | seconds the window's highest-weight cue phrase additionally reaches back and forward in that re-read, so the sentence a disclosure sits in survives when the highlighter cut the fragment at the cue |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
 | `--max-windows` | 300 | the ceiling on what reaches the model layer in one round; the selection usually stops earlier, at `--min-score` |
-| `--min-score` / `--min-windows` | 2.5 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the one-cue tie beneath it; 2.5 is one strong cue plus another signal in the same window |
+| `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the tie beneath it; on the density-first rank (0.5 per first-person hit in the fragment, plus the cue weights, since 2026-09-16) 8.0 is sixteen first-person hits alone, or a top-weight cue with ten |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
 | `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue; raised from 450 on 2026-09-16 so voice and the sentences around a cue survive the ranking cut) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |

@@ -13,8 +13,11 @@ terms are read off the window text afterwards (``host_naming``), where a
 self-naming is the host and a third-person naming is a second voice. When
 the phrases leave the window cap short, a SECOND pass over the bare
 first-person markers (``GENERIC_TERMS``) fills what is left, and only what
-is left: a phrase window always outranks a fallback window
-(``--generic-floor``). The cap is a ceiling, not a target: the selection
+is left (``--generic-floor``). Within a pass the rank is density first:
+``DENSITY_WEIGHT`` per first-person hit in the fragment
+(``first_person_density``) plus the weights of the cue phrases it fired, so
+a passage where the creator keeps saying "I" and "my" outranks one that
+merely brushed a strong cue. The cap is a ceiling, not a target: the selection
 takes every window at or above ``--min-score``, fills down to
 ``--min-windows`` when that is short, and stops there rather than spending
 the rest of the cap on a tie of one-cue windows. One passage takes one seat:
@@ -132,8 +135,26 @@ def host_naming(text: str, host_lc: set[str]) -> tuple[list[str], list[str], str
 # are out for firing on other people's lines and on stunts; "i am" and "i was"
 # are in for the uncontracted and past-tense self-narration the contractions miss.
 GENERIC_TERMS = ["i", "my", "myself", "i'm", "i am", "i've", "i'd", "i'll", "i was"]
-GENERIC_BOOST = 0.15            # per first-person hit in a fallback window's rank score
-GENERIC_DENSITY_CAP = 12
+# First-person density is the rank's FIRST term, on both passes. On the
+# 2026-09-15 fit over 6,288 labeled windows from ten channels, density carried
+# a coefficient of 2.7 while no cue phrase passed 0.7, and ranking by density
+# alone was monotone in gem yield where the cue sum was not (quintiles 0.69 /
+# 0.60 / 0.51 / 0.34 / 0.15 against 0.58 / 0.48 / 0.56 / 0.47 / 0.20; gems in
+# each channel's top 150: 760 against 704). The cue term on top of it neither
+# helped nor hurt, so it stays as the second term: a strong cue still lifts
+# a quiet window, and the phrase list stays the retrieval net.
+DENSITY_WEIGHT = 0.5            # rank points per first-person hit, both passes
+GENERIC_DENSITY_CAP = 20        # hits counted at most; a widened read runs ~120 words
+GENERIC_BOOST = DENSITY_WEIGHT  # the fallback pass's name for the same term
+_FIRST_PERSON_RX = re.compile(
+    r"\b(?:" + "|".join(re.escape(t) for t in sorted(GENERIC_TERMS, key=len, reverse=True))
+    + r")\b")
+
+
+def first_person_density(text: str) -> int:
+    """First-person marker hits in ``text`` (``GENERIC_TERMS``, longest match
+    first so "i am" is one hit, not two), capped at ``GENERIC_DENSITY_CAP``."""
+    return min(len(_FIRST_PERSON_RX.findall(text.lower())), GENERIC_DENSITY_CAP)
 # The index runs html_strip once. A double-encoded caption apostrophe
 # (``I&amp;#39;m``) comes out as ``&#39;`` and the standard tokenizer breaks it
 # into ``i`` ``39`` ``m``; a single-encoded one (``I&apos;m``) decodes to
@@ -148,20 +169,22 @@ PHRASE_CAP_SHARE = 0.08         # no single phrase supplies more than this share
 # Per-phrase weight from cue-phrases.txt (``phrase | 3``): how personal and
 # durable the statement behind the phrase usually is, never which life domain
 # it sits in. It is the ES boost (so the highlighter's fragment slots go to
-# the most personal passages of a video) and the window's rank score.
+# the most personal passages of a video) and the second term of the window's
+# rank score, after first-person density.
 PHRASE_WEIGHT_DEFAULT = 1.0
 WEAK_WEIGHT = 0.5
 RANK_CAP = 6.0                  # two top-weight cues saturate a window's cue score
-# The cap is a ceiling, not a target. Alexa Rivera (35765, 2026-09-14): of
-# 1,396 candidate passages, 122 scored 2.5 or better (more than one personal
-# signal in the window), then 303 sat tied at exactly one weight-2 cue and
-# 970 below that. Filling the default 300 spent 179 seats inside that tie,
-# which the rank can only break by publish year; from seat 151 on, every
-# kept window was single-cue. So the selection takes everything at or above
-# MIN_SCORE, fills down to MIN_WINDOWS when a thin channel leaves that
-# short, and stops. --max-windows still bounds a channel with more strong
-# windows than one round can extract.
-MIN_SCORE = 2.5
+# The cap is a ceiling, not a target. Alexa Rivera (35765, 2026-09-14) showed
+# why: filling the default 300 from a tie of one-cue windows spent 179 seats
+# on passages the rank could only order by publish year. So the selection
+# takes everything at or above MIN_SCORE, fills down to MIN_WINDOWS when a
+# thin channel leaves that short, and stops. On the density-first scale, 8.0
+# is sixteen first-person hits alone, or a top-weight cue with ten; over the
+# 2026-09-15 labeled pool it keeps 6% of all candidate windows (the old 2.5
+# kept 3%) at a 0.69 gem rate above the line against 0.43 below it.
+# --max-windows still bounds a channel with more strong windows than one
+# round can extract.
+MIN_SCORE = 8.0
 MIN_WINDOWS = 150
 # One passage, one seat. A creator re-cuts a segment into a retitled upload
 # and the highlighter returns it once per video, at full score each time:
@@ -598,7 +621,6 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
     shared across the passes, so a fallback passage within 30 s of one the
     phrase pass already produced is dropped; ``corpus`` grows in place.
     """
-    generic = {g.lower() for g in GENERIC_TERMS}
     windows: list[dict] = []
     for d in docs:
         vid = d.get("id") or d.get("_id")
@@ -621,20 +643,32 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
             starts.append(start)
             entry["cues"].extend(pieces)
             self_named, third_person, hint = host_naming(text, host_lc)
+            density_term = DENSITY_WEIGHT * first_person_density(text)
+            anchor = start
             if retrieval == "generic":
                 cue_hits: list[str] = []
                 specific: list[str] = []
                 rec: list[str] = []
-                density = sum(1 for h in raw_hits if h in generic)
-                heur = round(GENERIC_BOOST * min(density, GENERIC_DENSITY_CAP)
-                             + SELF_NAME_BONUS * min(len(self_named), 1), 2)
+                heur = round(density_term + SELF_NAME_BONUS * min(len(self_named), 1), 2)
             else:
                 cue_hits = [h for h in hits if h not in host_lc]
                 specific = [h for h in cue_hits if h not in recurring]
                 rec = [h for h in cue_hits if h in recurring]
-                heur = round(min(sum(phrase_weight(h, weights) for h in specific), RANK_CAP)
+                heur = round(density_term
+                             + min(sum(phrase_weight(h, weights) for h in specific), RANK_CAP)
                              + 0.5 * min(len(rec), 1)
                              + SELF_NAME_BONUS * min(len(self_named), 1), 2)
+                # the read-around anchors on the heaviest cue: the piece it
+                # sits in, or the pair it straddles
+                if specific:
+                    best = max(specific, key=lambda h: phrase_weight(h, weights))
+                    hit = next((s_ for s_, t_ in pieces if best in t_.lower()), None)
+                    if hit is None:
+                        hit = next((pieces[k][0] for k in range(len(pieces) - 1)
+                                    if best in (pieces[k][1] + " " + pieces[k + 1][1]).lower()),
+                                   None)
+                    if hit is not None:
+                        anchor = hit
             windows.append({
                 "id": vid, "video_id": vid.split(":", 1)[-1], "title": d.get("title"),
                 "language": d.get("transcript_language"), "format_hint": format_hint(d.get("title")),
@@ -654,6 +688,7 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 "_specific": specific, "_recurring": rec,
                 "_weights": weights,
                 "_span": [pieces[0][0], pieces[-1][0]],
+                "_anchor": anchor,
             })
     return windows
 
@@ -669,11 +704,18 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
 # the narrow fragment, which keeps the ranking sharp, and then every KEPT
 # window is re-read from the stored transcript, ``--read-before`` seconds
 # ahead of its first cue to ``--read-after`` seconds past its last, and that
-# wider text is what the extractor sees. The added cues join the corpus so a
-# quote cut from the context still verifies to its own second.
+# wider text is what the extractor sees. The window's heaviest cue phrase
+# additionally reaches ``--anchor-before`` back and ``--anchor-after``
+# forward (2026-09-16: at 900 raw characters the highlighter re-cuts
+# fragments, and 3 of 93 re-fetched calibration windows lost the sentence
+# the disclosure sat in when the read stayed relative to the fragment's
+# edges rather than to the cue that earned its seat). The added cues join
+# the corpus so a quote cut from the context still verifies to its own second.
 # --------------------------------------------------------------------------- #
 READ_BEFORE_S = 20
 READ_AFTER_S = 10
+ANCHOR_BEFORE_S = 30
+ANCHOR_AFTER_S = 15
 TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
 
 
@@ -700,7 +742,8 @@ def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
 
 
 def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
-                  before: float, after: float) -> tuple[str, int]:
+                  before: float, after: float, anchor_before: float = ANCHOR_BEFORE_S,
+                  anchor_after: float = ANCHOR_AFTER_S) -> tuple[str, int]:
     """Replace each kept window's fragment text with the transcript read around
     it, and grow the corpus by the cues that read added. Returns the source
     used (``transcript``, ``fragment_only`` when the lookup failed, ``off``
@@ -724,6 +767,10 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
             continue
         span = w.get("_span") or [w["start"], w["start"]]
         lo, hi = float(span[0]) - before, float(span[1]) + after
+        anchor = w.get("_anchor")
+        if anchor is not None:
+            lo = min(lo, float(anchor) - anchor_before)
+            hi = max(hi, float(anchor) + anchor_after)
         run = [(float(s), t) for s, t in cues if lo <= float(s) <= hi and t]
         if not run:
             continue
@@ -944,6 +991,11 @@ def main() -> int:
                          "(rank narrow, read wide); 0 with --read-after 0 = off")
     ap.add_argument("--read-after", type=float, default=READ_AFTER_S,
                     help="...to this many seconds after its last cue")
+    ap.add_argument("--anchor-before", type=float, default=ANCHOR_BEFORE_S,
+                    help="the window's heaviest cue phrase additionally reaches this many "
+                         "seconds back in the re-read...")
+    ap.add_argument("--anchor-after", type=float, default=ANCHOR_AFTER_S,
+                    help="...and this many seconds forward")
     ap.add_argument("--min-score", type=float, default=MIN_SCORE,
                     help="the selection stops at the first window below this score once "
                          "--min-windows are kept, instead of filling --max-windows from "
@@ -1067,6 +1119,7 @@ def main() -> int:
                 "read_span": None, "context_added": False,
                 "_specific": [], "_recurring": [], "_weights": None,
                 "_span": [run[0][0], run[-1][0]],
+                "_anchor": None,
             })
     per_video: dict[str, int] = {}
     per_phrase: dict[str, int] = {}
@@ -1124,12 +1177,14 @@ def main() -> int:
                           "channel; nothing to extract"}, indent=1))
         return 4
     # the cap is taken on the narrow fragments; what the extractor reads is wider
-    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after)
+    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after,
+                                         a.anchor_before, a.anchor_after)
     for w in windows:
         w.pop("_specific", None)
         w.pop("_recurring", None)
         w.pop("_weights", None)
         w.pop("_span", None)
+        w.pop("_anchor", None)
         w.pop("_dup_videos", None)
     sponsor_source = apply_sponsor_spans(kept)
     third_person_windows = sum(1 for w in kept if w.get("host_named_third_person"))
@@ -1212,6 +1267,7 @@ def main() -> int:
         "sponsor_flagged": sum(1 for w in kept if w["in_sponsor_read"]),
         "sponsor_source": sponsor_source,
         "read_span": {"before_s": a.read_before, "after_s": a.read_after,
+                      "anchor_before_s": a.anchor_before, "anchor_after_s": a.anchor_after,
                       "source": read_source, "widened": widened},
         # voice signals over the kept windows: a self-naming is the host, a
         # third-person naming is someone speaking of the host. A high share

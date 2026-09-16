@@ -844,7 +844,7 @@ def test_generic_fallback_fills_only_the_shortfall_behind_every_phrase_window(
     assert fb["passages"] == 3 and fb["windows_kept"] == 2 and fb["videos_added"] == 3
     assert summary["phrase_windows_kept"] == 1 and summary["windows_batched"] == 3
     assert [w["retrieval"] for w in kept] == ["phrase", "generic", "generic"]
-    assert kept[1]["cues_fired"] == [] and kept[1]["rank_score"] == pytest.approx(0.3)
+    assert kept[1]["cues_fired"] == [] and kept[1]["rank_score"] == pytest.approx(1.0)
     assert "generic_fallback=ran generic_windows=2" in _run.last_funnel
     assert "x 2 passes" in summary["queries"]
     with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
@@ -853,9 +853,9 @@ def test_generic_fallback_fills_only_the_shortfall_behind_every_phrase_window(
 
 def test_the_weakest_phrase_window_still_outranks_the_densest_fallback_window(
         tmp_path, monkeypatch):
-    """Ranking is by pass, never by score across passes: a weak cue (0.5)
-    beats twelve first-person hits (1.8) because the phrase pass is what
-    the cap is for."""
+    """Seats are by pass, never by score across passes: a weak cue (0.5 plus
+    its own first-person hit) sits ahead of six first-person hits (3.0)
+    because the phrase pass is what the cap is for."""
     _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i love", 100)])],
                    argv=("--max-windows", "2"), phrases="i love\n",
                    generic_docs=[_doc("7:v2", [_pronoun_frag(100, hits=6)])])
@@ -957,15 +957,17 @@ def test_a_heavier_phrase_outranks_a_lighter_one_and_two_heavy_ones_saturate(tmp
     _, kept = _run(tmp_path, monkeypatch, docs,
                    phrases="i was born | 3\ni grew up | 3\nmy hometown | 3\nmy dad | 2\n")
     assert [w["id"] for w in kept] == ["7:v3", "7:v2", "7:v1"]
-    assert kept[0]["rank_score"] == fetch_cues.RANK_CAP == 6.0     # 9 capped at 6
-    assert kept[1]["rank_score"] == 3.0 and kept[2]["rank_score"] == 2.0
+    # cue sums 9, 3 and 2, the first capped at RANK_CAP (6.0), plus 0.5 per
+    # first-person hit: three in v3 ("i was", "i", "my"), one in each other
+    assert kept[0]["rank_score"] == fetch_cues.RANK_CAP + 1.5 == 7.5
+    assert kept[1]["rank_score"] == 3.5 and kept[2]["rank_score"] == 2.5
 
 
 def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeypatch):
     summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
     assert summary["fragment_size"] == 900
     assert summary["generic_fallback"]["floor"] == 300
-    assert summary["selection"] == {"min_score": 2.5, "min_windows": 150, "max_windows": 300,
+    assert summary["selection"] == {"min_score": 8.0, "min_windows": 150, "max_windows": 300,
                                     "stop_reason": "exhausted", "duplicates_collapsed": 0}
 
 
@@ -978,18 +980,18 @@ _WEIGHTED = "i was born | 3\nmy dad | 2\n"
 
 
 def _floor_docs():
-    strong = [_doc(f"7:s{i}", [_frag("i was born", 100)]) for i in range(4)]     # 3.0 each
-    weak = [_doc(f"7:w{i}", [_frag("my dad", 100)]) for i in range(6)]           # 2.0 each
+    strong = [_doc(f"7:s{i}", [_frag("i was born", 100)]) for i in range(4)]     # 3.5 each
+    weak = [_doc(f"7:w{i}", [_frag("my dad", 100)]) for i in range(6)]           # 2.5 each
     return strong + weak
 
 
 def test_the_selection_stops_at_the_score_floor_once_the_minimum_is_kept(tmp_path, monkeypatch):
     summary, kept = _run(tmp_path, monkeypatch, _floor_docs(), phrases=_WEIGHTED,
-                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "2.5"),
+                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "3.0"),
                          generic_docs=[_doc("7:g1", [_pronoun_frag(100)])])
     # four windows clear the floor; one more fills the minimum; the other
     # five weak ones stay behind even though the cap of 50 has room
-    assert [w["rank_score"] for w in kept] == [3.0, 3.0, 3.0, 3.0, 2.0]
+    assert [w["rank_score"] for w in kept] == [3.5, 3.5, 3.5, 3.5, 2.5]
     assert summary["selection"]["stop_reason"] == "score_floor"
     assert summary["windows_batched"] == 5 and summary["passages"] == 10
     # and the fallback does not treat that stop as a shortfall to fill
@@ -1002,7 +1004,7 @@ def test_the_selection_stops_at_the_score_floor_once_the_minimum_is_kept(tmp_pat
 def test_an_explicit_generic_floor_still_fills_past_a_score_floor_stop(tmp_path, monkeypatch):
     generic = [_doc(f"7:g{i}", [_pronoun_frag(100)]) for i in range(3)]
     summary, kept = _run(tmp_path, monkeypatch, _floor_docs(), phrases=_WEIGHTED,
-                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "2.5",
+                         argv=("--max-windows", "50", "--min-windows", "5", "--min-score", "3.0",
                                "--generic-floor", "7"),
                          generic_docs=generic)
     assert summary["generic_fallback"]["ran"] is True
@@ -1013,7 +1015,7 @@ def test_an_explicit_generic_floor_still_fills_past_a_score_floor_stop(tmp_path,
 def test_the_minimum_is_kept_even_when_every_window_is_below_the_floor(tmp_path, monkeypatch):
     weak = [_doc(f"7:w{i}", [_frag("my dad", 100)]) for i in range(6)]
     summary, kept = _run(tmp_path, monkeypatch, weak, phrases=_WEIGHTED,
-                         argv=("--max-windows", "50", "--min-windows", "4", "--min-score", "2.5"))
+                         argv=("--max-windows", "50", "--min-windows", "4", "--min-score", "3.0"))
     assert len(kept) == 4 and summary["selection"]["stop_reason"] == "score_floor"
 
 
@@ -1022,7 +1024,7 @@ def test_stop_reason_is_cap_when_the_ceiling_binds_and_exhausted_when_the_pool_e
     docs = [_doc(f"7:v{i}", [_frag("i grew up", 100)]) for i in range(3)]
     summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "2"))
     assert len(kept) == 2 and summary["selection"]["stop_reason"] == "cap"
-    # three windows at 1.0, all below the default floor, but far under the
+    # three windows at 1.5, all below the default floor, but far under the
     # default minimum of 150: every one is kept and the fallback runs as before
     summary, kept = _run(tmp_path, monkeypatch, docs, argv=("--max-windows", "5"),
                          generic_docs=[_doc("7:g1", [_pronoun_frag(100)])])
@@ -1112,7 +1114,7 @@ def test_a_third_person_naming_earns_nothing_and_sets_the_hint(tmp_path, monkeyp
     summary, kept = _run(tmp_path, monkeypatch, [crew, plain],
                          argv=("--host-terms", "Eric,Airrack"))
     by = {w["id"]: w for w in kept}
-    assert by["7:v1"]["rank_score"] == by["7:v2"]["rank_score"] == 1.0   # no +2 for the name
+    assert by["7:v1"]["rank_score"] == by["7:v2"]["rank_score"] == 1.5   # no +2 for the name
     assert by["7:v1"]["host_anchor"] is False
     assert by["7:v1"]["host_named_third_person"] == ["eric"]
     assert "with eric" in by["7:v1"]["second_voice_hint"]
@@ -1131,7 +1133,7 @@ def test_a_self_naming_is_the_anchor_and_scores_like_one_cue(tmp_path, monkeypat
     assert kept[0]["host_anchor"] is True
     assert kept[0]["host_anchor_terms"] == [["eric", "self_named"]]
     assert kept[0]["second_voice_hint"] is None
-    assert kept[0]["rank_score"] == 1.0 + fetch_cues.SELF_NAME_BONUS
+    assert kept[0]["rank_score"] == 1.5 + fetch_cues.SELF_NAME_BONUS
     assert summary["self_named_windows"] == 1
 
 
@@ -1173,6 +1175,7 @@ def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatc
     with gzip.open(summary["windows_file"], "rt", encoding="utf-8") as f:
         assert json.loads(f.readline())["text"] == w["text"]
     assert summary["read_span"] == {"before_s": 20.0, "after_s": 10.0,
+                                    "anchor_before_s": 30.0, "anchor_after_s": 15.0,
                                     "source": "transcript", "widened": 1}
     assert "read_span=transcript widened=1" in _run.last_funnel
 
@@ -1180,7 +1183,8 @@ def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatc
 def test_a_read_that_adds_nothing_leaves_the_fragment_alone(tmp_path, monkeypatch):
     doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
     _, kept = _run(tmp_path, monkeypatch, [doc], transcripts={"7:v1": _TRANSCRIPT},
-                   argv=("--read-before", "5", "--read-after", "0"))
+                   argv=("--read-before", "5", "--read-after", "0",
+                         "--anchor-before", "0", "--anchor-after", "0"))
     assert kept[0]["context_added"] is False and kept[0]["read_span"] is None
     assert kept[0]["text"].startswith("my dad and my family behind")
 
@@ -1278,3 +1282,53 @@ def test_a_channel_with_no_transcripts_stops_at_fetch_with_exit_4(tmp_path, monk
     assert summary["exit"] == 4 and summary["windows_batched"] == 0
     assert not (out / "7" / "batches").exists()
     assert any("exit=4" in a[0] for a, k in capture["lines"] if k.get("file"))
+
+
+# --------------------------------------------------------------------------- #
+# density first: first-person hits carry the rank, the cue weights add to it
+# --------------------------------------------------------------------------- #
+def test_first_person_density_is_counted_the_same_way_on_both_passes():
+    assert fetch_cues.first_person_density("i'm sure i was there and my dad") == 3
+    assert fetch_cues.first_person_density("we went there and they left") == 0
+    assert fetch_cues.first_person_density(" ".join(["i"] * 40)) == fetch_cues.GENERIC_DENSITY_CAP
+
+
+def test_a_denser_window_outranks_a_heavier_cue_with_less_first_person_in_it(
+        tmp_path, monkeypatch):
+    dense = _doc("7:v1", [_frag("my dad", 100, "and i think i was wrong and my mom said "
+                                                "i am fine and my brother agreed")])
+    sparse = _doc("7:v2", [_frag("i was born", 100)])
+    _, kept = _run(tmp_path, monkeypatch, [dense, sparse], phrases=_WEIGHTED)
+    assert [w["id"] for w in kept] == ["7:v1", "7:v2"]
+    assert kept[0]["rank_score"] == 0.5 * 6 + 2.0       # six hits, one weight-2 cue
+    assert kept[1]["rank_score"] == 0.5 * 1 + 3.0       # one hit, one weight-3 cue
+
+
+_TRANSCRIPT_ANCHOR = [
+    (75.0, "when i was a kid in ohio"),
+    (80.0, "we moved around a lot"),
+    (100.0, "my dad drove a truck and"),
+    (104.0, "i was born in a small town"),
+    (112.0, "which is beside the point"),
+    (118.0, "anyway the recipe"),
+    (140.0, "needs more salt"),
+]
+
+
+def test_the_heaviest_cue_reaches_further_than_the_fragment_edges(tmp_path, monkeypatch):
+    """The plain read-around is 20 s before the fragment's first piece (100)
+    and 10 s after its last (104): 80..114. The weight-3 cue at 104 reaches
+    30 s back and 15 s forward on its own, so 75 and 118 are read too."""
+    frag = ('<text start="100"><em>my dad</em> drove a truck and</text>'
+            '<text start="104"><em>i was born</em> in a small town</text>')
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], phrases=_WEIGHTED,
+                   transcripts={"7:v1": _TRANSCRIPT_ANCHOR})
+    w = kept[0]
+    assert w["read_span"] == [75.0, 118.0]
+    assert w["text"].startswith("when i was a kid") and w["text"].endswith("anyway the recipe")
+    assert "more salt" not in w["text"]
+    # the margins are flags, and 0/0 falls back to the plain read
+    _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], phrases=_WEIGHTED,
+                   argv=("--anchor-before", "0", "--anchor-after", "0"),
+                   transcripts={"7:v1": _TRANSCRIPT_ANCHOR})
+    assert kept[0]["read_span"] == [80.0, 112.0]
