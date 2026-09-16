@@ -237,6 +237,20 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
   color: var(--ink-3); font-style: normal;
   font-family: "IBM Plex Mono", monospace; font-size: .72rem;
 }
+/* the creator's own written words, corroborated by nothing: deliberately
+   quieter than the run above it, and never dressed as a quote with a link */
+.own-words { list-style: none; margin: 0; padding: 0; }
+.own-words li {
+  margin: 0 0 .6rem; padding-left: .9rem;
+  border-left: 2px dashed var(--ink-3, #999);
+}
+.own-words .claim { font-weight: 600; }
+.own-words .said { display: block; font-style: italic; color: var(--ink-2); }
+.own-words .src {
+  display: block; color: var(--ink-3);
+  font-family: "IBM Plex Mono", monospace; font-size: .72rem;
+}
+.caveat { color: var(--ink-2); font-size: .92em; margin: .2rem 0 .8rem; }
 .thesis {
   border-left: 3px solid var(--accent); padding: .1rem 0 .1rem 1rem;
   margin: 0 0 1.4rem;
@@ -538,6 +552,28 @@ def tier_of(fact: dict) -> str:
     return "withheld" if fact.get("sensitive") else "none"
 
 
+def bio_corroborated(fact: dict, index: dict[str, dict]) -> bool:
+    """Whether a bio fact is really corroborated, re-derived here rather than
+    read off ``confidence``.
+
+    The merge pass confirms a bio fact when a transcript fact says the same
+    thing, but quote verification runs afterwards and can reject that quote —
+    and a later run can drop the transcript fact entirely. So the page asks the
+    question again from the evidence link: is the named fact still in the
+    ledger, is it a transcript fact, and did its quote survive verification."""
+    target = index.get(str(fact.get("corroborated_by") or ""))
+    if target is None or target.get("provenance") != "transcript":
+        return False
+    if str((target.get("verify") or {}).get("match") or "").lower() == "no":
+        return False
+    return bool(target.get("quote"))
+
+
+def unverified_bio(fact: dict, index: dict[str, dict]) -> bool:
+    """The creator's own written words that no upload corroborates."""
+    return fact.get("provenance") == "bio" and not bio_corroborated(fact, index)
+
+
 def tier_badge(fact: dict) -> str:
     tier = tier_of(fact)
     if tier == "none":
@@ -703,8 +739,13 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     left that contradiction unresolved and off the connection cards; the
     renderer put it back.
     """
+    index = {str(f.get("fact_id")): f for f in facts}
     usable = [f for f in facts
               if not f.get("superseded_by") and tier_of(f) not in WITHHELD
+              # what a creator writes about themselves is a lead, not a fact:
+              # until an upload says the same thing it stays off this strip and
+              # out of every connection, in its own labelled block below
+              and not unverified_bio(f, index)
               and tier_of(f) != "withheld" and not f.get("staged_only")
               # the merge pass's own rule for `selected`: a clinical fact is
               # public only where the creator made it so, three or more videos
@@ -787,6 +828,59 @@ def no_address_sentences(text: str) -> str:
     return " ".join(p for p in parts if p and not _ADDRESS.search(p)).strip()
 
 
+def bio_lane_ran(facts: list[dict] | None, meta: dict) -> bool:
+    """Whether the creator's written bio went through the lane on this build.
+
+    Either mark counts: the ledger holding a bio fact, or the run recording the
+    lane in its context. The second matters on its own — a bio whose every
+    claim was dropped as uncorroborated and sensitive leaves NO bio fact
+    behind, and that is precisely the run whose raw About box must not be
+    reprinted."""
+    if (meta.get("context") or {}).get("bio_lane"):
+        return True
+    return any(f.get("provenance") == "bio" for f in (facts or []))
+
+
+def own_words_section(facts: list[dict] | None) -> str:
+    """"In their own words (unverified)" — what the creator says about
+    themselves that no upload corroborates.
+
+    It is a separate block, under its own honest heading, because it is a
+    different kind of evidence: written by the subject, about the subject,
+    checked by nobody. It carries no quote marks around a timestamp and no
+    watch link, only the excerpt, the page it came from and the date it was
+    read. Withheld tiers never appear here — an uncorroborated sensitive claim
+    is dropped from the ledger upstream, and this filter is the backstop for a
+    ledger written before that rule existed."""
+    if not facts:
+        return ""
+    index = {str(f.get("fact_id")): f for f in facts}
+    picks = [f for f in facts
+             if unverified_bio(f, index) and not f.get("superseded_by")
+             and tier_of(f) not in WITHHELD and tier_of(f) not in ("clinical", "withheld")]
+    if not picks:
+        return ""
+    lis = []
+    for f in picks:
+        claim = html.escape(str(f.get("claim") or ""))
+        excerpt = str(f.get("source_excerpt") or "")
+        said = (f'<span class="said">“{html.escape(short_quote(excerpt, 22))}”</span>'
+                if excerpt else "")
+        url = str(f.get("source_url") or "")
+        where = str(f.get("source_kind") or "bio")
+        seen = str(f.get("seen_date") or "")
+        src = f"{where}{f', read {html.escape(seen)}' if seen else ''}"
+        if url.lower().startswith(("http://", "https://")):
+            src = f'<a href="{html.escape(url, quote=True)}">{src}</a>'
+        lis.append(f'<li><span class="claim">{claim}</span>{said}'
+                   f'<span class="src">{src}</span></li>')
+    return ('<h2>In their own words (unverified)</h2>'
+            '<p class="caveat">Written by the creator on their own page. Nothing in '
+            'the uploads confirms it yet, so none of it is used as a claim or an '
+            'angle above — read it as a lead to check, not as a fact.</p>'
+            f'<ul class="own-words">{"".join(lis)}</ul>')
+
+
 def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     picks = pick_who_flat(facts)
     fmt = meta.get("format")
@@ -806,8 +900,14 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
     # currency amount is dropped rather than shown.
     ctx = meta.get("context") or {}
     platform = []
-    for key, label in (("about_text", "From the channel"),
-                       ("generated_profile", "Platform profile")):
+    # Once the bio lane has run, the About text is no longer a free-text
+    # preamble: it has been filtered, judged by the rubric, corroborated or
+    # not, and a sensitive claim nothing corroborates has been DROPPED from the
+    # ledger. Printing the raw box beside that would republish exactly what was
+    # dropped, so the approved block stands in its place.
+    keys = (("generated_profile", "Platform profile"),) if bio_lane_ran(facts, meta) else (
+        ("about_text", "From the channel"), ("generated_profile", "Platform profile"))
+    for key, label in keys:
         text = no_address_sentences(no_money_sentences(str(ctx.get(key) or "")))
         if text:
             platform.append(f'<p class="platform"><span class="k">{label}</span> '
@@ -949,6 +1049,7 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
                        'honest ones, and each names what to confirm first.</div>')
     body_out = (thesis_block(thesis)
                 + who
+                + own_words_section(facts)
                 + about_block(brand_about)
                 + ("<h2>Connections</h2>" if conns or intro else "")
                 + thin_banner
@@ -1104,6 +1205,16 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
         if tier_of(f) in WITHHELD and f.get("selected"):
             problems.append(f"selected fact at withheld tier "
                             f"{tier_of(f)}: {str(f.get('claim'))[:50]}")
+    # the merge pass owns this rule; this end is the backstop, and it re-derives
+    # corroboration from the evidence link rather than trusting `confidence`
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
+    for f in (facts or []):
+        if f.get("selected") and unverified_bio(f, index):
+            problems.append(f"selected fact the creator only wrote about themselves, "
+                            f"uncorroborated: {str(f.get('claim'))[:50]}")
+        if unverified_bio(f, index) and tier_of(f) in ("clinical", "children", "location"):
+            problems.append(f"uncorroborated bio fact at a sensitive tier is in the "
+                            f"ledger and should have been dropped: {str(f.get('claim'))[:50]}")
     if no_fit and not kinds["thesis"]:
         problems = [p for p in problems if not p.startswith("missing section: ## Thesis")]
     return problems

@@ -1025,3 +1025,112 @@ def test_who_they_are_fall_back_never_routes_around_the_clinical_rule():
          "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
     ]
     assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2", "f3"]
+
+
+# --------------------------------------------------------------------------- #
+# build_html.py: the creator's own words, and what the page does with them
+# --------------------------------------------------------------------------- #
+def _bio_fact(**over):
+    fact = {"fact_id": "f2", "claim": "trained as a doctor before YouTube",
+            "domain": "work", "provenance": "bio", "confidence": "unconfirmed",
+            "recurrence": 1, "sensitivity": "none", "unverified_bio": True,
+            "source_url": "https://youtube.com/@x", "seen_date": "2026-09-15",
+            "source_kind": "about", "source_excerpt": "I trained as a doctor"}
+    fact.update(over)
+    return fact
+
+
+def _transcript_fact(**over):
+    fact = {"fact_id": "f1", "claim": "trained as a doctor", "domain": "work",
+            "provenance": "transcript", "confidence": "confirmed", "recurrence": 2,
+            "sensitivity": "none", "quote": "i trained as a doctor for six years",
+            "video": "1:v1", "start": 10,
+            "url": "https://www.youtube.com/watch?v=v1&t=10s"}
+    fact.update(over)
+    return fact
+
+
+def test_an_uncorroborated_bio_fact_stays_off_the_who_strip():
+    import build_html
+    facts = [_transcript_fact(claim="is allergic to radish"), _bio_fact()]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f1"]
+
+
+def test_an_uncorroborated_bio_fact_renders_in_its_own_labelled_block():
+    import build_html
+    html_out = build_html.own_words_section([_bio_fact()])
+    assert "In their own words (unverified)" in html_out
+    assert "trained as a doctor before YouTube" in html_out
+    assert "I trained as a doctor" in html_out          # their words, their page
+    assert "youtube.com/@x" in html_out
+    assert "read 2026-09-15" in html_out
+    assert "watch?v=" not in html_out                   # never a quote at a timestamp
+
+
+def test_a_corroborated_bio_fact_is_not_in_the_unverified_block():
+    """It belongs in "Who they are" with the upload behind it, not here."""
+    import build_html
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    facts = [_transcript_fact(), bio]
+    assert build_html.own_words_section(facts) == ""
+    assert "f2" in [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+
+
+def test_corroboration_is_re_derived_when_the_quote_failed_verification():
+    """The merge pass confirmed the pair; verification then rejected the quote.
+    The page must not keep publishing the bio claim as settled."""
+    import build_html
+    target = _transcript_fact(verify={"match": "no"})
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    facts = [target, bio]
+    assert build_html.unverified_bio(bio, {"f1": target}) is True
+    assert "f2" not in [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+    assert "In their own words" in build_html.own_words_section(facts)
+
+
+def test_corroboration_is_re_derived_when_the_transcript_fact_is_gone():
+    import build_html
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    assert build_html.unverified_bio(bio, {}) is True
+
+
+def test_a_sensitive_bio_claim_never_reaches_the_unverified_block():
+    """Backstop for a ledger written before the merge pass dropped these."""
+    import build_html
+    for tier in ("clinical", "children", "location"):
+        out = build_html.own_words_section([_bio_fact(sensitivity=tier)])
+        assert out == "", tier
+
+
+def test_the_raw_about_box_is_not_reprinted_once_the_bio_lane_has_run():
+    """A clinical claim dropped from the ledger still sat in the About
+    paragraph the page printed verbatim."""
+    import build_html
+    meta = dict(_META, context={"about_text": "I have coeliac disease and I love dogs.",
+                                "generated_profile": "A gaming channel."})
+    plain_who = build_html.who_they_are([_transcript_fact()], meta)
+    assert "coeliac" in plain_who                       # unchanged without the lane
+    lane_who = build_html.who_they_are([_transcript_fact(), _bio_fact()], meta)
+    assert "coeliac" not in lane_who
+    assert "A gaming channel." in lane_who              # the catalogue profile stays
+
+
+def test_a_run_whose_every_bio_claim_was_dropped_still_suppresses_the_about_box():
+    import build_html
+    meta = dict(_META, context={"about_text": "I have coeliac disease.",
+                                "bio_lane": True})
+    assert "coeliac" not in build_html.who_they_are([_transcript_fact()], meta)
+
+
+def test_check_refuses_a_selected_uncorroborated_bio_fact():
+    import build_html
+    facts = [_transcript_fact(), _bio_fact(selected=True)]
+    problems = build_html.check_page(_CONN_MD, facts, _META)
+    assert any("only wrote about themselves" in p for p in problems)
+
+
+def test_check_refuses_a_sensitive_uncorroborated_bio_fact_in_the_ledger():
+    import build_html
+    facts = [_transcript_fact(), _bio_fact(sensitivity="clinical")]
+    problems = build_html.check_page(_CONN_MD, facts, _META)
+    assert any("should have been dropped" in p for p in problems)

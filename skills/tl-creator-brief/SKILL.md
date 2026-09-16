@@ -316,9 +316,16 @@ scripts costs more than the scripts.
    - **Tell it what the platform record is worth.** The About text is often
      YouTube's default placeholder, and the AI profile describes the recent
      catalogue, not the person: both are context to search from, never the
-     identity itself, and neither is a fact. A lane that treats the AI profile
-     as the description of the creator will reject the right person for not
-     matching it.
+     identity itself. A lane that treats the AI profile as the description of
+     the creator will reject the right person for not matching it. **The AI
+     profile is still never a fact.** The About text is the one exception, and
+     not in this lane: it goes through the bio lane below, which filters it,
+     puts it through the same extractor rubric, and makes it earn `confirmed`
+     from the uploads. This lane does not write facts from it.
+   - **A profile bio this lane reads flows into the bio lane, not into a
+     fact.** When it confirms a profile belongs to the creator, it reports the
+     bio text with `match_confirmed` so `bio_lane.py batch` can take it; a bio
+     from an unmatched profile is another person's self-description.
    - **It is the one lane with transcript evidence available**, because it now
      runs beside the extractors rather than ahead of them. When the linked
      stores were empty, name the recurring people, places and formats the run
@@ -327,6 +334,35 @@ scripts costs more than the scripts.
      mismatch it returns no facts and says which candidate it rejected and why.
    - What it has when the extractors finish is what the merge pass gets; the
      rest is reported "linked but unread".
+
+   - **The bio lane (always on).** In the same wave, one more `gem-classifier`
+     over the creator's own written self-description:
+
+     ```bash
+     python3 <skill>/scripts/bio_lane.py batch --from <corpus>/context-full.json \
+       --channel <id> --out <corpus-parent>          # filters, writes bio/batch-000.json
+     python3 <skill>/scripts/extractor_prompt.py --batch <corpus>/<id>/bio/batch-000.json \
+       --context <corpus>/<id>/context.json --lane bio \
+       --write-to <corpus>/<id>/bio/batch-000.extract.json --out <prompt path>
+     python3 <skill>/scripts/bio_lane.py facts --batch … --returns … --out bio-facts.json
+     ```
+
+     `batch` strips boilerplate (YouTube placeholder copy, business-inquiry
+     lines, bare emails/URLs/hashtags/handles, subscribe calls) and reports
+     every dropped line with its reason; what survives is judged by the SAME
+     rubric, which is what rejects "the best gaming channel on YouTube". Pass
+     `--socials-bio` when the identity lane returned confirmed profile bios.
+     The records it mints are `provenance: "bio"` identity-lane facts: they go
+     in the merge agent's `facts` list, and `evidence-rules.md` owns what they
+     are worth. **Never feed a bio batch to `assemble_extracts.py`** — it
+     refuses them, because that path stamps every row as a transcript quote
+     with a video and a timestamp.
+   - **Then corroborate them.** `bio_lane.py terms` derives 1-3 search terms
+     per bio fact and writes a generated phrases file plus the exact round
+     recipe; run it as an additive `fetch_cues.py --round N` pass (see
+     `references/transcript-mining.md`). A bio fact no upload corroborates is
+     never a claim and never an angle: non-sensitive ones render in their own
+     "In their own words (unverified)" block, sensitive ones are dropped.
 
 4. **Assemble, cluster, prepare, authenticate: one command.** As soon as the
    receipts are in:

@@ -150,9 +150,18 @@ ACTIONS = {"keep", "fold", "drop"}
 # The identity lane. `evidence-rules.md`: lanes never masquerade as each other,
 # so a social/web fact names its source and seen-date and carries no quote,
 # video or start — those belong to the transcript lane alone.
-IDENTITY_PROVENANCE = {"social", "web"}
+IDENTITY_PROVENANCE = {"social", "web", "bio"}
 IDENTITY_REQUIRED = ("claim", "domain", "sensitivity", "source_url", "seen_date")
 IDENTITY_BANNED = ("quote", "video", "start", "url")
+# The bio lane. The creator's own written self-description is the most
+# explicit thing they ever say about themselves and the least verified: they
+# write untrue and out-of-date things in an About box, and nobody edits it.
+# So a bio fact is an identity-lane record with two extra rules of its own:
+# only a TRANSCRIPT fact may corroborate it (a second written bio agreeing
+# with the first is one source, not two), and a bio fact nothing corroborates
+# never reaches a claim or a pitch — it renders in its own labelled block, or,
+# at a withheld tier, is dropped from the ledger entirely.
+BIO = "bio"
 FORMATS = {"solo", "interview", "multi_host", "faceless_scripted"}
 
 # Formats where one voice holds the transcript, so an unattributed window is
@@ -889,6 +898,13 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         if corr.startswith("f"):
             if corr not in existing_ids:
                 bad(label, f"corroborates target {corr} is not in --existing")
+            elif (rec.get("provenance") == BIO
+                  and (existing.get(corr) or {}).get("provenance") != "transcript"):
+                # A written bio confirmed by another written bio is one source
+                # twice, not corroboration. Only the videos can verify the
+                # About box.
+                bad(label, f"a bio fact may only corroborate a transcript fact; {corr} is "
+                           f"{(existing.get(corr) or {}).get('provenance')!r}")
         elif corr not in kept:
             bad(label, f"corroborates target {corr} is not a kept cluster")
 
@@ -1010,7 +1026,51 @@ def identity_fact(rec: dict, fact_id: str) -> dict:
     }
     if str(rec.get("gloss") or "").strip():
         fact["gloss"] = str(rec["gloss"]).strip()
+    # A written-source excerpt is not a quote: it has a URL and a seen-date
+    # where a quote has a video and a timestamp, and it is cut from the stored
+    # bio text mechanically by `bio_lane.py`, never authored by a model. The
+    # ban on `quote`/`video`/`start`/`url` stands.
+    if str(rec.get("source_excerpt") or "").strip():
+        fact["source_excerpt"] = str(rec["source_excerpt"]).strip()
+    if str(rec.get("sensitivity_source") or "").strip():
+        fact["sensitivity_source"] = str(rec["sensitivity_source"]).strip()
     return fact
+
+
+def bio_gate(facts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """``(kept, dropped)``: what an uncorroborated bio fact is allowed to be.
+
+    Run over EVERY bio fact in the final ledger — including records carried
+    from ``--existing`` on a refresh, which never pass through the corroboration
+    pass again — and only after tier inheritance, so a bio fact that just
+    inherited a withheld tier from a transcript fact naming the same person is
+    judged at the tier it ended up with.
+
+    Corroborated (a transcript fact says the same thing): a normal confirmed
+    fact. Uncorroborated and sensitive: dropped from the ledger, because "he
+    says in his own bio that he has ADHD" is exactly the sentence this pipeline
+    exists not to hand a brand. Uncorroborated otherwise: kept, never selected,
+    never in a pitch, and rendered only under "In their own words
+    (unverified)"."""
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for fact in facts:
+        if fact.get("provenance") != BIO:
+            kept.append(fact)
+            continue
+        corroborated = (fact.get("confidence") == "confirmed"
+                        and bool(fact.get("corroborated_by")))
+        fact["unverified_bio"] = not corroborated
+        if corroborated:
+            kept.append(fact)
+            continue
+        fact["confidence"] = "unconfirmed"
+        fact["selected"] = False
+        if fact.get("sensitivity") in WITHHELD:
+            dropped.append(fact)
+            continue
+        kept.append(fact)
+    return kept, dropped
 
 
 def selectable(fact: dict) -> bool:
@@ -1033,6 +1093,8 @@ def selectable(fact: dict) -> bool:
         return False
     if fact.get("staged_only"):
         return False
+    if fact.get("provenance") == BIO and fact.get("confidence") != "confirmed":
+        return False
     if tier == "clinical" and fact.get("provenance") == "transcript":
         return int(fact.get("recurrence") or 0) >= 3
     return True
@@ -1044,6 +1106,8 @@ def unselectable_reason(fact: dict) -> str:
         return f"withheld tier {tier}"
     if fact.get("staged_only"):
         return "said only inside staged premises; no non-staged upload confirms it"
+    if fact.get("provenance") == BIO and fact.get("confidence") != "confirmed":
+        return "written in their own bio; no upload corroborates it"
     if tier == "clinical":
         return "clinical below three videos"
     return "not eligible"
@@ -1329,6 +1393,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # transcript fact and an identity-lane fact that name the same thing lift
     # each other to `confirmed`.
     corroborated: list[list[str]] = []
+    bio_uncorroborated: list[list[str]] = []
     for rec, fact_id in zip(identity, identity_ids):
         raw = rec.get("corroborates")
         if raw is None:
@@ -1336,8 +1401,23 @@ def cmd_expand(a: argparse.Namespace) -> int:
         target = assigned.get(str(raw), str(raw))
         if target not in fact_index:
             continue
+        if (fact_index[fact_id].get("provenance") == BIO
+                and (fact_index[target].get("provenance") != "transcript"
+                     or fact_index[target].get("staged_only"))):
+            # Only an upload can verify an About box, and not one that said it
+            # inside a staged premise: that is the confidence cap the
+            # transcript lane already applied, and corroboration may not
+            # override it from the outside.
+            bio_uncorroborated.append([fact_id, target])
+            continue
         fact_index[fact_id]["confidence"] = "confirmed"
         fact_index[target]["confidence"] = "confirmed"
+        # The link is kept on the fact, not just in this run's summary: the
+        # renderer re-derives whether a bio fact is really corroborated (the
+        # quote may fail verification downstream) instead of trusting
+        # `confidence`.
+        if fact_index[fact_id].get("provenance") == BIO:
+            fact_index[fact_id]["corroborated_by"] = target
         corroborated.append([fact_id, target])
 
     # A lane record naming the same person as a withheld-tier transcript fact
@@ -1369,6 +1449,13 @@ def cmd_expand(a: argparse.Namespace) -> int:
             tier_inherited.append([fact_id, str(fact.get("sensitivity")), new_tier])
             fact["sensitivity"] = new_tier
             fact["sensitive"] = new_tier in WITHHELD
+
+    # What an uncorroborated bio fact may be — applied here, after tier
+    # inheritance, and over every bio fact in the ledger including the ones
+    # carried from `--existing`, which never pass the corroboration loop again.
+    facts, bio_dropped = bio_gate(facts)
+    for f in bio_dropped:
+        fact_index.pop(str(f.get("fact_id")), None)
 
     # a re-judged cluster's other inherited facts stay as history
     for old, new in reconciled.items():
@@ -1503,6 +1590,13 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "dropped": dropped,
         "selected": len(chosen),
         "identity_facts": len(identity_ids),
+        "bio_facts": sum(1 for f in facts if f.get("provenance") == BIO),
+        "bio_confirmed": sum(1 for f in facts
+                             if f.get("provenance") == BIO and not f.get("unverified_bio")),
+        "bio_unverified": sum(1 for f in facts if f.get("unverified_bio")),
+        "bio_dropped": [[str(f.get("fact_id")), str(f.get("sensitivity"))]
+                        for f in bio_dropped],
+        "bio_corroboration_refused": bio_uncorroborated,
         "enum_aliases": enum_aliases,
         "corroborated": corroborated,
         "reconciled": reconciled,

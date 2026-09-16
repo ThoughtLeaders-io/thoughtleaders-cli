@@ -1361,3 +1361,139 @@ def test_a_patch_of_the_same_shard_still_overrides_its_ref(tmp_path):
     assert json.loads(proc.stdout)["identity_facts"] == 1
     social = [f for f in _facts(out).values() if f.get("provenance") == "social"]
     assert social[0]["claim"] == "runs a pottery studio"
+
+
+# --------------------------------------------------------------------------- #
+# the bio lane: the creator's own words, and what they are worth alone
+# --------------------------------------------------------------------------- #
+def _bio(**over):
+    rec = {"ref": "b1", "provenance": "bio",
+           "claim": "runs a pottery studio in Lisbon", "domain": "work",
+           "sensitivity": "none", "source_url": "https://youtube.com/@example",
+           "seen_date": "2026-09-15", "source_excerpt": "I run a pottery studio in Lisbon"}
+    rec.update(over)
+    return rec
+
+
+def _bio_ledger_fact(fact_id, *, claim, tier, confidence="unconfirmed"):
+    return {"fact_id": fact_id, "claim": claim, "domain": "work",
+            "provenance": "bio", "source_url": "https://youtube.com/@example",
+            "seen_date": "2026-09-01", "recurrence": 1, "confidence": confidence,
+            "sensitivity": tier, "sensitive": tier in merge_pass.WITHHELD,
+            "superseded_by": None, "selected": False, "members": []}
+
+
+def test_a_corroborated_bio_fact_is_confirmed_and_keeps_its_evidence_link(tmp_path):
+    clustered = _write_clusters(tmp_path, [
+        _cluster("runs a pottery studio", conf="likely", video="v1")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_bio(corroborates="c001")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert facts["f001"]["confidence"] == "confirmed"
+    bio = facts["f002"]
+    assert bio["confidence"] == "confirmed"
+    assert bio["corroborated_by"] == "f001"      # the renderer re-derives from this
+    assert bio["unverified_bio"] is False
+    assert bio["source_excerpt"] == "I run a pottery studio in Lisbon"
+    assert not {"quote", "video", "start", "url"} & set(bio)
+    assert json.loads(proc.stdout)["bio_confirmed"] == 1
+
+
+def test_an_uncorroborated_bio_fact_is_unverified_and_never_selected(tmp_path):
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      selected=["b1"], facts=[_bio()])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    bio = _facts(out)["f002"]
+    assert bio["confidence"] == "unconfirmed"
+    assert bio["unverified_bio"] is True
+    assert bio["selected"] is False              # asking for it does not get it
+    assert json.loads(proc.stdout)["bio_unverified"] == 1
+
+
+def test_an_uncorroborated_sensitive_bio_fact_is_dropped_entirely(tmp_path):
+    for tier, domain in (("clinical", "health"), ("children", "family"),
+                         ("location", "home")):
+        work = tmp_path / tier
+        work.mkdir()
+        clustered = _write_clusters(work, [_cluster("one")])
+        dpath = _envelope(work, {"c001": {"action": "keep"}},
+                          facts=[_bio(sensitivity=tier, domain=domain,
+                                      claim="a private detail about themselves")])
+        out = work / "facts.jsonl"
+        proc = _expand(clustered, dpath, out)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "f002" not in _facts(out)          # not withheld: gone
+        assert json.loads(proc.stdout)["bio_dropped"] == [["f002", tier]]
+
+
+def test_a_corroborated_sensitive_bio_fact_survives(tmp_path):
+    clustered = _write_clusters(tmp_path, [
+        _cluster("was diagnosed with ADHD", tier="clinical", domain="health")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_bio(sensitivity="clinical", domain="health",
+                                  claim="has ADHD", corroborates="c001")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    bio = _facts(out)["f002"]
+    assert bio["confidence"] == "confirmed" and bio["unverified_bio"] is False
+    assert bio["sensitive"] is True
+
+
+def test_a_bio_fact_may_not_be_corroborated_by_another_written_source(tmp_path):
+    """One source twice is not corroboration: only the uploads verify a bio."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    existing = _existing(tmp_path, [
+        {"fact_id": "f001", "claim": "runs a pottery studio", "domain": "work",
+         "provenance": "social", "source_url": "https://instagram.com/example",
+         "seen_date": "2026-09-02", "recurrence": 1, "confidence": "unconfirmed",
+         "sensitivity": "none", "sensitive": False, "superseded_by": None,
+         "selected": False, "members": []}])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_bio(corroborates="f001")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out, existing=existing)
+    assert proc.returncode == 3
+    assert "may only corroborate a transcript fact" in proc.stdout
+
+
+def test_a_bio_fact_carried_from_an_earlier_run_is_re_gated(tmp_path):
+    """A refresh never runs the corroboration loop for a carried record, so the
+    gate must read the ledger, not just this round's input."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    existing = _existing(tmp_path, [
+        _bio_ledger_fact("f050", claim="has a chronic illness", tier="clinical"),
+        _bio_ledger_fact("f051", claim="runs a pottery studio", tier="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out, existing=existing)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert "f050" not in facts                   # sensitive and still uncorroborated
+    assert facts["f051"]["unverified_bio"] is True
+
+
+def test_a_bio_fact_that_inherits_a_withheld_tier_is_then_dropped(tmp_path):
+    """The gate runs after tier inheritance, not before it."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("his daughter Luna is fifteen", tier="children", domain="family")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
+                      facts=[_bio(claim="Luna helps me film every week",
+                                  domain="family", sensitivity="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "f002" not in _facts(out)
+    assert json.loads(proc.stdout)["bio_dropped"] == [["f002", "children"]]
+
+
+def test_selectable_refuses_an_uncorroborated_bio_fact():
+    fact = {"provenance": "bio", "sensitivity": "none", "confidence": "unconfirmed"}
+    assert merge_pass.selectable(fact) is False
+    assert "no upload corroborates it" in merge_pass.unselectable_reason(fact)
+    assert merge_pass.selectable({**fact, "confidence": "confirmed"}) is True
