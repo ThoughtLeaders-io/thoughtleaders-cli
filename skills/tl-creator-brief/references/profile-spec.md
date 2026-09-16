@@ -334,8 +334,8 @@ stops — a no-fit verdict is the deliverable, not a failure.
 
 Opt-in, when the user asked for a version they can send to the creator. The
 brief writer reads `<corpus>/creator-brief-input-<brand_id>.json`
-(`tl-creator-brief-input/v1`: `talking_points`, `promoting`, `requirements`,
-`dont`, `approval`, all verbatim from the user, and `supplied`), the
+(`tl-creator-brief-input/v1`: `talking_points` and `promoting`, verbatim from
+the user, and `supplied`), the
 connection map and, where a supplied point has no card, the whole ledger,
 and writes `<corpus>/creator-brief-<brand_id>.md`. Its frontmatter is
 `schema: tl-creator-brief/v1`, `channel_name`, `brand_name`,

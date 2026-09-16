@@ -1271,16 +1271,8 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         for tp in inp.get("talking_points", []):
             if _norm_words(tp) not in norm_points:
                 problems.append(f"supplied talking point missing or reworded: {tp[:50]!r}")
-        for key, label in (("requirements", "Requirements"), ("dont", "Don't do")):
-            sec = _norm_words(found.get(key, ""))
-            for line in inp.get(key, []):
-                if _norm_words(line) not in sec:
-                    problems.append(f"supplied line missing or reworded under "
-                                    f"{label}: {line[:50]!r}")
         if inp.get("promoting") and _norm_words(inp["promoting"]) not in _norm_words(found.get("ask", "")):
             problems.append("the brand's 'promoting' line is not in The creative ask verbatim")
-        if inp.get("approval") and _norm_words(inp["approval"]) not in _norm_words(found.get("approval", "")):
-            problems.append("the brand's approval process is not in its section verbatim")
     for key, label in (("who", "Who is the brand"), ("ask", "The creative ask"),
                        ("requirements", "Requirements"), ("dont", "Don't do"),
                        ("approval", "Creative approval process")):
@@ -1327,11 +1319,9 @@ def supplied_lines(inp: dict | None) -> list[str]:
     """Every line the brand supplied, verbatim: the text that is theirs."""
     if not inp:
         return []
-    lines = list(inp.get("talking_points") or []) + list(inp.get("requirements") or []) \
-        + list(inp.get("dont") or [])
-    for key in ("promoting", "approval"):
-        if inp.get(key):
-            lines.append(str(inp[key]))
+    lines = list(inp.get("talking_points") or [])
+    if inp.get("promoting"):
+        lines.append(str(inp["promoting"]))
     return [ln for ln in lines if ln.strip()]
 
 

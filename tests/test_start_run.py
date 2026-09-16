@@ -277,8 +277,7 @@ def test_talking_points_imply_the_brief_and_are_written_verbatim(env, tmp_path):
                       "* Say \"complete and balanced\", their words\n")
     rc, out, _ = env(["--channel", "42", "--brand", "acme",
                       "--talking-points", str(points),
-                      "--promoting", "the new salmon recipe",
-                      "--dont", "no vet claims\nno price talk"], tl=_TL_BRAND)
+                      "--promoting", "the new salmon recipe"], tl=_TL_BRAND)
     assert rc == 0
     assert out["creator_brief"] == "on" and out["talking_points"] == 3
     assert "creator_brief_input" in out["ran"]
@@ -288,9 +287,9 @@ def test_talking_points_imply_the_brief_and_are_written_verbatim(env, tmp_path):
     # bullets and numbering stripped, the words untouched
     assert rec["talking_points"] == ["Rescue dogs first, always", "Show the bag on camera",
                                      'Say "complete and balanced", their words']
-    assert rec["dont"] == ["no vet claims", "no price talk"]
     assert rec["promoting"] == "the new salmon recipe" and rec["supplied"] is True
-    assert rec["requirements"] == [] and rec["approval"] is None
+    assert set(rec) == {"schema", "channel_id", "channel_name", "brand_id", "brand_name",
+                        "promoting", "talking_points", "supplied", "written_at"}
     assert Path(out["creator_brief_input"]).name == "creator-brief-input-7.json"
 
 

@@ -33,16 +33,15 @@ Usage:
                  [--rebuild] [--no-refresh] [--profiles-dir DIR]
                  [--creator-brief | --no-creator-brief]
                  [--talking-points <path or text>] [--promoting "<line>"]
-                 [--requirements <path or text>] [--dont <path or text>]
-                 [--approval "<text>"]
 
 **The creator brief is an opt-in second file on a CONNECT run.** The user is
 asked once, in the run's one wait turn, whether they want a version they can
-send to the creator; a flag skips that question, it never answers it
-silently. What the brand wants said is taken up front and written verbatim
-to ``<corpus>/creator-brief-input-<brand_id>.json`` (schema
-``tl-creator-brief-input/v1``), so the connection pass and the brief writer
-read the brand's own words, never a paraphrase. ``--talking-points`` or
+send to the creator; on yes they are asked for the brand's baseline talking
+points and what it is promoting, and that is the whole interview. A flag
+skips a question, it never answers it silently. The answers are written
+verbatim to ``<corpus>/creator-brief-input-<brand_id>.json`` (schema
+``tl-creator-brief-input/v1``), so the brief writer reads the brand's own
+words, never a paraphrase. ``--talking-points`` or
 ``--promoting`` implies ``--creator-brief``. None of these flags is valid
 without ``--brand``, and the ledger build never reads them: the profile is
 brand-blind.
@@ -222,9 +221,6 @@ def creator_brief_input(a, channel: dict, brand: dict) -> dict:
         "brand_name": brand.get("name"),
         "promoting": (a.promoting or "").strip() or None,
         "talking_points": points,
-        "requirements": read_lines(a.requirements),
-        "dont": read_lines(a.dont),
-        "approval": (a.approval or "").strip() or None,
         # supplied: the brand said what it wants; False means the brief is
         # built from the connection map alone and its header says so
         "supplied": bool(points or (a.promoting or "").strip()),
@@ -269,21 +265,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--promoting", default=None,
                     help="one line on what the brand is promoting in this ad; "
                          "implies --creator-brief")
-    ap.add_argument("--requirements", default=None,
-                    help="the brand's mandatories, a file path or the text, "
-                         "one per line")
-    ap.add_argument("--dont", default=None,
-                    help="the brand's don'ts, a file path or the text, one per line")
-    ap.add_argument("--approval", default=None,
-                    help="the brand's creative approval process, when it differs "
-                         "from the template's default")
     a = ap.parse_args(argv)
 
     brief_inputs = [f for f, v in (("--talking-points", a.talking_points),
-                                   ("--promoting", a.promoting),
-                                   ("--requirements", a.requirements),
-                                   ("--dont", a.dont),
-                                   ("--approval", a.approval)) if v]
+                                   ("--promoting", a.promoting)) if v]
     if (brief_inputs or a.creator_brief is not None) and not a.brand:
         print(json.dumps({"exit": 5, "error": "creator-brief inputs need --brand: "
                           + ", ".join(brief_inputs or ["--creator-brief"])}, indent=1))

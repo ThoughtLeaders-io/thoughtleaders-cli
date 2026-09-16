@@ -21,9 +21,9 @@ first names the brand.
 | `## Who is <brand>` | Two to four sentences a creator can read cold: what the product is, who it is for, how it is used | The connections page's About-brand paragraph, tightened. The user's "promoting" line when it adds a product name |
 | `## The creative ask` | What this ad is for and what to promote; the format when the brand stated one | The user's "promoting" line, verbatim, then one or two sentences of framing from the connection map's thesis |
 | `## Key talking points` | One `### ` per brand point. Under each: the creator's own quote as a `>` block with its timestamped link on a `>` continuation line, one line on how that moment meets the product, one "you could" suggestion | The user's talking points (each `###` names one verbatim). The connection map's cards for the moments. The ledger, read whole, when a point has no card |
-| `## Requirements` | The brand's mandatories, verbatim, as bullets | The user's requirements only. With none supplied, the ThoughtLeaders defaults below |
-| `## Don't do` | The brand's don'ts verbatim, then craft don'ts from the connections page | The user's don'ts. The page's Do-not lines, only those about craft |
-| `## Creative approval process` | How the draft gets reviewed and who says go | The user's approval text verbatim, or the default below |
+| `## Requirements` | The brand's mandatories, verbatim, as bullets | Whatever the pasted talking points state as required (deliverables, on-screen elements, timing). With none, the ThoughtLeaders defaults below |
+| `## Don't do` | The brand's don'ts verbatim, then craft don'ts from the connections page | Whatever the pasted talking points forbid. The page's Do-not lines, only those about craft |
+| `## Creative approval process` | How the draft gets reviewed and who says go | The pasted talking points when they describe one, otherwise the default below |
 
 An intro line before the first heading is allowed: the creator's first name,
 what this is, and that every quote links to the second it was said.
@@ -39,7 +39,9 @@ what this is, and that every quote links to the second it was said.
   either carried by a quote or followed by a line that says "no natural
   moment" and what to do instead. Nothing the brand asked for is dropped
   silently, and nothing is reworded.
-- Every supplied requirement and don't appears verbatim in its section.
+- A requirement, don't or approval step the brand wrote into its talking
+  points appears verbatim in its section. Nothing the brand wrote is dropped
+  or softened.
 - Second person, to the creator, in the creator's register. The "you could"
   line is a suggestion, never a script.
 - Every creator-facing sentence follows one pattern: what the brand wants,
@@ -64,8 +66,8 @@ what this is, and that every quote links to the second it was said.
 
 ## ThoughtLeaders defaults
 
-Used only when the brand supplied nothing for the section. The header of an
-unsupplied brief says so.
+Used when the pasted talking points say nothing for the section. The user is
+never asked for these separately.
 
 **Requirements, default**
 

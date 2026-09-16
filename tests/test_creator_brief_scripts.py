@@ -1034,8 +1034,7 @@ _INPUT = {
     "schema": "tl-creator-brief-input/v1", "channel_id": 42, "channel_name": "Patterrz",
     "brand_id": 7, "brand_name": "Acme", "promoting": "the new salmon recipe",
     "talking_points": ["Rescue dogs first, always", "Show the bag on camera"],
-    "requirements": ["Say the full name, Acme Salmon Recipe, once"],
-    "dont": ["No vet or medical claims"], "approval": None, "supplied": True,
+    "supplied": True,
 }
 
 _BRIEF_MD = (
@@ -1110,8 +1109,7 @@ def test_a_clean_brief_passes_and_renders_named_by_names(tmp_path):
 
 def test_an_unsupplied_brief_says_so_in_its_header(tmp_path):
     md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
-    inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None,
-           "requirements": [], "dont": []}
+    inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None}
     proc, res = _brief(tmp_path, md, inp, check=False)
     assert proc.returncode == 0 and not res["problems"], res["problems"]
     assert "no brand talking points supplied" in Path(res["html"]).read_text()
@@ -1143,7 +1141,6 @@ def test_the_check_wants_all_six_sections_in_order(tmp_path):
     missing = _BRIEF_MD.replace("## Requirements\n\n- Say the full name, Acme Salmon Recipe, once\n\n", "")
     problems = _problems(tmp_path, missing)
     assert "missing section: ## Requirements" in problems
-    assert any("missing or reworded under Requirements" in p for p in problems)
     swapped = _BRIEF_MD.replace("## Don't do", "## ZZZ").replace(
         "## Creative approval process", "## Don't do").replace("## ZZZ", "## Creative approval process")
     assert any("out of order" in p for p in _problems(tmp_path, swapped))
@@ -1154,8 +1151,13 @@ def test_the_check_refuses_a_dropped_or_reworded_brand_line(tmp_path):
                                 "videos for this one; worth doing straight, the bag in "
                                 "frame while Luna eats.\n\n", "")
     assert any("supplied talking point missing" in p for p in _problems(tmp_path, dropped))
-    reworded = _BRIEF_MD.replace("- No vet or medical claims", "- Avoid medical claims")
-    assert any("missing or reworded under Don't do" in p for p in _problems(tmp_path, reworded))
+    reworded = _BRIEF_MD.replace("### Rescue dogs first, always", "### Rescue dogs come first")
+    problems = _problems(tmp_path, reworded)
+    assert any("supplied talking point missing or reworded" in p for p in problems)
+    promoting = _BRIEF_MD.replace("Acme is promoting the new salmon recipe.",
+                                  "Acme is promoting its salmon food.")
+    assert any("'promoting' line is not in The creative ask" in p
+               for p in _problems(tmp_path, promoting))
 
 
 def test_a_talking_point_without_a_quote_must_say_no_natural_moment(tmp_path):

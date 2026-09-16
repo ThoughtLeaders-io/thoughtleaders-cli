@@ -62,8 +62,7 @@ python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
   [--host-terms "<surname>,<company>"] [--reserve <N>] \
   [--lanes transcripts+socials] [--rebuild] [--no-refresh] \
   [--creator-brief | --no-creator-brief] [--talking-points <path or text>] \
-  [--promoting "<line>"] [--requirements <path or text>] \
-  [--dont <path or text>] [--approval "<text>"]
+  [--promoting "<line>"]
 ```
 
 `<ref>` is a URL, @handle, YouTube ID, numeric TL id or a name. One JSON
@@ -144,14 +143,15 @@ message; on a reuse run this question stands alone:
 > for the ad?**
 > - **No** (default): still deciding on this channel. You get the internal
 >   connections page only.
-> - **Yes**: you also get a creator-friendly brief. Paste the brand's
->   baseline talking points (or a file path) and one line on what the brand
->   is promoting. Requirements, don'ts and the approval process are optional
->   here; the template's defaults fill in what you leave out.
+> - **Yes**: you also get a creator-friendly brief.
 
-On **Yes**, re-run `start_run.py` with the answers as `--talking-points`,
-`--promoting` and the optional flags before anything else, so the input file
-exists before the connection pass. A flag skips the question; nothing
+On **Yes**, one follow-up, and that is the whole interview: paste the
+brand's baseline talking points (or a file path) and what the brand is
+promoting. Then re-run `start_run.py` with the answers as `--talking-points`
+and `--promoting` before anything else, so the input file exists before the
+connection pass. Requirements, don'ts and the approval process are never
+asked for: the brief takes them from the pasted talking points when the
+brand included them, otherwise from the template's defaults. A flag skips the question; nothing
 answers it silently. Autonomous, unattended or fast runs: no brief, nothing
 asked, and the completion line says so.
 
