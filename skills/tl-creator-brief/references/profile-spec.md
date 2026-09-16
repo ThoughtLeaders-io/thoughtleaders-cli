@@ -336,6 +336,20 @@ If nothing honestly connects, the document has the About section and no
 connection sections: a **no fit** verdict in prose, what was searched, and it
 stops — a no-fit verdict is the deliverable, not a failure.
 
+## CONNECT: the creator brief source
+
+Opt-in, when the user asked for a version they can send to the creator. The
+brief writer reads `<corpus>/creator-brief-input-<brand_id>.json`
+(`tl-creator-brief-input/v1`: `talking_points` and `promoting`, verbatim from
+the user, and `supplied`), the
+connection map and, where a supplied point has no card, the whole ledger,
+and writes `<corpus>/creator-brief-<brand_id>.md`. Its frontmatter is
+`schema: tl-creator-brief/v1`, `channel_name`, `brand_name`,
+`talking_points_supplied`, and nothing else: no ids, no filenames. The six
+sections, their sources, the rules and an invented example are in
+`creator-brief-template.md`; `build_html.py --brief --check` enforces them
+and the render is named `<brand>-creator-brief-<creator>.html`.
+
 ## The page
 
 One deterministic template, never hand-written per run:

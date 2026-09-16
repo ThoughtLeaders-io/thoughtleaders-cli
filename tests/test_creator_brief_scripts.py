@@ -1134,3 +1134,169 @@ def test_check_refuses_a_sensitive_uncorroborated_bio_fact_in_the_ledger():
     facts = [_transcript_fact(), _bio_fact(sensitivity="clinical")]
     problems = build_html.check_page(_CONN_MD, facts, _META)
     assert any("should have been dropped" in p for p in problems)
+
+
+# build_html.py --brief: the creator-friendly brief, the second deliverable
+# --------------------------------------------------------------------------- #
+_INPUT = {
+    "schema": "tl-creator-brief-input/v1", "channel_id": 42, "channel_name": "Patterrz",
+    "brand_id": 7, "brand_name": "Acme", "promoting": "the new salmon recipe",
+    "talking_points": ["Rescue dogs first, always", "Show the bag on camera"],
+    "supplied": True,
+}
+
+_BRIEF_MD = (
+    "---\n"
+    "schema: tl-creator-brief/v1\n"
+    'channel_name: "Patterrz"\n'
+    "brand_name: Acme\n"
+    "talking_points_supplied: true\n"
+    "---\n\n"
+    "Patterrz, this is what Acme would like covered, with the moments from your own "
+    "videos that already say it.\n\n"
+    "## Who is Acme\n\n"
+    "Acme is a direct-to-consumer dog food brand.\n\n"
+    "## The creative ask\n\n"
+    "Acme is promoting the new salmon recipe. One integration inside a regular upload.\n\n"
+    "## Key talking points\n\n"
+    "### Rescue dogs first, always\n\n"
+    "> we finally adopted luna from the shelter last spring and she\n"
+    "> [Patterrz, 2026](https://www.youtube.com/watch?v=abc&t=12s)\n\n"
+    "Luna's adoption is the story Acme wants told. You could open on her and let the "
+    "food come second.\n\n"
+    "### Show the bag on camera\n\n"
+    "No natural moment in your videos for this one; worth doing straight, "
+    "the bag in frame while Luna eats.\n\n"
+    "## Requirements\n\n"
+    "- Say the full name, Acme Salmon Recipe, once\n\n"
+    "## Don't do\n\n"
+    "- No vet or medical claims\n\n"
+    "## Creative approval process\n\n"
+    "Send a draft to your ThoughtLeaders contact. Acme reviews it, and the video goes "
+    "live only after written approval.\n"
+)
+
+
+def _brief(tmp_path: Path, md: str = _BRIEF_MD, inp: dict | None = _INPUT,
+           facts=None, check: bool = True, out: Path | None = None):
+    src = tmp_path / "creator-brief-7.md"
+    src.write_text(md)
+    conn = tmp_path / "connections-7.md"
+    conn.write_text(_CONN_MD)
+    cmd = [sys.executable, str(_SCRIPTS / "build_html.py"), "--brief",
+           "--in", str(src), "--connections", str(conn),
+           "--facts", str(_write_ledger(tmp_path, facts))]
+    if inp is not None:
+        ip = tmp_path / "creator-brief-input-7.json"
+        ip.write_text(json.dumps(inp))
+        cmd += ["--input", str(ip)]
+    if check:
+        cmd.append("--check")
+    if out:
+        cmd += ["--out", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc, json.loads(proc.stdout)
+
+
+def test_a_clean_brief_passes_and_renders_named_by_names(tmp_path):
+    proc, res = _brief(tmp_path)
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+    proc, res = _brief(tmp_path, check=False)
+    assert proc.returncode == 0
+    html_path = Path(res["html"])
+    assert html_path.name == "acme-creator-brief-patterrz.html"
+    assert html_path.parent == (tmp_path / "42-facts.jsonl").parent
+    page = html_path.read_text()
+    assert "<title>Acme creator brief for Patterrz</title>" in page
+    assert "<h2>Who is Acme</h2>" in page and "<h2>Creative approval process</h2>" in page
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s"' in page
+    assert "no brand talking points supplied" not in page
+    assert Path(res["fragment"]).exists()
+    assert "FUNNEL stage=brief_render" in proc.stderr
+
+
+def test_an_unsupplied_brief_says_so_in_its_header(tmp_path):
+    md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None}
+    proc, res = _brief(tmp_path, md, inp, check=False)
+    assert proc.returncode == 0 and not res["problems"], res["problems"]
+    assert "no brand talking points supplied" in Path(res["html"]).read_text()
+
+
+def _problems(tmp_path, md, inp=_INPUT, facts=None) -> list[str]:
+    proc, res = _brief(tmp_path, md, inp, facts)
+    assert proc.returncode == 3, "a broken brief must fail the check"
+    return res["problems"]
+
+
+def test_the_check_refuses_a_quote_the_creator_never_said(tmp_path):
+    md = _BRIEF_MD.replace("we finally adopted luna from the shelter last spring and she",
+                           "luna changed my whole life the day we brought her home")
+    assert any("neither a ledger fact nor" in p for p in _problems(tmp_path, md))
+
+
+def test_the_check_refuses_a_withheld_tier_quote(tmp_path):
+    facts = [dict(f) for f in _FACTS]
+    facts[3]["quote"] = "maple started school this week and cried"   # children tier
+    md = _BRIEF_MD.replace(
+        "> we finally adopted luna from the shelter last spring and she\n",
+        "> maple started school this week and cried\n")
+    problems = _problems(tmp_path, md, facts=facts)
+    assert any("withheld-tier" in p for p in problems)
+
+
+def test_the_check_wants_all_six_sections_in_order(tmp_path):
+    missing = _BRIEF_MD.replace("## Requirements\n\n- Say the full name, Acme Salmon Recipe, once\n\n", "")
+    problems = _problems(tmp_path, missing)
+    assert "missing section: ## Requirements" in problems
+    swapped = _BRIEF_MD.replace("## Don't do", "## ZZZ").replace(
+        "## Creative approval process", "## Don't do").replace("## ZZZ", "## Creative approval process")
+    assert any("out of order" in p for p in _problems(tmp_path, swapped))
+
+
+def test_the_check_refuses_a_dropped_or_reworded_brand_line(tmp_path):
+    dropped = _BRIEF_MD.replace("### Show the bag on camera\n\nNo natural moment in your "
+                                "videos for this one; worth doing straight, the bag in "
+                                "frame while Luna eats.\n\n", "")
+    assert any("supplied talking point missing" in p for p in _problems(tmp_path, dropped))
+    reworded = _BRIEF_MD.replace("### Rescue dogs first, always", "### Rescue dogs come first")
+    problems = _problems(tmp_path, reworded)
+    assert any("supplied talking point missing or reworded" in p for p in problems)
+    promoting = _BRIEF_MD.replace("Acme is promoting the new salmon recipe.",
+                                  "Acme is promoting its salmon food.")
+    assert any("'promoting' line is not in The creative ask" in p
+               for p in _problems(tmp_path, promoting))
+
+
+def test_a_talking_point_without_a_quote_must_say_no_natural_moment(tmp_path):
+    md = _BRIEF_MD.replace("No natural moment in your videos for this one; worth doing "
+                           "straight, the bag in frame while Luna eats.",
+                           "Show the bag on camera while Luna eats.")
+    assert any("does not say 'no natural moment'" in p for p in _problems(tmp_path, md))
+
+
+def test_nothing_written_for_the_brands_eyes_reaches_the_creator(tmp_path):
+    cases = {
+        "**strong**": "Luna's adoption is the story Acme wants told (**strong**).",
+        "sponsorship pattern": "Other creators follow the same sponsorship pattern here.",
+        "fact id": "This is fact f1 from the file.",
+        "platform id": "Acme (id 50485) sells dog food.",
+        "money": "The read pays $400 per video.",
+        "CTA": "Tell them to use code LUNA at checkout.",
+        "against": "Feed Acme instead of the supermarket brand.",
+    }
+    for label, line in cases.items():
+        md = _BRIEF_MD.replace("You could open on her and let the food come second.", line)
+        problems = _problems(tmp_path, md)
+        assert problems, label
+        assert not any("missing" in p for p in problems), (label, problems)
+
+
+def test_the_brief_frontmatter_carries_no_platform_internals(tmp_path):
+    md = _BRIEF_MD.replace("brand_name: Acme\n", "brand_name: Acme\nbrand_id: 7\n")
+    assert "frontmatter carries a platform internal: brand_id" in _problems(tmp_path, md)
+
+
+def test_talking_points_supplied_must_agree_with_the_input_file(tmp_path):
+    md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    assert any("talking_points_supplied says false" in p for p in _problems(tmp_path, md))

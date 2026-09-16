@@ -31,6 +31,20 @@ Usage:
     start_run.py --channel <ref> [--brand <ref>] [--host-terms "a,b"]
                  [--reserve N] [--lanes transcripts+socials]
                  [--rebuild] [--no-refresh] [--profiles-dir DIR]
+                 [--creator-brief | --no-creator-brief]
+                 [--talking-points <path or text>] [--promoting "<line>"]
+
+**The creator brief is an opt-in second file on a CONNECT run.** The user is
+asked once, in the run's one wait turn, whether they want a version they can
+send to the creator; on yes they are asked for the brand's baseline talking
+points and what it is promoting, and that is the whole interview. A flag
+skips a question, it never answers it silently. The answers are written
+verbatim to ``<corpus>/creator-brief-input-<brand_id>.json`` (schema
+``tl-creator-brief-input/v1``), so the brief writer reads the brand's own
+words, never a paraphrase. ``--talking-points`` or
+``--promoting`` implies ``--creator-brief``. None of these flags is valid
+without ``--brand``, and the ledger build never reads them: the profile is
+brand-blind.
 
 Output (stdout): one JSON object. Every stage's FUNNEL line passes through on
 stderr, as though it had been run by hand.
@@ -172,6 +186,48 @@ def identity_block(context_full: pathlib.Path) -> dict:
     }
 
 
+CREATOR_BRIEF_INPUT_SCHEMA = "tl-creator-brief-input/v1"
+_BULLET = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
+
+
+def read_lines(value: str | None) -> list[str]:
+    """A path or literal text -> the brand's own lines, verbatim.
+
+    A path that exists is read; anything else is the text itself. Lines are
+    split on newlines, bullets and numbering stripped, blanks dropped. Nothing
+    is reworded: what the brand wrote is what the brief writer sees.
+    """
+    if value is None:
+        return []
+    text = value
+    candidate = pathlib.Path(value)
+    try:
+        if len(value) < 1024 and candidate.is_file():
+            text = candidate.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    lines = [_BULLET.sub("", ln).strip() for ln in text.splitlines()]
+    return [ln for ln in lines if ln]
+
+
+def creator_brief_input(a, channel: dict, brand: dict) -> dict:
+    """The verbatim input record for the creator brief writer."""
+    points = read_lines(a.talking_points)
+    return {
+        "schema": CREATOR_BRIEF_INPUT_SCHEMA,
+        "channel_id": channel["id"],
+        "channel_name": channel.get("name"),
+        "brand_id": brand["id"],
+        "brand_name": brand.get("name"),
+        "promoting": (a.promoting or "").strip() or None,
+        "talking_points": points,
+        # supplied: the brand said what it wants; False means the brief is
+        # built from the connection map alone and its header says so
+        "supplied": bool(points or (a.promoting or "").strip()),
+        "written_at": time.strftime("%Y-%m-%d"),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     t0 = time.monotonic()
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -195,7 +251,36 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-refresh", dest="no_refresh", action="store_true")
     ap.add_argument("--profiles-dir", dest="profiles_dir",
                     default="tl-creator-profiles")
+    cb = ap.add_mutually_exclusive_group()
+    cb.add_argument("--creator-brief", dest="creator_brief", action="store_true",
+                    default=None,
+                    help="CONNECT only: also produce the creator-friendly brief. "
+                         "Neither flag given, the run asks once")
+    cb.add_argument("--no-creator-brief", dest="creator_brief", action="store_false",
+                    help="CONNECT only: the internal connections page only")
+    ap.add_argument("--talking-points", dest="talking_points", default=None,
+                    help="the brand's baseline talking points, a file path or "
+                         "the text itself, one point per line; implies "
+                         "--creator-brief")
+    ap.add_argument("--promoting", default=None,
+                    help="one line on what the brand is promoting in this ad; "
+                         "implies --creator-brief")
     a = ap.parse_args(argv)
+
+    brief_inputs = [f for f, v in (("--talking-points", a.talking_points),
+                                   ("--promoting", a.promoting)) if v]
+    if (brief_inputs or a.creator_brief is not None) and not a.brand:
+        print(json.dumps({"exit": 5, "error": "creator-brief inputs need --brand: "
+                          + ", ".join(brief_inputs or ["--creator-brief"])}, indent=1))
+        return 5
+    if a.creator_brief is False and (a.talking_points or a.promoting):
+        print(json.dumps({"exit": 5, "error": "--no-creator-brief contradicts "
+                          + " and ".join(f for f in brief_inputs
+                                         if f in ("--talking-points", "--promoting"))},
+                         indent=1))
+        return 5
+    if a.creator_brief is None and (a.talking_points or a.promoting):
+        a.creator_brief = True
 
     out: dict = {"ran": []}
 
@@ -220,6 +305,22 @@ def main(argv: list[str] | None = None) -> int:
     profiles = pathlib.Path(a.profiles_dir)
     corpus = profiles / ".corpus" / str(cid)
     context_full = corpus / "context-full.json"
+
+    # the creator brief's inputs are written before anything that can fail,
+    # verbatim, so a re-run after a failed stage does not ask for them twice
+    out["creator_brief"] = ({True: "on", False: "off"}.get(a.creator_brief, "ask")
+                            if a.brand else None)
+    out["creator_brief_input"] = None
+    out["talking_points"] = 0
+    if a.brand and (a.creator_brief or brief_inputs):
+        record = creator_brief_input(a, channel, out["brand"])
+        input_path = corpus / f"creator-brief-input-{out['brand']['id']}.json"
+        input_path.parent.mkdir(parents=True, exist_ok=True)
+        input_path.write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n",
+                              encoding="utf-8")
+        out["creator_brief_input"] = str(input_path)
+        out["talking_points"] = len(record["talking_points"])
+        out["ran"].append("creator_brief_input")
 
     rc, _ = run_script("channel_context.py", ["--channel", str(cid)],
                        stdout_to=context_full)
