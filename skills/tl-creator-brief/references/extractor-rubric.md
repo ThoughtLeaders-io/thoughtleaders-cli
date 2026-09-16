@@ -75,8 +75,8 @@ Applying them to a window batch:
 - **`format_hint: "staged"`** marks a prank, challenge, 24-hour stunt, fake or
   pretend scenario, dating show or skit (from the title). One voice still
   holds the transcript, so the solo attribution rule stands. What changes is
-  the third test: a relationship, marriage, pregnancy, move, job or death
-  stated inside the premise may be the bit. Report it anyway, as a gem, with
+  the second test: a relationship, marriage, pregnancy, move, job or death
+  stated inside the premise may be the bit, not a lasting fact. Report it anyway, as a gem, with
   `confidence: "likely"` and `speaker_evidence` naming the staged hint
   ("staged premise, solo voice"); a later stage searches the rest of the
   channel for the same claim and decides with that evidence. Never withhold
@@ -89,13 +89,14 @@ Applying them to a window batch:
   window, a question being answered), so the merge pass can see how the
   call was made.
 - **Read the channel's own description first.** `channel_about` and
-  `channel_ai_profile` are what the channel says it is. Use them for the
-  third test in "What counts as self-disclosure" (a fact the premise already
-  implies is not a find: a cooking channel's host liking food is nothing, the
-  same host having trained as a lawyer is a gem), to recognise the host's
-  name, business or city when captions garble them, and to notice when a
-  window describes the channel rather than the person. A disclosure that
-  contradicts the description is still reported, at `confidence: "likely"`.
+  `channel_ai_profile` are what the channel says it is. Use them to
+  recognise the host's name, business or city when captions garble them,
+  and to notice when a window describes the channel rather than the person
+  ("this channel covers budget travel" is not a fact about anyone). They
+  are never a reason to skip a gem: a cooking host who says they have
+  cooked since childhood is a gem even though the channel is about cooking.
+  A disclosure that contradicts the description is still reported, at
+  `confidence: "likely"`.
 - **Windows come in any language** (each carries a `language` code). Judge
   the window in its source language; write `notable` and `claim` in English;
   report `entity_corrections` the same way. The quote span is cut from the

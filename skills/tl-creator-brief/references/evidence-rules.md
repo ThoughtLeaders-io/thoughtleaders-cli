@@ -7,22 +7,43 @@ doctrine — nothing else restates it.
 
 ## What counts as self-disclosure
 
-A first-person search is not the test. A window is a gem only if all three
-hold:
+A gem is one lasting fact about the creator as a person, in the creator's
+own voice. A first-person search is not the test. A window is a gem only if
+all three hold:
 
-1. **The speaker is the subject** — their own life, work, history, habits,
-   relationships or tastes. Not the topic, not the audience, not the video.
-2. **It would still be true if the video did not exist.** "I founded a
-   marketing agency" is true off camera. "I'll show you in a second" exists
-   only because the video exists.
-3. **It discloses something the channel's premise does not already imply.**
-   A geography host loving maps is nothing. "I trained as an accountant" is a
-   find. A trivial personal taste ("I can't stand coffee") passes — that is
-   exactly the kind of find this skill exists for.
+1. **About the person, not the content.** The fact is about the creator's
+   life: where they are from, family, home, pets, work history, money,
+   health, beliefs, standing habits and tastes, relationships. A verdict on
+   the thing this video is about is not a gem: the dish, the workout, the
+   game, the product, the news story. A standing trait is, even when it is
+   obvious from the channel: a cooking host saying they have loved cooking
+   since childhood is a gem. Obvious is not a reason to skip; a profile that
+   never mentions cooking on a cooking channel is wrong.
+2. **True off camera and next year.** Skip anything that exists only because
+   the video exists, and anything true only today: production notes, what
+   they did this morning, how they feel about this take, a reaction to this
+   one dish. A habit or taste counts when it is stated as recurring or
+   long-standing. "I've never liked cilantro" is a gem. "This dish is S tier"
+   is not.
+3. **The creator's own voice, settled.** The creator speaking about their
+   own life, including when a guest or co-host interviews them on their own
+   channel. Never a guest, co-host, crew member, street interviewee, read-out
+   comment, quoted speech, sarcasm, hypothetical, or a role played in a skit.
+   If you cannot settle whose voice it is, it is not a gem. A missed gem
+   costs less than a wrong one.
 
-Cast wide. Material with no bearing on any brand belongs in the profile; the
-unrelated detail is where the good connections come from, and CONNECT narrows
-later with its own inputs.
+The channel as a job counts only when the fact is biographical: when they
+started, what they quit to do it, how it changed their money or health, who
+works with them. The feeling of making this week's episode does not.
+
+Political and social opinions the creator states as their own are gems in
+every channel type. Opinions on the video's subject are not.
+
+Cast wide across domains and narrow on lasting. A trivial standing taste is
+a gem. A momentary reaction, however personal it sounds, is not. Material
+with no bearing on any brand belongs in the profile; the unrelated detail is
+where the good connections come from, and CONNECT narrows later with its
+own inputs.
 
 ## Attribution
 
