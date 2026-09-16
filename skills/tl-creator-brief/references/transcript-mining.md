@@ -57,7 +57,7 @@ reads carries a tag.
 phrase, and a disclosure usually ends at its cue: "film school wasn't going
 to make me who I wanted to be, so I left my girlfriend and my family" fires
 on the last clause, while the biography sits in the sentences before it,
-where no phrase fires and no fragment is ever cut. At 450 characters that
+where no phrase fires and no fragment is ever cut. At the earlier 450 characters that
 context is not demoted, it is absent from the whole candidate pool (Airrack,
 2026-09-10: three of the previous top-20 gems had no passage left anywhere).
 So the cap is taken on the narrow fragment, which keeps the ranking sharp,
@@ -121,7 +121,7 @@ minutes later is two passages.
 | `--min-score` / `--min-windows` | 2.5 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the one-cue tie beneath it; 2.5 is one strong cue plus another signal in the same window |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
-| `--fragment-size` / `--fragments-per-doc` | 450 / 10 | RANKING width in raw characters (about half is markup, so 450 is about 30 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
+| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue; raised from 450 on 2026-09-16 so voice and the sentences around a cue survive the ranking cut) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
 | `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |

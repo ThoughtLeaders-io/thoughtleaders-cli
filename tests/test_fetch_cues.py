@@ -963,7 +963,7 @@ def test_a_heavier_phrase_outranks_a_lighter_one_and_two_heavy_ones_saturate(tmp
 
 def test_defaults_are_the_smaller_cap_and_the_tighter_fragment(tmp_path, monkeypatch):
     summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [_frag("i grew up", 100)])])
-    assert summary["fragment_size"] == 450
+    assert summary["fragment_size"] == 900
     assert summary["generic_fallback"]["floor"] == 300
     assert summary["selection"] == {"min_score": 2.5, "min_windows": 150, "max_windows": 300,
                                     "stop_reason": "exhausted", "duplicates_collapsed": 0}

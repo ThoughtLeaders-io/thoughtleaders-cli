@@ -28,7 +28,7 @@ stays sharp and the extractor still sees the sentences before the cue.
 Usage:
     fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
                   [--max-windows 500] [--batch-size N] [--reserve N]
-                  [--generic-floor N] [--fragment-size 450] [--round N]
+                  [--generic-floor N] [--fragment-size 900] [--round N]
                   [--read-before 20] [--read-after 10]
                   [--min-score 2.5] [--min-windows 150]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
@@ -663,7 +663,7 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
 # a disclosure usually ENDS at its cue ("...and film school wasn't going to
 # make me who I wanted to be, so I left my girlfriend and my family"): the
 # biography sits in the sentences before the phrase, where no phrase fires and
-# so no fragment is ever cut. At 450 raw characters that context was gone
+# so no fragment is ever cut. At the earlier 450 raw characters that context was gone
 # from the whole candidate pool, not demoted (Airrack 2026-09-10: three of the
 # previous top-20 gems had no passage left anywhere). So the cap is taken on
 # the narrow fragment, which keeps the ranking sharp, and then every KEPT
@@ -742,7 +742,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
         w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
         entry = corpus.get(w["id"])
         if entry is not None:
-            # The highlighter cuts a fragment mid-cue at its 450-char boundary,
+            # The highlighter cuts a fragment mid-cue at its fragment-size boundary,
             # so the piece already stored at a start time can be the first
             # words of the cue only ("i'm bad at" for "i'm bad at maths"). The
             # extractor reads the wider text above, so the corpus must carry
@@ -928,10 +928,11 @@ def main() -> int:
                          "when the socials lane is on. Batches are sized "
                          "against cap minus this, so the last extractor is "
                          "not rejected and relaunched a wave later")
-    ap.add_argument("--fragment-size", type=int, default=450,
+    ap.add_argument("--fragment-size", type=int, default=900,
                     help="highlight width in RAW characters, of which about half is "
-                         "timed-text markup: 450 is about 30 spoken words, 600 about 45, "
-                         "900 about 70")
+                         "timed-text markup: 900 is about 70 spoken words, 600 about 45, "
+                         "450 about 30; 900 since 2026-09-16 so a voice call and the "
+                         "sentences around a cue survive the ranking cut")
     ap.add_argument("--generic-floor", type=int, default=None,
                     help="run the first-person fallback pass (GENERIC_TERMS) only when the "
                          "cue phrases keep fewer windows than this, and fill just the "
