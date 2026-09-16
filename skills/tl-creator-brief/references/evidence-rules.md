@@ -18,7 +18,11 @@ all three hold:
    game, the product, the news story. A standing trait is, even when it is
    obvious from the channel: a cooking host saying they have loved cooking
    since childhood is a gem. Obvious is not a reason to skip; a profile that
-   never mentions cooking on a cooking channel is wrong.
+   never mentions cooking on a cooking channel is wrong. Judge the fact, not
+   the window: a girlfriend named in a show intro, a childhood memory inside
+   a list of games, a dog and a backyard mentioned while building something
+   are gems even though the window is mostly content. "Not about their life"
+   is a verdict on every sentence in the window, never on its topic.
 2. **True off camera and next year.** Skip anything that exists only because
    the video exists, and anything true only today: production notes, what
    they did this morning, how they feel about this take, a reaction to this
@@ -29,8 +33,26 @@ all three hold:
    own life, including when a guest or co-host interviews them on their own
    channel. Never a guest, co-host, crew member, street interviewee, read-out
    comment, quoted speech, sarcasm, hypothetical, or a role played in a skit.
-   If you cannot settle whose voice it is, it is not a gem. A missed gem
-   costs less than a wrong one.
+   Settle the voice before anything else, in this order:
+   - A question followed by an answer: the answer belongs to whoever is
+     being interviewed. When the channel's own host asks ("what does your
+     family think of your career?"), the life story in the answer is the
+     guest's. Only when the host is the one being asked is it the host's.
+   - A life story that does not fit the host: a physician's residency on a
+     vintage-craft channel, a Nickelodeon career on a minimalism channel, a
+     wife's pregnancy told by the owner of the restaurant being visited. It
+     is someone else's, whatever the flags say.
+   - `format_hint: "interview_or_collab"` or a `second_voice_hint` means a
+     second person is speaking in this upload. Credit the host only when
+     the window itself shows the host speaking (a self-naming, the host's
+     known facts, the host addressing their own audience). Two unattributed
+     first-person voices in one window, or a first-person line you cannot
+     place, is not a gem.
+   The host's own narration about other people ("I flew to Mexico to meet
+   my friend Fede", "I'm buying my friends' tickets") is the host's voice
+   and the host's life: the friend is the subject of the sentence, the
+   host is the subject of the fact. A missed gem costs less than a wrong
+   one.
 
 The channel as a job counts only when the fact is biographical: when they
 started, what they quit to do it, how it changed their money or health, who
