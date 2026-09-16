@@ -253,3 +253,69 @@ def test_a_failed_fetch_stops_the_chain_and_names_the_stage(env):
     assert rc == 3
     assert out["failed"] == "fetch_cues"
     assert "context_stats" not in out["ran"]
+
+
+# --------------------------------------------------------------------------- #
+# the creator brief's inputs: verbatim, up front, CONNECT only
+# --------------------------------------------------------------------------- #
+_TL_BRAND = {
+    "whoami": {"stdout": json.dumps({"organization": {"plan": "Superuser"}})},
+    "brands": {"stdout": json.dumps({"results": [{"id": 7, "name": "Acme"}]})},
+}
+
+
+def test_creator_brief_inputs_need_a_brand(env, capsys):
+    rc, out, log = env(["--channel", "42", "--talking-points", "show the bag"])
+    assert rc == 5
+    assert "need --brand" in out["error"] and "--talking-points" in out["error"]
+    assert not _calls(log), "nothing ran"
+
+
+def test_talking_points_imply_the_brief_and_are_written_verbatim(env, tmp_path):
+    points = tmp_path / "points.md"
+    points.write_text("- Rescue dogs first, always\n\n2. Show the bag on camera\n"
+                      "* Say \"complete and balanced\", their words\n")
+    rc, out, _ = env(["--channel", "42", "--brand", "acme",
+                      "--talking-points", str(points),
+                      "--promoting", "the new salmon recipe",
+                      "--dont", "no vet claims\nno price talk"], tl=_TL_BRAND)
+    assert rc == 0
+    assert out["creator_brief"] == "on" and out["talking_points"] == 3
+    assert "creator_brief_input" in out["ran"]
+    rec = json.loads(Path(out["creator_brief_input"]).read_text())
+    assert rec["schema"] == "tl-creator-brief-input/v1"
+    assert rec["brand_id"] == 7 and rec["brand_name"] == "Acme" and rec["channel_id"] == 42
+    # bullets and numbering stripped, the words untouched
+    assert rec["talking_points"] == ["Rescue dogs first, always", "Show the bag on camera",
+                                     'Say "complete and balanced", their words']
+    assert rec["dont"] == ["no vet claims", "no price talk"]
+    assert rec["promoting"] == "the new salmon recipe" and rec["supplied"] is True
+    assert rec["requirements"] == [] and rec["approval"] is None
+    assert Path(out["creator_brief_input"]).name == "creator-brief-input-7.json"
+
+
+def test_no_creator_brief_contradicts_talking_points(env):
+    rc, out, _ = env(["--channel", "42", "--brand", "acme", "--no-creator-brief",
+                      "--talking-points", "x"], tl=_TL_BRAND)
+    assert rc == 5 and "--no-creator-brief contradicts" in out["error"]
+
+
+def test_with_nothing_said_the_brief_is_a_question_not_a_default(env):
+    """A flag skips the question; nothing answers it silently."""
+    rc, out, _ = env(["--channel", "42", "--brand", "acme"], tl=_TL_BRAND)
+    assert rc == 0
+    assert out["creator_brief"] == "ask" and out["creator_brief_input"] is None
+    assert "creator_brief_input" not in out["ran"]
+
+
+def test_creator_brief_on_with_no_points_writes_an_unsupplied_record(env):
+    rc, out, _ = env(["--channel", "42", "--brand", "acme", "--creator-brief"],
+                     tl=_TL_BRAND)
+    assert rc == 0 and out["creator_brief"] == "on"
+    rec = json.loads(Path(out["creator_brief_input"]).read_text())
+    assert rec["supplied"] is False and rec["talking_points"] == []
+
+
+def test_a_profile_run_carries_no_creator_brief_field(env):
+    rc, out, _ = env(["--channel", "42"])
+    assert rc == 0 and out["creator_brief"] is None

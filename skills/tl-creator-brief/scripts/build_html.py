@@ -46,6 +46,22 @@ The page, in order:
 required sections, a timestamped link inside every connection's blockquote,
 no price language), prints the problems and exits 3 without writing.
 
+``--brief`` renders the OTHER deliverable, the creator-friendly brief, from
+``<corpus>/creator-brief-<brand_id>.md``::
+
+    build_html.py --brief --in .corpus/<id>/creator-brief-<brand>.md \\
+        --facts <ledger> --connections .corpus/<id>/connections-<brand>.md \\
+        [--input .corpus/<id>/creator-brief-input-<brand>.json] [--check]
+
+Six sections in a fixed order (Who is the brand, The creative ask, Key
+talking points, Requirements, Don't do, Creative approval process), written
+for the creator's eyes: every quote is the creator's own verified words with
+its timestamped link, the brand's supplied lines appear verbatim, and nothing
+written for the brand's or the account manager's eyes (strength tags,
+provenance labels, ids, filenames, sponsorship patterns) is allowed on it.
+The output is named by names, ``<brand>-creator-brief-<creator>.html``,
+because it is an attachment. ``--check`` applies the same rules and exits 3.
+
 Facts at tier ``children`` or ``location`` never enter the who-they-are
 section (they are withheld from brand-facing angles by default); ``clinical``
 does, carrying its tier badge, per ``references/evidence-rules.md``.
@@ -1109,6 +1125,253 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
     return problems
 
 
+# --------------------------------------------------------------------------- #
+# --brief: the creator-friendly brief, the second deliverable of a CONNECT run
+# --------------------------------------------------------------------------- #
+# Written for a third audience, the creator. The connections page argues the
+# fit to the account manager; this file tells the creator what the brand wants
+# said and which of their own moments already say it. Same evidence rules,
+# second person, and nothing that was written for the brand's eyes.
+BRIEF_SCHEMA = "tl-creator-brief/v1"
+BRIEF_INPUT_SCHEMA = "tl-creator-brief-input/v1"
+# the six sections, in the order the brand-side template (David, 2026-09-15)
+# fixes; the first is matched on its prefix because it names the brand
+BRIEF_SECTIONS = (
+    ("who", "Who is <brand>", lambda t: t.startswith("who is")),
+    ("ask", "The creative ask", lambda t: t == "the creative ask"),
+    ("points", "Key talking points", lambda t: t == "key talking points"),
+    ("requirements", "Requirements", lambda t: t == "requirements"),
+    ("dont", "Don't do", lambda t: t in ("don't do", "do not do", "don'ts", "dont do")),
+    ("approval", "Creative approval process",
+     lambda t: t == "creative approval process"),
+)
+NO_MOMENT = re.compile(r"no natural moment", re.I)
+# vocabulary that exists for the brand's or the AM's eyes only
+_BRIEF_BANNED = [
+    r"\*\*strong\*\*", r"\*\*thin\*\*", r"\bthin fit\b", r"\bprecedent\b",
+    r"sponsorship pattern", r"ad-read sample", r"\bad read sample\b", r"\[web",
+    r"\[social", r"\bledger\b", r"-facts\.jsonl", r"connections-\d", r"\.jsonl\b",
+    r"channel_id", r"brand_id", r"Where this could go wrong", r"\bprobe\b",
+    r"\bunconfirmed\b", r"honesty strip", r"connections page", r"connection map",
+]
+_FACT_ID = re.compile(r"(?<![\w-])f\d{1,4}(?![\w-])")
+# a bare 5-7 digit number outside a link is a platform id
+_PLATFORM_ID = re.compile(r"(?<![\w=&?/.:-])\d{5,7}(?![\w-])")
+_CTA = re.compile(r"\b(download (?:it|now|the app)|link in (?:the )?description|use code"
+                  r"|sign up|click (?:the|here|below))\b", re.I)
+# the creator file builds the brand up; it never sets it against another
+# product, even one the creator plays (Yuval, 2026-09-15)
+_AGAINST = re.compile(r"\b(instead of|put (?:\w+ )?down|better than|ditch(?:ing)?"
+                      r"|swap(?:ping)? out|rather than (?:playing|using|opening))\b", re.I)
+
+
+def md_blockquotes(md: str) -> list[str]:
+    """The normalised text of every `>` block, attribution links dropped."""
+    out = []
+    for m in re.finditer(r"((?:^> ?.*\n?)+)", md, re.M):
+        text = re.sub(r"^> ?", "", m.group(1), flags=re.M)
+        text = re.sub(r"\[[^\]]*\]\([^)]*\)", " ", text)
+        out.append(_norm_words(text))
+    return [q for q in out if q]
+
+
+def brief_sections(body: str) -> tuple[str, dict[str, str], list[str], list[str]]:
+    """``(intro, {key: section text}, order of keys found, unknown headings)``."""
+    parts = re.split(r"(?m)^## ", body)
+    intro, found, order, unknown = parts[0], {}, [], []
+    for part in parts[1:]:
+        heading, _, rest = part.partition("\n")
+        t = heading.strip().lower().replace("’", "'").rstrip("?").strip()
+        for key, _label, match in BRIEF_SECTIONS:
+            if match(t):
+                found[key] = rest
+                order.append(key)
+                break
+        else:
+            unknown.append(heading.strip())
+    return intro, found, order, unknown
+
+
+def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
+                inp: dict | None) -> list[str]:
+    """Contract problems with the creator brief, one line each. Empty means
+    it can be sent."""
+    problems: list[str] = []
+    fm, body = parse_frontmatter(md_text)
+    brand = fm.get("brand_name") or ""
+    if fm.get("schema") != BRIEF_SCHEMA:
+        problems.append(f"frontmatter schema is not {BRIEF_SCHEMA}")
+    for key in ("channel_name", "brand_name"):
+        if not fm.get(key):
+            problems.append(f"frontmatter lacks {key}")
+    for key in ("channel_id", "brand_id", "facts_file", "connections_file"):
+        if key in fm:
+            problems.append(f"frontmatter carries a platform internal: {key}")
+    if inp is not None and inp.get("schema") != BRIEF_INPUT_SCHEMA:
+        problems.append(f"input file schema is not {BRIEF_INPUT_SCHEMA}")
+    supplied = bool(inp and inp.get("supplied"))
+    if str(fm.get("talking_points_supplied", "")).lower() not in ("true", "false"):
+        problems.append("frontmatter lacks talking_points_supplied: true|false")
+    elif (fm["talking_points_supplied"].lower() == "true") != supplied:
+        problems.append(f"talking_points_supplied says {fm['talking_points_supplied']} "
+                        f"but the input file says {supplied}")
+
+    intro, found, order, unknown = brief_sections(body)
+    expected = [k for k, _l, _m in BRIEF_SECTIONS]
+    for key, label, _m in BRIEF_SECTIONS:
+        if key not in found:
+            problems.append(f"missing section: ## {label.replace('<brand>', brand or '<brand>')}")
+    if order != [k for k in expected if k in found]:
+        problems.append("sections out of order; the template fixes: "
+                        + ", ".join(l for _k, l, _m in BRIEF_SECTIONS))
+    for h in unknown:
+        problems.append(f"a section the template does not have: ## {h[:50]}")
+    if brand and "who" in found and not re.search(
+            r"(?mi)^## who is " + re.escape(brand) + r"\s*\??\s*$", body):
+        problems.append(f"the first section does not name the brand: ## Who is {brand}")
+
+    # key talking points: each carries the creator's own verified moment, or
+    # says plainly that none was found
+    map_quotes = md_blockquotes(map_md)
+    points = found.get("points", "")
+    subs = re.split(r"(?m)^### ", points)
+    if len(subs) < 2:
+        problems.append("no ### talking point under ## Key talking points")
+    for sub in subs[1:]:
+        name = sub.splitlines()[0][:60] if sub.strip() else "(untitled)"
+        qs = md_blockquotes(sub)
+        if not qs:
+            if not NO_MOMENT.search(sub):
+                problems.append(f"talking point carries no quote and does not say "
+                                f"'no natural moment': {name}")
+            continue
+        if not re.search(r"\]\(https?://[^)]*[?&]t=\d", sub):
+            problems.append(f"talking point quote has no timestamped link: {name}")
+        for q in qs:
+            fact = quote_matches_ledger(q, facts)
+            in_map = any(q in mq or mq in q for mq in map_quotes)
+            if fact is None and not in_map:
+                problems.append(f"quote is neither a ledger fact nor one the connections "
+                                f"map argued: {name}")
+            if fact is not None:
+                if tier_of(fact) in WITHHELD:
+                    problems.append(f"quote is a withheld-tier fact ({tier_of(fact)}): {name}")
+                if fact.get("superseded_by"):
+                    problems.append(f"quote is a superseded fact: {name}")
+                if fact.get("staged_only"):
+                    problems.append(f"quote is a staged-only fact: {name}")
+        if supplied and not any(_norm_words(tp) in _norm_words(sub)
+                                for tp in inp.get("talking_points", [])):
+            problems.append(f"talking point names none of the brand's supplied points "
+                            f"verbatim: {name}")
+
+    # the brand's own lines, verbatim and all present
+    if inp:
+        norm_points = _norm_words(points)
+        for tp in inp.get("talking_points", []):
+            if _norm_words(tp) not in norm_points:
+                problems.append(f"supplied talking point missing or reworded: {tp[:50]!r}")
+        for key, label in (("requirements", "Requirements"), ("dont", "Don't do")):
+            sec = _norm_words(found.get(key, ""))
+            for line in inp.get(key, []):
+                if _norm_words(line) not in sec:
+                    problems.append(f"supplied line missing or reworded under "
+                                    f"{label}: {line[:50]!r}")
+        if inp.get("promoting") and _norm_words(inp["promoting"]) not in _norm_words(found.get("ask", "")):
+            problems.append("the brand's 'promoting' line is not in The creative ask verbatim")
+        if inp.get("approval") and _norm_words(inp["approval"]) not in _norm_words(found.get("approval", "")):
+            problems.append("the brand's approval process is not in its section verbatim")
+    for key, label in (("who", "Who is the brand"), ("ask", "The creative ask"),
+                       ("requirements", "Requirements"), ("dont", "Don't do"),
+                       ("approval", "Creative approval process")):
+        if key in found and not found[key].strip():
+            problems.append(f"empty section: {label}")
+
+    # nothing written for the brand's or the AM's eyes, and nothing that is copy
+    no_links = re.sub(r"\]\([^)]*\)", "]", body)
+    for pat in _BRIEF_BANNED:
+        m = re.search(pat, body, re.I)
+        if m:
+            problems.append(f"brand-side material on the creator page: {m.group(0)!r}")
+    m = _FACT_ID.search(no_links)
+    if m:
+        problems.append(f"a fact id on the page: {m.group(0)}")
+    m = _PLATFORM_ID.search(no_links)
+    if m:
+        problems.append(f"a platform id on the page: {m.group(0)}")
+    m = _MONEY.search(body)
+    if m:
+        problems.append(f"price, cost or rate language: {m.group(0).strip()!r}")
+    # the framing bans are on OUR words: the brand's own lines are theirs to
+    # phrase, so every supplied line is cut out before these two run
+    ours = no_links
+    for line in supplied_lines(inp):
+        ours = re.sub(r"\s+".join(re.escape(w) for w in line.split()), " ", ours, flags=re.I)
+    m = _CTA.search(ours)
+    if m:
+        problems.append(f"CTA wording on the page (the brand owns the CTA): {m.group(0)!r}")
+    m = _AGAINST.search(ours)
+    if m:
+        problems.append(f"sets the brand against something else: {m.group(0)!r}")
+    norm_body = _norm_words(no_links)
+    for f in facts or []:
+        if tier_of(f) in WITHHELD and f.get("quote"):
+            fq = _norm_words(str(f["quote"]))
+            if fq and fq in norm_body:
+                problems.append(f"withheld-tier quote on the page ({tier_of(f)})")
+                break
+    return problems
+
+
+def supplied_lines(inp: dict | None) -> list[str]:
+    """Every line the brand supplied, verbatim: the text that is theirs."""
+    if not inp:
+        return []
+    lines = list(inp.get("talking_points") or []) + list(inp.get("requirements") or []) \
+        + list(inp.get("dont") or [])
+    for key in ("promoting", "approval"):
+        if inp.get(key):
+            lines.append(str(inp[key]))
+    return [ln for ln in lines if ln.strip()]
+
+
+def brief_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-") or "x"
+
+
+def default_brief_out(in_path: pathlib.Path, facts_path: pathlib.Path | None,
+                      fm: dict) -> pathlib.Path:
+    """Named by names, never ids: this file is an attachment."""
+    name = (f"{brief_slug(fm.get('brand_name'))}-creator-brief-"
+            f"{brief_slug(fm.get('channel_name'))}.html")
+    return (facts_path.parent if facts_path is not None else in_path.parent) / name
+
+
+_BRIEF_CSS = """<style>
+.brief h2{margin-top:2.2rem}
+.brief h3{margin:1.6rem 0 .4rem;font-size:1.05rem}
+.brief blockquote{border-left:3px solid var(--accent);margin:.6rem 0;padding:.2rem 0 .2rem 1rem;color:var(--quote)}
+.brief .note{font-size:.9em;color:var(--ink-2)}
+</style>"""
+
+
+def render_brief(md_text: str, inp: dict | None) -> tuple[str, str, str]:
+    """``(title, page, fragment)`` for the creator brief."""
+    fm, body = parse_frontmatter(md_text)
+    creator = fm.get("channel_name") or "Creator"
+    brand = fm.get("brand_name") or "Brand"
+    title = f"{brand} creator brief for {creator}"
+    chips = [f"prepared {time.strftime('%Y-%m-%d')}"]
+    if not (inp and inp.get("supplied")):
+        chips.append("built from the creator's own material; no brand talking points supplied")
+    header_extra = ('<ul class="meta">'
+                    + "".join(f"<li>{html.escape(c)}</li>" for c in chips) + "</ul>")
+    body_html = _BRIEF_CSS + '<div class="brief">' + render_markdown(body) + "</div>"
+    eyebrow = "creator brief"
+    return (title, page_html(title, eyebrow, header_extra, body_html),
+            page_fragment(title, eyebrow, header_extra, body_html))
+
+
 def funnel(**fields) -> None:
     """One machine-parseable stage line for debugging (stderr)."""
     print("FUNNEL " + " ".join(f"{k}={v}" for k, v in fields.items()),
@@ -1135,12 +1398,56 @@ def main() -> None:
     ap.add_argument("--no-fragment", action="store_true",
                     help="skip the .fragment.html twin (written by default beside "
                          "the page, for hosts that publish body-only artifacts)")
+    ap.add_argument("--brief", action="store_true",
+                    help="render the creator-friendly brief instead of the "
+                         "connections page; --in is creator-brief-<brand>.md")
+    ap.add_argument("--connections", default=None,
+                    help="--brief: the connections map the brief was written "
+                         "from; a quote the map did not argue and the ledger "
+                         "does not hold fails the check")
+    ap.add_argument("--input", dest="brief_input", default=None,
+                    help="--brief: creator-brief-input-<brand>.json, the brand's "
+                         "own lines; each must appear verbatim")
     a = ap.parse_args()
 
     facts_path = pathlib.Path(a.facts) if a.facts else None
     facts, meta = load_ledger(facts_path, pathlib.Path(a.meta) if a.meta else None)
     in_path = pathlib.Path(a.infile)
     text = in_path.read_text(encoding="utf-8")
+
+    if a.brief:
+        if not a.connections:
+            ap.error("--brief needs --connections <connections-<brand>.md>")
+        map_md = pathlib.Path(a.connections).read_text(encoding="utf-8")
+        inp = (json.loads(pathlib.Path(a.brief_input).read_text(encoding="utf-8"))
+               if a.brief_input else None)
+        problems = check_brief(text, facts, map_md, inp)
+        if facts is None:
+            problems.append("no ledger given: the quotes cannot be verified")
+        if a.check:
+            print(json.dumps({"in": str(in_path), "problems": problems,
+                              "ok": not problems}, indent=1))
+            funnel(stage="brief_check", problems=len(problems),
+                   elapsed_s=round(time.monotonic() - t0, 1))
+            raise SystemExit(3 if problems else 0)
+        out_path = (pathlib.Path(a.out) if a.out
+                    else default_brief_out(in_path, facts_path, parse_frontmatter(text)[0]))
+        title, page, fragment = render_brief(text, inp)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(page, encoding="utf-8")
+        result = {"html": str(out_path.resolve()), "title": title, "problems": problems}
+        if not a.no_fragment:
+            frag_path = out_path.with_name(out_path.stem + ".fragment.html")
+            frag_path.write_text(fragment, encoding="utf-8")
+            result["fragment"] = str(frag_path.resolve())
+        print(json.dumps(result))
+        funnel(stage="brief_render", problems=len(problems),
+               supplied=bool(inp and inp.get("supplied")),
+               bytes=len(page.encode("utf-8")),
+               elapsed_s=round(time.monotonic() - t0, 1))
+        if problems:
+            print("BRIEF CONTRACT: " + "; ".join(problems), file=sys.stderr)
+        return
 
     problems = check_page(text, facts, meta)
     if a.check:

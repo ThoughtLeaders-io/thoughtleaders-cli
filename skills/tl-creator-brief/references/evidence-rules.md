@@ -207,3 +207,13 @@ thrice is one occurrence.
 - If the profile holds nothing that honestly connects to a brand, CONNECT says
   exactly that, shows what was searched, and stops. A no-fit verdict is a
   valid output.
+
+## A third audience: the creator
+
+The creator brief is read by the creator, in second person. That changes the
+register and nothing else. What counts as evidence is the same: a quote is
+the creator's own verified words with its timestamp, or it is not on the
+page. Withheld tiers stay withheld whatever the section, and a fact the
+connections page used only to say what not to say is never turned into a
+talking point. The brand's lines are the brand's, verbatim; ours join the
+brand's ask to the creator's own moment and stop there.

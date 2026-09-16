@@ -7,8 +7,9 @@ description: >
   habits and tastes, and build a reusable creator profile. Optionally map that
   profile's real connections to a named brand. Triggers: "creator profile",
   "what do we know about [creator]", "find self references", "creator brand
-  connection", "personal angle for [channel]", "creator brief",
-  "/tl-creator-brief".
+  connection", "personal angle for [channel]", "creator brief", "creator
+  talking points", "a brief I can send the creator", "creator-facing brief",
+  "talking points for [channel]", "/tl-creator-brief".
 ---
 
 # Creator Profile & Connections
@@ -23,7 +24,11 @@ Two modes, one contract:
 - **CONNECT** (channel + brand): reuse or build the ledger, read the brand
   lightly, and render the one human page,
   `tl-creator-profiles/<channel_id>-<brand_id>-connections.html`. A no-fit
-  verdict is a valid output, and so is a thin fit.
+  verdict is a valid output, and so is a thin fit. **Opt-in, a second file:**
+  when the user wants a version they can send to the creator, CONNECT also
+  writes the creator brief,
+  `tl-creator-profiles/<brand>-creator-brief-<creator>.html`, from the brand's
+  own talking points (`references/creator-brief-template.md`).
 
 `<skill>` is this skill's own directory (the installed plugin's copy); every
 command is `python3 <skill>/scripts/…`. Outputs land under the **invocation
@@ -55,7 +60,10 @@ of these stages do. They are one command:
 ```bash
 python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
   [--host-terms "<surname>,<company>"] [--reserve <N>] \
-  [--lanes transcripts+socials] [--rebuild] [--no-refresh]
+  [--lanes transcripts+socials] [--rebuild] [--no-refresh] \
+  [--creator-brief | --no-creator-brief] [--talking-points <path or text>] \
+  [--promoting "<line>"] [--requirements <path or text>] \
+  [--dont <path or text>] [--approval "<text>"]
 ```
 
 `<ref>` is a URL, @handle, YouTube ID, numeric TL id or a name. One JSON
@@ -91,6 +99,15 @@ summary on stdout, every stage's own `FUNNEL` line on stderr.
   bounded fetch and the context stats too, and `ran` says which stages went.
   Pass it only when the request already names the terms.
 
+- **The creator brief's inputs go in here, verbatim, CONNECT only.**
+  `--talking-points` and `--promoting` imply `--creator-brief`; with any of
+  them the command writes `<corpus>/creator-brief-input-<brand_id>.json`
+  (the brand's lines exactly as given, bullets stripped, nothing reworded)
+  and the summary says `creator_brief: on` and `talking_points: N`. With
+  none of the flags on a CONNECT run the summary says `creator_brief: ask`,
+  and the question is yours to ask (below). These flags never reach the
+  ledger build: the profile is brand-blind.
+
 The full context is written to `<corpus>/context-full.json` either way, so
 anything `identity` leaves out is one Read away.
 
@@ -118,6 +135,25 @@ those links and searches the web. It runs only when asked for:
 This is the only turn in the run that waits on a person, and it comes before
 any fetch so the answer can size `--reserve`. The completion lines say whether
 the socials half ran. *(socials ON)* below means only when it is on.
+
+**On a CONNECT run the same turn carries a second question**, when the
+summary said `creator_brief: ask` (no flag decided it). Ask both in one
+message; on a reuse run this question stands alone:
+
+> **Do you want a version you can send to the creator, with talking points
+> for the ad?**
+> - **No** (default): still deciding on this channel. You get the internal
+>   connections page only.
+> - **Yes**: you also get a creator-friendly brief. Paste the brand's
+>   baseline talking points (or a file path) and one line on what the brand
+>   is promoting. Requirements, don'ts and the approval process are optional
+>   here; the template's defaults fill in what you leave out.
+
+On **Yes**, re-run `start_run.py` with the answers as `--talking-points`,
+`--promoting` and the optional flags before anything else, so the input file
+exists before the connection pass. A flag skips the question; nothing
+answers it silently. Autonomous, unattended or fast runs: no brief, nothing
+asked, and the completion line says so.
 
 ## Reuse: every run starts here
 
@@ -537,15 +573,53 @@ Run the reuse check first. Then:
    fragment (the full page nests a document inside the tool's own shell and
    cannot be published); otherwise open the page (`open <absolute path>` on
    macOS). Give the user the absolute path of the page in either case.
-   CONNECT ends there, with the path, the artifact link if any, and one line
-   naming any brand lane that fell back or was unreachable.
+   Without a creator brief, CONNECT ends there, with the path, the artifact
+   link if any, and one line naming any brand lane that fell back or was
+   unreachable.
+
+3. **Creator brief** (only when `creator_brief` is on). Runs after the page
+   renders, on a fit or thin fit; on a no fit, one line says the brief was
+   skipped and why. Read `<corpus>/creator-brief-input-<brand_id>.json`, the
+   connections map, and, for any supplied point no card carries, the whole
+   ledger. Write `<corpus>/creator-brief-<brand_id>.md` to
+   `references/creator-brief-template.md`: the six sections in its order,
+   every brand line verbatim, every quote the creator's own with its `&t=`
+   link, second person, and none of the vocabulary written for the AM's
+   eyes. Then one command:
+
+   ```bash
+   python3 <skill>/scripts/build_html.py --brief --check \
+     --in <corpus>/creator-brief-<brand_id>.md \
+     --facts tl-creator-profiles/<id>-facts.jsonl \
+     --connections <corpus>/connections-<brand_id>.md \
+     --input <corpus>/creator-brief-input-<brand_id>.json && \
+   python3 <skill>/scripts/build_html.py --brief \
+     --in <corpus>/creator-brief-<brand_id>.md \
+     --facts tl-creator-profiles/<id>-facts.jsonl \
+     --connections <corpus>/connections-<brand_id>.md \
+     --input <corpus>/creator-brief-input-<brand_id>.json
+   ```
+
+   `--check` exits 3 listing what the brief lacks and writes nothing; fix
+   the markdown, never the checker. The render writes
+   `tl-creator-profiles/<brand>-creator-brief-<creator>.html` and its
+   fragment, named by names because it is an attachment. Publish the
+   fragment where the host can. CONNECT then ends with **two** absolute
+   paths, the artifact links if any, and the brand-lane line.
 
 ## Guardrails
 
 - **Read-only.** Nothing is sent to anyone; output comes back for review.
 - **No prices, costs, rate cards or deal terms in any output**, ever.
 - **One labelled sample read per connection at most.** No scripts, full
-  reads, CTA wording or alternate versions.
+  reads, CTA wording or alternate versions. In the creator brief the "you
+  could" line is that one allowance.
+- **Nothing written for the brand's or the AM's eyes reaches the creator.**
+  The connections page, its strength tags, provenance labels, thesis hedges
+  and "Where this could go wrong" stay internal; the creator brief carries
+  the brand's own lines and the creator's own quotes, and `--brief --check`
+  refuses the rest. The brief builds the brand up and never sets it against
+  another product. It is still never sent by the skill.
 - **Sensitivity is a tier** (`evidence-rules.md`): `clinical`, `children`
   and `location` stay out of connection angles by default, and they MUST be
   read for "Where this could go wrong", as the kind of fact, never the
