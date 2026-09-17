@@ -181,4 +181,9 @@ know the person, not the ones that happened to be judged last.
 `sensitivity`, as above. A lane record that names a person a transcript
 fact already put at tier `children` or `location` is the same person: give
 it the same tier (the script raises it if you do not, and reports that it
-had to).
+had to). A record with `provenance: "bio"` is a claim the creator wrote in
+their own About text, unverified until an upload says it too: when a kept,
+non-staged transcript cluster in your shard states the same fact in the
+creator's voice, set that record's `corroborates` to the cluster id;
+otherwise leave it `null`. Never point a bio record at another bio or social
+record, or at a staged cluster; the script refuses both.
