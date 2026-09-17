@@ -37,12 +37,14 @@ directory's absolute path once; if it sits inside a git checkout, say so once (t
 outputs are client-adjacent data and must not be committed). `<corpus>` is
 `tl-creator-profiles/.corpus/<channel_id>/`, the working directory.
 
-Detail lives in three references; open the one you need:
+Detail lives in four references; open the one you need:
 `references/transcript-mining.md` (script flags, the extractor and merge
 contracts, the authentication probe, the incremental round),
-`references/profile-spec.md` (ledger and meta formats, the connection map's
-sections, strength tags, the page), `references/evidence-rules.md` (what
-counts, attribution, staged premises, sensitivity).
+`references/profile-spec.md` (ledger and meta formats, the reuse thresholds,
+the connection map's sections, strength tags, the page),
+`references/evidence-rules.md` (what counts, attribution, staged premises,
+sensitivity), `references/identity-lane.md` (the socials lane's brief, rendered
+into its prompt by a script).
 
 Standing rules: scripts reach the platform only through
 `skills/_shared/tl_data.py`; names resolve via `tl channels find` /
@@ -157,7 +159,8 @@ asked, and the completion line says so.
 `start_run.py` runs the check (`ledger_meta.py check --channel <id>
 [--lanes …] [--rebuild] [--no-refresh]`, if you ever need it on its own).
 A found ledger gives one announcement line, which you repeat to the user
-verbatim, and a `decision`:
+verbatim, and a `decision` (the thresholds behind it live in
+`profile-spec.md`, "Reuse"):
 
 - `reuse`: CONNECT goes straight to the brand read; PROFILE reports the
   ledger as it is.
@@ -272,7 +275,8 @@ take under a second are chained with `&&` in one command.
    speaking of the host (a crew channel), and the label is `multi_host`
    however solo the thumbnails look ("multi_host: 41% of kept windows name
    the host in the third person"). Then write the context block and render every
-   batch's message in one chain:
+   batch's message in one chain, *(socials ON)* the identity lane's message
+   with them:
 
    ```bash
    python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
@@ -283,8 +287,13 @@ take under a second are chained with `&&` in one command.
      python3 <skill>/scripts/extractor_prompt.py --batch "$b" \
        --context <corpus>/context.json \
        --write-to <corpus>/returns/$n.extract.json --out <corpus>/prompts/$n.md; \
-   done
+   done && \
+   python3 <skill>/scripts/identity_prompt.py render --from <corpus>/context-full.json \
+     --context <corpus>/context.json \
+     --write-to <corpus>/returns/identity.json --out <corpus>/prompts/identity.md
    ```
+
+   Drop the last command on a socials-OFF run.
 
 3. **One fan-out: transcripts and identity in the SAME message.** One
    `<plugin>:gem-classifier` agent per `<corpus>/prompts/batch-NNN.md`, plus
@@ -298,59 +307,19 @@ take under a second are chained with `&&` in one command.
    and say so. The cap is `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when
    unset), which `--reserve` has already been sized against.
 
-   - *(socials ON)* The identity lane: `general-purpose`, **`model: sonnet`**,
-     about 8 lookups. Its prompt carries, from `context-full.json`, the
-     `websites` and `social_links` step 0 found, the channel name, **every
-     `name_candidates` variant**, **the About text and the AI profile**, and
-     the host terms and format label the run has called. It opens the sites
-     first, then the socials they link, then a web search. Put the
-     `social`/`web` fact record and its enums from `profile-spec.md` in its
-     prompt, or it invents labels that `expand` rejects.
-   - **Search the names the creator uses, not only the channel's.** Spend the
-     first lookups on `<variant> <surname>` before the channel name, because
-     the channel name is what a namesake will outrank you on and the nickname
-     is what the profiles are actually under. A link-in-bio aggregator
-     (Linktree, hoo.be, Beacons) found this way is the highest-value hit on a
-     channel that lists nothing, since it is the creator's own index of every
-     profile they own: read it and take the links from it.
-   - **Confirm the identity before reporting a single fact.** The cheapest
-     proof is a link back: an aggregator or profile that points at the channel
-     under investigation has identified itself, and no further checking is
-     needed. Failing a link back, confirm against the non-variant
-     `name_candidates` and the recurring co-stars in the titles: a profile is
-     the right person when the people around it are the people in the videos.
-     Say in one line which candidate you accepted and what confirmed it. On a
-     mismatch return no facts and name the candidate you rejected and why, so
-     the run reports an empty lane rather than a wrong one.
-   - A contact address found on any of these pages is not a fact about the
-     person and never travels, matching the rule the link harvest already
-     applies to the channel's own header. The same goes for every personal
-     identifier: date of birth, a legal or middle name not used on camera,
-     a company registration number, a home or business address, an email.
-     None of these has a sensitivity tier because none of them is a fact for
-     the ledger; a lane that finds one leaves it out and does not
-     cross-reference it against other sources.
-   - **Tell it what the platform record is worth.** The About text is often
-     YouTube's default placeholder, and the AI profile describes the recent
-     catalogue, not the person: both are context to search from, never the
-     identity itself. A lane that treats the AI profile as the description of
-     the creator will reject the right person for not matching it. **The AI
-     profile is still never a fact.** The About text is the one exception, and
-     not in this lane: it goes through the bio lane below, which filters it,
-     puts it through the same extractor rubric, and makes it earn `confirmed`
-     from the uploads. This lane does not write facts from it.
-   - **A profile bio this lane reads flows into the bio lane, not into a
-     fact.** When it confirms a profile belongs to the creator, it reports the
-     bio text with `match_confirmed` so `bio_lane.py batch` can take it; a bio
-     from an unmatched profile is another person's self-description.
-   - **It runs beside the extractors, so transcript evidence is available to
-     it.** When the linked
-     stores were empty, name the recurring people, places and formats the run
-     has already seen in the titles, so the lane has something to disambiguate
-     a common name against. A wrong identity is worse than an empty lane: on a
-     mismatch it returns no facts and says which candidate it rejected and why.
-   - What it has when the extractors finish is what the merge pass gets; the
-     rest is reported "linked but unread".
+   - *(socials ON)* **The identity lane**: one `general-purpose` agent,
+     **`model: sonnet`**, briefed exactly like an extractor: read
+     `<corpus>/prompts/identity.md` and follow it; one Write, then the one-line
+     receipt. The rendered file carries the lane's brief
+     (`references/identity-lane.md`, its one home), the provenance and
+     sensitivity rules, the links, the About text and AI profile labelled for
+     what they are worth, every `name_candidates` variant, the host terms, the
+     format call and the record format the merge pass accepts. Nothing about
+     the lane is typed by hand. It writes `<corpus>/returns/identity.json`:
+     the identity it accepted or rejected and why, its `social`/`web` fact
+     records, the confirmed profile bios, and every link it read or left
+     unread. What it has written when the extractors finish is what the merge
+     pass gets; the rest is reported "linked but unread".
 
    - **The bio lane (always on).** In the same wave, one more `gem-classifier`
      over the creator's own written self-description:
@@ -368,7 +337,9 @@ take under a second are chained with `&&` in one command.
      lines, bare emails/URLs/hashtags/handles, subscribe calls) and reports
      every dropped line with its reason; what survives is judged by the SAME
      rubric, which is what rejects "the best gaming channel on YouTube". Pass
-     `--socials-bio` when the identity lane returned confirmed profile bios.
+     `--socials-bio <corpus>/socials-bio.json` (written by
+     `identity_prompt.py slice`, step 4) when the identity lane returned
+     confirmed profile bios.
      The records it mints are `provenance: "bio"` identity-lane facts: they go
      in the merge agent's `facts` list, and `evidence-rules.md` owns what they
      are worth. **Never feed a bio batch to `assemble_extracts.py`** — it
@@ -406,8 +377,21 @@ take under a second are chained with `&&` in one command.
    `authenticate.py`: every staged-premise claim in a durable domain and
    every pair of contradicting clusters gets one channel-scoped query, and
    the evidence lands on the merge-input line (`staged`, `conflicts_with`,
-   `probe`). `prepare.json` lists the shard files and sizes. Spawn the merge
-   agents in the same message that reads this result.
+   `probe`). `prepare.json` lists the shard files and sizes.
+
+   *(socials ON)* Put one more command on the end of that chain:
+
+   ```bash
+   python3 <skill>/scripts/identity_prompt.py slice --returns <corpus>/returns/identity.json \
+     --prepare <corpus>/prepare.json --out <corpus>
+   ```
+
+   It checks every lane record against the merge pass's own enums (exit 3
+   lists the refs to re-ask the lane for; never hand-patch the file), writes
+   `<corpus>/identity-facts-sN.json` per shard with the records whose life
+   domains that shard holds, `<corpus>/socials-bio.json` for the bio lane, and
+   prints `social_read` / `social_unread` for step 6. Spawn the merge agents in
+   the same message that reads this result.
 
 5. **Merge pass: sharded agents decide, the script builds the ledger.**
    One `<plugin>:merge-shard` agent per file in `prepare.json` (`merge-input-N.jsonl`,
@@ -424,12 +408,12 @@ take under a second are chained with `&&` in one command.
    uncertain**: a staged or contradicted claim is kept and judged on the
    probe's evidence, per `evidence-rules.md`.
 
-   *(socials ON, more than one shard)* Split the lane's facts by life domain
-   too, one slice per shard, so each agent judges the lane records that sit
-   beside the clusters it can see and `corroborates` can reach them. `expand`
-   unions the slices by `ref`, so a shard whose domains hold no lane record
-   returns `"facts": []` and costs nothing. Socials OFF means no lane and
-   nothing to divide. Then:
+   *(socials ON)* Each shard's message also names its
+   `<corpus>/identity-facts-sN.json`: the lane records whose domains sit
+   beside the clusters it can see, so `corroborates` can reach them. `expand`
+   unions the shards' `facts` by `ref`, so a shard whose file is empty returns
+   `"facts": []` and costs nothing. Socials OFF means no lane and no files.
+   Then:
 
    ```bash
    python3 <skill>/scripts/merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl \
@@ -472,7 +456,8 @@ take under a second are chained with `&&` in one command.
 
    ```bash
    python3 <skill>/scripts/channel_context.py --set-socials <corpus>/context-full.json \
-     --social-read "<links it opened>" --social-unread "<links it did not>"
+     --social-read "<social_read from the slice summary>" \
+     --social-unread "<social_unread from the slice summary>"
    ```
 
    Skip it on a socials-OFF run. Without it the page cannot tell one link

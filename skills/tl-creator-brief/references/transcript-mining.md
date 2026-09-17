@@ -275,6 +275,13 @@ behind it instead of one wave finishing together.
 There is no scripted extractor: every batch is judged by an agent, and the
 only fallback is the `general-purpose` + `model: sonnet` spawn above.
 
+The identity lane, when the socials half is on, joins this same wave on the
+same terms: `scripts/identity_prompt.py render` writes its one message
+(`references/identity-lane.md` plus the channel context and the record
+enums), the agent reads that file and writes `returns/identity.json`, and
+`identity_prompt.py slice` validates the records and files them per merge
+shard once `prepare` has sized the shards.
+
 Print the stage's own funnel line from the returned receipts:
 `FUNNEL stage=extract batches=… agents=… windows=… gems=… elapsed_s=…`.
 

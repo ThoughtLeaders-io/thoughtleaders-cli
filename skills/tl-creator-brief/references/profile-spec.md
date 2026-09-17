@@ -212,13 +212,9 @@ announcement line, which is repeated to the user verbatim,
 - **`refresh`** — more uploads than that, or an older ledger, or the count
   failed, or the run asks for the socials lane and the ledger was built from
   transcripts only (a ledger that read socials covers a transcripts-only
-  request; the reverse does not): run ONE incremental round (`transcript-mining.md`, "Incremental round") —
-  fetch with `--round N --since <latest_video_date> --exclude
-  classified.jsonl`, extract only the new
-  batches, assemble with `--append`, re-cluster, `merge_pass.py prepare
-  --existing --state` (only genuinely new clusters reach the agent), expand,
-  verify, `ledger_meta.py write --from … --rounds N`. Cost scales with the new uploads, not the
-  corpus.
+  request; the reverse does not): run ONE incremental round, exactly as
+  `transcript-mining.md`, "Incremental round" gives it. Cost scales with the
+  new uploads, not the corpus.
 - **`build`** — no ledger, a ledger without the meta header (a v1/v2
   profile, or a legacy facts + sidecar `meta.json` pair that predates the
   single-file ledger), or `--rebuild`: full build.
