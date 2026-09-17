@@ -1,0 +1,1302 @@
+"""The creator-brief scripts: local quote verification and the deterministic
+connections page. The retrieval and assembly stages have their own files,
+``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No real network.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+_SCRIPTS = (Path(__file__).resolve().parents[1]
+            / "skills" / "tl-creator-brief" / "scripts")
+sys.path.insert(0, str(_SCRIPTS))
+import store_io  # noqa: E402
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> Path:
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# verify_quotes.py
+# --------------------------------------------------------------------------- #
+def _run_verify(tmp_path: Path, candidates: list[dict]) -> tuple:
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:vid1", "cues": [
+            [10, "so before we start"],
+            [14, "I grew up in a tiny town in Ohio"],
+            [19, "and my dad ran the bakery there"]]},
+        {"id": "1:vid2", "cues": []},
+    ])
+    infile = _write_jsonl(tmp_path / "candidates.jsonl", candidates)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "verify_quotes.py"),
+         "--in", str(infile), "--corpus", str(corpus)],
+        capture_output=True, text=True)
+    out = [json.loads(line) for line in
+           (tmp_path / "candidates.jsonl.verified.jsonl")
+           .read_text().splitlines()]
+    return proc, json.loads(proc.stdout), out
+
+
+def test_exact_match_publishes_and_owns_the_timestamp(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "transcript", "video": "1:vid1", "start": 999,
+         "quote": "I grew up in a tiny town in Ohio and my dad ran"}])
+    assert proc.returncode == 0
+    assert summary["exact"] == 1
+    v = rows[0]["verify"]
+    assert v["match"] == "exact" and v["found"] is True
+    # the located timestamp overrides whatever the candidate carried
+    assert rows[0]["start"] == 14
+    assert rows[0]["url"].endswith("v=vid1&t=14s")
+
+
+def test_partial_match_never_accepts(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Texas with my mother"}])
+    assert proc.returncode == 1
+    assert summary["partial"] == 1
+    v = rows[0]["verify"]
+    assert v["match"] == "partial" and v["found"] is False
+    assert "unmatched_tail" in v and "warning" in v
+    assert rows[0].get("start") is None  # nothing promoted
+
+
+def test_missing_video_and_no_transcript_are_flagged_not_matched(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "transcript", "video": "1:vid2", "quote": "anything"},
+        {"provenance": "transcript", "video": "1:nope", "quote": "anything"}])
+    assert proc.returncode == 1
+    assert summary["none"] == 2
+    assert all(r["verify"]["found"] is False and "error" in r["verify"]
+               for r in rows)
+
+
+def test_social_and_web_facts_pass_through_unverified(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "social", "claim": "has a dog",
+         "source_url": "https://example.com/p"}])
+    assert proc.returncode == 0
+    assert summary["passed_through_non_transcript"] == 1
+    assert rows[0]["verify"]["match"] == "n/a"
+
+
+def test_a_meta_header_is_not_a_candidate_and_survives_the_pass(tmp_path):
+    """Re-verifying an existing ledger must not verify (or lose) its header."""
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:vid1", "cues": [[14, "I grew up in a tiny town in Ohio"]]}])
+    header = {"schema": "tl-creator-meta/v2", "channel_id": 1, "channel_name": "P",
+              "coverage": {"facts": 1}}
+    ledger = tmp_path / "1-facts.jsonl"
+    store_io.write_ledger(ledger, header, [
+        {"provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Ohio"}])
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "verify_quotes.py"),
+         "--in", str(ledger), "--corpus", str(corpus),
+         "--out", str(tmp_path / "out.jsonl")],
+        capture_output=True, text=True)
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["candidates"] == 1      # the header is not one
+    meta, facts = store_io.read_ledger(tmp_path / "out.jsonl")
+    assert meta == header
+    assert len(facts) == 1 and facts[0]["verify"]["match"] == "exact"
+
+
+# --------------------------------------------------------------------------- #
+# build_html.py — the connections page, the one human deliverable
+# --------------------------------------------------------------------------- #
+_META = {"schema": "tl-creator-meta/v2", "channel_id": 42, "channel_name": "Patterrz",
+         "generated_at": "2026-08-31", "corpus_window": ["2019-04-02", "2026-08-20"],
+         "coverage": {"videos_with_transcript": 412, "videos_matched": 287,
+                      "passages": 2252, "windows_judged": 500, "gems": 310, "facts": 6},
+         "format": "solo", "lanes": "transcripts", "latest_video_date": "2026-08-29",
+         "rounds": 2}
+
+_FACTS = [
+    {"fact_id": "f1", "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
+     "sensitivity": "none", "sensitive": False, "recurrence": 4, "selected": True,
+     "quote": "we finally adopted luna from the shelter last spring and she",
+     "url": "https://www.youtube.com/watch?v=abc&t=12s"},
+    {"fact_id": "f2", "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
+     "sensitivity": "lifestyle", "sensitive": False, "recurrence": 2},
+    {"fact_id": "f3", "claim": "was diagnosed with ADHD", "domain": "health",
+     "confidence": "confirmed", "sensitivity": "clinical", "sensitive": True, "recurrence": 3},
+    {"fact_id": "f4", "claim": "daughter is named Maple", "domain": "family",
+     "confidence": "confirmed", "sensitivity": "children", "sensitive": True, "recurrence": 5},
+    {"fact_id": "f5", "claim": "lives on Elm Street", "domain": "home",
+     "confidence": "unconfirmed", "sensitivity": "location", "sensitive": True},
+    {"fact_id": "f6", "claim": "lived in LA", "domain": "home", "confidence": "confirmed",
+     "sensitivity": "none", "sensitive": False, "superseded_by": "f7",
+     "source_url": "https://example.com/about"},
+]
+
+_CONN_MD = (
+    "---\n"
+    "schema: tl-creator-connections/v2\n"
+    "channel_id: 42\n"
+    'channel_name: "Patterrz"\n'
+    "brand_id: 7\n"
+    "brand_name: Acme\n"
+    "facts_file: 42-facts.jsonl\n"
+    "brand_read_date: 2026-09-02\n"
+    "---\n\n"
+    "Built from 6 facts.\n\n"
+    "## About Acme\n\n"
+    "Acme is a direct-to-consumer dog food brand [web: product pages].\n\n"
+    "## 1. Adopted a rescue dog — **direct**\n\n"
+    "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n"
+    "Acme sells dog food [web]\n\n"
+    "## Streams on Sundays — **category precedent**\n\n"
+    "Bakes sourdough weekly [social: instagram]\n"
+)
+
+
+def _write_ledger(tmp_path: Path, facts=None, meta=None) -> Path:
+    path = tmp_path / "42-facts.jsonl"
+    store_io.write_ledger(path, _META if meta is None else meta,
+                           _FACTS if facts is None else facts)
+    return path
+
+
+def _render_conn(tmp_path: Path, md: str, facts=None, meta=None,
+                 with_ledger: bool = True, name: str = "42-7-connections.md",
+                 out: Path | None = None) -> str:
+    src = tmp_path / name
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text(md)
+    cmd = [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src)]
+    if with_ledger:
+        cmd += ["--facts", str(_write_ledger(tmp_path, facts, meta))]
+    if out:
+        cmd += ["--out", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return Path(json.loads(proc.stdout)["html"]).read_text()
+
+
+def test_connections_page_leads_with_who_they_are_then_ranked_cards(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD)
+    assert "<title>Patterrz × Acme</title>" in html
+    who, rest = html.split("<h2>Connections</h2>")
+    assert "<h2>Who they are</h2>" in who
+    assert "format: solo" in who and "videos 2019-04 → 2026-08" in who
+    assert "6 facts in the ledger" in who
+    # top facts by domain, with a short quote and its link
+    assert "has a dog" in who and "we finally adopted luna" in who
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s">watch</a>' in who
+    assert "wears glasses" in who and "badge-lifestyle" in who
+    assert "was diagnosed with ADHD" in who and "badge-clinical" in who
+    # withheld tiers and superseded facts never reach the brand-facing section
+    assert "Maple" not in who and "Elm Street" not in who and "lived in LA" not in who
+    conn = rest.split("<h2>About this ledger</h2>")[0]
+    # the cards: numbered by order, type badge, provenance labels kept
+    assert '<ol class="conn">' in conn and conn.count('<li><div class="body">') == 2
+    assert "<h3>Adopted a rescue dog — " in conn      # the "1." is the card's numeral
+    assert 'class="badge badge-direct">direct</span>' in conn
+    assert 'class="badge badge-precedent">category precedent</span>' in conn
+    assert "[web]" in conn and "social: instagram" in conn
+    assert "brand read 2026-09-02" in html and "ledger built 2026-08-31" in html
+    # the only external reference is the font stylesheet; no script anywhere
+    head = html.split("</head>")[0]
+    assert head.count("http") == 1 and "fonts.googleapis.com" in head
+    assert "<script" not in html
+    assert "@media (prefers-color-scheme: dark)" in html
+    assert ':root[data-theme="dark"]' in html
+
+
+def test_the_about_brand_strip_is_prose_above_the_cards_not_a_card(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD)
+    assert '<div class="about"><h3>About Acme</h3>' in html
+    assert "direct-to-consumer dog food brand" in html
+    # it sits between who-they-are and the connections, and is not numbered
+    assert html.index('class="about"') < html.index("<h2>Connections</h2>")
+    assert html.index("<h2>Who they are</h2>") < html.index('class="about"')
+    conn = html.split("<h2>Connections</h2>")[1]
+    assert "About Acme" not in conn
+    assert conn.count('<li><div class="body">') == 2     # the two real connections
+
+
+def test_the_ledger_footer_carries_the_honesty_surfaces(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD)
+    assert "<h2>About this ledger</h2>" in html
+    footer = html.split("<h2>About this ledger</h2>")[1]
+    assert "6 facts: 5 confirmed, 1 unconfirmed" in footer
+    # f3 is clinical but discussed in 3 videos, so it is usable in angles and
+    # not counted as withheld; children + location are
+    assert "1 lifestyle, 1 clinical, 1 children, 1 location — 2 withheld from angles" in footer
+    assert ("287/412 transcript videos matched, 500 passages judged — "
+            "absence is not evidence") in footer
+    assert "format: solo · corpus 2019-04-02 → 2026-08-20 · lanes: transcripts" in footer
+    assert "2 rounds · built 2026-08-31" in footer
+    # the withheld facts are counted in the footer, never shown on the page
+    assert "Maple" not in html and "Elm Street" not in html
+
+
+def test_a_passing_clinical_mention_counts_as_withheld(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD, facts=[
+        {"claim": "takes medication", "domain": "health", "sensitivity": "clinical",
+         "recurrence": 1}])
+    assert "1 clinical — 1 withheld from angles" in html
+
+
+def test_old_boolean_ledgers_count_as_withheld(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD, facts=[
+        {"claim": "born 1998", "domain": "family", "sensitive": True},
+        {"claim": "has a cat", "domain": "pets", "sensitive": False}])
+    assert "1 withheld (untiered)" in html
+    assert "born 1998" not in html                 # untiered-but-flagged is withheld
+
+
+def test_the_footer_lists_linked_platforms_and_sibling_channels(tmp_path):
+    meta = dict(_META, lanes="transcripts",
+                context={"social_links": ["https://instagram.com/patterrz", "javascript:x"],
+                         "second_channel_candidates": [{"name": "Patterrz Clips", "id": 43}]})
+    html = _render_conn(tmp_path, _CONN_MD, meta=meta)
+    footer = html.split("<h2>About this ledger</h2>")[1]
+    assert "<h3>Other channels and platforms</h3>" in footer
+    assert 'href="https://instagram.com/patterrz"' in footer
+    assert "linked but unread (socials lane not run)" in footer
+    assert 'href="javascript' not in html and "javascript:x" in footer
+    assert "Patterrz Clips (id 43) — not mined" in footer
+    read = _render_conn(tmp_path, _CONN_MD, meta=dict(meta, lanes="transcripts+socials"))
+    assert "read (socials lane)" in read and "unread" not in read
+
+
+def test_the_footer_honours_per_link_truth_over_the_lane_flag(tmp_path):
+    """A time-boxed lane reads some linked platforms and not others. Without
+    the per-link lists the footer falls back to the `lanes` flag and calls
+    every platform read, including pages the lane never opened, which is the
+    one claim the honesty strip exists not to make."""
+    meta = dict(_META, lanes="transcripts+socials",
+                context={"social_links": ["https://instagram.com/patterrz",
+                                          "https://tiktok.com/@patterrz"],
+                         "social_links_read": ["https://instagram.com/patterrz"],
+                         "social_links_unread": ["https://tiktok.com/@patterrz"]})
+    footer = _render_conn(tmp_path, _CONN_MD, meta=meta).split(
+        "<h2>About this ledger</h2>")[1]
+    instagram = [ln for ln in footer.split("<li>") if "instagram.com" in ln][0]
+    tiktok = [ln for ln in footer.split("<li>") if "tiktok.com" in ln][0]
+    assert "read (socials lane)" in instagram
+    assert "linked but unread" in tiktok
+
+
+def test_the_meta_header_is_read_from_the_ledger_itself(tmp_path):
+    """No --meta: the record is the ledger's first line."""
+    html = _render_conn(tmp_path, _CONN_MD)
+    assert "ledger built 2026-08-31" in html and "format: solo" in html
+
+
+def test_a_legacy_headerless_ledger_still_renders_with_meta(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)
+    facts = tmp_path / "42-facts.jsonl"
+    store_io.write_ledger(facts, None, _FACTS)
+    meta = tmp_path / "42-meta.json"
+    meta.write_text(json.dumps(_META))
+    subprocess.run([sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+                    "--facts", str(facts), "--meta", str(meta)],
+                   capture_output=True, text=True, check=True)
+    assert "ledger built 2026-08-31" in (tmp_path / "42-7-connections.html").read_text()
+
+
+def test_the_page_defaults_next_to_the_ledger_named_from_the_ids(tmp_path):
+    """The markdown is a working file under .corpus/; only the HTML is a
+    deliverable, and it lands beside the ledger."""
+    corpus = tmp_path / ".corpus" / "42"
+    corpus.mkdir(parents=True)
+    src = corpus / "connections-7.md"
+    src.write_text(_CONN_MD)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path))],
+        capture_output=True, text=True, check=True)
+    out = Path(json.loads(proc.stdout)["html"])
+    assert out == tmp_path / "42-7-connections.html" and out.exists()
+    assert not (corpus / "connections-7.html").exists()
+
+
+def test_without_a_ledger_the_page_lands_next_to_its_markdown(tmp_path):
+    html = _render_conn(tmp_path, _CONN_MD, with_ledger=False)
+    assert (tmp_path / "42-7-connections.html").exists()
+    assert "Who they are" not in html and '<ol class="conn">' in html
+    assert "About this ledger" not in html          # nothing to be honest about
+
+
+def test_no_fit_verdict_renders_as_prose_without_cards(tmp_path):
+    md = ("---\nchannel_name: Patterrz\nbrand_name: Acme\n---\n\n"
+          "**No fit**: nothing in the ledger meets Acme. Searched: 3 category terms.\n")
+    html = _render_conn(tmp_path, md)
+    assert '<ol class="conn">' not in html
+    assert 'class="badge badge-nofit">No fit</span>' in html
+    assert "Searched: 3 category terms" in html
+    assert "<h2>About this ledger</h2>" in html     # the coverage still bounds it
+
+
+def test_html_escapes_untrusted_markdown_text(tmp_path):
+    html = _render_conn(tmp_path, "# T\n\nquote says <script>alert(1)</script>\n",
+                        with_ledger=False)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_link_target_quote_cannot_break_out_of_href(tmp_path):
+    html = _render_conn(tmp_path, (
+        '# T\n\n[click](https://x.com/a"onmouseover="alert(1))\n'), with_ledger=False)
+    assert 'onmouseover="alert' not in html
+    assert "&quot;onmouseover=&quot;" in html
+
+
+def test_markdown_h1_title_is_not_double_escaped(tmp_path):
+    html = _render_conn(tmp_path, "# Rhett & Link\n\nhello\n", with_ledger=False)
+    assert "<title>Rhett &amp; Link</title>" in html
+    assert "&amp;amp;" not in html
+
+
+def test_href_ampersands_escape_exactly_once(tmp_path):
+    html = _render_conn(tmp_path,
+                        "[watch](https://www.youtube.com/watch?v=abc&t=90s)\n",
+                        with_ledger=False)
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=90s"' in html
+    assert "&amp;amp;" not in html
+
+
+def test_who_they_are_link_only_http_schemes(tmp_path):
+    facts = [{"fact_id": "f1", "claim": "grew up in Ohio", "domain": "origin",
+              "quote": "I grew up in Ohio", "url": "javascript:alert(1)",
+              "sensitivity": "none"}]
+    html = _render_conn(tmp_path, _CONN_MD, facts=facts)
+    who = html.split("<h2>Connections</h2>")[0]
+    assert 'href="javascript' not in who and "grew up in Ohio" in who
+
+
+def test_locate_prefers_the_occurrence_nearest_the_hint():
+    sys.path.insert(0, str(_SCRIPTS))
+    from verify_quotes import locate
+    cues = [(10.0, "I grew up in Ohio you know"),
+            (200.0, "and then she said I grew up in Ohio too")]
+    quote = "I grew up in Ohio"
+    assert locate(cues, quote)["start"] == 10
+    hit = locate(cues, quote, hint_start=190)
+    assert hit["start"] == 200 and hit["occurrences"] == 2
+
+
+def test_rows_raises_on_withheld_premium_fields():
+    shared = _SCRIPTS.parents[1] / "_shared"
+    sys.path.insert(0, str(shared))
+    import pytest
+    import tl_data
+    with pytest.raises(tl_data.DataError, match="premium"):
+        tl_data._rows({"results": [{"id": 1}],
+                       "_upgrade_required": {"message": "upgrade",
+                                             "fields": ["transcript"]}})
+    assert tl_data._rows({"results": [{"id": 1}]}) == [{"id": 1}]
+
+
+def test_write_context_builds_the_extractor_block_from_the_saved_full_context(tmp_path):
+    full = tmp_path / "context-full.json"
+    full.write_text(json.dumps({"name": "Ali Abdaal",
+                                "context_stats": {"fp_per_1k_words_median": 41}}))
+    out = tmp_path / "context.json"
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"), "--from", str(full),
+         "--format-label", "solo", "--format-evidence", "fp density 41/1k",
+         "--known-facts", "ex-doctor; lives in London", "--write-context", str(out)],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == {
+        "channel_name": "Ali Abdaal", "host_names": ["Ali Abdaal"],
+        "known_facts": ["ex-doctor", "lives in London"],
+        "channel_about": None, "channel_ai_profile": None,
+        "format_label": "solo", "format_evidence": "fp density 41/1k"}
+    # the label is an enum: a near-miss fails here, not in front of 20 agents
+    bad = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"), "--from", str(full),
+         "--format-label", "Solo", "--write-context", str(out)],
+        capture_output=True, text=True)
+    assert bad.returncode != 0
+
+
+def test_set_socials_records_which_links_the_lane_read(tmp_path):
+    """Only the socials lane knows this, and it finishes long after the
+    context is written, so it lands as a patch on context-full.json, which
+    is the file `ledger_meta.py write --context` is pointed at."""
+    full = tmp_path / "context-full.json"
+    full.write_text(json.dumps({"name": "Ali Abdaal",
+                                "social_links": ["https://instagram.com/x",
+                                                 "https://tiktok.com/@x"]}))
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(full),
+         "--social-read", "https://instagram.com/x",
+         "--social-unread", "https://tiktok.com/@x"],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    ctx = json.loads(full.read_text())
+    assert ctx["social_links_read"] == ["https://instagram.com/x"]
+    assert ctx["social_links_unread"] == ["https://tiktok.com/@x"]
+    # everything the file already carried survives the patch
+    assert ctx["name"] == "Ali Abdaal" and len(ctx["social_links"]) == 2
+    # neither list is a refusal: with no answer the page cannot tell them apart
+    bare = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(full)], capture_output=True, text=True)
+    assert bare.returncode != 0
+    missing = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "channel_context.py"),
+         "--set-socials", str(tmp_path / "nope.json"),
+         "--social-read", "https://instagram.com/x"],
+        capture_output=True, text=True)
+    assert missing.returncode != 0 and "no context file" in missing.stderr
+
+
+def test_youtu_be_shortlinks_are_not_second_channel_candidates():
+    sys.path.insert(0, str(_SCRIPTS))
+    import channel_context
+    row = {"external_channel_id": "UCmain", "url": "https://youtube.com/@main"}
+    doc = {"social_links": ["https://youtu.be/dQw4w9WgXcQ",
+                            "https://youtube.com/@mainVlogs"],
+           "description": "watch https://youtu.be/abc123 now"}
+    cands = channel_context.second_channel_candidates(row, doc)
+    assert [c["link"] for c in cands] == ["https://youtube.com/@mainVlogs"]
+
+
+# --------------------------------------------------------------------------- #
+# the one-pager: section order, the caveat block, and the --check pass
+# --------------------------------------------------------------------------- #
+_FULL_MD = (
+    "---\n"
+    "schema: tl-creator-connections/v2\n"
+    "channel_id: 42\n"
+    'channel_name: "Patterrz"\n'
+    "brand_id: 7\n"
+    "brand_name: Acme\n"
+    "facts_file: 42-facts.jsonl\n"
+    "brand_read_date: 2026-09-02\n"
+    "---\n\n"
+    "## About Patterrz\n\n"
+    "A solo creator who has been posting since 2019.\n\n"
+    "## Thesis\n\n"
+    "He already lives the thing Acme sells, and says so unprompted.\n\n"
+    "## About Acme\n\n"
+    "Acme is a direct-to-consumer dog food brand [web: product pages].\n\n"
+    "## Adopted a rescue dog — **direct** · **strong**\n\n"
+    "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n"
+    "Acme sells dog food [web]\n\n"
+    "**Do.** Let him tell the adoption story first.\n\n"
+    "**Do not.** Open on the ingredient list.\n\n"
+    "## Where this could go wrong\n\n"
+    "He has said he distrusts subscription boxes.\n"
+)
+
+
+def _check_conn(tmp_path: Path, md: str, name: str = "42-7-connections.md"):
+    src = tmp_path / name
+    src.write_text(md)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path)), "--check"],
+        capture_output=True, text=True)
+    return proc.returncode, json.loads(proc.stdout)
+
+
+def test_the_page_leads_with_the_thesis_above_the_creator_and_the_brand(tmp_path):
+    html = _render_conn(tmp_path, _FULL_MD)
+    # the reader wants the argument before any background, the creator's included
+    order = [html.index(x) for x in ('<h2>The thesis</h2>',
+                                     '<h2>Who they are</h2>',
+                                     '<div class="about"><h3>About Acme</h3>',
+                                     '<h2>Connections</h2>')]
+    assert order == sorted(order)
+    assert "already lives the thing Acme sells" in html
+    # the creator introduction is prose inside "Who they are", not a card
+    who = html.split('<h2>Who they are</h2>')[1].split('<div class="about"><h3>About Acme</h3>')[0]
+    assert "posting since 2019" in who
+    conn = html.split("<h2>Connections</h2>")[1]
+    assert "About Patterrz" not in conn
+
+
+def test_each_quote_appears_once_inside_its_own_card(tmp_path):
+    """The page used to repeat every card's strongest quote in an "In their
+    own words" strip above the brand. Removed: a quote read twice is not
+    read twice as hard, and the card is where it carries its connection."""
+    html = _render_conn(tmp_path, _FULL_MD)
+    assert "In their own words" not in html
+    assert 'class="bridges"' not in html
+    # nothing repeats a card's quote between the thesis and the creator strip
+    # any more (the strip itself cites the fact once, as its evidence)
+    thesis = html.split('<h2>The thesis</h2>')[1].split('<h2>Who they are</h2>')[0]
+    assert "we finally adopted luna" not in thesis
+    # the quote still renders, once, inside its own card, with its link
+    cards = html.split('<h2>Connections</h2>')[1]
+    assert cards.count("we finally adopted luna") == 1
+    assert cards.count('href="https://youtube.com/w?v=abc&amp;t=12s"') == 1
+
+
+def test_the_caveat_is_kept_but_never_numbered_among_the_connections(tmp_path):
+    html = _render_conn(tmp_path, _FULL_MD)
+    # honest mismatch beats overfitting, so it stays on the page …
+    assert "distrusts subscription boxes" in html
+    assert '<div class="caveat">' in html
+    # … but a caveat inside the ranked list reads as an angle
+    conn = html.split('<ol class="conn">')[1].split("</ol>")[0]
+    assert conn.count('<li><div class="body">') == 1
+    assert "could go wrong" not in conn.lower()
+    assert html.index('<ol class="conn">') < html.index('<div class="caveat">')
+
+
+def test_check_passes_a_complete_map(tmp_path):
+    code, report = _check_conn(tmp_path, _FULL_MD)
+    assert code == 0 and report["ok"] and report["problems"] == []
+
+
+def test_check_names_every_missing_section(tmp_path):
+    stripped = _FULL_MD.replace(
+        "## About Patterrz\n\nA solo creator who has been posting since 2019.\n\n", ""
+    ).replace(
+        "## Thesis\n\nHe already lives the thing Acme sells, and says so unprompted.\n\n", ""
+    ).replace(
+        "## Where this could go wrong\n\nHe has said he distrusts subscription boxes.\n", ""
+    )
+    code, report = _check_conn(tmp_path, stripped)
+    assert code == 3 and not report["ok"]
+    joined = " | ".join(report["problems"])
+    assert "## About Patterrz" in joined
+    assert "## Thesis" in joined
+    assert "Where this could go wrong" in joined
+
+
+def test_check_catches_a_connection_with_no_quote_and_price_language(tmp_path):
+    md = _FULL_MD.replace(
+        "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n",
+        "He mentions a dog sometimes.\n\n")
+    md += "\nThe integration ran at a $4,000 flat fee.\n"
+    code, report = _check_conn(tmp_path, md)
+    assert code == 3
+    joined = " | ".join(report["problems"])
+    assert "carries no quote" in joined
+    assert "price, cost or rate language" in joined
+
+
+def test_a_render_still_writes_the_page_but_reports_contract_problems(tmp_path):
+    """--check gates; a plain render never silently swallows the same finding."""
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)          # no creator intro, no thesis, no caveat
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path))],
+        capture_output=True, text=True, check=True)
+    assert Path(json.loads(proc.stdout)["html"]).exists()
+    assert json.loads(proc.stdout)["problems"]
+    assert "PAGE CONTRACT" in proc.stderr
+
+
+def test_write_context_carries_the_channels_own_description_to_the_extractors(tmp_path):
+    """The extractor judges a find against the premise, so it gets what the
+    channel says it is: the About text and the platform's AI profile, clipped."""
+    import channel_context
+    full = {"name": "Airrack", "about_text": "Pizza Enthusiast \n\nBusiness: x@y.com",
+            "generated_profile": "A " * 600}
+    ctx = channel_context.write_context(full, format_label="solo", format_evidence="e")
+    assert ctx["channel_about"] == "Pizza Enthusiast Business: x@y.com"
+    assert len(ctx["channel_ai_profile"]) == 900 and ctx["channel_ai_profile"].endswith("…")
+
+
+def test_name_candidates_find_the_nickname_the_channel_name_hides(tmp_path):
+    """Alexa Rivera (2026-09-10): both link stores empty, so the identity lane
+    searched the channel name, hit a same-named creator and rejected the right
+    person. The nickname was in the corpus the run had already fetched, so the
+    harvest hands it over as a search term and ranks it first."""
+    import channel_context
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:a", "cues": [[10, "what are two of my nicknames yeah Lexi "
+                                    "that is my nickname my real name's Alexa"]]},
+        {"id": "1:b", "cues": [[20, "Brooke Lexie Rivera Brooke is my username "
+                                    "I will be posting that on my story"]]},
+        {"id": "1:c", "cues": [[30, "my name is Lexi and welcome back"]]},
+        # the ASR spells it both ways; a variant carries once it recurs
+        {"id": "1:f", "cues": [[60, "tag me my nickname is Lexie on there"]]},
+        # a guest introducing themselves in one challenge video is not the host
+        {"id": "1:d", "cues": [[40, "hi my name is Sienna and I think I will win"]]},
+        # a common word that happens to sit inside the surname is not a name
+        {"id": "1:e", "cues": [[50, "my name is on the drive so we arrived early"]]},
+    ])
+    rows = channel_context.name_candidates(corpus, "Alexa Rivera")
+    names = [r["name"] for r in rows]
+    assert names[0] == "lexi", names
+    assert rows[0]["said_outright"] and rows[0]["channel_name_variant"]
+    assert rows[0]["videos"] == 2           # distinct videos, not cue hits
+    assert "lexie" in names                 # the ASR spelling is its own token
+    assert "sienna" not in names            # said once, and not a name variant
+    assert "drive" not in names and "arrived" not in names
+
+
+def test_name_candidates_need_a_corpus_and_survive_a_nameless_channel(tmp_path):
+    """No cues, no candidates; and a channel whose name is missing still runs,
+    falling back to names said outright across many uploads."""
+    import channel_context
+    empty = _write_jsonl(tmp_path / "empty.jsonl", [{"id": "1:a", "cues": []}])
+    assert channel_context.name_candidates(empty, "Alexa Rivera") == []
+    said = _write_jsonl(tmp_path / "said.jsonl", [
+        {"id": f"1:v{i}", "cues": [[i, "hey guys my name is Eric welcome back"]]}
+        for i in range(5)])
+    rows = channel_context.name_candidates(said, None)
+    assert [r["name"] for r in rows] == ["eric"]
+    assert rows[0]["videos"] == 5 and not rows[0]["channel_name_variant"]
+
+
+def test_websites_come_from_the_creators_labelled_header_links(tmp_path):
+    """Postgres social_links._other holds the creator's own sites under the
+    labels they wrote; the index's list holds bare platform links. The lane
+    starts at the sites, so they are separated out, and emails never travel."""
+    import channel_context
+    pg = {"_other": {"Turn Anything Into Pizza": "https://pizzafy.com/",
+                     "Second channel": "https://youtube.com/@airrack2"},
+          "_emails": ["zack@example.com"],
+          "instagram": "https://www.instagram.com/airrack/",
+          "tiktok": "https://vm.tiktok.com/ZMRDwC6n5/"}
+    es = ["instagram.com/airrack", "pizzafy.com"]
+    websites, socials = channel_context.websites_and_socials(pg, es)
+    assert websites == [{"label": "Turn Anything Into Pizza", "url": "https://pizzafy.com/"}]
+    assert socials == ["instagram.com/airrack", "pizzafy.com", "https://vm.tiktok.com/ZMRDwC6n5/"]
+    assert "zack@example.com" not in json.dumps([websites, socials])
+    # nothing from postgres: the index list stands alone
+    assert channel_context.websites_and_socials(None, es) == ([], es)
+
+
+def test_meta_context_carries_the_creators_own_sites(tmp_path):
+    """The websites step 0 discovers must survive into the ledger meta, or a
+    reuse rediscovers what this run already knew and the honesty strip cannot
+    tell a personal site from a platform link."""
+    import ledger_meta
+    ctx = tmp_path / "context-full.json"
+    ctx.write_text(json.dumps({
+        "about_text": "about", "generated_profile": "profile",
+        "websites": [{"label": "Get In Touch", "url": "https://example.com",
+                      "junk": "dropped"}],
+        "social_links": ["instagram.com/someone"],
+    }), encoding="utf-8")
+    out = ledger_meta.load_context(str(ctx))
+    assert out["websites"] == [{"label": "Get In Touch", "url": "https://example.com"}]
+    assert out["social_links"] == ["instagram.com/someone"]
+    # no websites key, and nothing blows up
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps({"about_text": "a"}), encoding="utf-8")
+    assert ledger_meta.load_context(str(bare))["websites"] == []
+
+
+def test_both_link_stores_empty_is_a_real_answer(tmp_path):
+    """Alexa Rivera (2026-09-10) had {} in Postgres and [] in the index. The
+    lane must be handed an honest empty pair, not a crash and not a guess."""
+    import channel_context
+    assert channel_context.websites_and_socials({}, []) == ([], [])
+    assert channel_context.websites_and_socials(None, None) == ([], [])
+
+
+
+def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_path):
+    """Alexa Rivera (2026-09-10): the merge pass left three incompatible partner
+    claims unresolved and off the connection cards, then the renderer put two of
+    them back on the page, because recurrence outranked confidence. Confidence
+    ranks first now, so a confirmed fact is never displaced by a repeated
+    unconfirmed one while confirmed material is still unrendered."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "husband paid for the cruise", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 3, "sensitivity": "none"},
+        {"fact_id": "f2", "claim": "has a wife", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 2, "sensitivity": "none"},
+        {"fact_id": "f3", "claim": "is allergic to radish", "domain": "health",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+        {"fact_id": "f4", "claim": "did gymnastics", "domain": "habits",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    order = [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+    assert order[:2] == ["f3", "f4"], order
+    assert order[2:] == ["f1", "f2"], order      # kept, but ranked below
+
+
+def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
+    """`profile-spec.md`: a staged_only fact is never quoted on a brand-facing
+    page, and the connections page is brand-facing. Superseded facts and the
+    withheld tiers were already filtered; this one was not."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "married Ben for 24 hours", "domain": "relationships",
+         "confidence": "unconfirmed", "recurrence": 4, "sensitivity": "none",
+         "staged_only": True},
+        {"fact_id": "f2", "claim": "grew up visiting this mall", "domain": "origin",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2"]
+
+
+def test_an_unconfirmed_fact_on_the_page_is_badged_as_one(tmp_path):
+    """A thin ledger fills the strip with unconfirmed facts legitimately, so
+    they must be visibly unconfirmed: the strip carried a sensitivity badge and
+    nothing about confidence, making an unsettled claim look settled."""
+    import build_html
+    confirmed = {"fact_id": "f1", "claim": "c", "domain": "habits",
+                 "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"}
+    unconfirmed = dict(confirmed, fact_id="f2", claim="u", confidence="unconfirmed")
+    assert build_html.confidence_badge(confirmed) == ""
+    assert 'badge-unconfirmed">unconfirmed<' in build_html.confidence_badge(unconfirmed)
+    who = build_html.who_they_are([confirmed, unconfirmed], _META)
+    assert who.count("badge-unconfirmed") == 1
+    # and it lands on the unconfirmed claim's own row, not loose in the strip
+    row = [li for li in who.split("<li>") if ">u<" in li][0]
+    assert "badge-unconfirmed" in row
+
+
+def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
+    """The channel's About text and the AI profile come from the ledger meta
+    and sit under the About prose, so the connection pass need not restate
+    public knowledge; a sentence with a currency amount never renders."""
+    meta = dict(_META, context={"about_text": "Pizza Enthusiast. Merch is $40 a hoodie. Hiring!",
+                                "generated_profile": "Airrack makes large-scale stunt videos."})
+    html = _render_conn(tmp_path, _CONN_MD, meta=meta)
+    who = html.split("<h2>Who they are</h2>")[1].split("<h2>")[0]
+    assert '<span class="k">From the channel</span> Pizza Enthusiast. Hiring!' in who
+    assert '<span class="k">Platform profile</span> Airrack makes large-scale stunt videos.' in who
+    assert "$40" not in html
+    # the honesty strip still counts the ledger, and no context means no block
+    assert "platform" not in _render_conn(tmp_path, _CONN_MD).split("<h2>Who they are</h2>")[1].split("<h2>")[0]
+
+
+# --------------------------------------------------------------------------- #
+# FUNNEL stage lines. SKILL.md promises one per stage on stderr, and until
+# now `channel_context.py`, `brand_reads.py` and `build_html.py` printed none,
+# so the whole CONNECT side of a run was untimed.
+# --------------------------------------------------------------------------- #
+def _funnel_lines(stderr: str) -> dict[str, dict[str, str]]:
+    """Every FUNNEL line in stderr, keyed by stage, as a field dict."""
+    out = {}
+    for line in stderr.splitlines():
+        if not line.startswith("FUNNEL "):
+            continue
+        fields = dict(kv.split("=", 1) for kv in line[len("FUNNEL "):].split())
+        out[fields["stage"]] = fields
+    return out
+
+
+def test_the_render_reports_its_own_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path))],
+        capture_output=True, text=True, check=True)
+    line = _funnel_lines(proc.stderr)["render"]
+    # the two ranked cards, not the About or the caveat sections
+    assert line["connections"] == "2"
+    assert line["no_fit"] == "False"
+    assert line["facts"] == "6"
+    assert int(line["bytes"]) > 0
+    assert "elapsed_s" in line
+
+
+def test_a_no_fit_page_says_so_on_its_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD.split("## 1. Adopted")[0])
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src)],
+        capture_output=True, text=True, check=True)
+    line = _funnel_lines(proc.stderr)["render"]
+    assert line["connections"] == "0"
+    assert line["no_fit"] == "True"
+
+
+def test_the_check_run_reports_its_own_stage_line(tmp_path):
+    src = tmp_path / "42-7-connections.md"
+    src.write_text(_CONN_MD)
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src), "--check"],
+        capture_output=True, text=True)
+    line = _funnel_lines(proc.stderr)["check"]
+    assert int(line["problems"]) == len(json.loads(proc.stdout)["problems"])
+
+
+def test_the_context_stage_line_carries_what_the_format_call_needs():
+    """Step 2 calls the format from this line, so every number that call is
+    made from has to be on it; opening context-full.json is the fallback."""
+    import channel_context
+    out = {
+        "channel_id": 42,
+        "name_candidates": [{"name": "Pat"}],
+        "context_stats": {
+            "videos_measured": 283,
+            "fp_per_1k_words_median": 41.0,
+            "videos_with_interview_markers": 12,
+            "questions_per_1k_words_median": 8.2,
+            "title_hints": {"staged": 60, "interview": 3, "reaction": 0},
+            "staged_share": 0.22,
+            "likely_faceless": False,
+        },
+    }
+    line = channel_context.funnel_fields(out, 19.4)
+    assert line["stage"] == "context"
+    assert line["videos"] == 283
+    assert line["fp_density_median"] == 41.0
+    assert line["interview_marker_videos"] == 12
+    assert line["question_density"] == 8.2
+    assert line["title_hint_videos"] == 63
+    assert line["staged_share"] == 0.22
+    assert line["likely_faceless"] is False
+    assert line["name_candidates"] == 1
+    assert line["elapsed_s"] == 19.4
+    # no space in any value, or the line does not parse back into fields
+    assert all(" " not in str(v) for v in line.values())
+
+
+def test_the_pre_fetch_read_is_its_own_stage_not_an_empty_context_line():
+    """Step 0 runs the same script with no corpus. One stage name for both
+    would put two different lines under one label."""
+    import channel_context
+    line = channel_context.funnel_fields(
+        {"channel_id": 42, "websites": [{"url": "https://a.com"}],
+         "social_links": ["https://instagram.com/x", "https://x.com/x"],
+         "second_channel_candidates": [{"url": "https://youtube.com/@vlog"}]}, 2.1)
+    assert line["stage"] == "identity"
+    assert (line["websites"], line["social_links"], line["second_channels"]) == (1, 2, 1)
+    assert "videos" not in line
+
+
+def test_the_brand_read_lane_reports_what_it_found():
+    import brand_reads
+    line = brand_reads.funnel_fields(
+        {"brand_ids": [8787, 8788], "mention_videos_found": 40,
+         "reads_returned": 15, "reads_with_spoken_words": 11}, 31.0)
+    assert line["stage"] == "brand_read"
+    assert (line["brands"], line["mention_videos"]) == (2, 40)
+    assert (line["reads"], line["with_spoken_words"]) == (15, 11)
+    assert line["elapsed_s"] == 31.0
+
+
+# --------------------------------------------------------------------------- #
+# expand && verify && write is one chain on a socials-OFF run, which only
+# holds while the last two stop on the SAME facts.
+# --------------------------------------------------------------------------- #
+def test_verify_and_the_ledger_write_refuse_the_same_run(tmp_path):
+    """SKILL.md step 5 chains the write onto verify with `&&`. That is only
+    safe because a quote verify rejects is a quote the write refuses: if
+    verify ever exited 0 on a partial, the chain would publish it."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import ledger_meta
+
+    proc, summary, _ = _run_verify(tmp_path, [
+        {"fact_id": "f1", "provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Ohio and my dad ran"},
+        {"fact_id": "f2", "provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Texas with my mother"}])
+    assert proc.returncode == 1 and summary["partial"] == 1
+
+    # the chain stops here, so the write never runs. Run it anyway: it has to
+    # refuse the very file verify just wrote, or `&&` is hiding a publish.
+    profiles = tmp_path / "tl-creator-profiles"
+    profiles.mkdir()
+    rc = ledger_meta.main(["write", "--channel", "1", "--profiles-dir", str(profiles),
+                           "--from", str(tmp_path / "candidates.jsonl.verified.jsonl")])
+    assert rc == 2
+    assert not (profiles / "1-facts.jsonl").exists()
+
+
+def test_a_clean_verify_lets_the_chained_write_through(tmp_path):
+    """The other half: nothing in the chain blocks a run with no bad quote."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import ledger_meta
+
+    proc, summary, _ = _run_verify(tmp_path, [
+        {"fact_id": "f1", "claim": "grew up in Ohio", "provenance": "transcript",
+         "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Ohio and my dad ran"}])
+    assert proc.returncode == 0 and summary["exact"] == 1
+
+    profiles = tmp_path / "tl-creator-profiles"
+    profiles.mkdir()
+    rc = ledger_meta.main(["write", "--channel", "1", "--profiles-dir", str(profiles),
+                           "--from", str(tmp_path / "candidates.jsonl.verified.jsonl"),
+                           "--channel-name", "Patterrz"])
+    assert rc == 0
+    assert (profiles / "1-facts.jsonl").exists()
+
+
+# --------------------------------------------------------------------------- #
+# verify_quotes.py --drop-unverified: the chain hands on a clean file
+# --------------------------------------------------------------------------- #
+def test_drop_unverified_writes_a_clean_file_and_refills_selected(tmp_path):
+    """Run I (2026-09-14): verify exited 1 but wrote every candidate, so the
+    ledger write refused and the operator hand-filtered. PleasantKenobi the
+    same day: 12 of the 40 selected facts were rejects, the page shipped 28.
+    With the flag the rejects go to their own file and the count is
+    re-filled from what did verify, by the merge pass's own ranking."""
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:vid1", "cues": [
+            [10, "so before we start"],
+            [14, "I grew up in a tiny town in Ohio"],
+            [19, "and my dad ran the bakery there"]]}])
+    infile = _write_jsonl(tmp_path / "facts.jsonl", [
+        {"fact_id": "f001", "provenance": "transcript", "video": "1:vid1", "start": 14,
+         "quote": "I grew up in a tiny town in Ohio", "confidence": "confirmed",
+         "recurrence": 1, "sensitivity": "none", "selected": True},
+        {"fact_id": "f002", "provenance": "transcript", "video": "1:vid1", "start": 19,
+         "quote": "my dad ran the bakery there for years", "confidence": "confirmed",
+         "recurrence": 2, "sensitivity": "none", "selected": True},
+        {"fact_id": "f003", "provenance": "transcript", "video": "1:vid1", "start": 10,
+         "quote": "so before we start", "confidence": "confirmed",
+         "recurrence": 3, "sensitivity": "none", "selected": False},
+        {"fact_id": "f004", "provenance": "transcript", "video": "1:vid1", "start": 10,
+         "quote": "before we start", "confidence": "confirmed",
+         "recurrence": 1, "sensitivity": "location", "selected": False},
+        {"fact_id": "f005", "provenance": "web", "source_url": "https://x.example",
+         "claim": "co-hosts a podcast", "confidence": "confirmed", "selected": False}])
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "verify_quotes.py"), "--in", str(infile),
+         "--corpus", str(corpus), "--drop-unverified"], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    summary = json.loads(proc.stdout)
+    assert summary["partial"] == 1 and summary["dropped"] == 1
+    kept = {r["fact_id"]: r for r in
+            (json.loads(l) for l in (tmp_path / "facts.jsonl.verified.jsonl").read_text().splitlines())}
+    assert set(kept) == {"f001", "f003", "f004", "f005"}
+    rejected = [json.loads(l) for l in (tmp_path / "facts.jsonl.rejected.jsonl").read_text().splitlines()]
+    assert [r["fact_id"] for r in rejected] == ["f002"]
+    assert rejected[0]["verify"]["match"] == "partial"
+    # the lost pick is re-filled by the strongest eligible confirmed fact:
+    # f003 (three videos), never f004 (a withheld tier)
+    assert summary["selected_refilled"] == ["f003"]
+    assert kept["f003"]["selected"] is True and kept["f004"]["selected"] is False
+    assert "dropped=1 selected_refilled=1" in proc.stderr
+
+
+def test_without_the_flag_verify_still_writes_every_candidate_and_exits_1(tmp_path):
+    proc, summary, rows = _run_verify(tmp_path, [
+        {"provenance": "transcript", "video": "1:vid1",
+         "quote": "I grew up in a tiny town in Texas with my mother"}])
+    assert proc.returncode == 1 and len(rows) == 1
+    assert summary["dropped"] == 0 and summary["rejected_file"] is None
+
+
+# --------------------------------------------------------------------------- #
+# build_html.py: wrapped bullets, addresses, and the clinical fall-back
+# --------------------------------------------------------------------------- #
+def test_a_wrapped_bullet_stays_one_list_item():
+    """Run H (2026-09-14): every multi-line bullet under "Where this could go
+    wrong" rendered as a one-line <li> plus an orphan <p> outside the list."""
+    import build_html
+    out = build_html.render_markdown(
+        "## Where this could go wrong\n"
+        "- His relationship status is unreconciled in the ledger.\n"
+        "  Two facts describe a girlfriend and a wife.\n"
+        "- A second bullet.\n")
+    assert out.count("<li>") == 2 and out.count("<ul>") == 1
+    assert ("<li>His relationship status is unreconciled in the ledger. "
+            "Two facts describe a girlfriend and a wife.</li>") in out
+    assert "<p>Two facts" not in out
+
+
+def test_the_platform_about_text_never_carries_an_address():
+    """Run H: the channel's About text printed a fan-mail PO box onto a
+    brand-facing page; the never-travels rule was enforced on facts only."""
+    import build_html
+    about = ("Hello fellow engineers, welcome to the channel. Fan mail: PO Box 123, "
+             "Cardiff, CF10 1AA. Business: hello@example.com. "
+             "I build things in games and sometimes in real life.")
+    text = build_html.no_address_sentences(about)
+    assert "PO Box" not in text and "CF10" not in text and "@" not in text
+    assert text.startswith("Hello fellow engineers") and "I build things" in text
+    assert build_html.no_address_sentences("I live in Wales.") == "I live in Wales."
+
+
+def test_who_they_are_fall_back_never_routes_around_the_clinical_rule():
+    """Run I (2026-09-14): with fewer than 40 selected facts the strip fell
+    back to the most-recurring facts and rendered a two-video clinical fact
+    the merge pass had refused to select. The strip applies the same
+    three-video rule `merge_pass.selectable` does."""
+    import build_html
+    facts = [
+        {"fact_id": "f1", "claim": "was diagnosed with ADHD", "domain": "health",
+         "confidence": "confirmed", "recurrence": 2, "sensitivity": "clinical"},
+        {"fact_id": "f2", "claim": "is sober", "domain": "health",
+         "confidence": "confirmed", "recurrence": 3, "sensitivity": "clinical"},
+        {"fact_id": "f3", "claim": "grew up in Wales", "domain": "origin",
+         "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
+    ]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2", "f3"]
+
+
+# --------------------------------------------------------------------------- #
+# build_html.py: the creator's own words, and what the page does with them
+# --------------------------------------------------------------------------- #
+def _bio_fact(**over):
+    fact = {"fact_id": "f2", "claim": "trained as a doctor before YouTube",
+            "domain": "work", "provenance": "bio", "confidence": "unconfirmed",
+            "recurrence": 1, "sensitivity": "none", "unverified_bio": True,
+            "source_url": "https://youtube.com/@x", "seen_date": "2026-09-15",
+            "source_kind": "about", "source_excerpt": "I trained as a doctor"}
+    fact.update(over)
+    return fact
+
+
+def _transcript_fact(**over):
+    fact = {"fact_id": "f1", "claim": "trained as a doctor", "domain": "work",
+            "provenance": "transcript", "confidence": "confirmed", "recurrence": 2,
+            "sensitivity": "none", "quote": "i trained as a doctor for six years",
+            "video": "1:v1", "start": 10,
+            "url": "https://www.youtube.com/watch?v=v1&t=10s"}
+    fact.update(over)
+    return fact
+
+
+def test_an_uncorroborated_bio_fact_stays_off_the_who_strip():
+    import build_html
+    facts = [_transcript_fact(claim="is allergic to radish"), _bio_fact()]
+    assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f1"]
+
+
+def test_an_uncorroborated_bio_fact_renders_in_its_own_labelled_block():
+    import build_html
+    html_out = build_html.own_words_section([_bio_fact()])
+    assert "In their own words (unverified)" in html_out
+    assert "trained as a doctor before YouTube" in html_out
+    assert "I trained as a doctor" in html_out          # their words, their page
+    assert "youtube.com/@x" in html_out
+    assert "read 2026-09-15" in html_out
+    assert "watch?v=" not in html_out                   # never a quote at a timestamp
+
+
+def test_a_corroborated_bio_fact_is_not_in_the_unverified_block():
+    """It belongs in "Who they are" with the upload behind it, not here."""
+    import build_html
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    facts = [_transcript_fact(), bio]
+    assert build_html.own_words_section(facts) == ""
+    assert "f2" in [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+
+
+def test_corroboration_is_re_derived_when_the_quote_failed_verification():
+    """The merge pass confirmed the pair; verification then rejected the quote.
+    The page must not keep publishing the bio claim as settled."""
+    import build_html
+    target = _transcript_fact(verify={"match": "no"})
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    facts = [target, bio]
+    assert build_html.unverified_bio(bio, {"f1": target}) is True
+    assert "f2" not in [f["fact_id"] for f in build_html.pick_who_flat(facts)]
+    assert "In their own words" in build_html.own_words_section(facts)
+
+
+def test_corroboration_is_re_derived_when_the_transcript_fact_is_gone():
+    import build_html
+    bio = _bio_fact(confidence="confirmed", corroborated_by="f1", unverified_bio=False)
+    assert build_html.unverified_bio(bio, {}) is True
+
+
+def test_a_sensitive_bio_claim_never_reaches_the_unverified_block():
+    """Backstop for a ledger written before the merge pass dropped these."""
+    import build_html
+    for tier in ("clinical", "children", "location"):
+        out = build_html.own_words_section([_bio_fact(sensitivity=tier)])
+        assert out == "", tier
+
+
+def test_the_raw_about_box_is_not_reprinted_once_the_bio_lane_has_run():
+    """A clinical claim dropped from the ledger still sat in the About
+    paragraph the page printed verbatim."""
+    import build_html
+    meta = dict(_META, context={"about_text": "I have coeliac disease and I love dogs.",
+                                "generated_profile": "A gaming channel."})
+    plain_who = build_html.who_they_are([_transcript_fact()], meta)
+    assert "coeliac" in plain_who                       # unchanged without the lane
+    lane_who = build_html.who_they_are([_transcript_fact(), _bio_fact()], meta)
+    assert "coeliac" not in lane_who
+    assert "A gaming channel." in lane_who              # the catalogue profile stays
+
+
+def test_a_run_whose_every_bio_claim_was_dropped_still_suppresses_the_about_box():
+    import build_html
+    meta = dict(_META, context={"about_text": "I have coeliac disease.",
+                                "bio_lane": True})
+    assert "coeliac" not in build_html.who_they_are([_transcript_fact()], meta)
+
+
+def test_check_refuses_a_selected_uncorroborated_bio_fact():
+    import build_html
+    facts = [_transcript_fact(), _bio_fact(selected=True)]
+    problems = build_html.check_page(_CONN_MD, facts, _META)
+    assert any("only wrote about themselves" in p for p in problems)
+
+
+def test_check_refuses_a_sensitive_uncorroborated_bio_fact_in_the_ledger():
+    import build_html
+    facts = [_transcript_fact(), _bio_fact(sensitivity="clinical")]
+    problems = build_html.check_page(_CONN_MD, facts, _META)
+    assert any("should have been dropped" in p for p in problems)
+
+
+# build_html.py --brief: the creator-friendly brief, the second deliverable
+# --------------------------------------------------------------------------- #
+_INPUT = {
+    "schema": "tl-creator-brief-input/v1", "channel_id": 42, "channel_name": "Patterrz",
+    "brand_id": 7, "brand_name": "Acme", "promoting": "the new salmon recipe",
+    "talking_points": ["Rescue dogs first, always", "Show the bag on camera"],
+    "supplied": True,
+}
+
+_BRIEF_MD = (
+    "---\n"
+    "schema: tl-creator-brief/v1\n"
+    'channel_name: "Patterrz"\n'
+    "brand_name: Acme\n"
+    "talking_points_supplied: true\n"
+    "---\n\n"
+    "Patterrz, this is what Acme would like covered, with the moments from your own "
+    "videos that already say it.\n\n"
+    "## Who is Acme\n\n"
+    "Acme is a direct-to-consumer dog food brand.\n\n"
+    "## The creative ask\n\n"
+    "Acme is promoting the new salmon recipe. One integration inside a regular upload.\n\n"
+    "## Key talking points\n\n"
+    "### Rescue dogs first, always\n\n"
+    "> we finally adopted luna from the shelter last spring and she\n"
+    "> [Patterrz, 2026](https://www.youtube.com/watch?v=abc&t=12s)\n\n"
+    "Luna's adoption is the story Acme wants told. You could open on her and let the "
+    "food come second.\n\n"
+    "### Show the bag on camera\n\n"
+    "No natural moment in your videos for this one; worth doing straight, "
+    "the bag in frame while Luna eats.\n\n"
+    "## Requirements\n\n"
+    "- Say the full name, Acme Salmon Recipe, once\n\n"
+    "## Don't do\n\n"
+    "- No vet or medical claims\n\n"
+    "## Creative approval process\n\n"
+    "Send a draft to your ThoughtLeaders contact. Acme reviews it, and the video goes "
+    "live only after written approval.\n"
+)
+
+
+def _brief(tmp_path: Path, md: str = _BRIEF_MD, inp: dict | None = _INPUT,
+           facts=None, check: bool = True, out: Path | None = None):
+    src = tmp_path / "creator-brief-7.md"
+    src.write_text(md)
+    conn = tmp_path / "connections-7.md"
+    conn.write_text(_CONN_MD)
+    cmd = [sys.executable, str(_SCRIPTS / "build_html.py"), "--brief",
+           "--in", str(src), "--connections", str(conn),
+           "--facts", str(_write_ledger(tmp_path, facts))]
+    if inp is not None:
+        ip = tmp_path / "creator-brief-input-7.json"
+        ip.write_text(json.dumps(inp))
+        cmd += ["--input", str(ip)]
+    if check:
+        cmd.append("--check")
+    if out:
+        cmd += ["--out", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc, json.loads(proc.stdout)
+
+
+def test_a_clean_brief_passes_and_renders_named_by_names(tmp_path):
+    proc, res = _brief(tmp_path)
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+    proc, res = _brief(tmp_path, check=False)
+    assert proc.returncode == 0
+    html_path = Path(res["html"])
+    assert html_path.name == "acme-creator-brief-patterrz.html"
+    assert html_path.parent == (tmp_path / "42-facts.jsonl").parent
+    page = html_path.read_text()
+    assert "<title>Acme creator brief for Patterrz</title>" in page
+    assert "<h2>Who is Acme</h2>" in page and "<h2>Creative approval process</h2>" in page
+    assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s"' in page
+    assert "no brand talking points supplied" not in page
+    assert Path(res["fragment"]).exists()
+    assert "FUNNEL stage=brief_render" in proc.stderr
+
+
+def test_an_unsupplied_brief_says_so_in_its_header(tmp_path):
+    md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None}
+    proc, res = _brief(tmp_path, md, inp, check=False)
+    assert proc.returncode == 0 and not res["problems"], res["problems"]
+    assert "no brand talking points supplied" in Path(res["html"]).read_text()
+
+
+def _problems(tmp_path, md, inp=_INPUT, facts=None) -> list[str]:
+    proc, res = _brief(tmp_path, md, inp, facts)
+    assert proc.returncode == 3, "a broken brief must fail the check"
+    return res["problems"]
+
+
+def test_the_check_refuses_a_quote_the_creator_never_said(tmp_path):
+    md = _BRIEF_MD.replace("we finally adopted luna from the shelter last spring and she",
+                           "luna changed my whole life the day we brought her home")
+    assert any("neither a ledger fact nor" in p for p in _problems(tmp_path, md))
+
+
+def test_the_check_refuses_a_withheld_tier_quote(tmp_path):
+    facts = [dict(f) for f in _FACTS]
+    facts[3]["quote"] = "maple started school this week and cried"   # children tier
+    md = _BRIEF_MD.replace(
+        "> we finally adopted luna from the shelter last spring and she\n",
+        "> maple started school this week and cried\n")
+    problems = _problems(tmp_path, md, facts=facts)
+    assert any("withheld-tier" in p for p in problems)
+
+
+def test_the_check_wants_all_six_sections_in_order(tmp_path):
+    missing = _BRIEF_MD.replace("## Requirements\n\n- Say the full name, Acme Salmon Recipe, once\n\n", "")
+    problems = _problems(tmp_path, missing)
+    assert "missing section: ## Requirements" in problems
+    swapped = _BRIEF_MD.replace("## Don't do", "## ZZZ").replace(
+        "## Creative approval process", "## Don't do").replace("## ZZZ", "## Creative approval process")
+    assert any("out of order" in p for p in _problems(tmp_path, swapped))
+
+
+def test_the_check_refuses_a_dropped_or_reworded_brand_line(tmp_path):
+    dropped = _BRIEF_MD.replace("### Show the bag on camera\n\nNo natural moment in your "
+                                "videos for this one; worth doing straight, the bag in "
+                                "frame while Luna eats.\n\n", "")
+    assert any("supplied talking point missing" in p for p in _problems(tmp_path, dropped))
+    reworded = _BRIEF_MD.replace("### Rescue dogs first, always", "### Rescue dogs come first")
+    problems = _problems(tmp_path, reworded)
+    assert any("supplied talking point missing or reworded" in p for p in problems)
+    promoting = _BRIEF_MD.replace("Acme is promoting the new salmon recipe.",
+                                  "Acme is promoting its salmon food.")
+    assert any("'promoting' line is not in The creative ask" in p
+               for p in _problems(tmp_path, promoting))
+
+
+def test_a_talking_point_without_a_quote_must_say_no_natural_moment(tmp_path):
+    md = _BRIEF_MD.replace("No natural moment in your videos for this one; worth doing "
+                           "straight, the bag in frame while Luna eats.",
+                           "Show the bag on camera while Luna eats.")
+    assert any("does not say 'no natural moment'" in p for p in _problems(tmp_path, md))
+
+
+def test_nothing_written_for_the_brands_eyes_reaches_the_creator(tmp_path):
+    cases = {
+        "**strong**": "Luna's adoption is the story Acme wants told (**strong**).",
+        "sponsorship pattern": "Other creators follow the same sponsorship pattern here.",
+        "fact id": "This is fact f1 from the file.",
+        "platform id": "Acme (id 50485) sells dog food.",
+        "money": "The read pays $400 per video.",
+        "CTA": "Tell them to use code LUNA at checkout.",
+        "against": "Feed Acme instead of the supermarket brand.",
+    }
+    for label, line in cases.items():
+        md = _BRIEF_MD.replace("You could open on her and let the food come second.", line)
+        problems = _problems(tmp_path, md)
+        assert problems, label
+        assert not any("missing" in p for p in problems), (label, problems)
+
+
+def test_the_brief_frontmatter_carries_no_platform_internals(tmp_path):
+    md = _BRIEF_MD.replace("brand_name: Acme\n", "brand_name: Acme\nbrand_id: 7\n")
+    assert "frontmatter carries a platform internal: brand_id" in _problems(tmp_path, md)
+
+
+def test_talking_points_supplied_must_agree_with_the_input_file(tmp_path):
+    md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    assert any("talking_points_supplied says false" in p for p in _problems(tmp_path, md))
