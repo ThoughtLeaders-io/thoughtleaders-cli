@@ -114,7 +114,7 @@ DOMAIN_LABELS = {
     "other": "Other",
 }
 # The "who they are" run renders the ledger's `selected` facts; the merge
-# pass owns that pick (SELECTED_TARGET, 40 since the 2026-09-10 review) and
+# pass owns that pick (SELECTED_TARGET, 40) and
 # this is only the render cap, so it matches. The per-domain cap stops one
 # talkative domain owning the strip; 8 of 12 domains at most.
 WHO_MAX_FACTS = 40
@@ -438,8 +438,8 @@ def render_markdown(md: str) -> str:
             continue
         if in_list and out and out[-1].endswith("</li>"):
             # a wrapped bullet: the continuation line belongs to the item, not
-            # to a paragraph after the list (run H shredded "Where this could
-            # go wrong" into one-line <li>s with orphan <p>s between them)
+            # to a paragraph after the list (otherwise "Where this could go
+            # wrong" is shredded into one-line <li>s with orphan <p>s between them)
             out[-1] = out[-1][:-len("</li>")] + " " + inline(stripped) + "</li>"
             continue
         close_list()
@@ -603,10 +603,10 @@ def confidence_badge(fact: dict) -> str:
 
     Confirmed is the expected case and goes unmarked, so the badge stays a
     signal rather than furniture. A thin ledger legitimately fills "who they
-    are" with unconfirmed facts (Brooklyn and Bailey, 2026-09-10: only 32
-    confirmed facts survive the per-domain cap against a render cap of 40), and
-    before this the reader could not tell one from the other: the strip carried
-    a sensitivity badge and nothing about confidence.
+    are" with unconfirmed facts (fewer confirmed facts survive the per-domain
+    cap than the render cap allows), and without the badge the reader could
+    not tell one from the other: the strip carried a sensitivity badge and
+    nothing about confidence.
     """
     return "" if fact.get("confidence") == "confirmed" else (badge("unconfirmed") or "")
 
@@ -746,14 +746,12 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     brand-facing page", and this page is brand-facing.
 
     Confidence ranks above recurrence, matching the order `merge_pass expand`
-    already applies when it owns `selected`. It used to rank below, which put
-    a well-repeated unsettled claim ahead of a confirmed one: Alexa Rivera
-    (2026-09-10) rendered "husband paid for the cruise" (unconfirmed, three
-    videos) and "has a wife who picked up dog poop on a plane" (unconfirmed,
-    two) side by side on the page, while 47 confirmed facts survived the
-    per-domain cap and the render cap was 40. The merge pass had deliberately
-    left that contradiction unresolved and off the connection cards; the
-    renderer put it back.
+    already applies when it owns `selected`. Ranking it below would put a
+    well-repeated unsettled claim ahead of a confirmed one, and could render
+    two contradicting unconfirmed relationship claims side by side while
+    confirmed facts that survived the per-domain cap went unused. The merge
+    pass deliberately leaves such a contradiction unresolved and off the
+    connection cards; the renderer must not put it back.
     """
     index = {str(f.get("fact_id")): f for f in facts}
     usable = [f for f in facts
@@ -766,8 +764,8 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
               # the merge pass's own rule for `selected`: a clinical fact is
               # public only where the creator made it so, three or more videos
               # for a transcript fact; the fall-back to most-recurring facts
-              # must not route around it (Hossenfelder 2026-09-14 rendered a
-              # two-video clinical fact on a brand-facing strip)
+              # must not route around it (otherwise a two-video clinical fact
+              # can reach a brand-facing strip)
               and not (tier_of(f) == "clinical"
                        and (f.get("provenance") or "transcript") == "transcript"
                        and int(f.get("recurrence") or 0) < 3)]
@@ -838,8 +836,8 @@ _ADDRESS = re.compile(
 def no_address_sentences(text: str) -> str:
     """The text minus any sentence carrying a postal address, PO box or
     email. The ledger enforces "a contact address never travels" fact by fact;
-    the channel's own About text is printed whole, and Real Civil Engineer's
-    (2026-09-14) carried a fan-mail PO box onto a brand-facing page."""
+    the channel's own About text is printed whole, and an About text can carry
+    a fan-mail address that must not reach a brand-facing page."""
     parts = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
     return " ".join(p for p in parts if p and not _ADDRESS.search(p)).strip()
 
@@ -987,8 +985,8 @@ def page_fragment(title: str, eyebrow: str, header_extra: str, body: str) -> str
     """The same page as a body fragment: `<title>` and `<style>` first (the
     Artifact tool reads the title from the first 8 KB and supplies the
     document shell itself), then the content. Publishing the full document
-    through that tool nests one HTML document inside another, which is why
-    the 2026-09-09 runs could not publish the page at all."""
+    through that tool nests one HTML document inside another, and the page
+    then cannot be published at all."""
     return (f"<title>{html.escape(title)}</title>\n"
             f'<link rel="stylesheet" href="{FONTS}">\n'
             f"<style>{CSS}</style>\n"
@@ -1117,8 +1115,8 @@ def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | No
 # --------------------------------------------------------------------------- #
 # --check: the mechanical half of a QA pass, in the renderer
 # --------------------------------------------------------------------------- #
-# A second agent re-reading the first agent's page cost a measured 234 s and
-# caught only things a script can check. These are those things. What a script
+# A second agent re-reading the first agent's page is slow and catches only
+# things a script can check. These are those things. What a script
 # cannot check — whether the thesis is any good — stays the connection pass's
 # job and is not re-litigated by another model.
 _MONEY = re.compile(r"(?<![\w-])(?:[$€£]\s?\d|\d+\s?(?:usd|eur|gbp)\b"
@@ -1171,9 +1169,8 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
 
     # every connection card must carry its evidence, and the evidence must be
     # the ledger's: a quote that matches no verified fact is the channel's
-    # premise or the writer's memory, not a connection (HopeScope 2026-09-09:
-    # the lead card quoted a fact about her parents' Barbie collection to
-    # argue that her format is unboxing drops)
+    # premise or the writer's memory, not a connection (a lead card can
+    # otherwise quote an unrelated family fact to argue a format claim)
     thin = 0
     strong = 0
     for title, rest in kinds["conn"]:
@@ -1245,8 +1242,8 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
 # second person, and nothing that was written for the brand's eyes.
 BRIEF_SCHEMA = "tl-creator-brief/v1"
 BRIEF_INPUT_SCHEMA = "tl-creator-brief-input/v1"
-# the six sections, in the order the brand-side template (David, 2026-09-15)
-# fixes; the first is matched on its prefix because it names the brand
+# the six sections, in the order the brand-side template fixes; the first is
+# matched on its prefix because it names the brand
 BRIEF_SECTIONS = (
     ("who", "Who is <brand>", lambda t: t.startswith("who is")),
     ("ask", "The creative ask", lambda t: t == "the creative ask"),
@@ -1271,7 +1268,7 @@ _PLATFORM_ID = re.compile(r"(?<![\w=&?/.:-])\d{5,7}(?![\w-])")
 _CTA = re.compile(r"\b(download (?:it|now|the app)|link in (?:the )?description|use code"
                   r"|sign up|click (?:the|here|below))\b", re.I)
 # the creator file builds the brand up; it never sets it against another
-# product, even one the creator plays (Yuval, 2026-09-15)
+# product, even one the creator plays
 _AGAINST = re.compile(r"\b(instead of|put (?:\w+ )?down|better than|ditch(?:ing)?"
                       r"|swap(?:ping)? out|rather than (?:playing|using|opening))\b", re.I)
 

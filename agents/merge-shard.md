@@ -92,9 +92,7 @@ Read the probe and decide:
 - **Be consistent across the conflict set.** If you drop one "husband" line
   as a scripted premise, every other line in its `conflicts_with` set that
   says the same thing gets the same reading, and none of them is `selected`
-  or a `supersedes` source. Alexa Rivera (2026-09-09): two "my husband" lines
-  dropped as a fake honeymoon, a third kept, folded, made to supersede the
-  boyfriend fact and selected onto the page.
+  or a `supersedes` source.
 
 `expand` refuses a `supersedes` that points against the dates (the target's
 evidence is newer than the source's) and hands the ids back for a re-ask

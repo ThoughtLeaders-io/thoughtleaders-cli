@@ -10,9 +10,9 @@ everything goes through ``scripts/store_io.py``.
 Two subcommands:
 
     ledger_meta.py write --channel <id> [--profiles-dir tl-creator-profiles]
-        [--corpus-dir <profiles>/.corpus/<id>] [--from facts.verified.jsonl]
+        [--from facts.verified.jsonl]
         [--channel-name "…"] [--format solo] [--format-evidence "…"]
-        [--rounds N] [--credits-spent N] [--lanes …] [--context <json>]
+        [--rounds N] [--lanes …] [--context <json>]
 
     With ``--from``, the verified working facts (``verify_quotes.py``'s
     output) become the ledger: every transcript fact must carry
@@ -312,8 +312,7 @@ def verified_facts(path: pathlib.Path) -> list[dict]:
 
 def cmd_write(a: argparse.Namespace) -> int:
     profiles = pathlib.Path(a.profiles_dir)
-    corpus_dir = (pathlib.Path(a.corpus_dir) if a.corpus_dir
-                  else profiles / ".corpus" / str(a.channel))
+    corpus_dir = profiles / ".corpus" / str(a.channel)
     path = profiles / f"{a.channel}-facts.jsonl"
     previous = store_io.read_ledger(path)[0] if path.exists() else None
     if a.from_facts:
@@ -330,7 +329,7 @@ def cmd_write(a: argparse.Namespace) -> int:
         facts = store_io.read_ledger(path)[1] if path.exists() else []
     meta = build_meta(a.channel, profiles, corpus_dir, channel_name=a.channel_name,
                       fmt=a.format, format_evidence=a.format_evidence, rounds=a.rounds,
-                      credits_spent=a.credits_spent, lanes=a.lanes,
+                      lanes=a.lanes,
                       context=load_context(a.context), previous=previous)
     store_io.write_ledger(path, meta, facts)
     print(json.dumps({"ledger": str(path), **meta}, ensure_ascii=False))
@@ -377,8 +376,6 @@ def main(argv: list[str] | None = None) -> int:
                        help="write the ledger's meta header from the build's files")
     w.add_argument("--channel", type=int, required=True)
     w.add_argument("--profiles-dir", default="tl-creator-profiles")
-    w.add_argument("--corpus-dir", default=None,
-                   help="default: <profiles-dir>/.corpus/<channel>")
     w.add_argument("--from", dest="from_facts", default=None,
                    help="verify_quotes.py output: its facts become the ledger "
                         "(exact matches only, verify stripped). Omit to rewrite "
@@ -389,7 +386,6 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--format-evidence", default=None)
     w.add_argument("--rounds", type=int, default=None,
                    help="extraction rounds run; default: number of fetch summaries")
-    w.add_argument("--credits-spent", type=float, default=None)
     w.add_argument("--lanes", choices=LANES, default=None,
                    help="which creator-source lanes built the ledger; default: transcripts, "
                         "or the existing record's value on a refresh")

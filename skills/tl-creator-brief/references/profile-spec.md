@@ -200,7 +200,7 @@ python3 scripts/ledger_meta.py check --channel <id> [--lanes transcripts+socials
 When `<channel_id>-facts.jsonl` exists with its meta header it prints one
 announcement line, which is repeated to the user verbatim,
 
-> Found a ledger for Sydney Watson built 2026-09-01 over 2016-03 → 2026-08-20,
+> Found a ledger for Marta Builds built 2026-09-01 over 2016-03 → 2026-08-20,
 > 91 facts. 3 videos uploaded since.
 
 — and a JSON decision. The uploads count is one cheap index count after
@@ -310,10 +310,10 @@ Types: **direct** (fact ↔ product), **adjacent** (lifestyle/context fit),
 **category precedent** (the creator already does what the product enables,
 from the confirm-only probe).
 
-**Strength**, the second tag, is the rule the 2026-09-09 test runs were
-missing: **the connection is the fact, not the format.** A card is
+**Strength**, the second tag: **the connection is the fact, not the
+format.** A card is
 **strong** when the quoted fact itself names the thing the brand offers (a
-creator who has driven to 47 branches of a restaurant chain, for that chain;
+creator who says they order from one delivery app every week, for that app;
 a creator who names four family members, for a family plan). It is **thin**
 when the link runs through the channel's premise ("her format is unboxing,
 the brand ships collectible drops", quoting a fact about her parents'

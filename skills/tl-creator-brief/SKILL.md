@@ -49,13 +49,11 @@ Standing rules: scripts reach the platform only through
 `tl brands find`, never a name match in a query; no `cd`; per-channel paths.
 Agent names below are written `<plugin>:gem-classifier` and
 `<plugin>:merge-shard`, where `<plugin>` is the installed plugin's namespace
-(`tl-cli` in production, `tl-cli-pr91` on a side-by-side test install).
+(`tl-cli`).
 
 ## Start the run
 
-Resolve, plan gate, channel context and the reuse check were four turns with
-no judgment between them, and a turn between two stages costs more than most
-of these stages do. They are one command:
+Resolve, plan gate, channel context and the reuse check are one command:
 
 ```bash
 python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
@@ -92,8 +90,7 @@ summary on stdout, every stage's own `FUNNEL` line on stderr.
   profile, the websites, the social links and the second-channel candidates.
   Take the terms from it (surname, company, former role, anything the About
   text or the profile names) and run PROFILE step 1 in your next message.
-  The channel name alone is not host terms: HopeScope ran with
-  `"HopeScope,Hope"` and took 22 anchor soft mismatches.
+  The channel name alone is not host terms.
 - **`--host-terms` given, the opening is one turn**: the command runs the
   bounded fetch and the context stats too, and `ran` says which stages went.
   Pass it only when the request already names the terms.
@@ -178,8 +175,7 @@ deliverable. The stages are `identity` and `context` (both
 `merge`, `authenticate`, `verify`, and on the CONNECT side `brand_read`
 (`brand_reads.py`) and `render` or `check` (`build_html.py`). Read them off
 the command you just ran rather than opening the file it wrote. Scripts that
-take under a second are chained with `&&` in one command: a turn between two
-scripts costs more than the scripts.
+take under a second are chained with `&&` in one command.
 
 0. **Channel context first.** `start_run.py` has already done this
    (`channel_context.py --channel <id> > <corpus>/context-full.json`, if you
@@ -189,9 +185,7 @@ scripts costs more than the scripts.
    This is the platform's own record of the channel: name, About text, the
    AI profile, sibling-channel candidates, language, and the creator's own
    links. Read it and take the host terms from it (surname, company, former
-   role, anything the About text or AI profile names). The old order asked
-   for the surname at fetch time and only produced it afterwards; HopeScope
-   ran with `"HopeScope,Hope"` and 22 anchor soft-mismatches.
+   role, anything the About text or AI profile names).
 
    **Identity discovery happens here, not in a lane of its own.** The links
    come from both stores at once: `websites` is the labelled header links the
@@ -205,9 +199,7 @@ scripts costs more than the scripts.
    real answer, not a failure. Say so once and carry on: the identity lane
    then has the channel name, the About text and the AI profile and nothing
    else, and it must be told that, or it will read the AI profile as the whole
-   truth about the person. Alexa Rivera (2026-09-10) had `{}` in Postgres and
-   `[]` in the index; the lane was handed only the AI profile, whose emphasis
-   on recent uploads led it to rule out the correct creator and return nothing.
+   truth about the person and rule out the correct creator for not matching it.
 
 1. **Fetch the cue passages**, and spawn the lanes that need only the ids.
    *(Already run if you passed `--host-terms` to `start_run.py`: check `ran`
@@ -259,7 +251,7 @@ scripts costs more than the scripts.
    "call me …") and whether it is a short relative of the channel name. **The
    variants are the identity lane's search terms**, because the name on the
    channel is often not the name the audience, the press or their own profiles
-   use: "Alexa Rivera" is Lexi, "Patterrz" is Pat, "Airrack" is Eric. A row
+   use. A row
    that is not a variant is somebody else the creator named on camera, useful
    for confirming an identity and never for searching one. These are search
    terms only; a name reaches the ledger solely as a transcript fact with its
@@ -270,8 +262,7 @@ scripts costs more than the scripts.
    the call is made from (`videos`, `fp_density_median`,
    `interview_marker_videos`, `question_density`, `title_hint_videos`,
    `staged_share`, `likely_faceless`). Open `context-full.json` only when the
-   line is genuinely ambiguous, since that Read is a turn of its own and a
-   turn costs more than the stage did.
+   line is genuinely ambiguous.
 
    Call the format (`solo`, `interview`, `multi_host`, `faceless_scripted`)
    with one line of evidence that also names `staged_share` when it is above
@@ -280,7 +271,7 @@ scripts costs more than the scripts.
    line too: above about 0.25 the kept windows are largely other people
    speaking of the host (a crew channel), and the label is `multi_host`
    however solo the thumbnails look ("multi_host: 41% of kept windows name
-   Eric in the third person"). Then write the context block and render every
+   the host in the third person"). Then write the context block and render every
    batch's message in one chain:
 
    ```bash
@@ -298,11 +289,7 @@ scripts costs more than the scripts.
 3. **One fan-out: transcripts and identity in the SAME message.** One
    `<plugin>:gem-classifier` agent per `<corpus>/prompts/batch-NNN.md`, plus
    *(socials ON)* the identity lane, all spawned in a single assistant message
-   with nothing else in flight. This is the run's only extraction fan-out;
-   sourcing the creator is one act, not a transcript stage with a socials
-   stage bolted beside it. The extractors cannot start earlier than this, as
-   their prompt files do not exist until step 2 has rendered them, so this is
-   the first moment all three sources can go out together.
+   with nothing else in flight. This is the run's only extraction fan-out.
 
    The extractor prompt is two lines: read that one file and follow it
    exactly; one Write, then the one-line receipt. Never paste the message in,
@@ -325,16 +312,11 @@ scripts costs more than the scripts.
      is what the profiles are actually under. A link-in-bio aggregator
      (Linktree, hoo.be, Beacons) found this way is the highest-value hit on a
      channel that lists nothing, since it is the creator's own index of every
-     profile they own: read it and take the links from it. Searching "Alexa
-     Rivera Instagram" returns a same-named creator; "Lexi Rivera Instagram"
-     returns `@lexibrookerivera` and a Linktree at `AlexaBrookeRivera`, which
-     is the name on the channel and the nickname in one string.
+     profile they own: read it and take the links from it.
    - **Confirm the identity before reporting a single fact.** The cheapest
      proof is a link back: an aggregator or profile that points at the channel
      under investigation has identified itself, and no further checking is
-     needed. Alexa Rivera's aggregator lists Instagram, TikTok, X, Facebook and
-     Patreon, and its YouTube link is `/c/AlexaRivera`, the channel the run
-     started from. Failing a link back, confirm against the non-variant
+     needed. Failing a link back, confirm against the non-variant
      `name_candidates` and the recurring co-stars in the titles: a profile is
      the right person when the people around it are the people in the videos.
      Say in one line which candidate you accepted and what confirmed it. On a
@@ -347,8 +329,7 @@ scripts costs more than the scripts.
      a company registration number, a home or business address, an email.
      None of these has a sensitivity tier because none of them is a fact for
      the ledger; a lane that finds one leaves it out and does not
-     cross-reference it against other sources (run H pulled a date of birth
-     off a company register that way).
+     cross-reference it against other sources.
    - **Tell it what the platform record is worth.** The About text is often
      YouTube's default placeholder, and the AI profile describes the recent
      catalogue, not the person: both are context to search from, never the
@@ -362,8 +343,8 @@ scripts costs more than the scripts.
      fact.** When it confirms a profile belongs to the creator, it reports the
      bio text with `match_confirmed` so `bio_lane.py batch` can take it; a bio
      from an unmatched profile is another person's self-description.
-   - **It is the one lane with transcript evidence available**, because it now
-     runs beside the extractors rather than ahead of them. When the linked
+   - **It runs beside the extractors, so transcript evidence is available to
+     it.** When the linked
      stores were empty, name the recurring people, places and formats the run
      has already seen in the titles, so the lane has something to disambiguate
      a common name against. A wrong identity is worse than an empty lane: on a
@@ -512,9 +493,7 @@ scripts costs more than the scripts.
    The second line reports the socials half by what it actually did, never
    just on or off: `off, N linked platforms listed unread`, or `on, N websites
    opened, N sources read, N facts`. "On" with zero facts is a result the
-   reader has to see, because the lane can run, read a source, reject the
-   identity and return nothing; a bare "on" reads as though socials
-   corroborated the ledger when it contributed nothing to it.
+   reader has to see: the lane can run, reject the identity and return nothing.
 
 ## Fast run
 
@@ -539,8 +518,7 @@ Run the reuse check first. Then:
      id (`description`, `audience`, `type`, `sponsored_topics`; `tl brands
      find` returns only id and name, and there is no `category` field, `type`
      is the nearest). Treat `sponsored_topics` as a hint to check against the
-     sponsored reads, never as a fact: on Matiks it listed craft beer and
-     vintage car restoration beside mental maths;
+     sponsored reads, never as a fact;
      `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` for
      the newest sponsored reads (those reads ARE the sponsorship patterns:
      what creators already say about the product on camera and the moments

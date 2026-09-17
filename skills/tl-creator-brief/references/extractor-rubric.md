@@ -61,17 +61,17 @@ Applying them to a window batch:
 - `in_sponsor_read` proves host voice. What it disqualifies is narrower than
   the whole window — see the ad-read rule below.
 - **`host_anchor` is the host naming themselves** in the window ("hey guys
-  it's Eric", "my name is Alexa"): host voice, settled. **`second_voice_hint`
+  it's Sam", "my name is Marta"): host voice, settled. **`second_voice_hint`
   is the opposite signal**: the host is named in the third person or spoken
-  to ("with Eric", "Eric asked me to move", "Eric, one sec"), quoted in the
+  to ("with Sam", "Sam asked me to move", "Sam, one sec"), quoted in the
   hint. Whoever says that line is not the host, and the first-person cue
   beside it is theirs, not the host's. Treat the hint the way you treat a
   `format_hint`: the window gets the shared-voice rules even on a channel
   labelled solo. `speaker_guess` is `guest`, `cohost` or `unclear` unless the
   text itself shows the host speaking of themselves in the third person (a
   self-introduction, a title card read aloud), and `speaker_evidence` names
-  the hint. A crew member's "I left my girlfriend and my family to make
-  videos with Eric" is the crew member's fact, never Eric's.
+  the hint. A crew member's "I moved across the country to make videos
+  with Sam" is the crew member's fact, never Sam's.
 - **`format_hint: "staged"`** marks a prank, challenge, 24-hour stunt, fake or
   pretend scenario, dating show or skit (from the title). One voice still
   holds the transcript, so the solo attribution rule stands. What changes is
@@ -144,7 +144,7 @@ still be true next year.
 **The claim must be fully supported by the quoted span alone.** If the fact
 needs more of the window than the span carries, widen the span (up to 45
 words) or narrow the claim. Never state in the claim what the span does not
-say: "was 27 and broke, now runs a $85M company" over a span that only says
+say: "was 27 and broke, now runs a $4M company" over a span that only says
 "I was 27 years old" is a failed verdict. Every number, name and title in the
 claim must appear in the span.
 
@@ -164,7 +164,7 @@ The message's OUTPUT section says whether you Write it to a named file
     "life_domain": "family",
     "speaker_guess": "host",
     "speaker_evidence": "solo channel, first person, no other voice",
-    "entity_corrections": {"maddox": "Matiks"},
+    "entity_corrections": {"north wind": "Northwind"},
     "notable": "father ran a bakery",
     "claim": "father ran a bakery in Ohio",
     "quote_span": {"first": "my dad ran a", "last": "town in ohio"},

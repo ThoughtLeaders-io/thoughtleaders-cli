@@ -242,8 +242,7 @@ def main() -> None:
     rejected_file = None
     if a.drop_unverified and failed:
         # `selected` was decided in expand, before any quote was checked, so a
-        # reject that was selected leaves the page short (PleasantKenobi
-        # 2026-09-14: 40 picked, 12 rejected, 28 shipped). The same ranking
+        # reject that was selected leaves the page short. The same ranking
         # expand used fills the gap from what did verify.
         keep = [f for f in verified if f["verify"]["match"] in ("exact", "n/a")]
         dropped = [f for f in verified if f["verify"]["match"] not in ("exact", "n/a")]

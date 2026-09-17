@@ -6,9 +6,9 @@ creator ledger. Imported by the sibling scripts, never run.
 object per video, ``{"id", "title", "publication_date", "views", "duration",
 "content_type", "cues": [[start_seconds, text], ...]}``; ``cues: []`` means
 no transcript stored. Written gzipped (captions compress ~8x), read either
-way, so an older plain corpus still opens. ``open_corpus`` /
-``open_corpus_write`` are that convention's single home; ``cues`` parses the
-timed-text caption XML into ``[(start, text)]``.
+way, so an older plain corpus still opens. ``open_corpus`` is that
+convention's single home; ``cues`` parses the timed-text caption XML into
+``[(start, text)]``.
 
 **Ledger** (``<channel_id>-facts.jsonl``): one JSONL file whose FIRST line
 may be the meta record (an object whose ``schema`` starts with
@@ -21,10 +21,8 @@ following line is one fact. Nothing iterates a ledger raw: ``read_ledger`` /
 """
 from __future__ import annotations
 
-import contextlib
 import gzip
 import html
-import io
 import json
 import os
 import pathlib
@@ -38,13 +36,6 @@ CUE = re.compile(r'<text start="([\d.]+)"[^>]*>(.*?)</text>', re.S)
 TAG = re.compile(r"<[^>]+>")
 
 GZIP_MAGIC = b"\x1f\x8b"
-# Compression is single-threaded and these files run to hundreds of megabytes,
-# so the level is a real time/space trade. COMPRESS_LEVEL is the fast end for
-# bulk window records; CORPUS_LEVEL is the slower, smaller end used for the
-# durable corpus, whose write sits behind a network sweep that dwarfs the
-# difference.
-COMPRESS_LEVEL = 1
-CORPUS_LEVEL = 6
 
 
 def resolve_corpus(path: str | pathlib.Path) -> pathlib.Path:
@@ -75,26 +66,6 @@ def open_corpus(path: str | pathlib.Path):
     if gzipped:
         return gzip.open(p, "rt", encoding="utf-8")
     return open(p, encoding="utf-8")
-
-
-@contextlib.contextmanager
-def open_corpus_write(path: str | pathlib.Path, *, append: bool = False,
-                      level: int = COMPRESS_LEVEL):
-    """Write text into a gzip file, deterministically.
-
-    ``mtime=0``, an empty stored filename and a fixed compression level keep
-    the bytes a pure function of the content — the same corpus compresses to
-    the same file on every run. ``append=True`` starts a NEW gzip member at
-    the end of an existing file; concatenated members are a valid gzip stream.
-    """
-    raw = open(path, "ab" if append else "wb")
-    try:
-        gz = gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0,
-                           compresslevel=level)
-        with io.TextIOWrapper(gz, encoding="utf-8") as text:
-            yield text
-    finally:
-        raw.close()
 
 
 def _unescape(text: str) -> str:

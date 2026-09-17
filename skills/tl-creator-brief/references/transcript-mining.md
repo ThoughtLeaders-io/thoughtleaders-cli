@@ -7,16 +7,7 @@ script, extraction runs on sonnet agents that each see one batch of windows
 and nothing else, and the expensive context is spent only on judgment no
 script can encode.
 
-Measured end to end on five channels (Sydney Watson 20107, Alex Hormozi
-253904 = 4,205 videos, Emma Chamberlain 3268, Professor G 1069544, Ali Abdaal
-31792): fetch 7–21 s on the first three and 36–54 s on the two channels with
-700–1,200 cue-matched videos — the clock follows the number of matched videos
-whose passages come back, not the upload count; 310 gems / 500 windows, 405 /
-497, 432 / 500; every quote exact by construction. The five-turn extractor
-of those runs took 2.3–8 minutes per agent and 5.6–6.3 minutes per 20-agent
-round plus re-spawns (10.7 minutes of extraction on Sydney Watson); the
-single-message extractor below replaces it (262 s per 500-window round,
-no re-spawns — see Speed).
+
 
 ## Layer 1+2: fetch the cue passages, one script
 
@@ -30,8 +21,7 @@ Retrieval and selection are the same query. A boolean `should` of
 index's `highlight` returns the passages around each hit with the timed-text
 `start` attributes intact — so a 5,000-video channel costs a few dozen small
 queries instead of a full transcript download, and every passage is born with
-its `&t=` link. There is no local full-transcript scan any more; nothing is
-downloaded that the model layer will not read.
+its `&t=` link. Nothing is downloaded that the model layer will not read.
 
 Only cue phrases go into that query. Every phrase holding an apostrophe is
 sent twice, as written and as the index spells a double-encoded caption
@@ -54,13 +44,12 @@ the markup and keeps each cue's `start` in the corpus; nothing the extractor
 reads carries a tag.
 
 **Rank narrow, read wide.** The highlighter cuts its fragment around the cue
-phrase, and a disclosure usually ends at its cue: "film school wasn't going
-to make me who I wanted to be, so I left my girlfriend and my family" fires
+phrase, and a disclosure usually ends at its cue: "the shop wasn't going to
+pay for itself, so I sold my car and moved back in with my parents" fires
 on the last clause, while the biography sits in the sentences before it,
-where no phrase fires and no fragment is ever cut. At the earlier 450 characters that
-context is not demoted, it is absent from the whole candidate pool (Airrack,
-2026-09-10: three of the previous top-20 gems had no passage left anywhere).
-So the cap is taken on the narrow fragment, which keeps the ranking sharp,
+where no phrase fires and no fragment is ever cut. Without the re-read that
+context is not demoted, it is absent from the whole candidate pool. So the cap
+is taken on the narrow fragment, which keeps the ranking sharp,
 and then every kept window is re-read from its stored transcript, from
 `--read-before` seconds ahead of its first cue to `--read-after` seconds past
 its last (20 / 10 by default), and that wider text is what the extractor
@@ -70,23 +59,21 @@ context verifies to its own second. A window says `context_added` and
 `fragment_only` when the lookup failed and the fragments stayed as they were).
 
 **Host terms are read, not queried.** A host name in a window is two
-different signals, and the old "+2, host anchor" treated them as one. "Hey
-guys it's Eric" is the host naming themselves: `host_anchor`, the strongest
-in-text proof of voice, worth one ordinary cue in the rank. "With Eric",
-"Eric asked me", "Eric, one sec" is someone else speaking of or to the host,
+different signals. "Hey guys it's Sam" is the host naming themselves:
+`host_anchor`, the strongest
+in-text proof of voice, worth one ordinary cue in the rank.  "With Sam",
+"Sam asked me", "Sam, one sec" is someone else speaking of or to the host,
 so the first-person cue beside it is probably theirs: worth nothing in the
 rank, and passed to the extractor as `second_voice_hint`, quoting the
-naming. Putting the names in the query cut fragments around a bare name that
-carried no cue and no disclosure (Airrack 2026-09-10: 118 of 300 kept
-windows stood on the name alone), so they no longer join it.
+naming. The names never join the query: a fragment cut around a bare name
+carries no cue and no disclosure.
 
-**The cap is a ceiling, not a target.** Alexa Rivera (35765, 2026-09-14):
-of 1,396 candidate passages, 122 scored 2.5 or better, meaning more than one
-personal signal in the window. Then a cliff: 303 tied at exactly one
-weight-2 cue ("my mom" and nothing else), and 970 below that. Filling the
-default 300 spent 179 seats inside that tie, which the rank can only break
-by publish year, and from seat 151 on every kept window was single-cue. So
-the selection takes every window at or above `--min-score` (8.0), fills
+**The cap is a ceiling, not a target.** Below the few windows that carry
+more than one personal signal, a channel's candidate pool is usually a long
+tie at exactly one weight-2 cue ("my mom" and nothing else), which the rank
+can only break by publish year; filling a fixed cap spends most of its seats
+inside that tie. So the selection takes every window at or above `--min-score`
+(8.0), fills
 down to `--min-windows` (150) when a thin channel leaves that short, and
 stops. `--max-windows` still bounds a channel with more strong windows than
 one round can extract. The summary's `selection.stop_reason` says which
@@ -97,8 +84,7 @@ still fills to that number.
 
 **One passage, one seat.** A creator re-cuts a segment into a retitled
 upload and the highlighter returns it once per video, at full score each
-time: Alexa Rivera's four 6.0 windows were two pairs, and her top 14 held
-about five distinct anecdotes. Two windows from different videos are the
+time. Two windows from different videos are the
 same passage when more than half of the shorter one's eight-word runs appear
 in the other (never fewer than three, so a shared greeting alone does not
 match). The first-kept copy stays and its `recurrence_videos` counts the
@@ -113,16 +99,16 @@ minutes later is two passages.
 | flag | default | what it does |
 |---|---|---|
 | `--channel` | required | internal TL channel id, from `tl channels find` |
-| `--host-terms` | none | comma-separated names/companies, read off the window text (never queried): a self-naming ("it's Eric") is `host_anchor` and scores like one cue; a third-person naming ("with Eric") scores nothing and sets `second_voice_hint` |
+| `--host-terms` | none | comma-separated names/companies, read off the window text (never queried): a self-naming ("it's Sam") is `host_anchor` and scores like one cue; a third-person naming ("with Sam") scores nothing and sets `second_voice_hint` |
 | `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
 | `--anchor-before` / `--anchor-after` | 30 / 15 | seconds the window's highest-weight cue phrase additionally reaches back and forward in that re-read, so the sentence a disclosure sits in survives when the highlighter cut the fragment at the cue |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
 | `--max-windows` | 300 | the ceiling on what reaches the model layer in one round; the selection usually stops earlier, at `--min-score` |
-| `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the tie beneath it; on the density-first rank (0.5 per first-person hit in the fragment, plus the cue weights, since 2026-09-16) 8.0 is sixteen first-person hits alone, or a top-weight cue with ten |
+| `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the tie beneath it; on the density-first rank (0.5 per first-person hit in the fragment, plus the cue weights) 8.0 is sixteen first-person hits alone, or a top-weight cue with ten |
 | `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
-| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue; raised from 450 on 2026-09-16 so voice and the sentences around a cue survive the ranking cut) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
+| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
 | `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |
@@ -148,9 +134,8 @@ spans the back catalogue rather than the last twelve months.
 
 **Dubbed tracks.** On an English-language channel (the channel record's
 `language`), a non-English `transcript_language` is a YouTube auto-dubbed
-audio track, not the creator's words: HopeScope carried 36 Arabic-track
-videos among 506, 96 of their windows reached the extractors, and one became
-a ledger fact with an Arabic "quote" she never spoke. The fetch excludes
+audio track, not the creator's words, and a quote cut from one is a quote the
+creator never spoke. The fetch excludes
 those tracks (no windows, no sampling) and reports them as `dubbed_excluded`
 in the summary and the FUNNEL line; `verify_quotes.py --channel-language`
 is the backstop for a corpus fetched before this rule, reporting `dubbed`,
@@ -201,12 +186,10 @@ of repeating. Do not raise `--max-windows` past what one round can extract.
 ## Layer 3: extraction — one fan-out, one message per agent
 
 Every batch file is judged by exactly one extractor: the `<plugin>:gem-classifier`
-agent, `<plugin>` being the installed plugin's namespace (`tl-cli` in
-production, `tl-cli-pr91` on a side-by-side test install; a literal `tl-cli:`
-on a test install resolves to nothing and falls back silently). The file name
-is historical; the role is a **gem extractor**,
-`model: sonnet` — haiku truncated its output at this size in testing). One
-pass decides whether the window is self-disclosure AND writes what it says:
+agent, `<plugin>` being the installed plugin's namespace (`tl-cli`). The
+agent is a **gem extractor**, `model: sonnet` (a smaller model truncated its
+output at this batch size). One pass decides whether the window is self-
+disclosure AND writes what it says:
 the third-person claim, the span of the window that proves it, the life
 domain, and the speaker guess with the evidence that decided it. It does
 not tier sensitivity: `assemble_extracts.py` attaches a keyword hint
@@ -278,18 +261,14 @@ verification scripts, no Bash, no other Reads, no second Write.
   with an explicit `model: sonnet` override and the same two-line prompt —
   the rendered message already carries the whole rubric.
   A general-purpose agent on the inherited (expensive) model is the failure
-  mode this list exists to prevent — it is how one past run reached 30M
-  tokens.
+  mode this list exists to prevent.
 
 **Concurrency.** The host runs at most `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`
 agents at once, 20 when unset, and 20 is the standard: leave the variable
 unset. On a CONNECT build the three brand lanes are spawned with the fetch
 and are still running during this fan-out, which is what `--reserve 3` is
-for: they need only the two ids, and starting them here instead of beside the
-merge shard took the brand read off the CONNECT critical path (both
-2026-09-09 runs spent 6 to 8 of their 16 minutes waiting on lanes spawned
-after extraction). Raising it to 40 was tested and slowed the run down (a second wave
-queued behind the cap instead of one wave finishing together).
+for: they need only the two ids. Do not raise the cap: a second wave queues
+behind it instead of one wave finishing together.
 `fetch_cues.py` reads the cap and sizes the batches to fill one wave
 (Layer 1+2).
 
@@ -347,8 +326,7 @@ judgment between them: run them as ONE `&&`-chained shell command as soon
 as the fan-out's receipts are in, with each stage's JSON summary redirected
 to a file and only the FUNNEL lines on stderr reaching you; exit 3 from
 assemble stops the chain by design. Spawn the merge agent in the same
-assistant message that reads that command's result — every notify-then-act
-gap between stages costs 20–60 s.
+assistant message that reads that command's result.
 
 ## Layer 4: cluster, then the sharded merge pass judges
 
@@ -361,8 +339,9 @@ small Claude pass over the clustered candidates.
 python3 <skill>/scripts/cluster_gems.py --in gems.jsonl
 ```
 
-A long back catalogue answers the same question hundreds of times: one
-channel's 172 gems held "BioShock is my favorite game" 29 times over. The script writes `gems-clustered.jsonl` beside the input — one line per claim, in
+A long back catalogue answers the same question hundreds of times, and a
+favourite-game line can recur across dozens of uploads. The script writes
+`gems-clustered.jsonl` beside the input, one line per claim, in
 the same shape as a gem line, so there is exactly one format downstream — and
 `gems-clustered.slim.jsonl`, the same lines without the window text (verdict,
 video, start, date, members), which is what the merge pass reads: a
@@ -412,10 +391,7 @@ agents (a fold may cross a domain, but an agent can only fold what it can
 see, so a shard holding whole domains keeps the findable folds inside one
 agent's read), spawned in ONE message like the extraction fan-out. `prepare`
 sizes N itself as `clusters / 40`, floor 1, ceiling 6, so the cluster and
-prepare scripts chain in one command (the old `clusters / 60` had to be
-computed by hand between them, and gave one 4-minute agent for 86 and 98
-clusters); `--shards N` overrides it. One agent on 226 clusters measured
-475 s and is the single slowest pass in the pipeline after extraction.
+prepare scripts chain in one command; `--shards N` overrides it.
 
 **Authenticate before the shard reads.** With `--channel`, `prepare` runs
 `scripts/authenticate.py` over the shard files it just wrote. Two kinds of
@@ -428,8 +404,7 @@ husband and a boyfriend), which are also marked `conflicts_with` on both
 lines. The result lands on the line as `probe`: how many uploads say it, the
 newest and oldest dates, how many of those uploads are staged, and a sample
 of titles. `probe.json` beside the shard files holds the same, keyed by
-cluster id, for `expand`. Measured: 3 queries in 3 s on HopeScope, 8 in 6 s
-on Alexa Rivera. The shard decides with that evidence in front of it; the
+cluster id, for `expand`. The shard decides with that evidence in front of it; the
 rules it applies are in `agents/merge-shard.md` and `evidence-rules.md`:
 found in a non-staged upload is the person's, found only in staged uploads
 is kept `unconfirmed` and marked `staged_only`, a conflict goes to the newest
@@ -437,9 +412,8 @@ dated evidence (the identity lane's `seen_date` counts), and **nothing is
 dropped for being uncertain**.
 
 **The biggest domain sets the floor.** Shards hold whole domains, so a channel
-whose clusters pile into one domain cannot split below that domain's size. A
-226-cluster solo tech channel packed 105 / 40 / 40 / 41 at `--shards 4`,
-because `work` alone held 105 of the 226; raising N to 6 changed nothing.
+whose clusters pile into one domain cannot split below that domain's size:
+when `work` alone holds half the clusters, raising N changes nothing.
 Read the per-file line counts from `prepare`'s JSON before assuming more
 shards will help, and expect the saving to be set by the largest shard rather
 than by the average.
@@ -534,8 +508,8 @@ kept cluster, or an existing fact when refreshing), fold cycles, a
 supersession that resolves to the fact itself or a cycle, **a supersession
 that points against the dated evidence** (the superseded cluster's newest
 upload in `probe.json`, or an identity-lane record corroborating it, is
-newer than the superseder's; HopeScope's Utah-over-Idaho decision is the
-case, refused with both dates in the message), enums, identity records, and
+newer than the superseder's; refused with both dates in the message), enums,
+identity records, and
 a narrowed claim that introduces a number token its quote and cluster claim
 lack, and exits **3** with the offending ids and reasons. The
 orchestrator re-asks the agent for exactly those ids ONCE and passes the
@@ -637,9 +611,8 @@ python3 <skill>/scripts/fetch_cues.py --channel <id> \
 Passages already judged are skipped, so the round costs one fetch (seconds)
 plus one extraction fan-out over genuinely new material. (A *refresh* round —
 new uploads, not new terms — adds `--since <latest_video_date>` so the fetch
-is bounded to what the ledger has not seen; measured live, an unbounded
-`--exclude` round on a 283-video channel re-pulled 1,765 unjudged passages
-and would have cost another full fan-out.) Confirmed entities
+is bounded to what the ledger has not seen; an unbounded `--exclude` round
+re-pulls every unjudged passage in the catalogue.) Confirmed entities
 also feed CONNECT's connection probes and improve attribution (a fact tied to a
 known family name anchors the host).
 
@@ -723,8 +696,8 @@ its distinct-video count, `said_outright`, and `channel_name_variant`: true
 when the token is a short relative of the channel name, which is what separates
 the host from a guest introducing themselves in a challenge video. The variants
 are the identity lane's search terms, since the channel name is frequently not
-the name the profiles are under (Alexa Rivera is Lexi, Patterrz is Pat, Airrack
-is Eric). They are search terms only; a name enters the ledger solely as a
+the name the profiles are under. They are search terms only; a name enters the
+ledger solely as a
 transcript fact with its own quote.
 
 After the fetch, format is measured rather than guessed: first-person
@@ -739,11 +712,11 @@ read of a small sample (3–5 videos' worth of windows) plus these stats calls
 the label — solo / interview / multi-host / faceless-scripted — **with
 evidence**. One number from the fetch summary joins the call:
 `third_person_host_share`, the share of kept windows that name the host in
-the third person ("with Eric", "Eric asked me"). A channel with one face on
+the third person ("with Sam", "Sam asked me"). A channel with one face on
 the thumbnail and a crew behind the camera reads as solo on every other stat
 while other people hold the microphone for much of the transcript; above
 about 0.25 the label is `multi_host` and the evidence line says so
-("multi_host: 41% of kept windows name Eric in the third person"). The label
+("multi_host: 41% of kept windows name the host in the third person"). The label
 exists for two reasons only:
 
 1. It is the attribution context handed to the classifier: interview means
@@ -757,27 +730,13 @@ profile header.
 
 ## Speed
 
-Wall clock is the extraction fan-out plus the merge pass. Measured: the fetch
-is **7–21 s on small channels and 36–54 s on channels with 700–1,200
-cue-matched videos**, the local scripts (assemble, cluster, expand, verify)
-are seconds, and the merge pass is one agent returning a few kilobytes of
-decisions (260 s on a 273-cluster channel). The old five-turn extractor —
-four Reads and a Write, each turn re-processing a growing context, ~115K
-input tokens per agent — ran 2.3–8 minutes per agent and 10.7 minutes per
-round with its re-spawns on Sydney Watson. The single-message extractor
-(Layer 3) is one Read, one Write and a receipt: measured on the same channel
-(2026-09-02, 20 agents × 25 windows, nothing else in flight) **262 s of wall
-clock** with agents at 119–218 s each, 497/500 windows assembled, and the
-coverage threshold (Layer 3b) let the run continue past the 3 unjudged
-windows with no re-spawn round. The whole fresh PROFILE run was 706 s
-(fetch 27 s, context brief 19 s, extraction 262 s, assemble→cluster→prepare
-1 s, merge agent 280 s, expand→verify→write 16 s), 206 facts, every quote
-exact — against 1,201 s before the change. Claude's share of a profile build is the fan-out
-plus a handful of turns: the identity lane, the format call, one merge pass —
-**one extractor per batch, one merge agent per shard, one optional socials lane**, not
-one per window and not one per fact.
+Wall clock is the extraction fan-out plus the merge pass; the fetch and the
+local scripts (assemble, cluster, expand, verify) are seconds. The model's
+share of a profile build is the fan-out plus a handful of turns: the identity
+lane, the format call, one merge pass. **One extractor per batch, one merge
+agent per shard, one optional socials lane**, not one per window and not one
+per fact.
 
 Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
-is always answerable with a stage name. Rounds are the knob that matters: one
-round is 500 windows spread over every agent the host runs at once, and going
-deeper means another `--exclude` round rather than a bigger cap.
+is always answerable with a stage name. Rounds are the knob that matters:
+going deeper means another `--exclude` round rather than a bigger cap.

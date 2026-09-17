@@ -4,8 +4,9 @@ materialises the ledger.
 
 The old merge pass asked one agent to compose the whole ledger — ~220 full fact
 records, ~118 KB in a single write — of which roughly three quarters was
-verbatim copying of fields the clustered file already held. It cost 21 minutes
-of a 33-minute run. Everything mechanical in that output is derivable here:
+verbatim copying of fields the clustered file already held, and that copying
+dominated the run's wall clock. Everything mechanical in that output is
+derivable here:
 fact ids, urls, recurrence over distinct videos, the confidence default, the
 sensitivity boolean, the `selected` pick. What is left for a model is the
 judgment a script cannot make — attribution, folds, narrowing an over-reaching
@@ -64,7 +65,7 @@ The decisions file (what the agent returns) is ONE object:
      "selected": ["c015", "f001"],
      "facts": [{"ref": "s1", "provenance": "social", "claim": "runs a pottery studio",
                 "domain": "work", "sensitivity": "none",
-                "source_url": "https://instagram.com/…", "seen_date": "2026-09-02",
+                "source_url": "https://instagram.com/…", "seen_date": "2025-03-02",
                 "corroborates": "c012"}]}
 
 The optional top-level ``facts`` list is the identity lane's way into the
@@ -173,17 +174,17 @@ SINGLE_VOICE = {"solo", "faceless_scripted"}
 _HINT_NON_SOLO = re.compile(r"interview|collab|reaction", re.I)
 
 # Facts the connections page leads with. The agent proposes, the script owns
-# the final count (revision 3 of the plan): never a contract violation. 40
-# since the 2026-09-10 review: the ledger keeps every verified fact whatever
-# this says, and the page's "who they are" run reads fine at 40; 20 was a
-# page-length guess that left real gems off the page.
+# the final count: never a contract violation. The ledger keeps every
+# verified fact whatever this says, and the page's "who they are" run reads
+# fine at 40; a lower cap was a page-length guess that left real gems off the
+# page.
 SELECTED_TARGET = 40
 # Below this many confirmed picks the fill may add `unconfirmed` facts so a
 # thin ledger still introduces the person; above it, unconfirmed never pads.
 SELECTED_MIN = 20
 # Shards for the merge pass when `prepare` is not told: clusters / 40, floor
-# 1, ceiling 6, so 86 and 98 clusters become two agents rather than one 4-minute
-# one (the merge shard was the longest single agent in both 2026-09-09 runs).
+# 1, ceiling 6, so around 90 clusters become two agents rather than one slow
+# one (the merge shard is otherwise the longest single agent in a run).
 SHARD_DIVISOR = 40
 SHARD_MAX = 6
 
@@ -512,8 +513,8 @@ def cmd_prepare(a: argparse.Namespace) -> int:
         rows.append(row)
 
     # --shards auto (the default): the count follows the clusters, so the
-    # cluster -> prepare chain runs as one command. Both 2026-09-09 runs had to
-    # break the chain by hand to read the cluster count first.
+    # cluster -> prepare chain runs as one command, with no need to break the
+    # chain by hand to read the cluster count first.
     shards = a.shards if a.shards and a.shards > 0 else max(
         1, min(SHARD_MAX, -(-len(rows) // SHARD_DIVISOR)))
     files: list[str] = []
@@ -534,7 +535,7 @@ def cmd_prepare(a: argparse.Namespace) -> int:
     # contradicting clusters get one channel-scoped query each, and the
     # evidence lands on the merge-input line. The shard decides with it.
     probe_summary: dict | None = None
-    if a.channel is not None and not a.no_probe:
+    if a.channel is not None:
         import authenticate  # sibling; imported here so prepare without --channel needs no tl CLI
         probe_summary = authenticate.run(
             a.channel, [pathlib.Path(f) for f in files], pathlib.Path(a.clustered),
@@ -594,9 +595,9 @@ def load_decisions(paths: list[str]) -> tuple[dict[str, dict], list[str],
     all); a later SHARD that reuses the ref (its decisions are disjoint, so it
     is judging other clusters and numbered its own slice from ``s1`` again)
     has its ref namespaced ``s<shard>-<ref>`` and appended, and its own
-    ``selected`` picks follow the rename. Run H and run I (2026-09-14) both
-    lost lane facts to that collision with no violation raised, since every
-    file's ``facts`` was non-empty. A record with no ``ref`` cannot be keyed,
+    ``selected`` picks follow the rename. Without the rename, lane facts are
+    lost to that collision with no violation raised, since every file's
+    ``facts`` is non-empty. A record with no ``ref`` cannot be keyed,
     so it is appended. An empty or omitted ``facts`` leaves the union standing,
     which is what a shard whose domains hold no lane record returns. A file
     that changes nothing at all is still a violation: a patch that no-ops is
@@ -701,8 +702,8 @@ def alias_enums(decisions: dict[str, dict], identity: list[dict]) -> list[str]:
     has not stopped either. The socials lane writes its own ``facts`` records
     rather than judging clusters, so it invents domain labels ("hobbies",
     "gear", "history"). The merge agent carries the extractor's confidence
-    vocabulary downstream ("likely"), which cost a measured run a 123 s
-    re-ask. Both are near-misses with exactly one sensible target, so they are
+    vocabulary downstream ("likely"), which otherwise costs a re-ask. Both
+    are near-misses with exactly one sensible target, so they are
     normalised here rather than argued with in the prompt."""
     notes: list[str] = []
     # Only `confidence` is aliased on the decision path, and deliberately not
@@ -1148,7 +1149,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     state_path = pathlib.Path(a.state) if a.state else out_path.parent / "merge-state.json"
     prior_state = load_state(state_path if (a.existing or a.state) else None)
-    probe_path = pathlib.Path(a.probe) if a.probe else out_path.parent / "probe.json"
+    probe_path = out_path.parent / "probe.json"
     probes = load_probe(probe_path)
 
     records = plan(clusters, a.format, prior_state, existing_ids)
@@ -1245,8 +1246,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
                     f"supersession, or keep both with neither superseding")
     # The identity lane is dated evidence too: a lane record seen this year
     # that corroborates a cluster another cluster just superseded says the
-    # superseded fact is the current one (HopeScope 2026-09-09: Utah 2020
-    # superseded Idaho 2020 while the creator's own bio said Idaho).
+    # superseded fact is the current one (a home claim must not be superseded
+    # by a same-year rival while the creator's own bio still says the former).
     for rec in identity:
         corr = rec.get("corroborates")
         if corr is None:
@@ -1427,9 +1428,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
         corroborated.append([fact_id, target])
 
     # A lane record naming the same person as a withheld-tier transcript fact
-    # inherits that tier. HopeScope 2026-09-09: the sister was `children` on
-    # both transcript facts (co-host, 15 years old) and `none` on the bio-page
-    # record that named her; the two records are one person.
+    # inherits that tier: a minor relative can be `children` on the transcript
+    # facts and `none` on the bio-page record that names them, and the two
+    # records are one person.
     tier_rank = {"none": 0, "lifestyle": 1, "clinical": 2, "children": 3, "location": 3}
     withheld_names: dict[str, str] = {}
     for f in facts:
@@ -1507,11 +1508,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
     facts.sort(key=lambda f: str(f.get("fact_id")))
 
     # ---- selected: the agent proposes, the script owns the count ---------- #
-    # Quality first (2026-09-10 review): the agent's picks are ranked before
-    # they are taken, an `unconfirmed` pick is refused while confirmed facts
-    # would otherwise be left off the page, and every refusal carries its
-    # reason. Alexa Rivera 2026-09-09: the shard's picks put a garbled-caption
-    # name and "says something predates her birth" on the page ahead of
+    # Quality first: the agent's picks are ranked before they are taken, an
+    # `unconfirmed` pick is refused while confirmed facts would otherwise be
+    # left off the page, and every refusal carries its reason. Otherwise a
+    # shard's picks can put a garbled-caption name on the page ahead of
     # confirmed, recurring facts.
     active = [f for f in facts if not f.get("superseded_by")]
     eligible = {str(f["fact_id"]) for f in active if selectable(f)}
@@ -1676,8 +1676,6 @@ def main() -> int:
     p.add_argument("--channel", type=int, default=None,
                    help="channel id; when given, authenticate.py probes staged-premise "
                         "and contradicting clusters and writes probe.json")
-    p.add_argument("--no-probe", action="store_true",
-                   help="skip the authentication probe even with --channel")
     p.add_argument("--max-queries", type=int, default=30,
                    help="probe budget, one ES query per flagged cluster")
     p.add_argument("--out", required=True, help="directory for merge-input*.jsonl")
@@ -1696,9 +1694,6 @@ def main() -> int:
     e.add_argument("--fallback-original", action="store_true",
                    help="use the cluster's own claim for claims that fail the "
                         "tripwire instead of exiting 3")
-    e.add_argument("--probe", default=None,
-                   help="probe.json from prepare (default: beside --out); the "
-                        "dated evidence behind the supersession check")
     e.set_defaults(fn=cmd_expand)
 
     a = ap.parse_args()

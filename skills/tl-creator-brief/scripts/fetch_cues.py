@@ -81,15 +81,15 @@ NON_EN_WINDOWS_PER_VIDEO = 3
 NON_EN_WINDOW_WORDS = 80
 WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
 
-# A host term in a window is two different signals. "hey guys it's Eric" or
-# "my name is Eric" is the host naming THEMSELVES: the strongest in-text proof
+# A host term in a window is two different signals. "hey guys it's Marta" or
+# "my name is Marta" is the host naming THEMSELVES: the strongest in-text proof
 # of voice there is, and the only thing ``host_anchor`` means from here on.
-# "with Eric", "Eric asked me", "Eric, one sec" is someone ELSE speaking of or
-# to the host, so a first-person cue beside it is probably not the host's.
-# Airrack (2026-09-10): the top-ranked window was a crew member's "I left my
-# girlfriend and my family to go make YouTube videos with Eric", promoted by
-# the +2 the name used to earn and then handed to Eric by the solo rule; 118
-# of the 300 kept windows had no cue at all and stood on the name alone. So
+# "with Marta", "Marta asked me", "Marta, one sec" is someone ELSE speaking of
+# or to the host, so a first-person cue beside it is probably not the host's.
+# On a crew channel the top-ranked window can be a crew member's "I moved
+# across the country to make videos with Marta", promoted by a name bonus and
+# then handed to the host by the solo rule, with many kept windows standing on
+# the name alone with no cue at all. So
 # the host terms no longer join the query, a third-person naming earns
 # nothing and is passed to the extractor as ``second_voice_hint``, and only
 # a self-naming scores, at the weight of one ordinary cue.
@@ -130,19 +130,17 @@ def host_naming(text: str, host_lc: set[str]) -> tuple[list[str], list[str], str
 # never join the phrase query. At minimum_should_match 1 they match every
 # transcript, and in the highlighter a passage with eight pronouns outscored a
 # passage with one real cue, so pronoun-dense banter took the fragment slots
-# (Airrack 2025: 7 of 30 slots carried a cue with them in, 19 of 19 without).
+# (with them in, most fragment slots carried no cue; without them, all did).
 # "me" (tell me, let me, look at me), "we" and "our" (group action narration)
 # are out for firing on other people's lines and on stunts; "i am" and "i was"
 # are in for the uncontracted and past-tense self-narration the contractions miss.
 GENERIC_TERMS = ["i", "my", "myself", "i'm", "i am", "i've", "i'd", "i'll", "i was"]
-# First-person density is the rank's FIRST term, on both passes. On the
-# 2026-09-15 fit over 6,288 labeled windows from ten channels, density carried
-# a coefficient of 2.7 while no cue phrase passed 0.7, and ranking by density
-# alone was monotone in gem yield where the cue sum was not (quintiles 0.69 /
-# 0.60 / 0.51 / 0.34 / 0.15 against 0.58 / 0.48 / 0.56 / 0.47 / 0.20; gems in
-# each channel's top 150: 760 against 704). The cue term on top of it neither
-# helped nor hurt, so it stays as the second term: a strong cue still lifts
-# a quiet window, and the phrase list stays the retrieval net.
+# First-person density is the rank's FIRST term, on both passes. In a fit over
+# labeled windows from several channels, density carried by far the largest
+# coefficient of any term, and ranking by density alone was monotone in gem
+# yield where the cue sum was not. The cue term on top of it neither helped
+# nor hurt, so it stays as the second term: a strong cue still lifts a quiet
+# window, and the phrase list stays the retrieval net.
 DENSITY_WEIGHT = 0.5            # rank points per first-person hit, both passes
 GENERIC_DENSITY_CAP = 20        # hits counted at most; a widened read runs ~120 words
 GENERIC_BOOST = DENSITY_WEIGHT  # the fallback pass's name for the same term
@@ -158,8 +156,8 @@ def first_person_density(text: str) -> int:
 # The index runs html_strip once. A double-encoded caption apostrophe
 # (``I&amp;#39;m``) comes out as ``&#39;`` and the standard tokenizer breaks it
 # into ``i`` ``39`` ``m``; a single-encoded one (``I&apos;m``) decodes to
-# ``i'm``. Both spellings live in the same channel (Airrack 2025: 34 videos
-# index ``i'm``, 248 index ``i 39 m``), so every apostrophe phrase is queried
+# ``i'm``. Both spellings live in the same channel (some videos index ``i'm``,
+# most index ``i 39 m``), so every apostrophe phrase is queried
 # both ways. The highlighter's ``<em>`` still reads ``I&amp;#39;m``, which
 # ``clean`` unescapes back to the phrase as written in the file.
 APOSTROPHE_TOKEN = " 39 "
@@ -174,22 +172,22 @@ PHRASE_CAP_SHARE = 0.08         # no single phrase supplies more than this share
 PHRASE_WEIGHT_DEFAULT = 1.0
 WEAK_WEIGHT = 0.5
 RANK_CAP = 6.0                  # two top-weight cues saturate a window's cue score
-# The cap is a ceiling, not a target. Alexa Rivera (35765, 2026-09-14) showed
-# why: filling the default 300 from a tie of one-cue windows spent 179 seats
-# on passages the rank could only order by publish year. So the selection
+# The cap is a ceiling, not a target: filling a fixed cap from a tie of
+# one-cue windows spends most seats on passages the rank can only order by
+# publish year. So the selection
 # takes everything at or above MIN_SCORE, fills down to MIN_WINDOWS when a
 # thin channel leaves that short, and stops. On the density-first scale, 8.0
 # is sixteen first-person hits alone, or a top-weight cue with ten; over the
-# 2026-09-15 labeled pool it keeps 6% of all candidate windows (the old 2.5
-# kept 3%) at a 0.69 gem rate above the line against 0.43 below it.
+# labeled pool it keeps about 6% of all candidate windows, with a markedly
+# higher gem rate above the line than below it.
 # --max-windows still bounds a channel with more strong windows than one
 # round can extract.
 MIN_SCORE = 8.0
 MIN_WINDOWS = 150
 # One passage, one seat. A creator re-cuts a segment into a retitled upload
-# and the highlighter returns it once per video, at full score each time:
-# Alexa Rivera's four 6.0 windows were two pairs, and her top 14 held about
-# five distinct anecdotes. Two windows from different videos are the same
+# and the highlighter returns it once per video, at full score each time, so
+# a channel's top windows can hold only a handful of distinct anecdotes.
+# Two windows from different videos are the same
 # passage when more than DUP_SHARE of the shorter one's DUP_SHINGLE_WORDS-
 # word runs appear in the other (never fewer than DUP_MIN_SHINGLES, so a
 # shared greeting alone does not match). The first-kept copy stays, the
@@ -695,21 +693,21 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
 
 # --------------------------------------------------------------------------- #
 # rank narrow, read wide: the highlighter cuts a fragment around the cue, and
-# a disclosure usually ENDS at its cue ("...and film school wasn't going to
-# make me who I wanted to be, so I left my girlfriend and my family"): the
+# a disclosure usually ENDS at its cue ("...and the office job wasn't going to
+# make me who I wanted to be, so I quit and moved back home"): the
 # biography sits in the sentences before the phrase, where no phrase fires and
-# so no fragment is ever cut. At the earlier 450 raw characters that context was gone
-# from the whole candidate pool, not demoted (Airrack 2026-09-10: three of the
-# previous top-20 gems had no passage left anywhere). So the cap is taken on
+# so no fragment is ever cut. At a narrower fragment that context is gone
+# from the whole candidate pool, not demoted (top gems can have no passage
+# left anywhere). So the cap is taken on
 # the narrow fragment, which keeps the ranking sharp, and then every KEPT
 # window is re-read from the stored transcript, ``--read-before`` seconds
 # ahead of its first cue to ``--read-after`` seconds past its last, and that
 # wider text is what the extractor sees. The window's heaviest cue phrase
 # additionally reaches ``--anchor-before`` back and ``--anchor-after``
-# forward (2026-09-16: at 900 raw characters the highlighter re-cuts
-# fragments, and 3 of 93 re-fetched calibration windows lost the sentence
-# the disclosure sat in when the read stayed relative to the fragment's
-# edges rather than to the cue that earned its seat). The added cues join
+# forward (at 900 raw characters the highlighter re-cuts fragments, and a
+# read that stays relative to the fragment's edges rather than to the cue
+# that earned its seat can lose the sentence the disclosure sat in). The
+# added cues join
 # the corpus so a quote cut from the context still verifies to its own second.
 # --------------------------------------------------------------------------- #
 READ_BEFORE_S = 20
@@ -794,8 +792,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
             # words of the cue only ("i'm bad at" for "i'm bad at maths"). The
             # extractor reads the wider text above, so the corpus must carry
             # the same words at the same start or verify_quotes rejects a
-            # faithful quote: on 2026-09-14, over three channels, 69 of 69
-            # rejected quotes were verbatim in the window text and absent
+            # faithful quote that is verbatim in the window text but absent
             # from the corpus. A colliding start takes the transcript's cue.
             slot = {round(float(c[0]), 2): i for i, c in enumerate(entry["cues"])}
             for s, t in run:
@@ -978,8 +975,8 @@ def main() -> int:
     ap.add_argument("--fragment-size", type=int, default=900,
                     help="highlight width in RAW characters, of which about half is "
                          "timed-text markup: 900 is about 70 spoken words, 600 about 45, "
-                         "450 about 30; 900 since 2026-09-16 so a voice call and the "
-                         "sentences around a cue survive the ranking cut")
+                         "450 about 30. The default is wide enough that a voice call "
+                         "and the sentences around a cue survive the ranking cut")
     ap.add_argument("--generic-floor", type=int, default=None,
                     help="run the first-person fallback pass (GENERIC_TERMS) only when the "
                          "cue phrases keep fewer windows than this, and fill just the "
@@ -1044,9 +1041,9 @@ def main() -> int:
     non_en_total = sum(n for k, n in langs.items() if not is_english(k))
     # An English-language channel whose index holds Arabic, Portuguese or
     # Vietnamese transcripts is carrying YouTube's auto-dubbed audio tracks,
-    # not the creator's words: HopeScope (2026-09-09) had 36 Arabic-track
-    # videos among 506, 96 of their windows reached the extractors, and one
-    # became a ledger fact with an Arabic "quote" she never spoke. A dubbed
+    # not the creator's words: dubbed-track windows otherwise reach the
+    # extractors and can become a ledger fact with a "quote" in a language
+    # the creator never spoke. A dubbed
     # track can never verify as verbatim, so on an English channel every
     # non-English track is excluded here and counted, never sampled. A
     # non-English channel keeps the sampling: there the source language IS
@@ -1163,7 +1160,7 @@ def main() -> int:
         queries_note += " x 2 passes (generic fallback ran)"
     windows.extend(generic_windows)          # phrase windows first, then the fallback's
     if not kept and videos_with_transcript == 0 and a.round <= 1:
-        # BocaBola 2026-09-14: 176 indexed uploads, 0 transcripts. Every later
+        # A channel can have many indexed uploads and 0 transcripts. Every later
         # stage exits 0 on empty input (assemble reports coverage 1.0 over 0
         # windows), so a `&&` chain ran eight clean stages before verify
         # finally refused an empty corpus. There is nothing to extract; say so

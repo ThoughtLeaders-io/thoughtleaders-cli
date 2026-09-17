@@ -9,28 +9,25 @@ are not one, or not yet one:
   "we just moved" in the host's own mouth as the bit. The words are hers; the
   fact may not be.
 * **Two clusters that contradict each other in a durable domain.** "We live
-  in the desert of Idaho" (2020-01) and "we live in northern Utah" (2020-04)
-  cannot both be current. Latest-wins between those two videos is not the
-  whole answer when the 300-window sample never reached the 2024 upload
-  that says Idaho again.
+  in the mountains of Fictionia" (2020-01) and "we live in coastal Exampleland"
+  (2020-04) cannot both be current. Latest-wins between those two videos is
+  not the whole answer when the window sample never reached a later upload
+  that says Fictionia again.
 
-Both used to be settled by the merge shard on the strength of two lines of
-compact input, and the 2026-09-09 runs showed it settling them wrong in both
-directions: dropping two "husband" lines as premise while keeping and
-selecting a third, and superseding Idaho with Utah while the identity lane
-said Idaho. The instruction from the review of those runs: **do not drop,
-demote or supersede a fact because the pipeline is unsure; go and check.**
+The merge shard should not settle either on the strength of two lines of
+compact input. The rule: **do not drop, demote or supersede a fact because
+the pipeline is unsure; go and check.**
 
 So this script checks. For each flagged cluster it runs ONE channel-scoped
 Elasticsearch phrase query, the cue phrase the window fired plus the claim's
-entity (``"we live in"`` + ``Idaho``; ``"my husband"`` alone when there is
-no entity), and attaches what the whole catalogue says to the merge-input
+entity (``"we live in"`` + ``Fictionia``; ``"my husband"`` alone when there
+is no entity), and attaches what the whole catalogue says to the merge-input
 line as ``probe``::
 
     {"videos": 4, "newest": "2024-06-02", "oldest": "2020-01-10",
      "staged_videos": 1, "non_staged_videos": 3, "staged_share": 0.25,
      "sample": [{"video_id": "...", "title": "...", "published": "..."}],
-     "query": "\"we live in\" + idaho"}
+     "query": "\"we live in\" + fictionia"}
 
 Contradicting clusters also get ``conflicts_with: ["c058"]`` on both lines.
 The shard reads that evidence and decides; ``merge_pass.py expand`` refuses
@@ -50,21 +47,18 @@ What the evidence means, for the shard (also in ``agents/merge-shard.md``):
   ``seen_date`` is evidence too when its source is the creator's own profile.
 
 Budget: one query per flagged cluster, ``--max-queries`` (default 30) per
-run, ``size`` 50, foreground, no deepening. It runs inside ``merge_pass.py
-prepare`` when ``--channel`` is given, or standalone::
+run, ``size`` 50, foreground, no deepening. This module is import-only: it
+runs inside ``merge_pass.py prepare`` when ``--channel`` is given, which
+calls ``run()`` on the shard files it just wrote.
 
-    authenticate.py --channel <id> --in <corpus>/merge-input.jsonl [--in ...]
-        [--clustered <corpus>/gems-clustered.jsonl] [--out-json <corpus>/probe.json]
-
-``--in`` files are rewritten in place with ``probe`` / ``conflicts_with`` /
-``staged`` added; ``probe.json`` (one object keyed by cluster id) is what
-``expand`` reads for its dated-evidence check. Exit 0 always: a failed query
-is recorded on the line as ``probe: {"error": ...}`` and the shard is told
-to treat it as "nothing found".
+The merge-input files are rewritten in place with ``probe`` /
+``conflicts_with`` / ``staged`` added; ``probe.json`` (one object keyed by
+cluster id) is what ``expand`` reads for its dated-evidence check. A failed
+query is never raised: it is recorded on the line as ``probe: {"error": ...}``
+and the shard is told to treat it as "nothing found".
 """
 from __future__ import annotations
 
-import argparse
 import json
 import pathlib
 import re
@@ -326,30 +320,3 @@ def run(channel: int, files: list[pathlib.Path], clustered: pathlib.Path | None,
           f"nothing_found={summary['nothing_found']} errors={summary['errors']} "
           f"elapsed_s={elapsed}", file=sys.stderr)
     return summary
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--channel", type=int, required=True)
-    ap.add_argument("--in", dest="infiles", action="append", required=True,
-                    help="merge-input*.jsonl, rewritten in place; repeatable")
-    ap.add_argument("--clustered", default=None,
-                    help="gems-clustered.jsonl, for the cue phrases the windows fired")
-    ap.add_argument("--out-json", default=None,
-                    help="probe.json for expand's dated-evidence check "
-                         "(default: probe.json beside the first --in)")
-    ap.add_argument("--max-queries", type=int, default=30)
-    a = ap.parse_args()
-    files = [pathlib.Path(p) for p in a.infiles]
-    summary = run(a.channel, files, pathlib.Path(a.clustered) if a.clustered else None,
-                  a.max_queries)
-    out = pathlib.Path(a.out_json) if a.out_json else files[0].parent / "probe.json"
-    out.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
-    slim = {k: v for k, v in summary.items() if k != "results"}
-    slim["probe_file"] = str(out)
-    print(json.dumps(slim, indent=1))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

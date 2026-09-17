@@ -11,8 +11,9 @@ stages do.
 
 **The one judgment in the opening is kept.** Host terms are chosen by reading
 the About text and the generated profile, and the channel name alone is not
-good enough: HopeScope ran with ``"HopeScope,Hope"`` and took 22 anchor soft
-mismatches. So with no ``--host-terms`` this stops after the reuse check and
+good enough: a channel called "Marta Builds" run with ``"Marta Builds,Marta"``
+as its host terms takes anchor soft mismatches on every "builds". So with no
+``--host-terms`` this stops after the reuse check and
 prints the identity it just read, and the caller picks the terms and runs the
 fetch in its next message. With ``--host-terms`` there is nothing left to
 decide and the whole opening, fetch and stats included, is one command.

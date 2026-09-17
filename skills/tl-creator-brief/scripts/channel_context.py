@@ -25,7 +25,7 @@ Usage:
         [--per-video-out <dir>/per-video.jsonl] > <dir>/context-full.json
     channel_context.py --from <dir>/context-full.json \\
         --format-label solo --format-evidence "fp density 41/1k words" \\
-        [--host-names "Ali,Abdaal"] [--known-facts "ex-doctor;lives in London"] \\
+        [--host-names "Marta,Marta Builds"] [--known-facts "former carpenter;lives in Lisbon"] \\
         --write-context <dir>/context.json
     channel_context.py --set-socials <dir>/context-full.json \\
         --social-read "https://instagram.com/x" \\
@@ -79,9 +79,8 @@ INTERVIEW = re.compile(
 # pranks, challenges, 24-hour stunts, fake or pretend scenarios, dating shows,
 # skits. One voice still holds the transcript, so attribution is unchanged;
 # what changes is that a relationship, marriage, move or job stated inside
-# the premise may be the bit, not the person. Alexa Rivera (2026-09-09): 37
-# PRANK, 21 CHALLENGE and 20 "24 HOURS" titles among 355 windowed videos, and
-# a "my husband" line from a fake-honeymoon video reached the page as fact.
+# the premise may be the bit, not the person: on a prank channel a
+# relationship line spoken inside a staged video can reach the page as fact.
 # The hint never drops a window: the extractor reports the claim with the
 # hint in its evidence, `merge_pass.py prepare` has `authenticate.py` look
 # for the same claim in non-staged uploads, and the merge shard decides with
@@ -104,16 +103,16 @@ TITLE_HINTS = {
         r"\b(married|adopted|dated|was a \w+) for (a|24) (day|week|hours?)\b|"
         r"\bfor 24 hours\b|\bfor a (day|week)\b|\bsurprising my\b|"
         # life-event titles are the classic stunt premise on prank channels
-        # ("CAN'T BELIEVE THIS HAPPENED ON OUR HONEYMOON!!" was a bit); a
-        # genuine one is probed and confirmed by its recurrence, never dropped
+        # ("WE GOT MARRIED?!" is usually a bit); a genuine one is probed and
+        # confirmed by its recurrence, never dropped
         r"\bhoneymoon\b|\bgot married\b|\bwedding\b|\bbroke up\b|\bpregnant\b|"
         r"\bmoving (away|out)\b|\bquitting\b|\bwe eloped\b|\bnew boyfriend\b|"
         r"\bnew girlfriend\b|"
         # in-character formats: a talent show joke ("I got fired from my job
         # at the bank"), an undercover or hide-in-plain-sight premise ("I
         # Secretly Lived In A Mall", "I live with a giant mouse as my
-        # roommate"), scam-bait (a scammer's "I grew up in Florida" was
-        # published as the host's, run G 2026-09-09), comedy and roast
+        # roommate"), scam-bait (a scammer's "I grew up in Florida" can be
+        # published as the host's), comedy and roast
         # formats. The line is a bit until the rest of the channel says
         # otherwise; the probe decides, never the title alone.
         r"\bgot talent\b|\btalent show\b|\btry not to laugh\b|"
@@ -176,8 +175,8 @@ def websites_and_socials(pg_links, es_links) -> tuple[list[dict], list[str]]:
     unioned with the platform links so nothing linked is silently missing.
     YouTube links are not websites; ``second_channel_candidates`` owns them.
 
-    Both stores come back empty on plenty of channels (Alexa Rivera, 2026-09-10:
-    ``{}`` in Postgres and ``[]`` in the index), so an empty result is a real
+    Both stores come back empty on plenty of channels (``{}`` in Postgres and
+    ``[]`` in the index), so an empty result is a real
     answer and the identity lane is told to expect it: it then has the channel
     name, the About text and the AI profile to work from, and nothing else.
     """
@@ -273,18 +272,16 @@ def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
 
 
 # The creator's OTHER names, harvested from their own cue passages. A channel
-# titled "Alexa Rivera" is searched for as "Alexa Rivera", and the audience,
-# the press and her own Instagram all call her Lexi: the identity lane cannot
+# titled "Marta Builds" is searched for as "Marta Builds", and the audience,
+# the press and her own Instagram all call her Mar: the identity lane cannot
 # find a profile under a name nobody uses. These are SEARCH TERMS, never facts;
 # a name reaches the ledger only as a transcript fact with its own quote.
 #
-# Alexa Rivera (2026-09-10) is the case this exists for. Both link stores were
-# empty, so the lane had the channel name and the AI profile, searched "Alexa
-# Rivera", drowned in a same-named creator, and rejected the right person. The
-# nickname was in the corpus the run had already fetched, in seven videos:
-# "my nicknames ... Lexi ... my real name's Alexa", and a garbled reading of
-# her handle, "Brooke Lexie Rivera Brooke is my username" (the real handle is
-# @lexibrookerivera).
+# When both link stores are empty the lane has only the channel name and the
+# AI profile to search on, and a same-named creator can drown out the right
+# person. The nickname is usually already in the corpus the run fetched
+# ("my nicknames ... Mar ... my real name's Marta"), along with ASR readings
+# of the handle.
 NAME_CUE = re.compile(
     r"\b(?:my (?:real |full |middle |first )?names?'?s?"
     r"|call me"
@@ -320,8 +317,8 @@ def name_candidates(corpus_path: pathlib.Path, channel_name: str | None,
     """Other names for the creator, ranked, from their own cue passages.
 
     Each row carries `channel_name_variant`: true when the token is a short
-    relative of the channel name (``Alexa`` -> ``Lexi``, ``Patterrz`` -> ``pat``,
-    and the ASR spellings of both), which is the signal that it is the creator
+    relative of the channel name (``Marta`` -> ``Mar``, and the ASR spellings
+    of both), which is the signal that it is the creator
     rather than a guest introducing themselves in a challenge video. A name
     that is neither a variant nor said across four or more uploads is dropped,
     because "my name is Sienna" is usually not the host.

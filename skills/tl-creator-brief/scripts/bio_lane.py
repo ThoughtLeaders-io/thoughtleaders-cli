@@ -32,7 +32,7 @@ render as the creator's own.
 
 Usage:
   bio_lane.py batch --from context-full.json --channel <id> --out <dir>
-                    [--socials-bio socials-bio.json] [--seen-date YYYY-MM-DD]
+                    [--socials-bio socials-bio.json]
   bio_lane.py facts --batch <bio/batch-000.json> --returns <extract.json>
                     --out bio-facts.json
   bio_lane.py terms --facts bio-facts.json --channel <id> --out <dir>
@@ -270,15 +270,12 @@ is_bio_window = _ax.is_bio_window
 
 def cmd_batch(a: argparse.ArgumentParser) -> int:
     full = json.loads(pathlib.Path(a.from_file).read_text(encoding="utf-8")) if a.from_file else {}
-    if a.about_text:
-        full = dict(full)
-        full["about_text"] = a.about_text
     socials = None
     if a.socials_bio:
         socials = json.loads(pathlib.Path(a.socials_bio).read_text(encoding="utf-8"))
         if isinstance(socials, dict):
             socials = socials.get("profiles") or socials.get("bios") or []
-    seen = a.seen_date or _dt.date.today().isoformat()
+    seen = _dt.date.today().isoformat()
     channel = a.channel or full.get("channel_id")
     if channel is None:
         print("--channel is required (or a context file carrying channel_id)", file=sys.stderr)
@@ -576,14 +573,12 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("batch", help="filter the bio and write the one extractor batch")
     b.add_argument("--from", dest="from_file", default=None,
                    help="context-full.json from channel_context.py --channel")
-    b.add_argument("--about-text", default=None, help="bio text directly, instead of --from")
     b.add_argument("--socials-bio", default=None,
                    help="JSON list of profile bios from the socials lane; each needs "
                         "match_confirmed, url and text")
     b.add_argument("--channel", default=None)
     b.add_argument("--out", default="tl-creator-profiles/.corpus",
                    help="PARENT directory; the run writes <out>/<channel>/bio/")
-    b.add_argument("--seen-date", default=None)
 
     f = sub.add_parser("facts", help="the classifier's returns as identity-lane records")
     f.add_argument("--batch", required=True, help="the bio batch those returns judged")

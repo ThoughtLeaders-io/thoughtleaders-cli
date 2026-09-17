@@ -38,9 +38,9 @@ all three hold:
      being interviewed. When the channel's own host asks ("what does your
      family think of your career?"), the life story in the answer is the
      guest's. Only when the host is the one being asked is it the host's.
-   - A life story that does not fit the host: a physician's residency on a
-     vintage-craft channel, a Nickelodeon career on a minimalism channel, a
-     wife's pregnancy told by the owner of the restaurant being visited. It
+   - A life story that does not fit the host: a surgeon's residency on a
+     woodworking channel, a child-actor career on a minimalism channel, a
+     pregnancy told by the owner of the restaurant being visited. It
      is someone else's, whatever the flags say.
    - `format_hint: "interview_or_collab"` or a `second_voice_hint` means a
      second person is speaking in this upload. Credit the host only when
@@ -49,7 +49,7 @@ all three hold:
      first-person voices in one window, or a first-person line you cannot
      place, is not a gem.
    The host's own narration about other people ("I flew to Mexico to meet
-   my friend Fede", "I'm buying my friends' tickets") is the host's voice
+   my friend Dani", "I'm buying my friends' tickets") is the host's voice
    and the host's life: the friend is the subject of the sentence, the
    host is the subject of the fact. A missed gem costs less than a wrong
    one.
@@ -85,7 +85,7 @@ judgement the classifier makes from the format and the deterministic features
   label it takes the shared-voice rules below, never the solo rule.
 - **Interview / multi-host / reaction**: most self-disclosure in the
   transcript belongs to the other voice. `host_anchor` (the host naming
-  themselves in the window: "it's Eric", "my name is") and `in_sponsor_read`
+  themselves in the window: "it's Sam", "my name is") and `in_sponsor_read`
   argue host. A `second_voice_hint` argues the other way. Guest-ambiguous
   windows drop; `speaker_guess: "unclear"` is an honest answer, and unclear
   windows never publish as the host's.
