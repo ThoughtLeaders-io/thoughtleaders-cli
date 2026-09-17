@@ -1037,6 +1037,12 @@ def identity_fact(rec: dict, fact_id: str) -> dict:
     return fact
 
 
+def bio_key(text) -> str:
+    """The comparison form of a bio claim or excerpt: lower-cased, punctuation
+    and whitespace collapsed, so a re-read About line matches its earlier self."""
+    return " ".join(re.sub(r"[^\w\s]", " ", str(text or "").lower()).split())
+
+
 def bio_gate(facts: list[dict]) -> tuple[list[dict], list[dict]]:
     """``(kept, dropped)``: what an uncorroborated bio fact is allowed to be.
 
@@ -1450,6 +1456,32 @@ def cmd_expand(a: argparse.Namespace) -> int:
             fact["sensitivity"] = new_tier
             fact["sensitive"] = new_tier in WITHHELD
 
+    # An unconfirmed bio claim carried from an earlier ledger lives only as
+    # long as the About text still says it. The carried record never passes the
+    # corroboration loop again, so without this it would render under "In their
+    # own words (unverified)" on every refresh forever, years after the creator
+    # deleted the line. Expiry runs only when this run's bio lane produced
+    # records: with none, an empty About box and a skipped lane look the same,
+    # and a skipped lane must not empty the ledger.
+    bio_expired: list[str] = []
+    current_bio = [rec for rec in identity if rec.get("provenance") == BIO]
+    if current_bio:
+        still_said = {bio_key(rec.get("claim")) for rec in current_bio}
+        still_said |= {bio_key(rec.get("source_excerpt")) for rec in current_bio}
+        still_said.discard("")
+        for fact_id in list(existing_by_id):
+            fact = fact_index.get(fact_id)
+            if not fact or fact.get("provenance") != BIO:
+                continue
+            if fact.get("confidence") == "confirmed" and fact.get("corroborated_by"):
+                continue
+            if (bio_key(fact.get("claim")) in still_said
+                    or bio_key(fact.get("source_excerpt")) in still_said):
+                continue
+            facts.remove(fact)
+            fact_index.pop(fact_id, None)
+            bio_expired.append(fact_id)
+
     # What an uncorroborated bio fact may be — applied here, after tier
     # inheritance, and over every bio fact in the ledger including the ones
     # carried from `--existing`, which never pass the corroboration loop again.
@@ -1596,6 +1628,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "bio_unverified": sum(1 for f in facts if f.get("unverified_bio")),
         "bio_dropped": [[str(f.get("fact_id")), str(f.get("sensitivity"))]
                         for f in bio_dropped],
+        "bio_expired": bio_expired,
         "bio_corroboration_refused": bio_uncorroborated,
         "enum_aliases": enum_aliases,
         "corroborated": corroborated,

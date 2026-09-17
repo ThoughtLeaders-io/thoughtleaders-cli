@@ -79,6 +79,14 @@ CTA_RX = re.compile(
     r"|comment below|join (?:my|our) (?:patreon|channel|discord|membership)"
     r"|check out (?:my|our) (?:merch|store|shop)|use code|link (?:in|below)"
     r"|new videos? every|uploads? every)\b", re.I)
+# "Follow me on Instagram: handle" is a pointer to another source, not a
+# statement about the person. The socials lane reads the account itself when
+# it is on; here the line only spends an extractor slot and can surface under
+# "In their own words" as if the creator had said something.
+SOCIAL_POINTER_RX = re.compile(
+    r"\b(?:follow|find|add|catch|message|dm) (?:me|us|along)\b"
+    r"|\b(?:instagram|insta|ig|tiktok|twitter|facebook|fb|twitch|snapchat|snap"
+    r"|threads|linkedin|discord|patreon|bluesky|x)\s*(?:handle)?\s*[:|>\u2192-]", re.I)
 FIRST_PERSON_RX = re.compile(
     r"\b(?:i|i'?m|i'?ve|i'?ll|i'?d|me|my|mine|myself|we|we'?re|we'?ve|our|ours|us)\b", re.I)
 # Personal identifiers never become search terms: SKILL.md's identity lane
@@ -88,6 +96,13 @@ IDENTIFIER_RX = re.compile(
     rf"{EMAIL_RX.pattern}|{URL_RX.pattern}|{PHONE_RX.pattern}|[@#][\w.]+")
 
 MIN_WORDS = 3
+# The corroboration round is a second fetch_cues.py pass, so without a cap of
+# its own it inherits the main pass's 300-window ceiling and a long About text
+# can send as many windows to the extractors as the whole gem hunt did. A term
+# either finds the creator saying the thing or it does not; a handful of
+# windows per term settles it.
+BIO_ROUND_PER_TERM = 5
+BIO_ROUND_CAP = 60
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -122,6 +137,8 @@ def drop_reason(segment: str) -> str | None:
         return "url_only"
     if CTA_RX.search(text):
         return "cta"
+    if SOCIAL_POINTER_RX.search(text):
+        return "social_pointer"
     if len(words) < MIN_WORDS:
         return "too_short"
     return None
@@ -524,9 +541,11 @@ def cmd_terms(a: argparse.Namespace) -> int:
         "# bio facts. Weight 3 = a specific, durable fact about the person.\n"
         + "".join(f"{t} | 3\n" for t in all_terms), encoding="utf-8")
     corpus = f"{a.out}/{a.channel}"
+    window_cap = min(BIO_ROUND_CAP, BIO_ROUND_PER_TERM * max(len(all_terms), 1))
     recipe = [
         f"python3 fetch_cues.py --channel {a.channel} --out {a.out} --round {a.round} "
-        f"--phrases {phrases_path} --exclude {corpus}/classified.jsonl --generic-floor 0",
+        f"--phrases {phrases_path} --exclude {corpus}/classified.jsonl --generic-floor 0 "
+        f"--max-windows {window_cap} --min-windows 0 --min-score 0",
         "# then the usual extractor fan-out over batches-r"
         f"{a.round}/, and:",
         f"python3 assemble_extracts.py --batches {corpus}/batches-r{a.round} "
@@ -536,6 +555,7 @@ def cmd_terms(a: argparse.Namespace) -> int:
     ]
     summary = {"channel": a.channel, "round": a.round, "facts": len(per_fact),
                "with_terms": len(per_fact) - len(no_terms), "no_terms": no_terms,
+               "window_cap": window_cap,
                "terms": all_terms, "per_fact": per_fact,
                "phrases_file": str(phrases_path), "recipe": recipe}
     probe_path = out / "bio-probe.json"

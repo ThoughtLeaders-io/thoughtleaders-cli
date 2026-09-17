@@ -1478,6 +1478,41 @@ def test_a_bio_fact_carried_from_an_earlier_run_is_re_gated(tmp_path):
     assert facts["f051"]["unverified_bio"] is True
 
 
+def test_a_carried_unconfirmed_bio_claim_expires_when_the_about_text_no_longer_says_it(tmp_path):
+    """The carried record never re-enters the corroboration loop, so the only
+    thing keeping it honest is whether the creator still writes it."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    existing = _existing(tmp_path, [
+        _bio_ledger_fact("f051", claim="runs a pottery studio", tier="none"),
+        _bio_ledger_fact("f052", claim="lives in Lisbon", tier="none")])
+    prep = _prepare(clustered, tmp_path / "prep", existing=existing)
+    judged = [json.loads(ln) for ln in open(Path(prep["files"][0]), encoding="utf-8")]
+    dpath = _envelope(tmp_path, {row["c"]: {"action": "keep"} for row in judged},
+                      facts=[_bio(claim="lives in Lisbon",
+                                  source_excerpt="Based in Lisbon since 2019")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out, existing=existing)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert "f051" not in facts                    # gone from the About text: expired
+    assert facts["f052"]["unverified_bio"] is True  # still written: carried, still unverified
+    summary = json.loads(proc.stdout)
+    assert summary["bio_expired"] == ["f051"]
+
+
+def test_carried_bio_claims_do_not_expire_when_this_run_read_no_bio(tmp_path):
+    """No bio records this run means the lane was skipped or the box is empty,
+    and the two are indistinguishable, so nothing is thrown away."""
+    clustered = _write_clusters(tmp_path, [_cluster("one")])
+    existing = _existing(tmp_path, [
+        _bio_ledger_fact("f051", claim="runs a pottery studio", tier="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out, existing=existing)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "f051" in _facts(out)
+    assert json.loads(proc.stdout)["bio_expired"] == []
+
+
 def test_a_bio_fact_that_inherits_a_withheld_tier_is_then_dropped(tmp_path):
     """The gate runs after tier inheritance, not before it."""
     clustered = _write_clusters(tmp_path, [

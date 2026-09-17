@@ -41,6 +41,8 @@ import fetch_cues  # noqa: E402
     ("Subscribe for more and hit the bell", "cta"),
     ("New videos every Tuesday and Friday", "cta"),
     ("Use code DAVID for 10% off my favourite mattress", "cta"),
+    ("Follow me on Instagram: rachelmaksy", "social_pointer"),
+    ("Instagram: @someone | TikTok: someone", "social_pointer"),
     ("Doctor. Author.", "too_short"),
     ("", "empty"),
 ])
@@ -56,6 +58,8 @@ def test_drop_reason_catches_boilerplate(segment, reason):
     # kept on purpose: real bios are written as lists without pronouns
     "Doctor, author, dad of two.",
     "Former nurse, now full-time creator since 2019.",
+    # a habit, not a pointer to an account
+    "I follow a plant-based diet and have for ten years.",
 ])
 def test_drop_reason_keeps_real_bio_text(segment):
     assert bio_lane.drop_reason(segment) is None
@@ -382,6 +386,11 @@ def test_terms_cli_writes_a_generated_phrases_file_and_the_round_recipe(tmp_path
     assert "bio-terms-r2.txt" in summary["phrases_file"]
     recipe = " ".join(summary["recipe"])
     assert "--round 2" in recipe and "--exclude" in recipe and "--generic-floor 0" in recipe
+    # the round has its own small budget: it never inherits the main pass's
+    # 300-window ceiling, so a long About text cannot crowd out the gem hunt
+    cap = 5 * len(summary["terms"])
+    assert 0 < cap <= 60 and summary["window_cap"] == cap
+    assert f"--max-windows {cap} --min-windows 0 --min-score 0" in recipe
     # without --append the round REPLACES classified.jsonl and round 1 is lost
     assert "--append" in recipe
 

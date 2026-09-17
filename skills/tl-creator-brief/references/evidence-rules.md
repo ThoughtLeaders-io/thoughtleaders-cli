@@ -165,7 +165,7 @@ as a fact:
 | corroborated by a transcript fact | `none`, `lifestyle` | **`confirmed`**, both sides, and usable like any confirmed fact |
 | corroborated by a transcript fact | `clinical` | `confirmed`; the transcript side still answers to the repetition rule below, and the bio side is never `selected` |
 | corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual — the tier decides the page, not the confidence |
-| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)" |
+| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)"; on a refresh it expires unless the About text still says it |
 | **uncorroborated** | `clinical`, `children`, `location` | **dropped from the ledger entirely** |
 
 - **Only a transcript fact corroborates a bio fact.** A second written source

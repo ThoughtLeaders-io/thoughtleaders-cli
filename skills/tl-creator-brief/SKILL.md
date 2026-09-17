@@ -396,9 +396,13 @@ scripts costs more than the scripts.
    - **Then corroborate them.** `bio_lane.py terms` derives 1-3 search terms
      per bio fact and writes a generated phrases file plus the exact round
      recipe; run it as an additive `fetch_cues.py --round N` pass (see
-     `references/transcript-mining.md`). A bio fact no upload corroborates is
-     never a claim and never an angle: non-sensitive ones render in their own
-     "In their own words (unverified)" block, sensitive ones are dropped.
+     `references/transcript-mining.md`). The recipe carries its own window
+     budget (`--max-windows`, five per term, at most 60) so a long About text
+     never crowds the gem hunt out of the extractor cap. A bio fact no upload
+     corroborates is never a claim and never an angle: non-sensitive ones
+     render in their own "In their own words (unverified)" block, sensitive
+     ones are dropped, and on a refresh an unverified one survives only while
+     the About text still says it (`expand` reports `bio_expired`).
 
 4. **Assemble, cluster, prepare, authenticate: one command.** As soon as the
    receipts are in:
