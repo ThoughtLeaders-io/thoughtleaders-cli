@@ -77,7 +77,8 @@ def _fake_es(counts_by_query=None, delay=0.0, fail_first=None):
         if fail_first is not None and key not in state["failed"] and fail_first(body):
             with lock:
                 state["failed"].add(key)
-            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="HTTP 429 Too Many Requests")
+            # the CLI's real wording (tl_cli/client/errors.py) — no status code in it
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Rate limited. Please wait and try again.")
         total = (counts_by_query or {}).get(_probe_term(body), 7)
         env = {"results": [], "total": total,
                "aggregations": {"distinct_channels": {"value": max(1, total // 2)},
@@ -143,14 +144,49 @@ class TestStdinGuard:
 
 class TestGroupsFile:
     @pytest.mark.parametrize("payload", [
-        {"groups": [{"text": "a +b", "content_fields": ["title"]}, {"text": '"c d"'}]},
+        {"groups": [{"text": "a +b"}, {"text": '"c d"'}]},
         [{"text": "a +b"}, {"text": '"c d"'}],
         ["a +b", '"c d"'],
     ])
     def test_three_shapes(self, tmp_path, sc, payload):
         f = tmp_path / "groups.json"
         f.write_text(json.dumps(payload))
-        assert sc.load_groups_file(str(f)) == ["a +b", '"c d"']
+        groups, default, op = sc.load_groups_file(str(f))
+        assert [g["text"] for g in groups] == ["a +b", '"c d"'] and default is None and op is None
+        assert all(g["content_fields"] is None and g["exclude"] is False for g in groups)
+
+    def test_report_semantics_preserved(self, monkeypatch, capsys, tmp_path, sc):
+        """Per-group content_fields, default_content_fields and exclude groups
+        must shape the ES query exactly as build_report.py would the link."""
+        f = tmp_path / "groups.json"
+        f.write_text(json.dumps({"default_content_fields": ["title", "summary"],
+                                 "groups": [{"text": "retirement +planning", "content_fields": ["title"]},
+                                            {"text": "pension"},
+                                            {"text": "scam", "exclude": True}]}))
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        fake = _fake_es()
+        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
+                                             "--no-enrich", "--groups-file", str(f)])
+        sc.main()
+        body = fake.calls[0]["query"]["bool"]
+        clauses = [c["simple_query_string"] for c in body["should"]]
+        assert [c["query"] for c in clauses] == ["retirement +planning", "pension"]
+        assert clauses[0]["fields"] == ["title^4"]            # boost carried from the default field list
+        assert clauses[1]["fields"] == ["title^4", "summary^2"]
+        assert body["must_not"] == [{"simple_query_string": {"query": "scam", "fields": sc.DEFAULT_FIELDS.split(","),
+                                                             "default_operator": "and"}}]
+        out = json.loads(capsys.readouterr().out)
+        assert out["query"]["not_groups"] == ["scam"]
+        assert out["expression"]["expression"].endswith(" AND NOT (scam)")
+
+    def test_only_excludes_is_an_error(self, tmp_path, sc, monkeypatch):
+        f = tmp_path / "groups.json"
+        f.write_text(json.dumps([{"text": "scam", "exclude": True}]))
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--groups-file", str(f)])
+        with pytest.raises(SystemExit):
+            sc.main()
 
     def test_appends_to_group_flags(self, monkeypatch, capsys, tmp_path, sv):
         f = tmp_path / "groups.json"
@@ -205,6 +241,17 @@ class TestProbeParallelAndCache:
         self._run(probe, monkeypatch, capsys, ["--fields", "title,summary", "alpha"], fake, tmp_path)
         self._run(probe, monkeypatch, capsys, ["--fields", "title", "--content-type", "all", "alpha"], fake, tmp_path)
         assert len(fake.calls) == 3
+
+    def test_cache_is_namespaced_by_endpoint_and_credentials(self, monkeypatch, capsys, tmp_path, probe):
+        fake = _fake_es({"alpha": 50})
+        monkeypatch.setenv("TL_API_URL", "https://a.example")
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path)
+        monkeypatch.setenv("TL_API_KEY", "other-account")
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path)
+        assert len(fake.calls) == 2  # different credentials never share an entry
+        assert len(list(tmp_path.iterdir())) == 2  # two namespace directories
 
     def test_no_cache_flag(self, monkeypatch, capsys, tmp_path, probe):
         fake = _fake_es({"alpha": 50})

@@ -166,16 +166,20 @@ has its own 90s timeout and one retry, probes and context fetches run six
 calls at a time, and identical probes are served from a 24h disk cache. So
 run them as plain foreground Bash calls with an explicit timeout of about
 300 seconds (300000 ms), never with `run_in_background`, never followed by a
-`sleep` or a monitor "until the file appears". If a single call exceeds ~120s
-it is oversized, not slow: split the candidate list or the channel list in
-half and rerun both halves (the cache makes the already-answered half free).
-Expected wall-clock: 25 candidates ≈ 15–20s; 40 channels of context ≈ 10s; an
-intensity triage over 20 groups ≈ 5–10s. A script that prints nothing for
-two minutes has hung — kill it and report, don't wait. Pass large boolean
+`sleep` or a monitor "until the file appears". The scripts print nothing
+until the whole batch is done, so silence is not a hang: one slow probe may
+legitimately take 90s, pause, and retry for another 90s. Size calls so they
+finish well inside the tool timeout — expected wall-clock: 25 candidates
+≈ 15–20s; 40 channels of context ≈ 10s; an intensity triage over 20 groups
+≈ 5–10s — and if the 300s tool timeout does fire, don't rerun the same call:
+split the candidate list or the channel list in half and run the halves
+(the cache makes the already-answered half free). Pass large boolean
 filters as a file (`--groups-file groups.json`, the same
-`{"groups":[{"text":…}]}` shape `build_report.py` takes) instead of quoting
-twenty `--group` arguments in the shell; and never use the `timeout`
-binary — macOS doesn't ship it, the Bash tool's own timeout is the guard.
+`{"groups":[{"text":…, "content_fields":[…], "exclude":true}]}` shape
+`build_report.py` takes — per-group fields and excluded groups are honoured,
+so the search measures what the link will select) instead of quoting twenty
+`--group` arguments in the shell; and never use the `timeout` binary —
+macOS doesn't ship it, the Bash tool's own timeout is the guard.
 
 ### Stage 0 — Set up: intent, deliverable, operator, breadth, scope
 
@@ -544,6 +548,10 @@ on-topic uploads. Tell the user when one channel dominates and offer
    ```
    Extracts the text window around each keyword occurrence (transcript is
    caption XML — the script strips/unescapes it client-side).
+   A channel whose fetch failed comes back with `"error"` and no snippets
+   (the batch no longer aborts). **Leave those out of the classifier batch**
+   — an empty-snippet channel would be judged `mixed`, not "unknown" — rerun
+   just those ids once, and list any that still fail as *not validated*.
 3. **Classify** with the **`keyword-context-classifier`** agent (Agent tool,
    `subagent_type: keyword-context-classifier` — Haiku-cheap). Give each batch
    a `TOPIC:` line, usually a `NOT:` line, and the indexed evidence. Batch

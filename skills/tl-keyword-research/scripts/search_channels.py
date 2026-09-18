@@ -48,7 +48,8 @@ YOUTUBE_FORMAT = 4
 CONTENT_TYPES = ("longform", "short", "live", "all")
 
 
-TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "Rate limited", "Please wait and try again",
+                     "Server error", "timed out", "timeout", "Too Many Requests")
 
 
 def _transient(text):
@@ -158,15 +159,17 @@ def composed_bool(any_groups, not_terms, fields, since, until,
 
 
 def groups_bool(groups, not_terms, fields, since, until, operator="OR",
-                content_type="longform"):
+                content_type="longform", group_fields=None, not_groups=None):
     """Boolean-group mode — each group is a self-contained simple_query_string
     (`("fable 5" | fable5) -keto` scopes its exclusion to its own arm), exactly
     the shape the delivered keyword_groups filter stores. Groups combine per
     `operator` (default OR — a filter's groups union); `--not` still excludes
     across the whole query. `default_operator: "and"` keeps in-group `-` safe."""
+    group_fields = group_fields or {}
     clauses = [
-        {"simple_query_string": {"query": g, "fields": fields, "default_operator": "and"}}
-        for g in groups
+        {"simple_query_string": {"query": g, "fields": group_fields.get(i, fields),
+                                 "default_operator": "and"}}
+        for i, g in enumerate(groups)
     ]
     bool_q = {"filter": _filters(since, until, content_type)}
     if operator == "AND":
@@ -174,8 +177,13 @@ def groups_bool(groups, not_terms, fields, since, until, operator="OR",
     else:
         bool_q["should"] = clauses
         bool_q["minimum_should_match"] = 1
-    if not_terms:
-        bool_q["must_not"] = keyword_clauses(not_terms, fields)
+    must_not = keyword_clauses(not_terms, fields) if not_terms else []
+    must_not += [  # excluded groups from a groups file: `AND NOT (group)`
+        {"simple_query_string": {"query": g, "fields": fields, "default_operator": "and"}}
+        for g in (not_groups or [])
+    ]
+    if must_not:
+        bool_q["must_not"] = must_not
     return bool_q
 
 
@@ -351,24 +359,43 @@ def stdin_is_readable():
 
 def load_groups_file(path):
     """Read boolean groups from a JSON file — the same shape build_report.py
-    consumes ({"groups": [{"text": ...}]}), a bare list of {"text": ...}
-    objects, or a bare list of strings. Avoids shell-quoting 20 groups."""
+    consumes ({"groups": [{"text": ..., "content_fields": [...], "exclude": true}],
+    "default_content_fields": [...]}), a bare list of such objects, or a bare
+    list of strings. Returns (groups, default_content_fields) where each group
+    is {"text", "content_fields", "exclude"} — per-group fields and exclusion
+    flags are preserved so the search measures what the report will select.
+    Returns (groups, default_content_fields, operator); --operator governs the
+    search and a differing file operator is warned about."""
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
         sys.exit(f"--groups-file {path}: {exc}")
+    default_fields, file_operator = None, None
     if isinstance(data, dict):
+        default_fields = data.get("default_content_fields") or None
+        file_operator = (data.get("operator") or None)
         data = data.get("groups", [])
     if not isinstance(data, list):
         sys.exit(f"--groups-file {path}: expected a list of groups or an object with a 'groups' list")
     out = []
     for item in data:
-        text = item.get("text") if isinstance(item, dict) else item
+        if isinstance(item, dict):
+            text, cf, ex = item.get("text"), item.get("content_fields"), bool(item.get("exclude"))
+        else:
+            text, cf, ex = item, None, False
         text = str(text or "").strip()
         if text:
-            out.append(text)
-    return out
+            out.append({"text": text, "content_fields": list(cf) if cf else None, "exclude": ex})
+    return out, default_fields, file_operator
+
+
+def boosted(names, fields):
+    """Map plain content-field names (title) onto the caller's boosted list
+    (title^4) so a per-group override keeps the ranking weights."""
+    by_name = {f.split("^", 1)[0]: f for f in fields}
+    return [by_name.get(n, n) for n in names]
+
 
 
 def dedupe(items):
@@ -444,10 +471,25 @@ def main():
     keywords = dedupe(collect_keywords(args.keywords))
     any_groups = [g for g in (parse_group(r) for r in args.any) if g]
     sqs_groups = [g.strip() for g in args.group if g.strip()]
+    group_fields, not_groups = {}, []
     if args.groups_file:
-        sqs_groups = sqs_groups + load_groups_file(args.groups_file)
+        file_groups, file_default, file_operator = load_groups_file(args.groups_file)
+        if file_operator and str(file_operator).upper() != args.operator:
+            sys.stderr.write(f"--groups-file: file operator {file_operator!r} differs from "
+                             f"--operator {args.operator}; --operator governs this search\n")
+        file_default = boosted(file_default, fields) if file_default else None
+        for g in file_groups:
+            if g["exclude"]:
+                not_groups.append(g["text"])
+                continue
+            per = g["content_fields"] or file_default
+            if per:
+                group_fields[len(sqs_groups)] = boosted(per, fields)
+            sqs_groups.append(g["text"])
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
 
+    if not_groups and not sqs_groups:
+        sys.exit("--groups-file holds only excluded groups; nothing to search")
     if sqs_groups and any_groups:
         sys.exit("--group and --any are different composition modes; use one or the other")
 
@@ -455,10 +497,15 @@ def main():
         if keywords:  # positional/stdin keywords become plain-phrase groups
             sqs_groups = [f'"{k}"' if " " in k else k for k in keywords] + sqs_groups
         bool_q = groups_bool(sqs_groups, not_terms, fields, args.since, args.until,
-                             args.operator, args.content_type)
+                             args.operator, args.content_type, group_fields, not_groups)
         query_desc = {"mode": "groups", "operator": args.operator,
                       "groups": sqs_groups, "not": not_terms}
         expression = render_groups(sqs_groups, not_terms, args.operator)
+        if not_groups or group_fields:
+            query_desc["not_groups"] = not_groups
+            query_desc["group_fields"] = {str(i): f for i, f in group_fields.items()}
+            for g in not_groups:
+                expression["expression"] += f" AND NOT ({g})"
     elif any_groups:
         if keywords:  # positional/stdin keywords become a leading required OR-group
             any_groups = [keywords] + any_groups

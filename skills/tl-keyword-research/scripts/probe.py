@@ -91,7 +91,8 @@ RETRY_PAUSE = 3  # seconds before the single retry of a transient failure
 PROBE_WORKERS = 6  # concurrent `tl db es` calls (each is one short HTTP round-trip)
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "tl-keyword-research", "probe")
 CACHE_TTL_HOURS = 24  # a probe body re-run within this window is served from disk
-TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "Rate limited", "Please wait and try again",
+                     "Server error", "timed out", "timeout", "Too Many Requests")
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _FIELD_RE = re.compile(r"^[\w.]+(\^\d+(\.\d+)?)?$")  # e.g. title, ai.description, title^3
 
@@ -323,6 +324,36 @@ def extract_samples(data, field_pairs):
     return out
 
 
+CACHE_FORMAT = 1  # bump when the cached response shape changes
+_CACHE_NS = None
+
+
+def cache_namespace():
+    """Sub-directory that isolates cache entries per API endpoint and
+    credentials: TL_API_URL / TL_API_KEY plus the contents of the tl config
+    dir (stored login). Switching account or environment never serves the
+    other one's responses."""
+    global _CACHE_NS
+    if _CACHE_NS is None:
+        h = hashlib.sha256()
+        h.update(f"format={CACHE_FORMAT}\n".encode())
+        for var in ("TL_API_URL", "TL_API_KEY"):
+            h.update(f"{var}={os.environ.get(var, '')}\n".encode())
+        cfg = os.path.join(os.path.expanduser("~"), ".config", "tl")
+        try:
+            for fn in sorted(os.listdir(cfg)):
+                if fn == "recent_queries.json":
+                    continue  # churns on every call; not an identity
+                fp = os.path.join(cfg, fn)
+                if os.path.isfile(fp):
+                    with open(fp, "rb") as fh:
+                        h.update(fn.encode() + b"\n" + fh.read() + b"\n")
+        except OSError:
+            pass
+        _CACHE_NS = h.hexdigest()[:16]
+    return _CACHE_NS
+
+
 def cache_key(body):
     return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
@@ -331,7 +362,7 @@ def cache_load(cache_dir, body, ttl_hours):
     """Return the cached ES response for `body` if it is younger than the TTL."""
     if not cache_dir:
         return None
-    path = os.path.join(cache_dir, cache_key(body) + ".json")
+    path = os.path.join(cache_dir, cache_namespace(), cache_key(body) + ".json")
     try:
         if time.time() - os.path.getmtime(path) > ttl_hours * 3600:
             return None
@@ -345,8 +376,9 @@ def cache_store(cache_dir, body, data):
     if not cache_dir:
         return
     try:
-        os.makedirs(cache_dir, exist_ok=True)
-        path = os.path.join(cache_dir, cache_key(body) + ".json")
+        ns_dir = os.path.join(cache_dir, cache_namespace())
+        os.makedirs(ns_dir, exist_ok=True)
+        path = os.path.join(ns_dir, cache_key(body) + ".json")
         tmp = f"{path}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False)

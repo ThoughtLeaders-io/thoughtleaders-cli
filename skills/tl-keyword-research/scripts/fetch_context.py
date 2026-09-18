@@ -33,7 +33,8 @@ DEFAULT_FIELDS = ["title", "summary", "transcript"]
 ES_TIMEOUT = 90
 RETRY_PAUSE = 3  # seconds before the single retry of a transient tl db es failure
 CONTEXT_WORKERS = 6  # concurrent per-channel ES calls
-TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "Rate limited", "Please wait and try again",
+                     "Server error", "timed out", "timeout", "Too Many Requests")
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 
