@@ -38,6 +38,7 @@ import hashlib
 import os
 import stat
 import subprocess
+import threading
 import time
 import sys
 
@@ -326,6 +327,7 @@ def extract_samples(data, field_pairs):
 
 CACHE_FORMAT = 1  # bump when the cached response shape changes
 _CACHE_NS = None
+_CACHE_NS_LOCK = threading.Lock()
 
 
 def cache_namespace():
@@ -333,24 +335,26 @@ def cache_namespace():
     authenticated identity. Credentials live in the OS keyring, so the only
     reliable identity is what the CLI itself reports: one `tl whoami` per run
     (~1s). If that fails (not logged in, network down) the cache is disabled
-    for the run rather than risk serving another account's responses."""
+    for the run rather than risk serving another account's responses.
+    Resolved once under a lock so concurrent workers never see a half-set value."""
     global _CACHE_NS
-    if _CACHE_NS is None:
-        _CACHE_NS = False
-        try:
-            proc = subprocess.run(["tl", "whoami", "--json"], capture_output=True,
-                                  text=True, timeout=PROBE_TIMEOUT)
-            user = (json.loads(proc.stdout).get("user") or {}) if proc.returncode == 0 else {}
-        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
-            user = {}
-        ident = user.get("id") or user.get("email")
-        if ident:
-            h = hashlib.sha256()
-            h.update(f"format={CACHE_FORMAT}\n".encode())
-            h.update(f"url={os.environ.get('TL_API_URL', '')}\n".encode())
-            h.update(f"user={ident}\n".encode())
-            _CACHE_NS = h.hexdigest()[:16]
-    return _CACHE_NS or None
+    with _CACHE_NS_LOCK:
+        if _CACHE_NS is None:
+            _CACHE_NS = False
+            try:
+                proc = subprocess.run(["tl", "whoami", "--json"], capture_output=True,
+                                      text=True, timeout=PROBE_TIMEOUT)
+                user = (json.loads(proc.stdout).get("user") or {}) if proc.returncode == 0 else {}
+            except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
+                user = {}
+            ident = user.get("id") or user.get("email")
+            if ident:
+                h = hashlib.sha256()
+                h.update(f"format={CACHE_FORMAT}\n".encode())
+                h.update(f"url={os.environ.get('TL_API_URL', '')}\n".encode())
+                h.update(f"user={ident}\n".encode())
+                _CACHE_NS = h.hexdigest()[:16]
+        return _CACHE_NS or None
 
 
 def cache_key(body):
@@ -620,6 +624,9 @@ def main():
     # One ES round-trip per candidate, `--workers` at a time; responses land
     # back in candidate order so subsumption and output are deterministic.
     outcomes = [None] * len(bodies)
+    if cache_dir and cache_namespace() is None:
+        sys.stderr.write("probe cache disabled: could not establish the tl identity (tl whoami failed)\n")
+        cache_dir = None
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, max(1, len(bodies)))) as pool:
         futures = {pool.submit(probe_one, body, cache_dir, args.cache_ttl_hours): i
                    for i, body in enumerate(bodies)}

@@ -6,6 +6,7 @@ blocks forever before its first ES call. These tests pin the guard, the
 `--groups-file` input path that replaces shell-quoting large filters, the
 parallel/cached probe loop, and the parallel context fetch.
 """
+import concurrent.futures
 import importlib.util
 import io
 import json
@@ -309,6 +310,18 @@ class TestProbeParallelAndCache:
         assert probe.cache_load(str(tmp_path), {"q": 1}, 24) is None
         probe.cache_store(str(tmp_path), {"q": 1}, {"x": 1})
         assert not any(tmp_path.iterdir())  # nothing written when identity is unknown
+
+    def test_namespace_resolved_once_under_concurrency(self, monkeypatch, probe):
+        calls = []
+        def slow_whoami(cmd, **kw):
+            calls.append(cmd)
+            time.sleep(0.05)
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"user": {"id": 7}}), stderr="")
+        monkeypatch.setattr(probe.subprocess, "run", slow_whoami)
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(lambda _: probe.cache_namespace(), range(6)))
+        assert len(calls) == 1 and len(set(results)) == 1 and results[0]
 
     def test_no_cache_flag(self, monkeypatch, capsys, tmp_path, probe):
         fake = _fake_es({"alpha": 50})
