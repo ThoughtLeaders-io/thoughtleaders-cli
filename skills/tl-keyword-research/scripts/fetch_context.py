@@ -559,10 +559,18 @@ def main():
             tiers = [t.strip() for t in args.tiers.split(",") if t.strip()] if args.tiers else None
             channel_ids += load_channels_file(args.channels_file, tiers, args.max_channels)
         channel_ids = list(dict.fromkeys(channel_ids))
-        if not channel_ids:
+        if not channel_ids and not (args.channels_file and args.emit_batches):
             sys.exit("provide channel ids via --channels and/or --channels-file")
     if args.emit_batches and not (args.out_dir and args.topic.strip()):
         sys.exit("--emit-batches needs --out-dir and --topic")
+    if args.emit_batches and os.path.exists(kw_batches.manifest_path(os.path.abspath(args.out_dir))):
+        # Refuse BEFORE any chargeable fetch, not after.
+        sys.exit(f"{os.path.abspath(args.out_dir)} already holds a judge run (manifest.json); use a fresh "
+                 "--out-dir — re-emitting over existing verdict files would let stale verdicts pass as new ones")
+    if not channel_ids:
+        # A tier selection that keeps nothing is a real answer (no core/recurring
+        # channels) — emit an empty run so the merge can report it, don't abort.
+        sys.stderr.write("no channels selected after --tiers/--max-channels; emitting an empty judge run\n")
 
     def one(cid):
         try:
@@ -577,8 +585,10 @@ def main():
         sys.stderr.write("context cache disabled: could not establish the tl identity (tl whoami failed)\n")
         cache_dir = None
     # One ES call per channel, `--workers` at a time; output keeps input order.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(channel_ids))) as pool:
-        out = list(pool.map(one, channel_ids))
+    out = []
+    if channel_ids:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(channel_ids))) as pool:
+            out = list(pool.map(one, channel_ids))
 
     if manifest is not None:  # --retry-failed: append successes as a new batch of the same pass
         snap = kw_batches.snapshot_of(manifest)

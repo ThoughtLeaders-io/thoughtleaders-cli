@@ -149,12 +149,28 @@ class TestBatchesAndMerge:
         assert code == 0, err
         return out_dir, json.loads(out), chans, fake
 
-    def test_emit_refuses_existing_run_dir(self, ctx, monkeypatch, capsys, tmp_path):
+    def test_emit_refuses_existing_run_dir_before_any_fetch(self, ctx, monkeypatch, capsys, tmp_path):
         out_dir, s, chans, _ = self._emit(ctx, monkeypatch, capsys, tmp_path)
         g = tmp_path / "g.json"
+        fake = _es_fake()
+        monkeypatch.setattr(ctx.subprocess, "run", fake)
         code, _, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels-file", str(chans),
                                                         "--emit-batches", "--topic", "t", "--out-dir", str(out_dir), "--no-cache"])
         assert code != 0 and "already holds a judge run" in err
+        assert fake.calls == []  # nothing chargeable ran
+
+    def test_empty_tier_selection_emits_an_empty_run(self, ctx, monkeypatch, capsys, tmp_path):
+        g = _write(tmp_path, GROUPS)
+        chans = _write(tmp_path, {"channels": [{"channel_id": 2, "tier": "one_off"}]}, "int.json")
+        fake = _es_fake()
+        monkeypatch.setattr(ctx.subprocess, "run", fake)
+        out_dir = tmp_path / "empty"
+        code, out, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels-file", str(chans),
+                                                          "--tiers", "core,recurring", "--emit-batches", "--topic", "t",
+                                                          "--out-dir", str(out_dir), "--no-cache"])
+        assert code == 0, err
+        assert json.loads(out)["item_count"] == 0 and json.loads(out)["batches"] == []
+        assert (out_dir / "manifest.json").exists() and fake.calls == []
 
     def test_tiers_and_max_channels_gate_the_fetch(self, ctx, monkeypatch, capsys, tmp_path):
         g = _write(tmp_path, GROUPS)
