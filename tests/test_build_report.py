@@ -1,6 +1,8 @@
 """Tests for the tl-keyword-research build_report.py script (pure, no ES)."""
 import importlib.util
+import io
 import json
+import socket
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -175,7 +177,7 @@ class TestMain:
                        {"text": "dropshipping", "exclude": True}],
         }
         monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
-        monkeypatch.setattr(br.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(br.kw_common, "stdin_is_readable", lambda: True)
         monkeypatch.setattr(br.sys.stdin, "read", lambda: json.dumps(spec))
         br.main()
         out = json.loads(capsys.readouterr().out)
@@ -191,7 +193,7 @@ class TestContentFieldValidation:
     def _run(self, spec, monkeypatch):
         import pytest
         monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
-        monkeypatch.setattr(br.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(br.kw_common, "stdin_is_readable", lambda: True)
         monkeypatch.setattr(br.sys.stdin, "read", lambda: json.dumps(spec))
         with pytest.raises(SystemExit):
             br.main()
@@ -207,11 +209,10 @@ class TestContentFieldValidation:
                    "groups": [{"text": "x"}]}, monkeypatch)
 
     def test_accepts_valid_enum_fields(self, monkeypatch, capsys):
-        import pytest
         spec = {"report_type": "channels",
                 "groups": [{"text": "cooking", "content_fields": ["title", "channel_topic_description"]}]}
         monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
-        monkeypatch.setattr(br.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(br.kw_common, "stdin_is_readable", lambda: True)
         monkeypatch.setattr(br.sys.stdin, "read", lambda: json.dumps(spec))
         br.main()
         out = json.loads(capsys.readouterr().out)
@@ -267,7 +268,7 @@ class TestAppSyntaxTranslation:
 class TestTranslationInDeliverable:
     def _run(self, spec, monkeypatch, capsys):
         monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
-        monkeypatch.setattr(br.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(br.kw_common, "stdin_is_readable", lambda: True)
         monkeypatch.setattr(br.sys.stdin, "read", lambda: json.dumps(spec))
         br.main()
         return json.loads(capsys.readouterr().out)
@@ -301,7 +302,7 @@ class TestTranslationInDeliverable:
         spec = {"operator": "OR", "report_type": "channels",
                 "groups": [{"text": "retire* planning"}]}
         monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
-        monkeypatch.setattr(br.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(br.kw_common, "stdin_is_readable", lambda: True)
         monkeypatch.setattr(br.sys.stdin, "read", lambda: json.dumps(spec))
         with pytest.raises(SystemExit) as exc:
             br.main()
@@ -376,3 +377,39 @@ class TestTranslationSemanticsGuards:
 
     def test_operator_word_as_bare_group_term_stays_quoted_literal(self):
         assert br.sqs_to_app_syntax("(rock | AND)") == '( "rock" OR "AND" )'
+
+
+class _SocketStdin(io.TextIOWrapper):
+    """A stdin that looks like the harness's: a unix socket that never closes."""
+
+    def __init__(self):
+        a, self._b = socket.socketpair()
+        super().__init__(a.makefile("rb"), encoding="utf-8")
+        self._fd = a.fileno()
+
+    def fileno(self):
+        return self._fd
+
+
+class TestStdinGuard:
+    """A socket stdin is not a TTY and never reaches EOF, so `isatty()` said
+    "read it" and the read blocked forever with nothing on stderr."""
+
+    def test_socket_stdin_exits_with_the_usage_line(self, monkeypatch, capsys):
+        monkeypatch.setattr(br.sys, "stdin", _SocketStdin())
+        monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
+        assert br.kw_common.stdin_is_readable() is False
+        with pytest.raises(SystemExit) as exc:
+            br.main()
+        assert "pass the report spec on stdin (`< spec.json`)" in str(exc.value)
+
+    def test_a_real_file_on_stdin_is_read(self, monkeypatch, capsys, tmp_path):
+        spec = {"groups": [{"text": "tiktok shop"}], "operator": "OR"}
+        path = tmp_path / "spec.json"
+        path.write_text(json.dumps(spec), encoding="utf-8")
+        with open(path, encoding="utf-8") as fh:
+            monkeypatch.setattr(br.sys, "stdin", fh)
+            monkeypatch.setattr(br.sys, "argv", ["build_report.py"])
+            br.main()
+        out = json.loads(capsys.readouterr().out)
+        assert json.dumps(out).count("tiktok shop") >= 1     # the spec was read, not blocked on

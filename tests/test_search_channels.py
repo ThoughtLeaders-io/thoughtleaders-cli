@@ -52,7 +52,7 @@ def _fake_run(search_rows=None, enrich_rows=None, capture=None):
 
 
 def _main(monkeypatch, argv, **fake_kwargs):
-    monkeypatch.setattr(sc.subprocess, "run", _fake_run(**fake_kwargs))
+    monkeypatch.setattr(sc.kw_common.subprocess, "run", _fake_run(**fake_kwargs))
     monkeypatch.setattr(sc.sys, "argv", ["search_channels.py"] + argv)
     monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)  # no stdin keywords
     sc.main()
@@ -110,7 +110,8 @@ class TestScope:
         assert {"term": {"channel.format": 4}} in filters
         assert {"term": {"content_type": "longform"}} in filters
         out = json.loads(capsys.readouterr().out)
-        assert out["scope"] == {"format": "youtube", "content_type": "longform"}
+        assert out["scope"] == {"format": "youtube", "content_type": "longform",
+                                "since": None, "until": None}
 
     def test_content_type_all_drops_filter(self, monkeypatch, capsys):
         bodies = []
@@ -195,7 +196,7 @@ def _fake_run_intensity(buckets=None, totals=None, enrich_rows=None, capture=Non
 
 class TestIntensityMode:
     def _run(self, monkeypatch, argv, **kw):
-        monkeypatch.setattr(sc.subprocess, "run", _fake_run_intensity(**kw))
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", _fake_run_intensity(**kw))
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py"] + argv)
         monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
         sc.main()
@@ -249,6 +250,36 @@ class TestIntensityMode:
         assert by_id[1]["tier"] == "recurring"     # 12 >= 5
         assert by_id[2]["tier"] == "occasional"    # 4 < 5
 
+    def test_totals_denominator_matches_numerator_scope_with_since(self, monkeypatch, capsys):
+        # The totals (denominator) call must carry the SAME --since range as the
+        # intensity (numerator) call, else topic_share is inflated by an all-time
+        # denominator whenever a date window narrows the numerator.
+        bodies = []
+        self._run(monkeypatch, ["--intensity", "--since", "2026-01-01", "investing"],
+                  capture=bodies)
+        numerator_filters = bodies[0]["query"]["bool"]["filter"]
+        totals_filters = bodies[1]["query"]["bool"]["filter"]
+        range_filter = {"range": {"publication_date": {"gte": "2026-01-01"}}}
+        assert range_filter in numerator_filters
+        assert range_filter in totals_filters
+        assert {"term": {"content_type": "longform"}} in totals_filters
+
+    def test_totals_denominator_no_range_without_since(self, monkeypatch, capsys):
+        bodies = []
+        self._run(monkeypatch, ["--intensity", "investing"], capture=bodies)
+        totals_filters = bodies[1]["query"]["bool"]["filter"]
+        assert not any("range" in f for f in totals_filters)
+
+    def test_totals_body_helper_matches_intensity_envelope_scope(self):
+        # Same assertion at the unit level, directly on the two body builders.
+        cutoff = sc.kw_common.months_ago_iso(12)
+        num_filters = sc.intensity_envelope({"filter": []}, 200, cutoff)["query"]["bool"]["filter"]
+        den_filters = sc.totals_body([1, 2, 3], "longform", "2026-01-01", None)["query"]["bool"]["filter"]
+        assert num_filters == []  # intensity_envelope takes the caller's bool_q verbatim
+        assert {"range": {"publication_date": {"gte": "2026-01-01"}}} in den_filters
+        den_filters_no_since = sc.totals_body([1, 2, 3], "longform")["query"]["bool"]["filter"]
+        assert not any("range" in f for f in den_filters_no_since)
+
 
 class TestIntensityTierFn:
     def test_matrix(self):
@@ -278,7 +309,7 @@ class TestIntensityTierFn:
                     "by_channel": {"buckets": buckets}}}
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
-        monkeypatch.setattr(sc.subprocess, "run", run)
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", run)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "investing"])
         monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
         sc.main()
@@ -288,3 +319,105 @@ class TestIntensityTierFn:
         assert c["name"] == "ch1"                   # enrichment joined
         assert c["topic_share"] == 0.6              # share joined (12/20)
         assert c["tier"] == "core"
+
+
+class TestRunLedger:
+    def test_event_records_a_numeric_elapsed(self, monkeypatch, tmp_path, capsys):
+        _main(monkeypatch, ["--run-dir", str(tmp_path), "--no-enrich", "investing"])
+        capsys.readouterr()
+        events = sorted((tmp_path / "events").glob("*.json"))
+        assert len(events) == 1
+        event = json.loads(events[0].read_text(encoding="utf-8"))
+        assert event["script"] == "search_channels"
+        assert isinstance(event["elapsed_seconds"], (int, float))
+
+
+class TestIntensitySheet:
+    def _run(self, monkeypatch, argv, **kw):
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", _fake_run_intensity(**kw))
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py"] + argv)
+        monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
+        sc.main()
+
+    def test_sheet_lines(self, monkeypatch, capsys, tmp_path):
+        sheet = tmp_path / "intensity.md"
+        self._run(monkeypatch, ["--intensity", "--since", "2025-09-19",
+                                "--sheet", str(sheet), "investing"])
+        lines = sheet.read_text(encoding="utf-8").splitlines()
+        assert 3 <= len(lines) <= 12
+        assert lines[0] == ("# Intensity · youtube longform · 2025-09-19.. · "
+                            "433 distinct channels · 19 matching uploads")
+        assert lines[1] == ("tiers (top 4 channels by matching uploads): core 1 · "
+                            "recurring 1 · occasional 1 · one_off 1 — the other 429 "
+                            "distinct channels are un-tiered")
+        assert lines[2] == "- 1 · ch1 · 12 up (5 rec) · 60% · core"
+        assert lines[-1] == "- 4 · ch4 · 1 up (1 rec) · 0% · one_off"
+
+    def test_sheet_shows_at_most_ten_channels(self, monkeypatch, capsys, tmp_path):
+        sheet = tmp_path / "intensity.md"
+        buckets = [{"key": k, "doc_count": 30 - k, "recent": {"doc_count": 1}}
+                   for k in range(1, 16)]
+        self._run(monkeypatch, ["--intensity", "--no-share", "--sheet", str(sheet), "investing"],
+                  buckets=buckets, totals={k: 100 for k in range(1, 16)})
+        lines = sheet.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 12                      # header + tiers + 10 channels
+        assert lines[2].startswith("- 1 · ch1 · 29 up")
+
+    def test_summary_block_matches_the_sheet(self, monkeypatch, capsys):
+        self._run(monkeypatch, ["--intensity", "investing"])
+        out = json.loads(capsys.readouterr().out)
+        assert out["summary"] == {
+            "distinct_channels": 433, "total_matching_videos": 19,
+            "tiered_channels": 4, "top": 200, "untiered_channels": 429,
+            "tiers": {"core": 1, "recurring": 1, "occasional": 1, "one_off": 1}}
+
+    def test_sheet_without_intensity_is_refused(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sc.sys, "argv",
+                            ["search_channels.py", "--sheet", str(tmp_path / "s.md"), "investing"])
+        monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
+        with pytest.raises(SystemExit) as exc:
+            sc.main()
+        assert "--intensity" in str(exc.value)
+
+
+class TestArgvParsing:
+    """Positionals may appear anywhere (parse_intermixed_args); a mistyped flag
+    is named rather than searched for as a keyword."""
+
+    def test_keywords_after_options_are_parsed(self, monkeypatch, capsys):
+        bodies = []
+        _main(monkeypatch, ["--group", "(a | b)", "--no-enrich", "tiktok shop"],
+              capture=bodies)
+        queries = [c["simple_query_string"]["query"]
+                   for c in bodies[0]["query"]["bool"]["should"]]
+        assert '"tiktok shop"' in queries
+
+    def test_mistyped_option_is_rejected_by_name(self, monkeypatch, capsys):
+        monkeypatch.setattr(sc.sys, "argv",
+                            ["search_channels.py", "--sinse", "2026-01-01", "investing"])
+        monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
+        with pytest.raises(SystemExit):
+            sc.main()
+        assert "--sinse" in capsys.readouterr().err
+
+
+class TestDeadline:
+    """An expired budget is not an error: exiting non-zero would break the `&&`
+    chain the skill runs these steps in."""
+
+    def test_ranked_mode_emits_the_empty_envelope_and_exits_zero(self, monkeypatch, capsys):
+        calls = []
+        _main(monkeypatch, ["investing", "--no-enrich", "--deadline-at", "1"], capture=calls)
+        out = json.loads(capsys.readouterr().out)
+        assert out["channels"] == [] and out["total_matching_videos"] == 0
+        assert out["unresolved"] == "deadline"
+        assert out["query"]["keywords"] == ["investing"]
+        assert calls == []                                  # ES was never called
+
+    def test_intensity_sheet_says_it_was_not_run(self, monkeypatch, capsys, tmp_path):
+        sheet = tmp_path / "intensity.md"
+        _main(monkeypatch, ["investing", "--intensity", "--no-share", "--no-enrich",
+                            "--sheet", str(sheet), "--deadline-at", "1"])
+        out = json.loads(capsys.readouterr().out)
+        assert out["unresolved"] == "deadline"
+        assert sheet.read_text(encoding="utf-8") == "deadline reached — not run\n"

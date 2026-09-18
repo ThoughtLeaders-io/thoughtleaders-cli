@@ -12,7 +12,6 @@ import io
 import json
 import os
 import socket
-import stat
 import subprocess
 import threading
 import time
@@ -43,11 +42,6 @@ def sv():
 @pytest.fixture
 def probe():
     return _load("probe")
-
-
-@pytest.fixture
-def ctx():
-    return _load("fetch_context")
 
 
 class _SocketStdin(io.TextIOWrapper):
@@ -109,7 +103,7 @@ class TestStdinGuard:
         mod = _load(name)
         sock = _SocketStdin()
         monkeypatch.setattr(mod.sys, "stdin", sock)
-        assert mod.stdin_is_readable() is False
+        assert mod.kw_common.stdin_is_readable() is False
         collect = getattr(mod, "collect_keywords", None) or mod.collect_candidates
         assert collect([]) == []  # returns instantly instead of blocking
 
@@ -118,21 +112,21 @@ class TestStdinGuard:
         f.write_text('["a", "b"]')
         with open(f, encoding="utf-8") as fh:
             monkeypatch.setattr(sc.sys, "stdin", fh)
-            assert sc.stdin_is_readable() is True
+            assert sc.kw_common.stdin_is_readable() is True
             assert sc.collect_keywords([]) == ["a", "b"]
         r, w = os.pipe()
         os.write(w, b'["c"]')
         os.close(w)
         with os.fdopen(r, encoding="utf-8") as fh:
             monkeypatch.setattr(sc.sys, "stdin", fh)
-            assert sc.stdin_is_readable() is True
+            assert sc.kw_common.stdin_is_readable() is True
             assert sc.collect_keywords([]) == ["c"]
 
     def test_group_run_with_socket_stdin_reaches_es(self, monkeypatch, capsys, sc):
         """The exact shape that hung: --group only, no positional keywords."""
         monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
         fake = _fake_es()
-        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", fake)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
                                              "--no-enrich", "--group", '"youtube policy"'])
         sc.main()
@@ -149,12 +143,21 @@ class TestGroupsFile:
         [{"text": "a +b"}, {"text": '"c d"'}],
         ["a +b", '"c d"'],
     ])
-    def test_three_shapes(self, tmp_path, sc, payload):
+    def test_three_shapes(self, monkeypatch, tmp_path, sc, payload):
+        """All three --groups-file payload shapes drive search_channels.py to the
+        same ES query."""
         f = tmp_path / "groups.json"
         f.write_text(json.dumps(payload))
-        groups, default, op = sc.load_groups_file(str(f))
-        assert [g["text"] for g in groups] == ["a +b", '"c d"'] and default is None and op is None
-        assert all(g["content_fields"] is None and g["exclude"] is False for g in groups)
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        fake = _fake_es()
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", fake)
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
+                                             "--no-enrich", "--groups-file", str(f)])
+        sc.main()
+        body = fake.calls[0]["query"]["bool"]
+        clauses = [c["simple_query_string"] for c in body["should"]]
+        assert [c["query"] for c in clauses] == ["a +b", '"c d"']
+        assert all(c["fields"] == sc.DEFAULT_FIELDS.split(",") for c in clauses)
 
     def test_report_semantics_preserved(self, monkeypatch, capsys, tmp_path, sc):
         """Per-group content_fields, default_content_fields and exclude groups
@@ -166,17 +169,19 @@ class TestGroupsFile:
                                             {"text": "scam", "exclude": True}]}))
         monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
         fake = _fake_es()
-        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", fake)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
                                              "--no-enrich", "--groups-file", str(f)])
         sc.main()
         body = fake.calls[0]["query"]["bool"]
         clauses = [c["simple_query_string"] for c in body["should"]]
         assert [c["query"] for c in clauses] == ["retirement +planning", "pension"]
-        assert clauses[0]["fields"] == ["title^4"]            # boost carried from the default field list
-        assert clauses[1]["fields"] == ["title^4", "summary^2"]
+        # explicit per-group content_fields ("title") wins over the file default
+        assert clauses[0]["fields"] == ["title"]
+        # no per-group override -> falls back to the file's default_content_fields
+        assert clauses[1]["fields"] == ["title", "summary"]
         # the excluded group inherits default_content_fields, exactly as the report would
-        assert body["must_not"] == [{"simple_query_string": {"query": "scam", "fields": ["title^4", "summary^2"],
+        assert body["must_not"] == [{"simple_query_string": {"query": "scam", "fields": ["title", "summary"],
                                                              "default_operator": "and"}}]
         out = json.loads(capsys.readouterr().out)
         assert out["query"]["not_groups"] == ["scam"]
@@ -187,7 +192,7 @@ class TestGroupsFile:
         f.write_text(json.dumps({"operator": "AND", "groups": [{"text": "a"}, {"text": "b"}]}))
         monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
         fake = _fake_es()
-        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", fake)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
                                              "--no-enrich", "--groups-file", str(f)])
         sc.main()
@@ -204,7 +209,7 @@ class TestGroupsFile:
                                             {"text": "scam", "exclude": True, "content_fields": ["title"]}]}))
         monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
         fake = _fake_es()
-        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.kw_common.subprocess, "run", fake)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
                                              "--no-enrich", "--groups-file", str(f), "seed one", "seed2"])
         sc.main()
@@ -212,16 +217,24 @@ class TestGroupsFile:
         should = [c["simple_query_string"] for c in body["should"]]
         assert [c["query"] for c in should] == ['"seed one"', "seed2", "pension"]
         assert should[0]["fields"] == sc.DEFAULT_FIELDS.split(",")  # positional seeds keep the defaults
-        assert should[2]["fields"] == ["title^4"]                     # the file group's override moved with it
-        assert body["must_not"][0]["simple_query_string"]["fields"] == ["title^4"]
+        assert should[2]["fields"] == ["title"]                       # the file group's override moved with it
+        assert body["must_not"][0]["simple_query_string"]["fields"] == ["title"]
 
     @pytest.mark.parametrize("field", ["channel_description", "channel_topic_description", "nonsense"])
-    def test_unsearchable_report_fields_fail_loudly(self, tmp_path, sc, sv, field):
+    def test_unsearchable_report_fields_fail_loudly(self, monkeypatch, tmp_path, sc, sv, field):
+        """A groups-file content field that cannot be searched at video level
+        fails loudly (an exception naming the field) instead of silently
+        matching nothing."""
+        f = tmp_path / "groups.json"
+        f.write_text(json.dumps({"groups": [{"text": "a", "content_fields": [field]}]}))
         for mod in (sc, sv):
-            with pytest.raises(SystemExit) as exc:
-                mod.boosted([field], mod.DEFAULT_FIELDS.split(","))
+            monkeypatch.setattr(mod.sys, "stdin", _SocketStdin())
+            monkeypatch.setattr(mod.sys, "argv", [f"{mod.__name__}.py", "--groups-file", str(f)])
+            with pytest.raises(mod.kw_common.BatchError) as exc:
+                mod.main()
             assert field in str(exc.value)
-        assert sc.boosted(["hashtags", "title"], ["title^4"]) == ["hashtags", "title^4"]
+        # a searchable field maps straight through to its ES path
+        assert sc.kw_common.es_fields(["hashtags", "title"]) == ["hashtags", "title"]
 
     def test_only_excludes_is_an_error(self, tmp_path, sc, monkeypatch):
         f = tmp_path / "groups.json"
@@ -236,26 +249,28 @@ class TestGroupsFile:
         f.write_text(json.dumps({"groups": [{"text": "x | y"}]}))
         monkeypatch.setattr(sv.sys, "stdin", _SocketStdin())
         fake = _fake_es()
-        monkeypatch.setattr(sv.subprocess, "run", fake)
+        monkeypatch.setattr(sv.kw_common.subprocess, "run", fake)
         monkeypatch.setattr(sv.sys, "argv", ["search_videos.py", "--no-enrich", "--group", "a +b",
                                              "--groups-file", str(f)])
         sv.main()
         out = json.loads(capsys.readouterr().out)
         assert out["query"]["groups"] == ["a +b", "x | y"]
 
-    def test_bad_file_fails_loudly(self, tmp_path, sc):
+    def test_bad_file_fails_loudly(self, monkeypatch, tmp_path, sc):
         f = tmp_path / "groups.json"
         f.write_text("{not json")
-        with pytest.raises(SystemExit):
-            sc.load_groups_file(str(f))
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--groups-file", str(f)])
+        with pytest.raises(sc.kw_common.BatchError):
+            sc.main()
 
 
 # ---------------------------------------------------------------- probe loop
 
 class TestProbeParallelAndCache:
     def _run(self, probe, monkeypatch, capsys, argv, fake, cache_dir, ns="test-identity"):
-        monkeypatch.setattr(probe.subprocess, "run", fake)
-        monkeypatch.setattr(probe, "_CACHE_NS", ns)
+        monkeypatch.setattr(probe.kw_common.subprocess, "run", fake)
+        monkeypatch.setattr(probe.kw_common, "_CACHE_NS", ns)
         monkeypatch.setattr(probe.sys, "argv", ["probe.py", "--samples", "0", "--no-recency",
                                                 "--cache-dir", str(cache_dir)] + argv)
         probe.main()
@@ -276,7 +291,8 @@ class TestProbeParallelAndCache:
         out = self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path)
         assert len(fake.calls) == 1  # no second ES call
         assert out["timing"] == {"elapsed_seconds": out["timing"]["elapsed_seconds"],
-                                 "es_calls": 0, "cache_hits": 1, "workers": probe.PROBE_WORKERS}
+                                 "es_calls": 0, "cache_hits": 1, "workers": probe.PROBE_WORKERS,
+                                 "waves": 1, "unresolved": 0}
         assert out["keywords"][0]["count"] == 50
 
     def test_cache_key_includes_fields_and_scope(self, monkeypatch, capsys, tmp_path, probe):
@@ -293,23 +309,27 @@ class TestProbeParallelAndCache:
         assert len(fake.calls) == 2  # another account never shares an entry
         assert len(list(tmp_path.iterdir())) == 2  # two namespace directories
 
-    def test_namespace_comes_from_tl_whoami_and_disables_cache_on_failure(self, monkeypatch, tmp_path, probe):
+    def test_namespace_comes_from_tl_whoami_with_a_shared_fallback(self, monkeypatch, tmp_path, probe):
         def whoami_ok(cmd, **kw):
             assert cmd[:2] == ["tl", "whoami"]
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"user": {"id": 7, "email": "a@b"}}), stderr="")
-        monkeypatch.setattr(probe.subprocess, "run", whoami_ok)
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
-        ns_a = probe.cache_namespace()
+        monkeypatch.setattr(probe.kw_common.subprocess, "run", whoami_ok)
+        monkeypatch.setattr(probe.kw_common, "_CACHE_NS", None)
+        ns_a = probe.kw_common.cache_namespace()
         monkeypatch.setenv("TL_API_URL", "https://staging.example")
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
-        assert probe.cache_namespace() not in (None, ns_a)  # endpoint is part of the identity
-        monkeypatch.setattr(probe.subprocess, "run",
+        monkeypatch.setattr(probe.kw_common, "_CACHE_NS", None)
+        assert probe.kw_common.cache_namespace() not in (None, ns_a)  # endpoint is part of the identity
+        monkeypatch.setattr(probe.kw_common.subprocess, "run",
                             lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not logged in"))
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
-        assert probe.cache_namespace() is None
-        assert probe.cache_load(str(tmp_path), {"q": 1}, 24) is None
-        probe.cache_store(str(tmp_path), {"q": 1}, {"x": 1})
-        assert not any(tmp_path.iterdir())  # nothing written when identity is unknown
+        monkeypatch.setattr(probe.kw_common.time, "sleep", lambda *_: None)
+        monkeypatch.setattr(probe.kw_common, "_CACHE_NS", None)
+        # whoami failing no longer disables the cache — it falls back to the
+        # endpoint-scoped shared namespace (kw_common.cache_namespace()).
+        shared = probe.kw_common.cache_namespace()
+        assert shared.startswith("shared-") and shared != ns_a
+        probe.kw_common.cache_store(str(tmp_path), {"q": 1}, {"x": 1})
+        assert probe.kw_common.cache_load(str(tmp_path), {"q": 1}, 24) == {"x": 1}
+        assert [d.name for d in tmp_path.iterdir()] == [shared]
 
     def test_namespace_resolved_once_under_concurrency(self, monkeypatch, probe):
         calls = []
@@ -317,10 +337,10 @@ class TestProbeParallelAndCache:
             calls.append(cmd)
             time.sleep(0.05)
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"user": {"id": 7}}), stderr="")
-        monkeypatch.setattr(probe.subprocess, "run", slow_whoami)
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        monkeypatch.setattr(probe.kw_common.subprocess, "run", slow_whoami)
+        monkeypatch.setattr(probe.kw_common, "_CACHE_NS", None)
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-            results = list(pool.map(lambda _: probe.cache_namespace(), range(6)))
+            results = list(pool.map(lambda _: probe.kw_common.cache_namespace(), range(6)))
         assert len(calls) == 1 and len(set(results)) == 1 and results[0]
 
     def test_no_cache_flag(self, monkeypatch, capsys, tmp_path, probe):
@@ -331,32 +351,8 @@ class TestProbeParallelAndCache:
         assert not any(tmp_path.iterdir())
 
     def test_transient_failure_retried_once(self, monkeypatch, capsys, tmp_path, probe):
-        monkeypatch.setattr(probe, "RETRY_PAUSE", 0)
+        monkeypatch.setattr(probe.kw_common, "RETRY_PAUSE", 0)
         fake = _fake_es({"alpha": 50}, fail_first=lambda body: True)
         out = self._run(probe, monkeypatch, capsys, ["--no-cache", "alpha"], fake, tmp_path)
         assert len(fake.calls) == 2
         assert out["failed"] == [] and out["keywords"][0]["count"] == 50
-
-
-# ---------------------------------------------------------------- fetch_context
-
-class TestFetchContextParallel:
-    def test_order_kept_and_errors_recorded(self, monkeypatch, capsys, ctx):
-        monkeypatch.setattr(ctx, "RETRY_PAUSE", 0)
-
-        def run(cmd, input=None, **kw):
-            body = json.loads(input)
-            cid = next(f["term"]["channel.id"] for f in body["query"]["bool"]["filter"] if "channel.id" in f["term"])
-            if cid == 2:
-                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
-            row = {"id": f"v{cid}", "title": f"kw hit {cid}", "summary": ""}
-            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"results": [row], "total": 1}), stderr="")
-
-        monkeypatch.setattr(ctx.subprocess, "run", run)
-        monkeypatch.setattr(ctx.sys, "argv", ["fetch_context.py", "--channels", "3,2,1", "--no-cache",
-                                              "--fields", "title", "--workers", "3", "kw"])
-        ctx.main()
-        out = json.loads(capsys.readouterr().out)
-        assert [o["channel_id"] for o in out] == [3, 2, 1]
-        assert out[1]["error"].startswith("tl db es failed") and out[1]["snippets"] == []
-        assert out[0]["match_count"] == 1 and out[0]["snippets"][0]["keyword"] == "kw"
