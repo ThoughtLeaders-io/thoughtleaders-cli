@@ -391,11 +391,33 @@ def load_groups_file(path):
     return out, default_fields, file_operator
 
 
+# Report content-field names → ES paths on ARTICLE docs (what these scripts
+# search). Channel-level report fields (channel_description, …) live on channel
+# docs and need a parent-child join ES won't run here — refuse them loudly
+# rather than silently matching nothing. See references/elasticsearch-content-search.md.
+ARTICLE_FIELD_MAP = {"title": "title", "summary": "summary", "transcript": "transcript",
+                     "content": "content", "hashtags": "hashtags"}
+CHANNEL_ONLY_FIELDS = {"channel_description", "channel_description_ai",
+                       "channel_topic_description", "channel.channel_name"}
+
+
 def boosted(names, fields):
-    """Map plain content-field names (title) onto the caller's boosted list
-    (title^4) so a per-group override keeps the ranking weights."""
-    by_name = {f.split("^", 1)[0]: f for f in fields}
-    return [by_name.get(n, n) for n in names]
+    """Map report content-field names (title) onto ES paths, carrying the
+    caller's boost for that path (title^4) so a per-group override keeps the
+    ranking weights. Channel-level names are rejected: they cannot be searched
+    from article documents."""
+    by_path = {f.split("^", 1)[0]: f for f in fields}
+    out = []
+    for n in names:
+        if n in CHANNEL_ONLY_FIELDS:
+            sys.exit(f"content field {n!r} lives on channel docs and cannot be searched at video "
+                     "level; measure it with probe.py --level channel instead")
+        path = ARTICLE_FIELD_MAP.get(n)
+        if path is None:
+            sys.exit(f"unknown content field {n!r} in groups file; known: "
+                     f"{sorted(ARTICLE_FIELD_MAP)} (channel-level fields are not searchable here)")
+        out.append(by_path.get(path, path))
+    return out
 
 
 

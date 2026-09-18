@@ -214,6 +214,14 @@ class TestGroupsFile:
         assert should[2]["fields"] == ["title^4"]                     # the file group's override moved with it
         assert body["must_not"][0]["simple_query_string"]["fields"] == ["title^4"]
 
+    @pytest.mark.parametrize("field", ["channel_description", "channel_topic_description", "nonsense"])
+    def test_unsearchable_report_fields_fail_loudly(self, tmp_path, sc, sv, field):
+        for mod in (sc, sv):
+            with pytest.raises(SystemExit) as exc:
+                mod.boosted([field], mod.DEFAULT_FIELDS.split(","))
+            assert field in str(exc.value)
+        assert sc.boosted(["hashtags", "title"], ["title^4"]) == ["hashtags", "title^4"]
+
     def test_only_excludes_is_an_error(self, tmp_path, sc, monkeypatch):
         f = tmp_path / "groups.json"
         f.write_text(json.dumps([{"text": "scam", "exclude": True}]))
