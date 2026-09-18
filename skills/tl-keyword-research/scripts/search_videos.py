@@ -25,10 +25,14 @@ Output (stdout): a single JSON object — see OUTPUT_SHAPE at the bottom.
 import argparse
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kw_batches  # noqa: E402
 
 DEFAULT_FIELDS = "title^4,summary^2,transcript^1"  # title > summary > transcript
 # ES channel docs keep the LEGACY field names (reach …) — the index was not
@@ -244,6 +248,20 @@ def collect_keywords(argv_words):
         return [str(x).strip() for x in parsed if str(x).strip()]
     sys.exit("stdin JSON must be a list of strings")
 
+# A plain multi-word group (no SQS operators) is a PHRASE in the delivered
+# report; unquoted it would be an implicit AND of loose terms here. Mirror
+# build_report.py's structural test so search and link select the same docs.
+_STRUCTURAL_BOOL_RE = re.compile(r'[|()"]|(?:^|(?<=[\s(]))[+-](?=\S)')
+_DETACHED_SIGN_RE = re.compile(r"(?:^|(?<=\s))[+-](?=\s|$)")
+
+
+def phrase_if_plain(text):
+    """Quote an unstructured multi-word group as one phrase; leave boolean text alone."""
+    t = text.strip()
+    if " " in t and not (_STRUCTURAL_BOOL_RE.search(t) or _DETACHED_SIGN_RE.search(t)):
+        return f'"{t}"'
+    return t
+
 
 def stdin_is_readable():
     """True only when stdin is a real pipe or regular file.
@@ -364,9 +382,16 @@ def main():
     ap.add_argument("--since", help="publication_date >= YYYY-MM-DD")
     ap.add_argument("--until", help="publication_date <= YYYY-MM-DD")
     ap.add_argument("--no-enrich", action="store_true", help="Skip channel name/subscribers enrichment")
+    ap.add_argument("--run-dir", metavar="DIR",
+                    help="Run ledger: append this invocation (argv, elapsed, output) as one event file under DIR/events/")
     args = ap.parse_args()
 
     fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    _ledger_started = time.monotonic()
+
+    def emit(obj, **dump_kw):
+        print(json.dumps(obj, ensure_ascii=False, **dump_kw))
+        kw_batches.record_event(args.run_dir, "search_videos", sys.argv[1:], _ledger_started, obj)
     if not fields:
         sys.exit("--fields must list at least one ES field")
 
@@ -375,7 +400,7 @@ def main():
 
     keywords = dedupe(collect_keywords(args.keywords))
     any_groups = [g for g in (parse_group(r) for r in args.any) if g]
-    sqs_groups = [g.strip() for g in args.group if g.strip()]
+    sqs_groups = [phrase_if_plain(g) for g in args.group if g.strip()]
     group_fields, not_groups = {}, []
     if args.groups_file:
         file_groups, file_default, file_operator = load_groups_file(args.groups_file)
@@ -391,11 +416,11 @@ def main():
             per = g["content_fields"] or file_default
             per = boosted(per, fields) if per else None
             if g["exclude"]:  # an excluded group keeps its own field scope
-                not_groups.append({"text": g["text"], "fields": per or fields})
+                not_groups.append({"text": phrase_if_plain(g["text"]), "fields": per or fields})
                 continue
             if per:
                 group_fields[len(sqs_groups)] = per
-            sqs_groups.append(g["text"])
+            sqs_groups.append(phrase_if_plain(g["text"]))
     if args.operator is None:
         args.operator = "OR"
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
@@ -464,7 +489,7 @@ def main():
                 v["channel"]["subscribers"] = doc.get("reach")
 
     scope = {"format": "youtube", "content_type": args.content_type}
-    print(json.dumps({
+    emit({
         "query": query_desc,
         "expression": expression,
         "fields": args.fields,
@@ -473,7 +498,7 @@ def main():
         "distinct_channels": args.distinct_channels,
         "total_matching_videos": env.get("total", 0),
         "videos": videos,
-    }, ensure_ascii=False))
+    })
 
 
 # OUTPUT_SHAPE:

@@ -346,14 +346,14 @@ class TestFetchContextParallel:
 
         def run(cmd, input=None, **kw):
             body = json.loads(input)
-            cid = body["query"]["bool"]["filter"][1]["term"]["channel.id"]
+            cid = next(f["term"]["channel.id"] for f in body["query"]["bool"]["filter"] if "channel.id" in f["term"])
             if cid == 2:
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
             row = {"id": f"v{cid}", "title": f"kw hit {cid}", "summary": ""}
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"results": [row], "total": 1}), stderr="")
 
         monkeypatch.setattr(ctx.subprocess, "run", run)
-        monkeypatch.setattr(ctx.sys, "argv", ["fetch_context.py", "--channels", "3,2,1",
+        monkeypatch.setattr(ctx.sys, "argv", ["fetch_context.py", "--channels", "3,2,1", "--no-cache",
                                               "--fields", "title", "--workers", "3", "kw"])
         ctx.main()
         out = json.loads(capsys.readouterr().out)

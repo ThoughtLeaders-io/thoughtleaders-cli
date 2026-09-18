@@ -255,11 +255,20 @@ def main():
                     help=f"Cap on insider_terms folded in (default {MAX_INSIDER_DEFAULT}).")
     ap.add_argument("--probe-batch", action="store_true",
                     help="Print ONLY the probe_candidates array (pipe straight into probe.py).")
+    ap.add_argument("--names", nargs="+", metavar="NAME",
+                    help="Expand these names directly (no resolver JSON, no web step): the same "
+                         "tokenization variants — spaced / solid / spelled-out number — every "
+                         "brainstormed entity should get. Mutually exclusive with resolver stdin.")
     args = ap.parse_args()
     if args.max_insider < 0:
         sys.exit("--max-insider must be >= 0")
 
-    out = expand(load_resolver(), args.existing, args.max_insider)
+    if args.names:
+        # Offline path: treat each name as an entity family of kind "named".
+        resolver = {"entities": [{"name": n, "kind": "named"} for n in args.names if n.strip()]}
+    else:
+        resolver = load_resolver()
+    out = expand(resolver, args.existing, args.max_insider)
     if args.probe_batch:
         print(json.dumps(out["probe_candidates"], ensure_ascii=False))
     else:
@@ -277,5 +286,6 @@ def main():
 #     "recency","notes","sources","counts"
 #   }
 #   --probe-batch (stdout): [{"sqs"|"phrase": str, "label": str}, ...]   # the array only
+#   --names N1 N2 …: same shapes, built from the given names without a resolver (kind "named")
 if __name__ == "__main__":
     main()

@@ -267,10 +267,13 @@ A shallow synonym list is the #1 failure mode. Coverage is won or lost here.
   `anthropic` for the Claude Fable 5 launch missed `fable 5` (713 ch),
   `claude mythos` (620 ch — the sibling), and `mythos 5` (433 ch) — most of the
   topic.)
-- **Generate tokenization variants for every name/number.** The index tokenizes
-  `fable5`, `fable 5`/`fable-5`, and `fable five` as *different terms that miss
-  each other's documents* — probe each spelling (solid / spaced / spelled-out /
-  hashtag-handle) as its own candidate. No stemming either: expand
+- **Generate tokenization variants for every name/number — with the script,
+  not by hand.** The index tokenizes `fable5`, `fable 5`/`fable-5`, and
+  `fable five` as *different terms that miss each other's documents*. Run
+  every named entity you brainstorm through
+  `expand_entities.py --names "fable 5" "claude mythos" --existing … --probe-batch`
+  (no web step needed) and probe the candidates it prints — each family becomes
+  one `("fable 5" | fable5 | "fable five")` group. No stemming either: expand
   inflections/plurals yourself (`invest`/`investing`/`investments` are distinct).
 - **Candidates can be boolean groups, not just phrases** — a self-contained
   `simple_query_string` like `("fable 5" | fable5 | "claude fable")`, or a
@@ -347,29 +350,46 @@ this skill from a free YouTube search.
 verbatim intent. Drop off-intent keywords, `count: 0`, and redundant
 `subsumed_by` duplicates.
 
-**At scale (the `keyword-relevance-validator` sub-agent):**
+**At scale (the `keyword-relevance-validator` sub-agent) — files in, files out:**
 
 ```bash
-python3 <SKILL_DIR>/scripts/probe.py "tiktok shop" "selling on tiktok" "tiktok" > /tmp/kw_probe.json
-python3 <SKILL_DIR>/scripts/select_keywords.py --emit-batch < /tmp/kw_probe.json > /tmp/kw_batch.json
+python3 <SKILL_DIR>/scripts/probe.py "tiktok shop" "selling on tiktok" "tiktok" > $RUN/probe1.json
+python3 <SKILL_DIR>/scripts/select_keywords.py --emit-batch --probe-file $RUN/probe1.json \
+  --intent "<the verbatim intent>" --out-dir $RUN/val1 --run-dir $RUN
 ```
 
-Send the batch (prepending one line — `intent: <one sentence>`) to the
-`keyword-relevance-validator` agent (Agent tool), save the strict reply
-`[{i,relevant}]`, optionally run a second pass for a majority vote, then:
+That writes an immutable snapshot, `manifest.json`, and `batch_p1_000.json …`
+(≤40 samples each, ≤64KB) and prints one line per batch with its `path`,
+`verdict_path` and `count`. **Never paste samples into a prompt.** Then:
 
-```bash
-python3 <SKILL_DIR>/scripts/select_keywords.py --apply /tmp/verdict1.json [/tmp/verdict2.json] < /tmp/kw_probe.json
-```
+1. **Spawn exactly one `keyword-relevance-validator` per batch file, all in
+   ONE message** (`subagent_type: keyword-relevance-validator`; never pass
+   `model` — the agent file pins Haiku). If there are more than 6 batches,
+   run them in waves of 6. Each prompt is one line: *"Judge the batch file
+   `<path>`."* The agent reads the file, writes the array to its
+   `verdict_path`, and replies `{"verdict_path", "count"}` — that reply is all
+   that enters your context.
+2. **Apply — the script checks completeness, you don't:**
+   ```bash
+   python3 <SKILL_DIR>/scripts/select_keywords.py --apply --manifest $RUN/val1 --run-dir $RUN
+   ```
+   Exit 0: done. Exit 2: some ids came back missing (cheap models drop the
+   tail of long lists); the output lists **repair batches** it just wrote
+   (`batch_p1_r000.json`, sparse ids, same pass) — spawn a validator per
+   repair batch, then `--apply` again. A malformed reply (fence, prose,
+   `"relevant": "false"`, an id outside the batch, two different verdicts for
+   one id) fails loudly with the batch id: re-spawn a fresh validator for that
+   batch once; if it fails again, run that one batch with `model: sonnet` and
+   say so. Never hand-edit a verdict file.
+3. **Second opinion (optional):** `--add-pass --manifest $RUN/val1` emits every
+   item again under `p2`; spawn validators the same way; `--apply` then
+   majority-votes per sample across passes (a tie drops the sample).
 
-Keeps a keyword only when a strict majority of its samples are on-topic, lists
-`dropped` with reasons, surfaces `candidate_channels`/`candidate_videos` from
-validated samples, and emits `groups` for Stage 6. **Completeness is checked**:
-if the verdict doesn't cover every batch sample, `--apply` fails and lists the
-missing indices — re-send just those samples to a fresh validator and merge
-(cheap models silently drop the tail of long lists; never assume a batch came
-back whole).
-
+`--apply` keeps a keyword only when a strict majority of its samples are
+on-topic, lists `dropped` with reasons, surfaces `candidate_channels` /
+`candidate_videos` from validated samples, emits `groups` for Stage 6, and a
+`fitness` block (samples, judged, on_topic, relevance_share, worst_offenders)
+— that is the round's fitness number; read it, don't estimate it.
 **Ask the user on scope, not relevance.** Two different questions hide here:
 *relevance* ("is this term's match on-topic?" — you judge from samples) and
 *scope* ("is this sub-topic part of what the user wants?" — the user's call).
@@ -401,12 +421,24 @@ good). Each round:
    `--fields title,summary`, or chunk the union. Re-probing a group you
    already measured this session costs nothing: identical probes come back
    from the disk cache, so recompose freely.)
+   **Measure residuals and exclusions with the script, not by composing
+   queries by hand:** `probe.py --residual-vs '<core sqs>' <candidates…>`
+   reports each candidate's `residual` (documents / channels it reaches that
+   the core does not; `residual_share`) and
+   `probe.py --exclude-phrase "film festival" <candidates…>` reports
+   `exclusion_checks` with the document/channel `delta_pct` the exclusion
+   costs. These are measurements — compare them with the worked numbers in
+   the reference (a shared token cut the Cannes core 24%, the phrase 4%);
+   there is no fixed threshold.
 3. **Validate** what changed (Stage 3 machinery; 15–20 samples for noise-rate
    audits — 5 is too few to estimate a noise rate).
-4. **Score fitness** and write it down: share of on-topic samples, whether
-   noise clusters on one confusable sense, coverage vs the Stage 0 breadth
-   judgment, what the round changed.
-5. **Decide the move** and record (query, fitness, decision) so you can
+4. **Score fitness** — read `fitness` from `select_keywords.py --apply`
+   (relevance_share, worst_offenders) plus the coverage number, and write down
+   what the round changed and where the noise sits. Fitness never ends a
+   round early on its own: ≥3 rounds and the checkpoint stand.
+5. **Decide the move** and record (query, fitness, decision) — every script
+   call carries `--run-dir $RUN`, so the ledger under `$RUN/events/` holds each
+   round's queries and numbers; your note adds the decision — so you can
    backtrack. **Backtracking is expected, not failure** — when a move reduced
    fitness, discard it, return to the recorded query, try a different axis.
 6. **Keep a running validated set** across rounds (dedupe by `channel_id`):
@@ -539,30 +571,44 @@ on-topic uploads. Tell the user when one channel dominates and offer
    (`title^4,summary^2,transcript^1`) with sponsorability flags. During
    refinement rounds the coarser `--any/--not` composition is a quick
    narrowing lever; the `--group` form re-runs the delivered filter exactly.
-2. **Fetch context** for candidates, prioritized by intensity tier — core and
-   recurring first, occasional only if budget remains, one-offs not at all
-   (unless the user asks):
+2. **Fetch context with the delivered filter, and let the script build the
+   classifier batches.** Candidates are prioritized by intensity tier — core
+   and recurring first, occasional only if budget remains, one-offs not at
+   all (unless the user asks). Pass the intensity output straight in:
    ```bash
-   python3 <SKILL_DIR>/scripts/fetch_context.py --channels 466311,2105 \
-     --samples 4 --window 160 investing
+   python3 <SKILL_DIR>/scripts/fetch_context.py --groups-file $RUN/groups.json \
+     --channels-file $RUN/intensity.json --samples 4 --window 160 \
+     --emit-batches --topic "<intended sense>" --not "<senses to exclude>" \
+     --out-dir $RUN/ctx1 --run-dir $RUN
    ```
-   Extracts the text window around each keyword occurrence (transcript is
-   caption XML — the script strips/unescapes it client-side).
-   A channel whose fetch failed comes back with `"error"` and no snippets
-   (the batch no longer aborts). **Leave those out of the classifier batch**
-   — an empty-snippet channel would be judged `mixed`, not "unknown" — rerun
-   just those ids once, and list any that still fail as *not validated*.
-3. **Classify** with the **`keyword-context-classifier`** agent (Agent tool,
-   `subagent_type: keyword-context-classifier` — Haiku-cheap). Give each batch
-   a `TOPIC:` line, usually a `NOT:` line, and the indexed evidence. Batch
-   ≈50–100 channels, run batches in parallel. Returns per channel:
-   `verdict on_topic|mixed|off_topic`, `confidence`, `evidence_quote`,
-   `adjacent_terms` (feed those back to Stage 4).
-   **Completeness ritual, non-negotiable:** anchor the count in the prompt
-   (*"There are exactly 50 channels (indices 0–49). Return exactly 50 objects.
-   The last channel_id is 778812."*), and after each batch **diff the returned
-   `channel_id`s against what you sent; re-send missing ones to a fresh agent
-   and merge.** Never assume a batch came back whole.
+   Evidence is selected under the same scope and the same boolean groups (with
+   their per-group fields and excludes) the searches ran, and each snippet is
+   the text window around a *literal* term of a group. It writes the evidence
+   snapshot, `manifest.json` and `batch_p1_000.json …` (≤40 channels each) and
+   prints one line per batch plus `failed_channels`. Failed fetches are left
+   out of the batches; run `fetch_context.py --retry-failed $RUN/ctx1
+   --groups-file …` once to append them, and list any that still fail as
+   *not validated*.
+3. **Classify — one `keyword-context-classifier` per batch file, all in ONE
+   message** (`subagent_type: keyword-context-classifier`, never pass
+   `model`; waves of 6 if there are more). Each prompt is one line: *"Judge
+   the batch file `<path>`."* The agent reads the evidence, writes its
+   `verdict_path`, and replies `{"verdict_path", "count"}`. Then merge:
+   ```bash
+   python3 <SKILL_DIR>/scripts/classify_channels.py --manifest $RUN/ctx1 \
+     --intensity $RUN/intensity.json [--ranking $RUN/ranked.json] --run-dir $RUN
+   ```
+   It validates every verdict (`(i, channel_id)` must match the evidence,
+   verdict ∈ on_topic|mixed|off_topic), checks completeness per pass and
+   writes **repair batches** for anything missing (exit 2 — spawn a
+   classifier per repair batch, run it again), then prints the final table:
+   `channels` (on_topic + mixed, tier × verdict × sponsorability), `excluded`
+   (off_topic, always surfaced), `not_validated` (fetch failed / never
+   fetched), pooled `adjacent_terms` with the channels that said them, and a
+   sponsorability summary. A malformed verdict file fails with its batch id:
+   re-spawn a fresh classifier for that batch once, then escalate that batch
+   to `model: sonnet` and say so. `adjacent_terms` are suggestions for Stage 4
+   — widening the filter with one is a scope decision for the user.
 4. **Disposition:** the final channel table carries **tier × verdict ×
    sponsorability**. Keep `on_topic` AND `mixed` (labelled, with confidence);
    exclude only clear `off_topic` — and surface the excluded list. Rank all,
@@ -670,10 +716,12 @@ jargon-dense topics. Run `tl describe show db` for live rates; preview with
    scope-widening was user-confirmed (never silent drift).
 6. Intensity triage ran before any per-channel spend, and its tier summary
    was shown to the user. For the channel-targets deliverable, the final
-   table carries **tier × verdict × sponsorability**: context validation ran
-   with the completeness ritual (every batch diffed by `channel_id`, missing
-   items re-sent), prioritized core + recurring; only clear `off_topic`
-   channels excluded, and the exclusion surfaced; all ranked, none filtered
+   table is `classify_channels.py`'s output (tier × verdict × sponsorability):
+   evidence came from `fetch_context.py --groups-file` (the delivered filter,
+   not hand-picked keywords), every batch went to an agent as a file path,
+   completeness was enforced by the scripts (repair batches judged until
+   `--apply` / the merge exited 0), prioritized core + recurring; only clear
+   `off_topic` channels excluded, and the exclusion surfaced; all ranked, none filtered
    for being unbookable. If the topic has few/no core channels you said so
    and framed the recurring tier as the market — no padding, no near-empty
    list passed off as the answer. If budget forced a degraded validation you

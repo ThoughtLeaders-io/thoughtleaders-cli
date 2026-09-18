@@ -39,8 +39,11 @@ import os
 import stat
 import subprocess
 import threading
-import time
 import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kw_batches  # noqa: E402
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
 # `summary` holds the video's creator-written description (links, hashtags, promo)
@@ -566,6 +569,14 @@ def main():
                     help="Topic STALE share: recent_channels/channels below this AND below the floor → stale (default 0.10).")
     ap.add_argument("--min-active-share", type=float, default=0.33,
                     help="Channel STALE share: active_channels/channels below this AND below the floor → stale (default 0.33).")
+    ap.add_argument("--residual-vs", metavar="SQS",
+                    help="Measurement: also probe each candidate MINUS this core query "
+                         "(`(candidate) -(core)`) and report residual_documents / residual_channels — "
+                         "what the candidate reaches that the core does not. Counts, not a verdict.")
+    ap.add_argument("--exclude-phrase", action="append", default=[], metavar="TEXT",
+                    help="Measurement (repeatable): also probe each candidate with this phrase excluded "
+                         "and report the document/channel drop (delta_pct). No threshold is applied — "
+                         "read the numbers against the reference's worked examples.")
     ap.add_argument("--workers", type=int, default=PROBE_WORKERS,
                     help=f"Concurrent ES probes (default {PROBE_WORKERS}; 1 = sequential).")
     ap.add_argument("--cache-dir", default=CACHE_DIR,
@@ -574,10 +585,17 @@ def main():
                     help=f"Serve an identical probe from cache if younger than this (default {CACHE_TTL_HOURS}).")
     ap.add_argument("--no-cache", action="store_true",
                     help="Always hit ES, and don't write the cache.")
+    ap.add_argument("--run-dir", metavar="DIR",
+                    help="Run ledger: append this invocation (argv, elapsed, output) as one event file under DIR/events/")
     args = ap.parse_args()
 
     if args.workers < 1:
         sys.exit("--workers must be >= 1")
+    _ledger_started = time.monotonic()
+
+    def emit(obj, **dump_kw):
+        print(json.dumps(obj, ensure_ascii=False, **dump_kw))
+        kw_batches.record_event(args.run_dir, "probe", sys.argv[1:], _ledger_started, obj)
     cache_dir = None if args.no_cache else args.cache_dir
 
     if args.recency_months < 1:
@@ -637,6 +655,32 @@ def main():
             except ProbeError as exc:
                 outcomes[i] = exc
 
+    # Measurement variants share the pool: one extra body per candidate per measurement.
+    measurements = []  # (candidate_index, kind, label, body)
+    for ci, cand in enumerate(candidates):
+        as_sqs = f'"{cand["value"]}"' if cand["mode"] == "phrase" else f'({cand["value"]})'
+        if args.residual_vs:
+            v = {"label": cand["label"], "value": f"{as_sqs} -({args.residual_vs})", "mode": "sqs"}
+            measurements.append((ci, "residual", None, build_body(
+                v, fields=fields, level=args.level, samples=0, source_paths=source_paths,
+                since=args.since, until=args.until, recency_cutoff=None, content_type=args.content_type)))
+        for phrase in args.exclude_phrase:
+            q = f'"{phrase}"' if " " in phrase else phrase
+            v = {"label": cand["label"], "value": f"{as_sqs} -{q}", "mode": "sqs"}
+            measurements.append((ci, "exclusion", phrase, build_body(
+                v, fields=fields, level=args.level, samples=0, source_paths=source_paths,
+                since=args.since, until=args.until, recency_cutoff=None, content_type=args.content_type)))
+    m_outcomes = [None] * len(measurements)
+    if measurements:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(measurements))) as pool:
+            futs = {pool.submit(probe_one, body, cache_dir, args.cache_ttl_hours): k
+                    for k, (_, _, _, body) in enumerate(measurements)}
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    m_outcomes[futs[fut]] = fut.result()
+                except ProbeError as exc:
+                    m_outcomes[futs[fut]] = exc
+
     results, failed = [], []
     cache_hits = es_calls = 0
     for cand, outcome in zip(candidates, outcomes):
@@ -670,6 +714,34 @@ def main():
                                         else args.min_active_share))
         results.append(row)
 
+    def pct_drop(before, after):
+        return round((before - after) * 100.0 / before, 1) if before else None
+
+    for k, (ci, kind, phrase, _) in enumerate(measurements):
+        cand = candidates[ci]
+        row = next((r for r in results if r["keyword"] == cand["value"] and r["_mode"] == cand["mode"]), None)
+        if row is None:
+            continue
+        mo = m_outcomes[k]
+        if isinstance(mo, ProbeError):
+            rec = {"error": str(mo)}
+        else:
+            mdata, from_cache = mo
+            cache_hits += from_cache
+            es_calls += not from_cache
+            rec = {"documents": extract_total(mdata), "channels": extract_distinct(mdata)}
+        if kind == "residual":
+            row["residual"] = {"vs": args.residual_vs, **rec}
+            if "documents" in rec:
+                row["residual"]["residual_share"] = (round(rec["documents"] / row["documents"], 3)
+                                                     if row["documents"] else None)
+        else:
+            rec = {"phrase": phrase, **rec}
+            if "documents" in rec:
+                rec["delta_pct_documents"] = pct_drop(row["documents"], rec["documents"])
+                rec["delta_pct_channels"] = pct_drop(row["channels"], rec["channels"])
+            row.setdefault("exclusion_checks", []).append(rec)
+
     mark_subsumed(results, args.operator)
 
     # `count` is 0 exactly when the document total is 0 (a non-empty match always
@@ -684,6 +756,9 @@ def main():
         kept = {"keyword": r["keyword"], "count": r["count"],
                 "documents": r["documents"], "channels": r["channels"],
                 "subsumed_by": r["subsumed_by"], "samples": r["samples"]}
+        for extra in ("residual", "exclusion_checks"):
+            if extra in r:
+                kept[extra] = r[extra]
         if recency:
             for k in (*recency_keys, "stale", "stale_reason", "thin"):
                 kept[k] = r[k]
@@ -709,7 +784,7 @@ def main():
     if recency:
         out["recency"] = ({"months": args.recency_months, "cutoff": recency_cutoff}
                           if args.level == "topic" else {"signal": "posts_per_90_days>0"})
-    print(json.dumps(out, ensure_ascii=False))
+    emit(out)
     if failed and not results:
         sys.exit(1)  # every candidate failed — the batch itself is broken
 
@@ -722,6 +797,8 @@ def main():
 #   "scope": {"format": "youtube"[, "content_type": "longform"|"short"|"live"|"all"]},  # always-on filters
 #   "failed": [ {"keyword": "...", "label": "...", "error": "..."} ],  # probes that errored/timed out — retry individually
 #   "timing": {"elapsed_seconds": 12.3, "es_calls": 40, "cache_hits": 8, "workers": 6}  # wall-clock + how many probes hit ES vs the 24h disk cache
+#   per keyword with --residual-vs:   "residual": {"vs", "documents", "channels", "residual_share"}   # candidate minus core; counts only
+#   per keyword with --exclude-phrase: "exclusion_checks": [{"phrase","documents","channels","delta_pct_documents","delta_pct_channels"}]
 #   "keywords": [                       # all candidates with documents>0, sorted desc by count
 #     {"keyword": "...",
 #      "count": <int>,        # headline for ranking: documents at topic, channels at channel

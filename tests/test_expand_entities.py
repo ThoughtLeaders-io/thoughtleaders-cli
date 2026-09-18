@@ -173,3 +173,23 @@ class TestMainIO:
         monkeypatch.setattr(ee.sys, "argv", ["expand_entities.py"])
         with pytest.raises(SystemExit):
             ee.main()
+
+
+class TestNamesMode:
+    def test_names_expand_offline(self, monkeypatch, capsys):
+        ee = _load() if "_load" in globals() else None
+        mod = ee or globals().get("ee")
+        monkeypatch.setattr(mod.sys, "argv", ["expand_entities.py", "--probe-batch", "--names", "fable 5", "openclaw"])
+        monkeypatch.setattr(mod.sys.stdin, "isatty", lambda: True)  # no resolver on stdin
+        mod.main()
+        batch = json.loads(capsys.readouterr().out)
+        assert batch[0]["label"] == "fable 5" and "fable5" in batch[0]["sqs"] and "fable five" in batch[0]["sqs"]
+        assert batch[1] == {"phrase": "openclaw", "label": "openclaw"}
+
+    def test_names_respect_existing(self, monkeypatch, capsys):
+        mod = _load() if "_load" in globals() else globals().get("ee")
+        monkeypatch.setattr(mod.sys, "argv", ["expand_entities.py", "--names", "fable 5", "--existing", "fable5"])
+        monkeypatch.setattr(mod.sys.stdin, "isatty", lambda: True)
+        mod.main()
+        out = json.loads(capsys.readouterr().out)
+        assert "fable5" in out["deduped"]
