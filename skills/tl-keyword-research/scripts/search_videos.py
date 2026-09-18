@@ -387,7 +387,6 @@ def main():
         elif file_operator and file_operator != args.operator:
             sys.stderr.write(f"--groups-file: file operator {file_operator} differs from "
                              f"explicit --operator {args.operator}; --operator governs this search\n")
-        file_default = boosted(file_default, fields) if file_default else None
         for g in file_groups:
             per = g["content_fields"] or file_default
             per = boosted(per, fields) if per else None
