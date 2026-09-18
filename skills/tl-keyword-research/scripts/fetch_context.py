@@ -24,31 +24,49 @@ import argparse
 import html
 import json
 import re
+import concurrent.futures
 import subprocess
+import time
 import sys
 
 DEFAULT_FIELDS = ["title", "summary", "transcript"]
 ES_TIMEOUT = 90
+RETRY_PAUSE = 3  # seconds before the single retry of a transient tl db es failure
+CONTEXT_WORKERS = 6  # concurrent per-channel ES calls
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 
 
+class ContextError(Exception):
+    """One channel's ES call failed; the batch continues without it."""
+
+
 def run_es(body):
-    proc = subprocess.run(
-        ["tl", "db", "es", "-", "--json"],
-        input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
-    )
-    if proc.returncode != 0:
-        sys.stderr.write(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()}\n"
-        )
-        sys.exit(proc.returncode or 1)
+    """POST an ES body via `tl db es`; one retry on a transient failure."""
+    proc = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(
+                ["tl", "db", "es", "-", "--json"],
+                input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                time.sleep(RETRY_PAUSE)
+                continue
+            raise ContextError(f"timed out twice after {ES_TIMEOUT}s each")
+        if proc.returncode == 0:
+            break
+        detail = (proc.stderr or proc.stdout).strip()
+        if attempt == 1 and any(m in detail for m in TRANSIENT_MARKERS):
+            time.sleep(RETRY_PAUSE)
+            continue
+        raise ContextError(f"tl db es failed (rc={proc.returncode}): {detail[:300]}")
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
-        sys.stderr.write(f"could not parse tl db es output: {exc}\n")
-        sys.exit(1)
+        raise ContextError(f"could not parse tl db es output: {exc}")
 
 
 def clean_text(value):
@@ -160,7 +178,11 @@ def main():
     ap.add_argument("--max-snippets", type=int, default=3, help="Max snippets per video (default 3)")
     ap.add_argument("--since", help="publication_date >= YYYY-MM-DD")
     ap.add_argument("--until", help="publication_date <= YYYY-MM-DD")
+    ap.add_argument("--workers", type=int, default=CONTEXT_WORKERS,
+                    help=f"Concurrent per-channel ES calls (default {CONTEXT_WORKERS}; 1 = sequential).")
     args = ap.parse_args()
+    if args.workers < 1:
+        sys.exit("--workers must be >= 1")
 
     fields = [f.strip() for f in args.fields.split(",") if f.strip()]
     if not fields:
@@ -172,11 +194,17 @@ def main():
     if not channel_ids:
         sys.exit("provide at least one channel id via --channels")
 
-    out = [
-        channel_evidence(cid, args.keywords, fields, args.operator,
-                         args.since, args.until, args.samples, args.window, args.max_snippets)
-        for cid in channel_ids
-    ]
+    def one(cid):
+        try:
+            return channel_evidence(cid, args.keywords, fields, args.operator,
+                                    args.since, args.until, args.samples, args.window, args.max_snippets)
+        except ContextError as exc:
+            sys.stderr.write(f"context fetch failed for channel {cid}: {exc}\n")
+            return {"channel_id": cid, "match_count": 0, "sampled": 0, "snippets": [], "error": str(exc)}
+
+    # One ES call per channel, `--workers` at a time; output keeps --channels order.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(channel_ids))) as pool:
+        out = list(pool.map(one, channel_ids))
     print(json.dumps(out, ensure_ascii=False))
 
 

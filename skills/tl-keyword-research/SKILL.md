@@ -160,6 +160,23 @@ model** via the bundled agents: `keyword-relevance-validator` and
 `keyword-entity-resolver` runs on Sonnet. Don't do in your own context what a
 script or a Haiku batch can do.
 
+**Run every script in the foreground, with a timeout, and never wait on a
+background job.** The scripts are short-lived: each ES call inside them
+has its own 90s timeout and one retry, probes and context fetches run six
+calls at a time, and identical probes are served from a 24h disk cache. So
+run them as plain foreground Bash calls with an explicit timeout of about
+300 seconds (300000 ms), never with `run_in_background`, never followed by a
+`sleep` or a monitor "until the file appears". If a single call exceeds ~120s
+it is oversized, not slow: split the candidate list or the channel list in
+half and rerun both halves (the cache makes the already-answered half free).
+Expected wall-clock: 25 candidates ≈ 15–20s; 40 channels of context ≈ 10s; an
+intensity triage over 20 groups ≈ 5–10s. A script that prints nothing for
+two minutes has hung — kill it and report, don't wait. Pass large boolean
+filters as a file (`--groups-file groups.json`, the same
+`{"groups":[{"text":…}]}` shape `build_report.py` takes) instead of quoting
+twenty `--group` arguments in the shell; and never use the `timeout`
+binary — macOS doesn't ship it, the Bash tool's own timeout is the guard.
+
 ### Stage 0 — Set up: intent, deliverable, operator, breadth, scope
 
 Keep the user's own sentence **verbatim as the intent** — it's the yardstick
@@ -377,7 +394,9 @@ good). Each round:
      '"retirement planning" | "pension planning" | annuities | 401k'
    ```
    (A big union over `transcript` can time out — measure coverage on
-   `--fields title,summary`, or chunk the union.)
+   `--fields title,summary`, or chunk the union. Re-probing a group you
+   already measured this session costs nothing: identical probes come back
+   from the disk cache, so recompose freely.)
 3. **Validate** what changed (Stage 3 machinery; 15–20 samples for noise-rate
    audits — 5 is too few to estimate a noise rate).
 4. **Score fitness** and write it down: share of on-topic samples, whether
@@ -468,6 +487,9 @@ with the full validation offered as a follow-up.
 python3 <SKILL_DIR>/scripts/search_channels.py --intensity \
   --group '("cannes lions" | canneslions)' \
   --group 'cannes +lions +(advertising | agency | "young lions") -"film festival"'
+# many groups: write them once as build_report.py's input and point every
+# Stage 5 call at the file — no shell quoting, same groups in every call
+python3 <SKILL_DIR>/scripts/search_channels.py --intensity --groups-file /tmp/kw_groups.json
 ```
 
 One aggregation call measures every channel's **relationship to the topic**
@@ -600,7 +622,11 @@ One `tl db es` query per candidate probe (~1–2 credits each); ~10 candidates �
 `--intensity` is 2–3 calls TOTAL for the whole tier table regardless of
 channel count (aggregations) — always run it before spending per-channel.
 `fetch_context.py` is 1 call per channel with priced fields — keep `--samples`
-small (default 4) and validate the top candidates, not the tail. Haiku validation is cheap by design;
+small (default 4) and validate the top candidates, not the tail — it runs six
+channels at a time, so 100 channels take ~20s. Probes run six at a time too and
+identical bodies are cached on disk for 24h (`~/.cache/tl-keyword-research/probe`;
+`--no-cache` to force ES): re-measuring a keyword in a later round is free in
+both credits and time. Haiku validation is cheap by design;
 batch and parallelize. `build_report.py` and `expand_entities.py` are free (no
 ES). The gated web step adds no credits — a few WebSearch/WebFetch calls inside
 the resolver's own context; it fires only on post-cutoff / renamed / trend /

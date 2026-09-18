@@ -25,8 +25,11 @@ Output (stdout): a single JSON object — see OUTPUT_SHAPE at the bottom.
 import argparse
 import datetime
 import json
+import os
+import stat
 import subprocess
 import sys
+import time
 
 DEFAULT_FIELDS = "title^4,summary^2,transcript^1"  # title > summary > transcript
 # ES channel docs keep the LEGACY field names (reach / is_tl_channel …) — the
@@ -38,18 +41,42 @@ ENRICH_SOURCE = [
     "sponsorship_price", "reach",
 ]
 ES_TIMEOUT = 90
+RETRY_PAUSE = 3  # seconds before the single retry of a transient tl db es failure
 # Always scope to YouTube uploads (channel.format 4 — our inventory); at video
 # level also default to longform (best sponsorable-content signal).
 YOUTUBE_FORMAT = 4
 CONTENT_TYPES = ("longform", "short", "live", "all")
 
 
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
+
+
+def _transient(text):
+    return any(m in (text or "") for m in TRANSIENT_MARKERS)
+
+
 def run_es(body):
-    """POST an ES body via `tl db es` and return the parsed envelope, or exit."""
-    proc = subprocess.run(
-        ["tl", "db", "es", "-", "--json"],
-        input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
-    )
+    """POST an ES body via `tl db es` and return the parsed envelope, or exit.
+
+    One retry after a short pause on a transient failure (rate limit, gateway
+    error, client timeout) — anything else fails loudly on the first try.
+    """
+    proc = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(
+                ["tl", "db", "es", "-", "--json"],
+                input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                time.sleep(RETRY_PAUSE)
+                continue
+            sys.stderr.write(f"tl db es timed out twice after {ES_TIMEOUT}s each\n")
+            sys.exit(1)
+        if proc.returncode == 0 or attempt == 2 or not _transient(proc.stderr or proc.stdout):
+            break
+        time.sleep(RETRY_PAUSE)
     if proc.returncode != 0:
         sys.stderr.write(
             f"tl db es failed (rc={proc.returncode}): "
@@ -293,7 +320,7 @@ def sponsorability(doc):
 def collect_keywords(argv_words):
     if argv_words:
         return [w.strip() for w in argv_words if w.strip()]
-    if sys.stdin.isatty():
+    if not stdin_is_readable():
         return []
     raw = sys.stdin.read().strip()
     if not raw:
@@ -305,6 +332,43 @@ def collect_keywords(argv_words):
     if isinstance(parsed, list):
         return [str(x).strip() for x in parsed if str(x).strip()]
     sys.exit("stdin JSON must be a list of strings")
+
+
+def stdin_is_readable():
+    """True only when stdin is a real pipe or regular file.
+
+    Agent harnesses (Claude Code's Bash tool among them) hand scripts a stdin
+    that is an open unix socket: not a TTY, never at EOF. `sys.stdin.read()`
+    on it blocks forever — before any ES call, with nothing on stderr. Only
+    read stdin when someone actually piped or redirected something into it.
+    """
+    try:
+        mode = os.fstat(sys.stdin.fileno()).st_mode
+    except (OSError, ValueError, AttributeError):
+        return False
+    return stat.S_ISFIFO(mode) or stat.S_ISREG(mode)
+
+
+def load_groups_file(path):
+    """Read boolean groups from a JSON file — the same shape build_report.py
+    consumes ({"groups": [{"text": ...}]}), a bare list of {"text": ...}
+    objects, or a bare list of strings. Avoids shell-quoting 20 groups."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.exit(f"--groups-file {path}: {exc}")
+    if isinstance(data, dict):
+        data = data.get("groups", [])
+    if not isinstance(data, list):
+        sys.exit(f"--groups-file {path}: expected a list of groups or an object with a 'groups' list")
+    out = []
+    for item in data:
+        text = item.get("text") if isinstance(item, dict) else item
+        text = str(text or "").strip()
+        if text:
+            out.append(text)
+    return out
 
 
 def dedupe(items):
@@ -330,6 +394,10 @@ def main():
                          "'(\"fable 5\" | fable5) -keto'. Repeatable; groups combine per "
                          "--operator (default OR). This is the delivered keyword_groups "
                          "shape, so the final filter re-runs verbatim.")
+    ap.add_argument("--groups-file", metavar="PATH",
+                    help="JSON file of boolean groups — build_report.py's {\"groups\": "
+                         "[{\"text\": ...}]} shape, or a list of strings. Appended to "
+                         "--group; skips shell quoting for large filters.")
     ap.add_argument("--not", dest="exclude", action="append", default=[], metavar="TERMS",
                     help="Comma-separated terms to EXCLUDE (must_not); repeatable. Narrows away a confusable sense.")
     ap.add_argument("--fields", default=DEFAULT_FIELDS,
@@ -376,6 +444,8 @@ def main():
     keywords = dedupe(collect_keywords(args.keywords))
     any_groups = [g for g in (parse_group(r) for r in args.any) if g]
     sqs_groups = [g.strip() for g in args.group if g.strip()]
+    if args.groups_file:
+        sqs_groups = sqs_groups + load_groups_file(args.groups_file)
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
 
     if sqs_groups and any_groups:

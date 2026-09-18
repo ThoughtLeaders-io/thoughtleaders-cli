@@ -26,6 +26,12 @@ def _load():
 probe = _load()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_probe_cache(monkeypatch, tmp_path):
+    """Keep every probe test off the real on-disk response cache."""
+    monkeypatch.setattr(probe, "CACHE_DIR", str(tmp_path / "probe-cache"))
+
+
 def _term_of(body):
     """Pull the searched term out of a built ES body (phrase or sqs)."""
     must = body["query"]["bool"]["must"][0]

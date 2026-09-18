@@ -33,7 +33,12 @@ import argparse
 import datetime
 import json
 import re
+import concurrent.futures
+import hashlib
+import os
+import stat
 import subprocess
+import time
 import sys
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
@@ -82,6 +87,11 @@ DEFAULT_SAMPLES = 5
 MAX_SAMPLES = 25
 MAX_SAMPLE_TEXT = 500  # trim long text so samples stay light for the validator
 PROBE_TIMEOUT = 90  # per-candidate ES probe, seconds
+RETRY_PAUSE = 3  # seconds before the single retry of a transient failure
+PROBE_WORKERS = 6  # concurrent `tl db es` calls (each is one short HTTP round-trip)
+CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "tl-keyword-research", "probe")
+CACHE_TTL_HOURS = 24  # a probe body re-run within this window is served from disk
+TRANSIENT_MARKERS = ("429", "502", "503", "504", "timed out", "timeout", "Too Many Requests")
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _FIELD_RE = re.compile(r"^[\w.]+(\^\d+(\.\d+)?)?$")  # e.g. title, ai.description, title^3
 
@@ -197,21 +207,28 @@ def run_es(body):
     Raises ProbeError on failure so the caller can record the candidate and
     continue — one slow/heavy term must not abort a 60-candidate batch.
     """
-    try:
-        proc = subprocess.run(
-            ["tl", "db", "es", "-", "--json"],
-            input=json.dumps(body),
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise ProbeError(f"timed out after {PROBE_TIMEOUT}s")
-    if proc.returncode != 0:
-        raise ProbeError(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()[:300]}"
-        )
+    proc = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(
+                ["tl", "db", "es", "-", "--json"],
+                input=json.dumps(body),
+                capture_output=True,
+                text=True,
+                timeout=PROBE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                time.sleep(RETRY_PAUSE)
+                continue
+            raise ProbeError(f"timed out twice after {PROBE_TIMEOUT}s each")
+        if proc.returncode == 0:
+            break
+        detail = (proc.stderr or proc.stdout).strip()
+        if attempt == 1 and any(m in detail for m in TRANSIENT_MARKERS):
+            time.sleep(RETRY_PAUSE)
+            continue
+        raise ProbeError(f"tl db es failed (rc={proc.returncode}): {detail[:300]}")
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
@@ -306,6 +323,64 @@ def extract_samples(data, field_pairs):
     return out
 
 
+def cache_key(body):
+    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def cache_load(cache_dir, body, ttl_hours):
+    """Return the cached ES response for `body` if it is younger than the TTL."""
+    if not cache_dir:
+        return None
+    path = os.path.join(cache_dir, cache_key(body) + ".json")
+    try:
+        if time.time() - os.path.getmtime(path) > ttl_hours * 3600:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def cache_store(cache_dir, body, data):
+    if not cache_dir:
+        return
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        path = os.path.join(cache_dir, cache_key(body) + ".json")
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # the cache is an accelerator, never a failure
+
+
+def probe_one(body, cache_dir, ttl_hours):
+    """Fetch one candidate's response — from cache when fresh, else ES.
+    Returns (data, from_cache)."""
+    data = cache_load(cache_dir, body, ttl_hours)
+    if data is not None:
+        return data, True
+    data = run_es(body)
+    cache_store(cache_dir, body, data)
+    return data, False
+
+
+def stdin_is_readable():
+    """True only when stdin is a real pipe or regular file.
+
+    Agent harnesses (Claude Code's Bash tool among them) hand scripts a stdin
+    that is an open unix socket: not a TTY, never at EOF. `sys.stdin.read()`
+    on it blocks forever — before any ES call, with nothing on stderr. Only
+    read stdin when someone actually piped or redirected something into it.
+    """
+    try:
+        mode = os.fstat(sys.stdin.fileno()).st_mode
+    except (OSError, ValueError, AttributeError):
+        return False
+    return stat.S_ISFIFO(mode) or stat.S_ISREG(mode)
+
+
 def collect_candidates(argv_words):
     """Read candidates from argv (preferred) or stdin (JSON array / newlines).
 
@@ -313,7 +388,7 @@ def collect_candidates(argv_words):
     """
     if argv_words:
         return [w for w in argv_words if w.strip()]
-    if sys.stdin.isatty():
+    if not stdin_is_readable():
         return []
     raw = sys.stdin.read().strip()
     if not raw:
@@ -454,7 +529,19 @@ def main():
                     help="Topic STALE share: recent_channels/channels below this AND below the floor → stale (default 0.10).")
     ap.add_argument("--min-active-share", type=float, default=0.33,
                     help="Channel STALE share: active_channels/channels below this AND below the floor → stale (default 0.33).")
+    ap.add_argument("--workers", type=int, default=PROBE_WORKERS,
+                    help=f"Concurrent ES probes (default {PROBE_WORKERS}; 1 = sequential).")
+    ap.add_argument("--cache-dir", default=CACHE_DIR,
+                    help=f"Directory for the probe response cache (default {CACHE_DIR}).")
+    ap.add_argument("--cache-ttl-hours", type=float, default=CACHE_TTL_HOURS,
+                    help=f"Serve an identical probe from cache if younger than this (default {CACHE_TTL_HOURS}).")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="Always hit ES, and don't write the cache.")
     args = ap.parse_args()
+
+    if args.workers < 1:
+        sys.exit("--workers must be >= 1")
+    cache_dir = None if args.no_cache else args.cache_dir
 
     if args.recency_months < 1:
         sys.exit("--recency-months must be >= 1")
@@ -490,17 +577,36 @@ def main():
     if recency:
         recency_cutoff = months_ago_iso(args.recency_months) if args.level == "topic" else "active"
 
+    started = time.monotonic()
+    bodies = [
+        build_body(cand, fields=fields, level=args.level, samples=samples,
+                   source_paths=source_paths, since=args.since, until=args.until,
+                   recency_cutoff=recency_cutoff, content_type=args.content_type)
+        for cand in candidates
+    ]
+    # One ES round-trip per candidate, `--workers` at a time; responses land
+    # back in candidate order so subsumption and output are deterministic.
+    outcomes = [None] * len(bodies)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, max(1, len(bodies)))) as pool:
+        futures = {pool.submit(probe_one, body, cache_dir, args.cache_ttl_hours): i
+                   for i, body in enumerate(bodies)}
+        for fut in concurrent.futures.as_completed(futures):
+            i = futures[fut]
+            try:
+                outcomes[i] = fut.result()
+            except ProbeError as exc:
+                outcomes[i] = exc
+
     results, failed = [], []
-    for cand in candidates:
-        body = build_body(cand, fields=fields, level=args.level, samples=samples,
-                          source_paths=source_paths, since=args.since, until=args.until,
-                          recency_cutoff=recency_cutoff, content_type=args.content_type)
-        try:
-            data = run_es(body)
-        except ProbeError as exc:
-            sys.stderr.write(f"probe failed for {cand['value']!r}: {exc}\n")
-            failed.append({"keyword": cand["value"], "label": cand["label"], "error": str(exc)})
+    cache_hits = es_calls = 0
+    for cand, outcome in zip(candidates, outcomes):
+        if isinstance(outcome, ProbeError):
+            sys.stderr.write(f"probe failed for {cand['value']!r}: {outcome}\n")
+            failed.append({"keyword": cand["value"], "label": cand["label"], "error": str(outcome)})
             continue
+        data, from_cache = outcome
+        cache_hits += from_cache
+        es_calls += not from_cache
         documents = extract_total(data)
         channels = extract_distinct(data)
         # `count` is the level-appropriate headline used for ranking/subsumption:
@@ -557,6 +663,8 @@ def main():
         "keywords": survivors,
         "dropped": dropped,
         "failed": failed,
+        "timing": {"elapsed_seconds": round(time.monotonic() - started, 1),
+                   "es_calls": es_calls, "cache_hits": cache_hits, "workers": args.workers},
     }
     if recency:
         out["recency"] = ({"months": args.recency_months, "cutoff": recency_cutoff}
@@ -573,6 +681,7 @@ def main():
 #   "fields": [<es fields searched>],
 #   "scope": {"format": "youtube"[, "content_type": "longform"|"short"|"live"|"all"]},  # always-on filters
 #   "failed": [ {"keyword": "...", "label": "...", "error": "..."} ],  # probes that errored/timed out — retry individually
+#   "timing": {"elapsed_seconds": 12.3, "es_calls": 40, "cache_hits": 8, "workers": 6}  # wall-clock + how many probes hit ES vs the 24h disk cache
 #   "keywords": [                       # all candidates with documents>0, sorted desc by count
 #     {"keyword": "...",
 #      "count": <int>,        # headline for ranking: documents at topic, channels at channel
