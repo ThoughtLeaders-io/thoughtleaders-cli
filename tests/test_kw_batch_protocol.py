@@ -87,6 +87,13 @@ class TestEmit:
                                                       "--out-dir", str(tmp_path / "e")])
         assert code == 0 and json.loads(out)["batches"] == []
 
+    def test_emit_refuses_existing_run_dir(self, sk, monkeypatch, capsys, tmp_path):
+        probe = tmp_path / "probe.json"; probe.write_text(json.dumps(_probe()))
+        args = ["--emit-batch", "--probe-file", str(probe), "--intent", "x", "--out-dir", str(tmp_path / "v")]
+        assert _run(sk, monkeypatch, capsys, args)[0] == 0
+        code, _, err = _run(sk, monkeypatch, capsys, args)
+        assert code != 0 and "already holds a judge run" in err
+
     def test_byte_cap_splits_batches(self, kb):
         items = {i: {"i": i, "title": "x" * 1000} for i in range(10)}
         assert [len(b) for b in kb.chunk_ids(list(range(10)), items, 40, 2500)] == [2, 2, 2, 2, 2]

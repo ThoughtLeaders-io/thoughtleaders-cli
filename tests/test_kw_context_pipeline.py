@@ -83,6 +83,28 @@ class TestFilterParity:
         assert ctx.literal_terms('("fable 5" | fable5) -keto +launch') == ["fable 5", "fable5", "launch"]
         assert ctx.literal_terms('"creator economy"') == ["creator economy"]
 
+    def test_literal_terms_negation_and_escapes(self, ctx):
+        assert ctx.literal_terms('a -"bad phrase" b') == ["a", "b"]
+        assert ctx.literal_terms('retire -(scam | "get rich") +(plan | "401k")') == ["retire", "plan", "401k"]
+        assert ctx.literal_terms('"say \\"hello\\" world" -x') == ['say "hello" world']
+        assert ctx.literal_terms('(inner -(deep | deeper) kept) | outer') == ["inner", "kept", "outer"]
+
+    def test_anchors_respect_group_field_scope(self, ctx, monkeypatch, capsys, tmp_path):
+        g = _write(tmp_path, {"groups": [{"text": "apple", "content_fields": ["title"]},
+                                         {"text": "pension", "content_fields": ["title", "summary"]}]})
+        def run(cmd, input=None, **kw):
+            if cmd[:2] == ["tl", "whoami"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"user": {"id": 1}}), stderr="")
+            row = {"id": "v1", "title": "pension advice", "summary": "apple apple apple apple pension"}
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"results": [row], "total": 1}), stderr="")
+        monkeypatch.setattr(ctx.subprocess, "run", run)
+        code, out, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels", "7", "--no-cache",
+                                                          "--max-snippets", "3"])
+        assert code == 0, err
+        snips = json.loads(out)[0]["snippets"]
+        assert all(not (s["keyword"] == "apple" and s["field"] == "summary") for s in snips)
+        assert any(s["keyword"] == "pension" and s["field"] == "title" for s in snips)
+
     def test_groups_query_mirrors_search(self, ctx, monkeypatch, capsys, tmp_path):
         g = tmp_path / "groups.json"; g.write_text(json.dumps(GROUPS))
         fake = _es_fake()
@@ -122,9 +144,28 @@ class TestBatchesAndMerge:
         code, out, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels-file", str(chans),
                                                           "--emit-batches", "--topic", "creator economy news",
                                                           "--not", "get-rich-quick", "--out-dir", str(out_dir),
-                                                          "--chunk", "3", "--no-cache"])
+                                                          "--chunk", "3", "--no-cache", "--since", "2026-01-01",
+                                                          "--content-type", "short"])
         assert code == 0, err
         return out_dir, json.loads(out), chans, fake
+
+    def test_emit_refuses_existing_run_dir(self, ctx, monkeypatch, capsys, tmp_path):
+        out_dir, s, chans, _ = self._emit(ctx, monkeypatch, capsys, tmp_path)
+        g = tmp_path / "g.json"
+        code, _, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels-file", str(chans),
+                                                        "--emit-batches", "--topic", "t", "--out-dir", str(out_dir), "--no-cache"])
+        assert code != 0 and "already holds a judge run" in err
+
+    def test_tiers_and_max_channels_gate_the_fetch(self, ctx, monkeypatch, capsys, tmp_path):
+        g = _write(tmp_path, GROUPS)
+        chans = _write(tmp_path, {"channels": [{"channel_id": 1, "tier": "core"}, {"channel_id": 2, "tier": "one_off"},
+                                               {"channel_id": 3, "tier": "recurring"}, {"channel_id": 4, "tier": "recurring"}]}, "int.json")
+        fake = _es_fake()
+        monkeypatch.setattr(ctx.subprocess, "run", fake)
+        code, out, err = _main(ctx, monkeypatch, capsys, ["--groups-file", str(g), "--channels-file", str(chans),
+                                                          "--tiers", "core,recurring", "--max-channels", "2", "--no-cache"])
+        assert code == 0, err
+        assert [o["channel_id"] for o in json.loads(out)] == [1, 3]
 
     def test_emit_excludes_failed_channels_and_indexes_items(self, ctx, monkeypatch, capsys, tmp_path):
         out_dir, s, _, _ = self._emit(ctx, monkeypatch, capsys, tmp_path, fail_ids=(3,))
@@ -135,12 +176,16 @@ class TestBatchesAndMerge:
         assert b["topic"] == "creator economy news" and b["not"] == "get-rich-quick"
         assert [it["channel_id"] for it in b["items"]] == [1, 2, 4] and [it["i"] for it in b["items"]] == [0, 1, 2]
 
-    def test_retry_failed_appends_new_batch(self, ctx, monkeypatch, capsys, tmp_path):
-        out_dir, s, _, _ = self._emit(ctx, monkeypatch, capsys, tmp_path, fail_ids=(3,))
-        monkeypatch.setattr(ctx.subprocess, "run", _es_fake())  # now it works
-        code, out, err = _main(ctx, monkeypatch, capsys, ["--retry-failed", str(out_dir), "--no-cache",
-                                                          "--groups-file", str(tmp_path / "g.json")])
+    def test_retry_failed_appends_new_batch_with_saved_scope(self, ctx, monkeypatch, capsys, tmp_path):
+        out_dir, s, _, first = self._emit(ctx, monkeypatch, capsys, tmp_path, fail_ids=(3,))
+        fake = _es_fake()  # now it works
+        monkeypatch.setattr(ctx.subprocess, "run", fake)
+        code, out, err = _main(ctx, monkeypatch, capsys, ["--retry-failed", str(out_dir), "--no-cache"])
         assert code == 0, err
+        # the retry ran the ORIGINAL query: same date window, content type, groups and operator
+        orig = [c for c in first.calls if _cid(c) == 3][0]
+        assert fake.calls[0]["query"] == orig["query"]
+        assert {"term": {"content_type": "short"}} in fake.calls[0]["query"]["bool"]["filter"]
         r = json.loads(out)
         assert r["retried"] == 1 and r["failed_channels"] == []
         assert r["batches"][0]["batch_id"] == "p1_001" and r["batches"][0]["count"] == 1
@@ -173,6 +218,29 @@ class TestBatchesAndMerge:
         assert res["not_validated"]["not_fetched"] == []
         assert res["adjacent_terms"][0] == {"term": "mrbeast", "channels": [1, 3], "mentions": 2}
         assert res["verdicts"] == {"on_topic": 1, "off_topic": 1, "mixed": 1}
+
+    def test_metadata_comes_from_an_agreeing_pass(self, ctx, cc, monkeypatch, capsys, tmp_path):
+        out_dir, s, chans, _ = self._emit(ctx, monkeypatch, capsys, tmp_path)
+        items = [it for b in s["batches"] for it in json.loads(Path(b["path"]).read_text())["items"]]
+        def verdicts(sub, verdict, note, terms):
+            return [{"i": it["i"], "channel_id": it["channel_id"], "verdict": verdict, "confidence": "high",
+                     "evidence_quote": note, "adjacent_terms": terms, "notes": note} for it in sub]
+        for b in s["batches"]:
+            sub = json.loads(Path(b["path"]).read_text())["items"]
+            Path(b["verdict_path"]).write_text(json.dumps(verdicts(sub, "off_topic", "only sports betting", ["betting"])))
+        # two more passes through the protocol module (what --add-pass would do)
+        kb = _load("kw_batches")
+        man = kb.load_manifest(str(out_dir))
+        by_id = {it["i"]: it for it in items}
+        for pid, verdict, note in (("p2", "on_topic", "stock market"), ("p3", "on_topic", "index funds")):
+            recs = kb.emit_batches(man, man["_dir"], by_id, list(by_id), pid, "initial")
+            Path(recs[0]["verdict_path"]).write_text(json.dumps(verdicts(items, verdict, note, ["stocks"])))
+        code, out, err = _main(cc, monkeypatch, capsys, ["--manifest", str(out_dir), "--intensity", str(chans)])
+        assert code == 0, err
+        row = json.loads(out)["channels"][0]
+        assert row["verdict"] == "on_topic" and row["votes"] == ["off_topic", "on_topic", "on_topic"]
+        assert row["notes"] == "stock market"  # from an agreeing pass, not the losing first one
+        assert {t["term"] for t in json.loads(out)["adjacent_terms"]} == {"betting", "stocks"}
 
     def test_channel_id_mismatch_is_fatal(self, ctx, cc, monkeypatch, capsys, tmp_path):
         out_dir, s, chans, _ = self._emit(ctx, monkeypatch, capsys, tmp_path)

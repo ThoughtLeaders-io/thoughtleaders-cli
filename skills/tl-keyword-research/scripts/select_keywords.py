@@ -116,6 +116,9 @@ def emit_artifacts(probe, intent, out_dir, chunk, max_bytes):
     if not intent.strip():
         sys.exit("--intent is required with --out-dir (the validator judges against it)")
     out_dir = os.path.abspath(out_dir)
+    if os.path.exists(kw_batches.manifest_path(out_dir)):
+        sys.exit(f"{out_dir} already holds a judge run (manifest.json); use a fresh --out-dir — "
+                 "re-emitting over existing verdict files would let stale verdicts pass as new ones")
     os.makedirs(out_dir, exist_ok=True)
     snapshot = os.path.join(out_dir, "probe.snapshot.json")
     kw_batches.write_json_atomic(snapshot, probe)

@@ -18,7 +18,8 @@ Usage:
     # then spawn one keyword-context-classifier per batch (ALL IN ONE MESSAGE),
     # each gets only its batch path and writes its verdict_path; merge with
     # classify_channels.py --manifest /tmp/kwrun/ctx1
-    fetch_context.py --retry-failed /tmp/kwrun/ctx1     # re-fetch only the channels that errored
+    fetch_context.py --retry-failed /tmp/kwrun/ctx1     # re-fetch only the channels that errored,
+                                                        # with the run's saved query settings
     # ad-hoc: plain keywords, JSON array on stdout
     fetch_context.py --channels 466311,199308 investing
     fetch_context.py --channels 5607 --samples 5 --window 200 "tiktok shop"
@@ -158,18 +159,58 @@ def phrase_if_plain(text):
 
 def literal_terms(group_text):
     """The literal anchors of a boolean group: quoted phrases and positive bare
-    words (`+word`, `word`); negated tokens are excluded senses, never anchors.
-    Snippet windows are cut around these, so evidence never depends on the
-    boolean expression itself."""
-    terms = []
-    for tok in _SQS_TOKEN_RE.findall(group_text):
-        if tok.startswith("-"):
+    words. Anything negated — `-word`, `-"a phrase"`, `-(a | b)` and every
+    token inside a negated group — is an excluded sense, never an anchor.
+    Escaped quotes inside a phrase are decoded so the anchor matches plain
+    text. Snippet windows are cut around these, so evidence never depends on
+    the boolean expression itself."""
+    terms, i, n = [], 0, len(group_text)
+    depth, negated_depth, negate_next = 0, None, False
+    while i < n:
+        c = group_text[i]
+        if c.isspace():
+            i += 1
             continue
-        tok = tok.lstrip("+")
-        if tok.startswith('"') and tok.endswith('"') and len(tok) >= 2:
-            tok = tok[1:-1]
-        tok = tok.strip()
-        if tok and tok not in terms:
+        if c in "+-":
+            negate_next = c == "-"  # the sign applies to the next token, phrase or group
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+            if negate_next and negated_depth is None:
+                negated_depth = depth
+            negate_next = False
+            i += 1
+            continue
+        if c == ")":
+            if negated_depth == depth:
+                negated_depth = None
+            depth = max(0, depth - 1)
+            negate_next = False
+            i += 1
+            continue
+        if c == "|":
+            negate_next = False
+            i += 1
+            continue
+        if c == '"':
+            j, buf = i + 1, []
+            while j < n and group_text[j] != '"':
+                if group_text[j] == "\\" and j + 1 < n:
+                    buf.append(group_text[j + 1])
+                    j += 2
+                    continue
+                buf.append(group_text[j])
+                j += 1
+            tok, i = "".join(buf).strip(), j + 1
+        else:
+            j = i
+            while j < n and not group_text[j].isspace() and group_text[j] not in '()|"':
+                j += 1
+            tok, i = group_text[i:j], j
+        excluded = negate_next or negated_depth is not None
+        negate_next = False
+        if tok and not excluded and tok not in terms:
             terms.append(tok)
     return terms
 
@@ -324,10 +365,18 @@ def channel_evidence(channel_id, keywords, fields, operator, since, until, sampl
     if groups:
         body = build_groups_query(channel_id, groups, not_groups, operator, since, until, samples, content_type)
         fields = sorted({f for g in groups for f in g["fields"]})
-        keywords = [t for g in groups for t in literal_terms(g["text"])]
-        keywords = list(dict.fromkeys(keywords))
+        # Each literal anchors only in the fields ITS group searches — a
+        # title-only group's terms never produce summary snippets.
+        anchors = []
+        for g in groups:
+            for t in literal_terms(g["text"]):
+                if all(t != a[0] for a in anchors):
+                    anchors.append((t, set(g["fields"])))
+                else:
+                    next(a for a in anchors if a[0] == t)[1].update(g["fields"])
     else:
         body = build_query(channel_id, keywords, fields, operator, since, until, samples, content_type)
+        anchors = [(kw, set(fields)) for kw in keywords]
     env = run_es_cached(body, cache_dir, ttl_hours)
     snippets = []
     for row in env.get("results", []):
@@ -340,7 +389,9 @@ def channel_evidence(channel_id, keywords, fields, operator, since, until, sampl
             text = clean_text(row.get(field))
             if not text:
                 continue
-            for kw in keywords:
+            for kw, allowed in anchors:
+                if field not in allowed:
+                    continue
                 for snip in windows(text, kw, half, max_snips - per_video):
                     snippets.append({"video_id": vid, "title": title, "field": field, "keyword": kw, "text": snip})
                     per_video += 1
@@ -356,9 +407,11 @@ def channel_evidence(channel_id, keywords, fields, operator, since, until, sampl
     }
 
 
-def load_channels_file(path):
+def load_channels_file(path, tiers=None, max_channels=None):
     """Channel ids from a JSON file: a bare list of ids, or any search_channels.py
-    output ({"channels":[{"channel_id":…}]}), so the intensity output feeds in directly."""
+    output ({"channels":[{"channel_id":…}]}), so the intensity output feeds in
+    directly. `tiers` keeps only rows whose `tier` is listed (bare ids have no
+    tier and are kept); `max_channels` truncates after that, in file order."""
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -368,11 +421,15 @@ def load_channels_file(path):
         data = data.get("channels", [])
     ids = []
     for item in data:
+        if tiers and isinstance(item, dict) and item.get("tier") not in tiers:
+            continue
         cid = item.get("channel_id") if isinstance(item, dict) else item
         try:
             ids.append(int(cid))
         except (TypeError, ValueError):
             sys.exit(f"--channels-file {path}: bad channel id {cid!r}")
+    if max_channels is not None:
+        ids = ids[:max_channels]
     return ids
 
 
@@ -383,6 +440,9 @@ def emit_context_batches(out, topic, not_topic, out_dir, chunk, max_bytes, extra
     """Evidence snapshot + manifest + indexed classifier batches. Channels whose
     fetch failed are left OUT of the batches and listed in the summary."""
     out_dir = os.path.abspath(out_dir)
+    if os.path.exists(kw_batches.manifest_path(out_dir)):
+        sys.exit(f"{out_dir} already holds a judge run (manifest.json); use a fresh --out-dir — "
+                 "re-emitting over existing verdict files would let stale verdicts pass as new ones")
     os.makedirs(out_dir, exist_ok=True)
     good = [o for o in out if not o.get("error")]
     failed = [{"channel_id": o["channel_id"], "error": o["error"]} for o in out if o.get("error")]
@@ -410,6 +470,11 @@ def main():
     ap.add_argument("--channels", help="Comma-separated channel ids")
     ap.add_argument("--channels-file", metavar="PATH",
                     help="JSON list of ids, or search_channels.py output (its 'channels' ids are used)")
+    ap.add_argument("--tiers", metavar="T1,T2",
+                    help="With --channels-file from --intensity: keep only these tiers "
+                         "(e.g. core,recurring) — the budget decision, made before any fetch")
+    ap.add_argument("--max-channels", type=int, metavar="N",
+                    help="With --channels-file: at most N channels, in file order (biggest matchers first)")
     ap.add_argument("--operator", choices=["AND", "OR"], default=None,
                     help="How groups/keywords combine (default: the groups file's operator, else OR)")
     ap.add_argument("--content-type", choices=list(CONTENT_TYPES), default="longform",
@@ -447,32 +512,43 @@ def main():
         sys.exit("--chunk must be >= 1")
     cache_dir = None if args.no_cache else args.cache_dir
 
-    fields = [f.strip() for f in args.fields.split(",") if f.strip()]
-    if not fields:
-        sys.exit("--fields must list at least one ES field")
-
-    groups = not_groups = None
-    if args.groups_file:
-        groups, not_groups, file_op = load_groups_file(args.groups_file, fields)
-        if args.operator is None:
-            args.operator = file_op or "OR"
-    elif not args.keywords:
-        sys.exit("provide keywords, or --groups-file with the delivered filter")
-    args.operator = args.operator or "OR"
-
     manifest = None
     if args.retry_failed:
+        # The retry must run the SAME query as the original fetch: restore every
+        # setting from the evidence snapshot and ignore the CLI's fresh defaults.
         try:
             manifest = kw_batches.load_manifest(args.retry_failed)
         except kw_batches.BatchError as exc:
             sys.exit(str(exc))
         if manifest["kind"] != "context":
             sys.exit(f"{args.retry_failed} is not a context manifest")
+        snap = kw_batches.snapshot_of(manifest)
+        for key in ("groups_file", "keywords", "since", "until"):
+            if getattr(args, key):
+                sys.stderr.write(f"--retry-failed: --{key.replace('_', '-')} ignored; "
+                                 "the run's saved query settings are used\n")
+        groups, not_groups = snap.get("groups"), snap.get("not_groups")
+        args.keywords = snap.get("keywords") or []
+        fields = snap.get("fields") or [f.strip() for f in args.fields.split(",") if f.strip()]
+        args.operator = snap.get("operator") or "OR"
+        args.since, args.until = snap.get("since"), snap.get("until")
+        args.content_type = (snap.get("scope") or {}).get("content_type", args.content_type)
         channel_ids = [f["channel_id"] for f in manifest.get("failed_channels", [])]
         if not channel_ids:
             emit({"manifest": kw_batches.manifest_path(manifest["_dir"]), "retried": 0})
             return
     else:
+        fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+        if not fields:
+            sys.exit("--fields must list at least one ES field")
+        groups = not_groups = None
+        if args.groups_file:
+            groups, not_groups, file_op = load_groups_file(args.groups_file, fields)
+            if args.operator is None:
+                args.operator = file_op or "OR"
+        elif not args.keywords:
+            sys.exit("provide keywords, or --groups-file with the delivered filter")
+        args.operator = args.operator or "OR"
         channel_ids = []
         if args.channels:
             try:
@@ -480,7 +556,8 @@ def main():
             except ValueError:
                 sys.exit("--channels must be comma-separated integer channel ids")
         if args.channels_file:
-            channel_ids += load_channels_file(args.channels_file)
+            tiers = [t.strip() for t in args.tiers.split(",") if t.strip()] if args.tiers else None
+            channel_ids += load_channels_file(args.channels_file, tiers, args.max_channels)
         channel_ids = list(dict.fromkeys(channel_ids))
         if not channel_ids:
             sys.exit("provide channel ids via --channels and/or --channels-file")

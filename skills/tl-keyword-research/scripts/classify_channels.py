@@ -147,7 +147,11 @@ def main():
         objs = [vm[i] for vm in per_pass if i in vm]
         cid = item["channel_id"]
         verdict = majority(objs)
-        first = objs[0]
+        # Supporting metadata comes from a judgment that AGREES with the merged
+        # verdict; when no pass said it (a tie resolved to mixed), say so.
+        agreeing = [o for o in objs if o["verdict"] == verdict]
+        first = agreeing[0] if agreeing else {"confidence": "low", "evidence_quote": "",
+                                              "notes": "passes disagree: " + ", ".join(o["verdict"] for o in objs)}
         t = tiers.get(cid) or {}
         r = rank_rows.get(cid) or {}
         row = {
@@ -166,8 +170,8 @@ def main():
             "snippets": len(item["snippets"]),
             "sponsorability": t.get("sponsorability") or r.get("sponsorability"),
         }
-        for term in first.get("adjacent_terms") or []:
-            terms[term.strip().lower()].append(cid)
+        for term in {tm.strip().lower() for o in objs for tm in (o.get("adjacent_terms") or []) if tm.strip()}:
+            terms[term].append(cid)
         (excluded if verdict == "off_topic" else rows).append(row)
 
     rows.sort(key=lambda x: (VERDICT_ORDER[x["verdict"]], TIER_ORDER.get(x["tier"], 4),

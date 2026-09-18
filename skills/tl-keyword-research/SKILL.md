@@ -574,10 +574,13 @@ on-topic uploads. Tell the user when one channel dominates and offer
 2. **Fetch context with the delivered filter, and let the script build the
    classifier batches.** Candidates are prioritized by intensity tier — core
    and recurring first, occasional only if budget remains, one-offs not at
-   all (unless the user asks). Pass the intensity output straight in:
+   all (unless the user asks). Pass the intensity output in with the tier
+   decision made explicit — `--tiers` is the budget gate, `--max-channels`
+   the cap; without `--tiers` every channel in the file is fetched:
    ```bash
    python3 <SKILL_DIR>/scripts/fetch_context.py --groups-file $RUN/groups.json \
-     --channels-file $RUN/intensity.json --samples 4 --window 160 \
+     --channels-file $RUN/intensity.json --tiers core,recurring --max-channels 200 \
+     --samples 4 --window 160 \
      --emit-batches --topic "<intended sense>" --not "<senses to exclude>" \
      --out-dir $RUN/ctx1 --run-dir $RUN
    ```
@@ -586,9 +589,10 @@ on-topic uploads. Tell the user when one channel dominates and offer
    the text window around a *literal* term of a group. It writes the evidence
    snapshot, `manifest.json` and `batch_p1_000.json …` (≤40 channels each) and
    prints one line per batch plus `failed_channels`. Failed fetches are left
-   out of the batches; run `fetch_context.py --retry-failed $RUN/ctx1
-   --groups-file …` once to append them, and list any that still fail as
-   *not validated*.
+   out of the batches; run `fetch_context.py --retry-failed $RUN/ctx1` once
+   (it re-runs the saved query settings) to append them, and list any that
+   still fail as *not validated*. Each judge run gets a fresh `--out-dir`;
+   the scripts refuse to re-emit over one that already exists.
 3. **Classify — one `keyword-context-classifier` per batch file, all in ONE
    message** (`subagent_type: keyword-context-classifier`, never pass
    `model`; waves of 6 if there are more). Each prompt is one line: *"Judge
