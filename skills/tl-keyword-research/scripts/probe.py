@@ -330,28 +330,27 @@ _CACHE_NS = None
 
 def cache_namespace():
     """Sub-directory that isolates cache entries per API endpoint and
-    credentials: TL_API_URL / TL_API_KEY plus the contents of the tl config
-    dir (stored login). Switching account or environment never serves the
-    other one's responses."""
+    authenticated identity. Credentials live in the OS keyring, so the only
+    reliable identity is what the CLI itself reports: one `tl whoami` per run
+    (~1s). If that fails (not logged in, network down) the cache is disabled
+    for the run rather than risk serving another account's responses."""
     global _CACHE_NS
     if _CACHE_NS is None:
-        h = hashlib.sha256()
-        h.update(f"format={CACHE_FORMAT}\n".encode())
-        for var in ("TL_API_URL", "TL_API_KEY"):
-            h.update(f"{var}={os.environ.get(var, '')}\n".encode())
-        cfg = os.path.join(os.path.expanduser("~"), ".config", "tl")
+        _CACHE_NS = False
         try:
-            for fn in sorted(os.listdir(cfg)):
-                if fn == "recent_queries.json":
-                    continue  # churns on every call; not an identity
-                fp = os.path.join(cfg, fn)
-                if os.path.isfile(fp):
-                    with open(fp, "rb") as fh:
-                        h.update(fn.encode() + b"\n" + fh.read() + b"\n")
-        except OSError:
-            pass
-        _CACHE_NS = h.hexdigest()[:16]
-    return _CACHE_NS
+            proc = subprocess.run(["tl", "whoami", "--json"], capture_output=True,
+                                  text=True, timeout=PROBE_TIMEOUT)
+            user = (json.loads(proc.stdout).get("user") or {}) if proc.returncode == 0 else {}
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
+            user = {}
+        ident = user.get("id") or user.get("email")
+        if ident:
+            h = hashlib.sha256()
+            h.update(f"format={CACHE_FORMAT}\n".encode())
+            h.update(f"url={os.environ.get('TL_API_URL', '')}\n".encode())
+            h.update(f"user={ident}\n".encode())
+            _CACHE_NS = h.hexdigest()[:16]
+    return _CACHE_NS or None
 
 
 def cache_key(body):
@@ -360,9 +359,10 @@ def cache_key(body):
 
 def cache_load(cache_dir, body, ttl_hours):
     """Return the cached ES response for `body` if it is younger than the TTL."""
-    if not cache_dir:
+    ns = cache_namespace() if cache_dir else None
+    if not ns:
         return None
-    path = os.path.join(cache_dir, cache_namespace(), cache_key(body) + ".json")
+    path = os.path.join(cache_dir, ns, cache_key(body) + ".json")
     try:
         if time.time() - os.path.getmtime(path) > ttl_hours * 3600:
             return None
@@ -373,10 +373,11 @@ def cache_load(cache_dir, body, ttl_hours):
 
 
 def cache_store(cache_dir, body, data):
-    if not cache_dir:
+    ns = cache_namespace() if cache_dir else None
+    if not ns:
         return
     try:
-        ns_dir = os.path.join(cache_dir, cache_namespace())
+        ns_dir = os.path.join(cache_dir, ns)
         os.makedirs(ns_dir, exist_ok=True)
         path = os.path.join(ns_dir, cache_key(body) + ".json")
         tmp = f"{path}.{os.getpid()}.tmp"

@@ -30,6 +30,7 @@ probe = _load()
 def _isolated_probe_cache(monkeypatch, tmp_path):
     """Keep every probe test off the real on-disk response cache."""
     monkeypatch.setattr(probe, "CACHE_DIR", str(tmp_path / "probe-cache"))
+    monkeypatch.setattr(probe, "_CACHE_NS", "test-identity")  # no `tl whoami` in tests
 
 
 def _term_of(body):

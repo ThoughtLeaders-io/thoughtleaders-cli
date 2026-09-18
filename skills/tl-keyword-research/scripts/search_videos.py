@@ -176,8 +176,9 @@ def build_groups(groups, not_terms, fields, since, until, size, sort,
         bool_q["should"] = clauses
         bool_q["minimum_should_match"] = 1
     must_not = keyword_clauses(not_terms, fields) if not_terms else []
-    must_not += [  # excluded groups from a groups file: `AND NOT (group)`
-        {"simple_query_string": {"query": g, "fields": fields, "default_operator": "and"}}
+    must_not += [  # excluded groups from a groups file: `AND NOT (group)`, own field scope
+        {"simple_query_string": {"query": g["text"], "fields": g.get("fields") or fields,
+                                 "default_operator": "and"}}
         for g in (not_groups or [])
     ]
     if must_not:
@@ -313,7 +314,7 @@ def dedupe(items):
 def main():
     ap = argparse.ArgumentParser(description="Find matching videos/uploads for a topic filter (trend lane).")
     ap.add_argument("keywords", nargs="*", help="Keywords (or pipe a JSON array on stdin)")
-    ap.add_argument("--operator", choices=["AND", "OR"], default="OR",
+    ap.add_argument("--operator", choices=["AND", "OR"], default=None,
                     help="How to combine flat keywords / --group groups (default OR).")
     ap.add_argument("--any", action="append", default=[], metavar="TERMS",
                     help="A comma-separated OR-group. Repeat to AND groups. Enables composed mode.")
@@ -356,18 +357,26 @@ def main():
     group_fields, not_groups = {}, []
     if args.groups_file:
         file_groups, file_default, file_operator = load_groups_file(args.groups_file)
-        if file_operator and str(file_operator).upper() != args.operator:
-            sys.stderr.write(f"--groups-file: file operator {file_operator!r} differs from "
-                             f"--operator {args.operator}; --operator governs this search\n")
+        file_operator = str(file_operator).upper() if file_operator else None
+        if file_operator not in (None, "AND", "OR"):
+            sys.exit(f"--groups-file: unknown operator {file_operator!r}")
+        if args.operator is None:
+            args.operator = file_operator or "OR"  # the file's operator, unless overridden
+        elif file_operator and file_operator != args.operator:
+            sys.stderr.write(f"--groups-file: file operator {file_operator} differs from "
+                             f"explicit --operator {args.operator}; --operator governs this search\n")
         file_default = boosted(file_default, fields) if file_default else None
         for g in file_groups:
-            if g["exclude"]:
-                not_groups.append(g["text"])
-                continue
             per = g["content_fields"] or file_default
+            per = boosted(per, fields) if per else None
+            if g["exclude"]:  # an excluded group keeps its own field scope
+                not_groups.append({"text": g["text"], "fields": per or fields})
+                continue
             if per:
-                group_fields[len(sqs_groups)] = boosted(per, fields)
+                group_fields[len(sqs_groups)] = per
             sqs_groups.append(g["text"])
+    if args.operator is None:
+        args.operator = "OR"
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
 
     if not_groups and not sqs_groups:
@@ -378,6 +387,7 @@ def main():
     if sqs_groups:
         if keywords:  # positional/stdin keywords become plain-phrase groups
             sqs_groups = [f'"{k}"' if " " in k else k for k in keywords] + sqs_groups
+            group_fields = {i + len(keywords): f for i, f in group_fields.items()}
         env = run_es(build_groups(sqs_groups, not_terms, fields, args.since, args.until,
                                   args.size, args.sort, args.distinct_channels,
                                   args.operator, args.content_type, group_fields, not_groups))
@@ -385,10 +395,10 @@ def main():
                       "groups": sqs_groups, "not": not_terms}
         expression = render_groups(sqs_groups, not_terms, args.operator)
         if not_groups or group_fields:
-            query_desc["not_groups"] = not_groups
+            query_desc["not_groups"] = [g["text"] for g in not_groups]
             query_desc["group_fields"] = {str(i): f for i, f in group_fields.items()}
             for g in not_groups:
-                expression["expression"] += f" AND NOT ({g})"
+                expression["expression"] += f" AND NOT ({g['text']})"
     elif any_groups:
         if keywords:
             any_groups = [keywords] + any_groups

@@ -14,6 +14,7 @@ import socket
 import stat
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,6 @@ def _fake_es(counts_by_query=None, delay=0.0, fail_first=None):
         with lock:
             calls.append(body)
         if delay:
-            import time
             time.sleep(delay)
         key = json.dumps(body, sort_keys=True)
         if fail_first is not None and key not in state["failed"] and fail_first(body):
@@ -174,11 +174,45 @@ class TestGroupsFile:
         assert [c["query"] for c in clauses] == ["retirement +planning", "pension"]
         assert clauses[0]["fields"] == ["title^4"]            # boost carried from the default field list
         assert clauses[1]["fields"] == ["title^4", "summary^2"]
-        assert body["must_not"] == [{"simple_query_string": {"query": "scam", "fields": sc.DEFAULT_FIELDS.split(","),
+        # the excluded group inherits default_content_fields, exactly as the report would
+        assert body["must_not"] == [{"simple_query_string": {"query": "scam", "fields": ["title^4", "summary^2"],
                                                              "default_operator": "and"}}]
         out = json.loads(capsys.readouterr().out)
         assert out["query"]["not_groups"] == ["scam"]
         assert out["expression"]["expression"].endswith(" AND NOT (scam)")
+
+    def test_file_operator_applies_unless_overridden(self, monkeypatch, capsys, tmp_path, sc):
+        f = tmp_path / "groups.json"
+        f.write_text(json.dumps({"operator": "AND", "groups": [{"text": "a"}, {"text": "b"}]}))
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        fake = _fake_es()
+        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
+                                             "--no-enrich", "--groups-file", str(f)])
+        sc.main()
+        assert "must" in fake.calls[0]["query"]["bool"]  # AND from the file
+        assert json.loads(capsys.readouterr().out)["query"]["operator"] == "AND"
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
+                                             "--no-enrich", "--operator", "OR", "--groups-file", str(f)])
+        sc.main()
+        assert "should" in fake.calls[1]["query"]["bool"]  # explicit flag wins
+
+    def test_excluded_group_keeps_its_field_scope_and_positional_offsets(self, monkeypatch, capsys, tmp_path, sc):
+        f = tmp_path / "groups.json"
+        f.write_text(json.dumps({"groups": [{"text": "pension", "content_fields": ["title"]},
+                                            {"text": "scam", "exclude": True, "content_fields": ["title"]}]}))
+        monkeypatch.setattr(sc.sys, "stdin", _SocketStdin())
+        fake = _fake_es()
+        monkeypatch.setattr(sc.subprocess, "run", fake)
+        monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "--no-share",
+                                             "--no-enrich", "--groups-file", str(f), "seed one", "seed2"])
+        sc.main()
+        body = fake.calls[0]["query"]["bool"]
+        should = [c["simple_query_string"] for c in body["should"]]
+        assert [c["query"] for c in should] == ['"seed one"', "seed2", "pension"]
+        assert should[0]["fields"] == sc.DEFAULT_FIELDS.split(",")  # positional seeds keep the defaults
+        assert should[2]["fields"] == ["title^4"]                     # the file group's override moved with it
+        assert body["must_not"][0]["simple_query_string"]["fields"] == ["title^4"]
 
     def test_only_excludes_is_an_error(self, tmp_path, sc, monkeypatch):
         f = tmp_path / "groups.json"
@@ -210,8 +244,9 @@ class TestGroupsFile:
 # ---------------------------------------------------------------- probe loop
 
 class TestProbeParallelAndCache:
-    def _run(self, probe, monkeypatch, capsys, argv, fake, cache_dir):
+    def _run(self, probe, monkeypatch, capsys, argv, fake, cache_dir, ns="test-identity"):
         monkeypatch.setattr(probe.subprocess, "run", fake)
+        monkeypatch.setattr(probe, "_CACHE_NS", ns)
         monkeypatch.setattr(probe.sys, "argv", ["probe.py", "--samples", "0", "--no-recency",
                                                 "--cache-dir", str(cache_dir)] + argv)
         probe.main()
@@ -242,16 +277,30 @@ class TestProbeParallelAndCache:
         self._run(probe, monkeypatch, capsys, ["--fields", "title", "--content-type", "all", "alpha"], fake, tmp_path)
         assert len(fake.calls) == 3
 
-    def test_cache_is_namespaced_by_endpoint_and_credentials(self, monkeypatch, capsys, tmp_path, probe):
+    def test_cache_is_namespaced_by_authenticated_identity(self, monkeypatch, capsys, tmp_path, probe):
         fake = _fake_es({"alpha": 50})
-        monkeypatch.setenv("TL_API_URL", "https://a.example")
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
-        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path)
-        monkeypatch.setenv("TL_API_KEY", "other-account")
-        monkeypatch.setattr(probe, "_CACHE_NS", None)
-        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path)
-        assert len(fake.calls) == 2  # different credentials never share an entry
+        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path, ns="user-1")
+        self._run(probe, monkeypatch, capsys, ["alpha"], fake, tmp_path, ns="user-2")
+        assert len(fake.calls) == 2  # another account never shares an entry
         assert len(list(tmp_path.iterdir())) == 2  # two namespace directories
+
+    def test_namespace_comes_from_tl_whoami_and_disables_cache_on_failure(self, monkeypatch, tmp_path, probe):
+        def whoami_ok(cmd, **kw):
+            assert cmd[:2] == ["tl", "whoami"]
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"user": {"id": 7, "email": "a@b"}}), stderr="")
+        monkeypatch.setattr(probe.subprocess, "run", whoami_ok)
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        ns_a = probe.cache_namespace()
+        monkeypatch.setenv("TL_API_URL", "https://staging.example")
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        assert probe.cache_namespace() not in (None, ns_a)  # endpoint is part of the identity
+        monkeypatch.setattr(probe.subprocess, "run",
+                            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not logged in"))
+        monkeypatch.setattr(probe, "_CACHE_NS", None)
+        assert probe.cache_namespace() is None
+        assert probe.cache_load(str(tmp_path), {"q": 1}, 24) is None
+        probe.cache_store(str(tmp_path), {"q": 1}, {"x": 1})
+        assert not any(tmp_path.iterdir())  # nothing written when identity is unknown
 
     def test_no_cache_flag(self, monkeypatch, capsys, tmp_path, probe):
         fake = _fake_es({"alpha": 50})
