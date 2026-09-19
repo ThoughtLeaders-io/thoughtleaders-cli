@@ -8,6 +8,11 @@ Then enriches the candidate channels with name + sponsorability flags from the
 channel docs (one more ES call). This is the skill's DEFAULT output; keyword
 distribution (`probe.py`) is the opt-in mode.
 
+`--intensity`'s `total_uploads` denominator is scoped with the EXACT SAME
+`--since`/`--until`/`--content-type` window as the numerator (matching_uploads)
+— without matching scope, topic_share is inflated by an all-time denominator
+whenever a date window narrows the numerator.
+
 Usage:
     search_channels.py investing "index funds" "stock market"
     echo '["investing","index funds"]' | search_channels.py
@@ -23,10 +28,13 @@ Usage:
 Output (stdout): a single JSON object — see OUTPUT_SHAPE at the bottom.
 """
 import argparse
-import datetime
 import json
-import subprocess
+import os
 import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kw_common  # noqa: E402
 
 DEFAULT_FIELDS = "title^4,summary^2,transcript^1"  # title > summary > transcript
 # ES channel docs keep the LEGACY field names (reach / is_tl_channel …) — the
@@ -37,30 +45,7 @@ ENRICH_SOURCE = [
     "media_selling_network_join_date", "has_outreach_email",
     "sponsorship_price", "reach",
 ]
-ES_TIMEOUT = 90
-# Always scope to YouTube uploads (channel.format 4 — our inventory); at video
-# level also default to longform (best sponsorable-content signal).
-YOUTUBE_FORMAT = 4
-CONTENT_TYPES = ("longform", "short", "live", "all")
-
-
-def run_es(body):
-    """POST an ES body via `tl db es` and return the parsed envelope, or exit."""
-    proc = subprocess.run(
-        ["tl", "db", "es", "-", "--json"],
-        input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
-    )
-    if proc.returncode != 0:
-        sys.stderr.write(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()}\n"
-        )
-        sys.exit(proc.returncode or 1)
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"could not parse tl db es output: {exc}\n")
-        sys.exit(1)
+CONTENT_TYPES = kw_common.CONTENT_TYPES
 
 
 def keyword_clauses(keywords, fields):
@@ -69,23 +54,6 @@ def keyword_clauses(keywords, fields):
         {"multi_match": {"query": kw, "type": "phrase", "fields": fields}}
         for kw in keywords
     ]
-
-
-def _filters(since, until, content_type="longform"):
-    filt = [
-        {"term": {"doc_type": "article"}},
-        {"term": {"channel.format": YOUTUBE_FORMAT}},
-    ]
-    if content_type and content_type != "all":
-        filt.append({"term": {"content_type": content_type}})
-    if since or until:
-        rng = {}
-        if since:
-            rng["gte"] = since
-        if until:
-            rng["lte"] = until
-        filt.append({"range": {"publication_date": rng}})
-    return filt
 
 
 def _envelope(bool_q, size):
@@ -103,7 +71,8 @@ def search_bool(keywords, fields, operator, since, until, not_terms=None,
                 content_type="longform"):
     """Flat mode: a single OR/AND list of keywords (+ optional exclusions)."""
     clauses = keyword_clauses(keywords, fields)
-    bool_q = {"filter": _filters(since, until, content_type)}
+    bool_q = {"filter": kw_common.scope_filters(level="topic", content_type=content_type,
+                                                since=since, until=until)}
     if operator == "AND":
         bool_q["must"] = clauses
     else:
@@ -124,31 +93,35 @@ def composed_bool(any_groups, not_terms, fields, since, until,
         {"bool": {"should": keyword_clauses(group, fields), "minimum_should_match": 1}}
         for group in any_groups
     ]
-    bool_q = {"must": must, "filter": _filters(since, until, content_type)}
+    bool_q = {"must": must, "filter": kw_common.scope_filters(level="topic", content_type=content_type,
+                                                               since=since, until=until)}
     if not_terms:
         bool_q["must_not"] = keyword_clauses(not_terms, fields)
     return bool_q
 
 
 def groups_bool(groups, not_terms, fields, since, until, operator="OR",
-                content_type="longform"):
+                content_type="longform", group_fields=None, not_groups=None):
     """Boolean-group mode — each group is a self-contained simple_query_string
     (`("fable 5" | fable5) -keto` scopes its exclusion to its own arm), exactly
     the shape the delivered keyword_groups filter stores. Groups combine per
     `operator` (default OR — a filter's groups union); `--not` still excludes
-    across the whole query. `default_operator: "and"` keeps in-group `-` safe."""
-    clauses = [
-        {"simple_query_string": {"query": g, "fields": fields, "default_operator": "and"}}
-        for g in groups
+    across the whole query, alongside any excluded groups from a groups file.
+    Built via `kw_common.groups_query`, scope via `kw_common.scope_filters`."""
+    group_fields = group_fields or {}
+    spec_groups = [
+        {"text": g, "content_fields": group_fields.get(i), "exclude": False}
+        for i, g in enumerate(groups)
+    ] + [
+        {"text": g["text"], "content_fields": g.get("fields"), "exclude": True}
+        for g in (not_groups or [])
     ]
-    bool_q = {"filter": _filters(since, until, content_type)}
-    if operator == "AND":
-        bool_q["must"] = clauses
-    else:
-        bool_q["should"] = clauses
-        bool_q["minimum_should_match"] = 1
+    spec = {"groups": spec_groups, "operator": operator, "default_content_fields": fields}
+    bool_q = kw_common.groups_query(spec, operator=operator)
+    bool_q["filter"] = kw_common.scope_filters(level="topic", content_type=content_type,
+                                               since=since, until=until)
     if not_terms:
-        bool_q["must_not"] = keyword_clauses(not_terms, fields)
+        bool_q["must_not"] = list(bool_q.get("must_not") or []) + keyword_clauses(not_terms, fields)
     return bool_q
 
 
@@ -173,32 +146,18 @@ def intensity_envelope(bool_q, top, recency_cutoff):
     }
 
 
-def totals_body(channel_ids, content_type="longform"):
-    """Per-channel TOTAL upload counts in the same scope — the denominator for
-    topic share (matching_uploads / total_uploads). One call for all ids."""
-    filt = [
-        {"term": {"doc_type": "article"}},
-        {"term": {"channel.format": YOUTUBE_FORMAT}},
-        {"terms": {"channel.id": channel_ids}},
-    ]
-    if content_type and content_type != "all":
-        filt.append({"term": {"content_type": content_type}})
+def totals_body(channel_ids, content_type="longform", since=None, until=None):
+    """Per-channel TOTAL upload counts, scoped EXACTLY like the numerator
+    (same doc_type/format/content_type/date window) — the denominator for
+    topic_share (matching_uploads / total_uploads). One call for all ids."""
+    filters = kw_common.scope_filters(level="topic", content_type=content_type,
+                                      since=since, until=until, channel_ids=channel_ids)
     return {
         "size": 0,
         "track_total_hits": True,
-        "query": {"bool": {"filter": filt}},
+        "query": {"bool": {"filter": filters}},
         "aggs": {"by_channel": {"terms": {"field": "channel.id", "size": len(channel_ids)}}},
     }
-
-
-def months_ago_iso(months):
-    """ISO date `months` whole months before today (day clamped to <=28)."""
-    today = datetime.date.today()
-    y, m = today.year, today.month - months
-    while m <= 0:
-        m += 12
-        y -= 1
-    return datetime.date(y, m, min(today.day, 28)).isoformat()
 
 
 def _as_id(key):
@@ -207,6 +166,9 @@ def _as_id(key):
     if isinstance(key, str) and key.isdigit():
         return int(key)
     return key
+
+
+TIER_NAMES = ("core", "recurring", "occasional", "one_off")
 
 
 def intensity_tier(matches, share, recurring_min, core_share):
@@ -290,10 +252,51 @@ def sponsorability(doc):
     }
 
 
+# ---------------------------------------------------------- intensity sheet
+
+def scope_line(scope):
+    """`youtube longform · 2025-09-19..` — the window the counts were taken in."""
+    line = f"{scope.get('format') or 'youtube'} {scope.get('content_type') or 'all'}"
+    since, until = scope.get("since"), scope.get("until")
+    if since or until:
+        line += f" · {since or ''}..{until or ''}"
+    return line
+
+
+def render_intensity_sheet(out, limit=10):
+    """The intensity sheet: the numbers plus the biggest matchers, 12 lines max.
+
+    Read this instead of the JSON. The tier counts describe the tiered slice
+    only (the biggest `--top` matchers); `distinct_channels` is the corpus
+    total, and the rest of it is un-tiered by design."""
+    summary = out["summary"]
+    tiers = summary["tiers"]
+    distinct = summary["distinct_channels"]
+    lines = [f"# Intensity · {scope_line(out['scope'])} · "
+             f"{distinct if distinct is not None else '?'} distinct channels · "
+             f"{summary['total_matching_videos']} matching uploads"]
+    tier_bits = " · ".join(f"{t} {tiers.get(t, 0)}" for t in TIER_NAMES)
+    tier_line = (f"tiers (top {summary['tiered_channels']} channels by matching "
+                 f"uploads): {tier_bits}")
+    if summary["untiered_channels"]:
+        tier_line += (f" — the other {summary['untiered_channels']} distinct channels "
+                      "are un-tiered")
+    lines.append(tier_line)
+    for c in out["channels"][:limit]:
+        bits = [str(c["channel_id"]), c.get("name") or "(unknown)",
+                f"{c.get('matching_uploads') or 0} up "
+                f"({c.get('recent_matching_uploads') or 0} rec)"]
+        if c.get("topic_share") is not None:
+            bits.append(f"{round(c['topic_share'] * 100)}%")
+        bits.append(c.get("tier") or "untiered")
+        lines.append("- " + " · ".join(bits))
+    return "\n".join(lines) + "\n"
+
+
 def collect_keywords(argv_words):
     if argv_words:
         return [w.strip() for w in argv_words if w.strip()]
-    if sys.stdin.isatty():
+    if not kw_common.stdin_is_readable():
         return []
     raw = sys.stdin.read().strip()
     if not raw:
@@ -317,10 +320,47 @@ def dedupe(items):
     return out
 
 
+def _resolve_deadline(deadline_at):
+    """`--deadline-at EPOCH_SECONDS` (or `$TL_KW_DEADLINE_AT`) → a `kw_common.Deadline`
+    counting down to that moment; unbounded when neither is given."""
+    if deadline_at is None:
+        raw = os.environ.get("TL_KW_DEADLINE_AT")
+        if raw:
+            try:
+                deadline_at = float(raw)
+            except ValueError:
+                deadline_at = None
+    if deadline_at is None:
+        return kw_common.Deadline(None)
+    return kw_common.Deadline(max(0.0, deadline_at - time.time()))
+
+
+def _fatal_es_error(exc):
+    """Exit the way the old inline `run_es` did — message + exit code.
+
+    A deadline is NOT routed here: it is a budget outcome, not a broken query,
+    and a non-zero exit would break the `&&` chain the skill runs these steps
+    in. The caller emits the normal envelope with empty results instead.
+    """
+    sys.stderr.write(f"{exc}\n")
+    sys.exit(1)
+
+def _write_sheet(path, text):
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    except OSError as exc:
+        sys.exit(f"could not write --sheet {path}: {exc}")
+
+
+DEADLINE_SHEET = "deadline reached — not run\n"
+
+
+
 def main():
     ap = argparse.ArgumentParser(description="Rank channels by field-weighted topic relevance.")
     ap.add_argument("keywords", nargs="*", help="Keywords (or pipe a JSON array on stdin)")
-    ap.add_argument("--operator", choices=["AND", "OR"], default="OR",
+    ap.add_argument("--operator", choices=["AND", "OR"], default=None,
                     help="How to combine flat keywords (default OR). Ignored when --any is used.")
     ap.add_argument("--any", action="append", default=[], metavar="TERMS",
                     help="A comma-separated OR-group. Repeat to AND groups: "
@@ -330,6 +370,10 @@ def main():
                          "'(\"fable 5\" | fable5) -keto'. Repeatable; groups combine per "
                          "--operator (default OR). This is the delivered keyword_groups "
                          "shape, so the final filter re-runs verbatim.")
+    ap.add_argument("--groups-file", metavar="PATH",
+                    help="JSON file of boolean groups — build_report.py's {\"groups\": "
+                         "[{\"text\": ...}]} shape, or a list of strings. Appended to "
+                         "--group; skips shell quoting for large filters.")
     ap.add_argument("--not", dest="exclude", action="append", default=[], metavar="TERMS",
                     help="Comma-separated terms to EXCLUDE (must_not); repeatable. Narrows away a confusable sense.")
     ap.add_argument("--fields", default=DEFAULT_FIELDS,
@@ -342,6 +386,13 @@ def main():
     ap.add_argument("--since", help="publication_date >= YYYY-MM-DD")
     ap.add_argument("--until", help="publication_date <= YYYY-MM-DD")
     ap.add_argument("--no-enrich", action="store_true", help="Skip name + sponsorability enrichment")
+    ap.add_argument("--run-dir", metavar="DIR",
+                    help="Run ledger: append this invocation (argv, elapsed, output) as one event file under DIR/events/")
+    ap.add_argument("--deadline-at", type=float, default=None, metavar="EPOCH_SECONDS",
+                    help="Unix epoch seconds after which no new ES call starts (env "
+                         "TL_KW_DEADLINE_AT as a fallback). A call that would start past "
+                         "this emits the normal envelope with no results and "
+                         "\"unresolved\": \"deadline\", and exits 0.")
     # Intensity mode — classify every channel's RELATIONSHIP to the topic
     # (core / recurring / occasional / one_off) from 2–3 aggregation calls,
     # instead of ranking by best-matching video.
@@ -361,12 +412,25 @@ def main():
     ap.add_argument("--core-share", type=float, default=0.5,
                     help="Intensity mode: topic_share at/above which a recurring "
                          "channel is 'core' (default 0.5).")
+    ap.add_argument("--sheet", metavar="PATH",
+                    help="Intensity mode: also write the readable intensity sheet here "
+                         "(read this instead of the JSON).")
     ap.add_argument("--no-share", action="store_true",
                     help="Intensity mode: skip the totals call (no topic_share, "
                          "so no 'core' tier — saves one ES call).")
-    args = ap.parse_args()
+    args = ap.parse_intermixed_args()
+    kw_common.reject_option_like(ap, args.keywords)
+
+    if args.sheet and not args.intensity:
+        sys.exit("--sheet is written in --intensity mode only")
 
     fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    _ledger_started = time.monotonic()
+    deadline = _resolve_deadline(args.deadline_at)
+
+    def emit(obj):
+        kw_common.emit(obj, run_dir=args.run_dir, script="search_channels",
+                       argv=sys.argv[1:], started=_ledger_started)
     if not fields:
         sys.exit("--fields must list at least one ES field")
 
@@ -375,20 +439,51 @@ def main():
 
     keywords = dedupe(collect_keywords(args.keywords))
     any_groups = [g for g in (parse_group(r) for r in args.any) if g]
-    sqs_groups = [g.strip() for g in args.group if g.strip()]
+    sqs_groups = [kw_common.phrase_if_plain(g) for g in args.group if g.strip()]
+    group_fields, not_groups = {}, []
+    if args.groups_file:
+        loaded = kw_common.load_groups_file(args.groups_file)
+        file_groups, file_default, file_operator = (
+            loaded["groups"], loaded["default_content_fields"], loaded["operator"])
+        if file_operator not in (None, "AND", "OR"):
+            sys.exit(f"--groups-file: unknown operator {file_operator!r}")
+        if args.operator is None:
+            args.operator = file_operator or "OR"  # the file's operator, unless overridden
+        elif file_operator and file_operator != args.operator:
+            sys.stderr.write(f"--groups-file: file operator {file_operator} differs from "
+                             f"explicit --operator {args.operator}; --operator governs this search\n")
+        for g in file_groups:
+            text = kw_common.phrase_if_plain(g["text"])
+            per = g["content_fields"] or file_default
+            if g["exclude"]:  # an excluded group keeps its own field scope
+                not_groups.append({"text": text, "fields": per or fields})
+                continue
+            if per:
+                group_fields[len(sqs_groups)] = per
+            sqs_groups.append(text)
+    if args.operator is None:
+        args.operator = "OR"
     not_terms = dedupe([t for r in args.exclude for t in parse_group(r)])
 
+    if not_groups and not sqs_groups:
+        sys.exit("--groups-file holds only excluded groups; nothing to search")
     if sqs_groups and any_groups:
         sys.exit("--group and --any are different composition modes; use one or the other")
 
     if sqs_groups:
         if keywords:  # positional/stdin keywords become plain-phrase groups
             sqs_groups = [f'"{k}"' if " " in k else k for k in keywords] + sqs_groups
+            group_fields = {i + len(keywords): f for i, f in group_fields.items()}
         bool_q = groups_bool(sqs_groups, not_terms, fields, args.since, args.until,
-                             args.operator, args.content_type)
+                             args.operator, args.content_type, group_fields, not_groups)
         query_desc = {"mode": "groups", "operator": args.operator,
                       "groups": sqs_groups, "not": not_terms}
         expression = render_groups(sqs_groups, not_terms, args.operator)
+        if not_groups or group_fields:
+            query_desc["not_groups"] = [g["text"] for g in not_groups]
+            query_desc["group_fields"] = {str(i): f for i, f in group_fields.items()}
+            for g in not_groups:
+                expression["expression"] += f" AND NOT ({g['text']})"
     elif any_groups:
         if keywords:  # positional/stdin keywords become a leading required OR-group
             any_groups = [keywords] + any_groups
@@ -405,82 +500,111 @@ def main():
         pos_clauses = [keywords] if args.operator == "OR" else [[k] for k in keywords]
         expression = render_cnf(pos_clauses, not_terms)
 
-    scope = {"format": "youtube", "content_type": args.content_type}
+    scope = {"format": "youtube", "content_type": args.content_type,
+             "since": args.since, "until": args.until}
 
-    if args.intensity:
-        cutoff = months_ago_iso(args.recency_months)
-        env = run_es(intensity_envelope(bool_q, args.top, cutoff))
-        aggs = env.get("aggregations") or {}
-        buckets = (aggs.get("by_channel") or {}).get("buckets") or []
-        distinct = (aggs.get("distinct_channels") or {}).get("value")
-        channels = [{
-            "channel_id": _as_id(b.get("key")),
-            "matching_uploads": b.get("doc_count", 0),
-            "recent_matching_uploads": (b.get("recent") or {}).get("doc_count", 0),
-        } for b in buckets]
+    try:
+        if args.intensity:
+            cutoff = kw_common.months_ago_iso(args.recency_months)
+            env = kw_common.run_es(intensity_envelope(bool_q, args.top, cutoff), deadline=deadline)
+            aggs = env.get("aggregations") or {}
+            buckets = (aggs.get("by_channel") or {}).get("buckets") or []
+            distinct = (aggs.get("distinct_channels") or {}).get("value")
+            channels = [{
+                "channel_id": _as_id(b.get("key")),
+                "matching_uploads": b.get("doc_count", 0),
+                "recent_matching_uploads": (b.get("recent") or {}).get("doc_count", 0),
+            } for b in buckets]
 
-        totals = {}
-        if channels and not args.no_share:
-            tenv = run_es(totals_body([c["channel_id"] for c in channels], args.content_type))
-            taggs = tenv.get("aggregations") or {}
-            totals = {_as_id(tb.get("key")): tb.get("doc_count", 0)
-                      for tb in (taggs.get("by_channel") or {}).get("buckets") or []}
+            totals = {}
+            if channels and not args.no_share:
+                tenv = kw_common.run_es(
+                    totals_body([c["channel_id"] for c in channels], args.content_type,
+                               args.since, args.until),
+                    deadline=deadline)
+                taggs = tenv.get("aggregations") or {}
+                totals = {_as_id(tb.get("key")): tb.get("doc_count", 0)
+                          for tb in (taggs.get("by_channel") or {}).get("buckets") or []}
 
-        tiers = {"core": 0, "recurring": 0, "occasional": 0, "one_off": 0}
-        for c in channels:
-            total_uploads = totals.get(c["channel_id"])
-            share = (round(c["matching_uploads"] / total_uploads, 3)
-                     if total_uploads else None)
-            c["total_uploads"] = total_uploads
-            c["topic_share"] = share
-            c["tier"] = intensity_tier(c["matching_uploads"], share,
-                                       args.recurring_min, args.core_share)
-            tiers[c["tier"]] += 1
+            tiers = {t: 0 for t in TIER_NAMES}
+            for c in channels:
+                total_uploads = totals.get(c["channel_id"])
+                share = (round(c["matching_uploads"] / total_uploads, 3)
+                         if total_uploads else None)
+                c["total_uploads"] = total_uploads
+                c["topic_share"] = share
+                c["tier"] = intensity_tier(c["matching_uploads"], share,
+                                           args.recurring_min, args.core_share)
+                tiers[c["tier"]] += 1
+
+            if channels and not args.no_enrich:
+                meta = {d.get("id"): d for d in
+                        kw_common.run_es(build_enrich([c["channel_id"] for c in channels]),
+                                         deadline=deadline).get("results", [])}
+                for c in channels:
+                    doc = meta.get(c["channel_id"], {})
+                    c["name"] = doc.get("name")
+                    c["sponsorability"] = sponsorability(doc)
+
+            out = {
+                "query": query_desc,
+                "cnf": expression,      # kept name for back-compat; see OUTPUT_SHAPE
+                "expression": expression,
+                "fields": args.fields,
+                "scope": scope,
+                "recency": {"months": args.recency_months, "cutoff": cutoff},
+                "total_matching_videos": env.get("total", 0),
+                "distinct_channels": distinct,
+                "tiers": tiers,
+                "summary": {
+                    "distinct_channels": distinct,
+                    "total_matching_videos": env.get("total", 0),
+                    "tiered_channels": len(channels),
+                    "top": args.top,
+                    "untiered_channels": (max(distinct - len(channels), 0)
+                                          if isinstance(distinct, int) else None),
+                    "tiers": dict(tiers),
+                },
+                "channels": channels,
+            }
+            if args.sheet:
+                _write_sheet(args.sheet, render_intensity_sheet(out))
+            emit(out)
+            return
+
+        env = kw_common.run_es(_envelope(bool_q, args.size), deadline=deadline)
+        channels = []
+        for row in env.get("results", []):
+            ch = row.get("channel") or {}
+            cid = ch.get("id")
+            if cid is None:
+                continue
+            channels.append({
+                "channel_id": cid,
+                "score": round(row.get("_score") or 0.0, 3),
+                "top_video_id": row.get("_id"),
+                "top_video_title": row.get("title"),
+            })
 
         if channels and not args.no_enrich:
             meta = {d.get("id"): d for d in
-                    run_es(build_enrich([c["channel_id"] for c in channels])).get("results", [])}
+                    kw_common.run_es(build_enrich([c["channel_id"] for c in channels]),
+                                     deadline=deadline).get("results", [])}
             for c in channels:
                 doc = meta.get(c["channel_id"], {})
                 c["name"] = doc.get("name")
                 c["sponsorability"] = sponsorability(doc)
-
-        print(json.dumps({
-            "query": query_desc,
-            "cnf": expression,      # kept name for back-compat; see OUTPUT_SHAPE
-            "expression": expression,
-            "fields": args.fields,
-            "scope": scope,
-            "recency": {"months": args.recency_months, "cutoff": cutoff},
-            "total_matching_videos": env.get("total", 0),
-            "distinct_channels": distinct,
-            "tiers": tiers,
-            "channels": channels,
-        }, ensure_ascii=False))
+    except kw_common.EsError as exc:
+        if exc.kind != "deadline":
+            _fatal_es_error(exc)
+        if args.sheet:
+            _write_sheet(args.sheet, DEADLINE_SHEET)
+        emit({"query": query_desc, "cnf": expression, "expression": expression,
+              "fields": args.fields, "scope": scope, "total_matching_videos": 0,
+              "channels": [], "unresolved": "deadline"})
         return
 
-    env = run_es(_envelope(bool_q, args.size))
-    channels = []
-    for row in env.get("results", []):
-        ch = row.get("channel") or {}
-        cid = ch.get("id")
-        if cid is None:
-            continue
-        channels.append({
-            "channel_id": cid,
-            "score": round(row.get("_score") or 0.0, 3),
-            "top_video_id": row.get("_id"),
-            "top_video_title": row.get("title"),
-        })
-
-    if channels and not args.no_enrich:
-        meta = {d.get("id"): d for d in run_es(build_enrich([c["channel_id"] for c in channels])).get("results", [])}
-        for c in channels:
-            doc = meta.get(c["channel_id"], {})
-            c["name"] = doc.get("name")
-            c["sponsorability"] = sponsorability(doc)
-
-    print(json.dumps({
+    emit({
         "query": query_desc,
         "cnf": expression,          # kept name for back-compat; see OUTPUT_SHAPE
         "expression": expression,
@@ -488,7 +612,7 @@ def main():
         "scope": scope,
         "total_matching_videos": env.get("total", 0),
         "channels": channels,
-    }, ensure_ascii=False))
+    })
 
 
 # OUTPUT_SHAPE (ranked mode, the default):
@@ -508,14 +632,23 @@ def main():
 #  "total_matching_videos",
 #  "distinct_channels": <true breadth — the tiered list is capped at --top>,
 #  "tiers":{"core":n,"recurring":n,"occasional":n,"one_off":n},
+#  "summary":{"distinct_channels","total_matching_videos","tiered_channels","top",
+#             "untiered_channels","tiers":{...}},   # the same numbers --sheet prints
 #  "channels":[{"channel_id","name","matching_uploads","recent_matching_uploads",
 #               "total_uploads","topic_share","tier","sponsorability":{...}}, ...]}
 # — biggest matchers first; topic_share/"core" need the totals call (absent
 #   with --no-share). Tiers: core = recurring AND topic_share >= --core-share;
 #   recurring = matching_uploads >= --recurring-min; occasional = 2..min-1;
-#   one_off = 1.
+#   one_off = 1. total_uploads is scoped identically to matching_uploads (same
+#   --since/--until/--content-type), so topic_share reflects the chosen window.
 #
 # sponsorability reads LEGACY ES channel-doc fields (reach, is_tl_channel) and
 # emits the renamed vocabulary (subscribers, is_tpp) — ES was not migrated.
+#
+# Errors: an ES call that fails writes a message to stderr and exits non-zero.
+# A call that would start past --deadline-at is NOT an error: the normal
+# envelope is emitted with "channels": [] and "unresolved": "deadline", exit 0
+# (a --sheet then holds one line, "deadline reached — not run"), so the
+# && chain the skill runs these steps in survives a budget miss.
 if __name__ == "__main__":
     main()

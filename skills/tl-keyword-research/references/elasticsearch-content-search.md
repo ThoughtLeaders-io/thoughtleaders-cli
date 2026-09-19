@@ -134,9 +134,9 @@ platform's **own keyword grammar**, which is not simple_query_string:
 the script. In the URL, groups missing `content_fields` inherit the link's
 global `content_fields` param.
 
-**Sample keys returned by `probe.py`** (friendly, already validator-ready — not
-ES paths): topic level → `title`, `summary`, `channel_id`, `category`, `url`;
-channel level → `name`, `topic`, `channel_description`, `channel_id`. These
+**Sample keys returned by `probe.py`** (friendly, ready for inline judgment —
+not ES paths): topic level → `title`, `summary`, `channel_id`, `category`,
+`url`; channel level → `name`, `topic`, `channel_description`, `channel_id`. These
 metadata keys (`channel_id`, `category`, `url`) are for context/candidate
 extraction only — they are not valid `content_fields` for a filter spec.
 
@@ -382,23 +382,60 @@ a small floor **AND** its share of all-time channels is below a threshold — so
 high-volume evergreen term (large recent reach, small share, e.g. `annuity`:
 2,254 recent channels at 8%) is never mislabeled.
 
-## Counts + samples in ONE query (no highlight)
+## Counts + samples in ONE query, with highlight fragments
 
 `track_total_hits: true` gives the full count even with a small `size`; `size: N`
-returns the top-N (by `_score`) docs. **The `tl db es` CLI strips the ES
-`highlight` block**, so don't rely on it — return the `_source` fields you need
-for validation instead (title/summary for articles; `name`/`ai.topic_descriptions`
-for channels). The response is `{results: [...rows with _source flattened...],
+returns the top-N (by `_score`) docs. **Highlight fragments ARE available** —
+pass `--highlight` to `tl db es` and the query body carries a `highlight`
+clause naming the fields to fragment and the pre/post tags to wrap a match
+in; the CLI keeps the `highlight` block in the response only when `--highlight`
+is passed, and drops it otherwise. Fragments come back per result row under
+`highlight.<field>` — one or more short excerpts centred on the match — so
+you can see *where* a term matched without re-reading the whole field. The
+skill's scripts use `<<`/`>>` as the pre/post tags (rendered as `«»` on the
+sample sheets); tags are configurable per query. The response shape is
+`{results: [...rows with _source flattened, highlight alongside it...],
 total: <int>, usage: {...}}`.
 
 ```json
 {"size": 5, "track_total_hits": true,
  "_source": ["title", "summary", "channel.id"],
+ "highlight": {"fields": {"title": {"fragment_size": 250, "number_of_fragments": 2},
+                          "summary": {"fragment_size": 250, "number_of_fragments": 2}},
+              "pre_tags": ["<<"], "post_tags": [">>"], "require_field_match": true},
  "query": {"bool": {"filter": [{"term": {"doc_type": "article"}}],
                     "must": [{"match_phrase": {"title": "tiktok shop"}}]}}}
 ```
 
-`probe.py` builds exactly this per candidate.
+Run this with `tl db es - --json --highlight`; without the flag the query
+still runs, but the response has no `highlight` block at all. `probe.py`
+builds exactly this shape per candidate.
+
+**Keep `require_field_match: true`, and pass a `highlight_query`.** With the
+match requirement off, every clause in the query highlights every field — the
+scope filter `{"term": {"channel.format": 4}}` came back marking
+`PlayStation «4»`. A `highlight_query` holding just the content clause (the
+candidate's own match, or the keyword groups without the scope filters) marks
+the terms you are gathering evidence for, so a group like
+`cannes +lions +(advertising | agency)` shows the fragment with the anchor
+terms rather than the one word that also appears in a description.
+
+## Evidence in one call
+
+Once a filter is settled, `evidence.py` answers "does this specific channel's
+content actually match it" for many channels at once, without one query per
+channel: the delivered filter (the same `simple_query_string` groups the
+report link uses), scoped down to the chosen channels with a `terms` filter
+on `channel.id`, `collapse`d on `channel.id` and sorted by `_score` — so each
+channel surfaces its single best-matching upload, with a highlight snippet
+from whichever field matched. One call covers up to 100 channels.
+
+A **second** matching upload for the same channel needs a **second** query —
+ES does not return the other members of a collapsed group here (`inner_hits`
+is not among the accepted query types), so a channel's runner-up match means
+re-running the same filter with that channel's first hit excluded. Ask for
+it only for the channels whose verdict genuinely needs a second look, not for
+every channel.
 
 ## Relevance signals
 
@@ -438,6 +475,22 @@ that parent-child join (the join query types are not accepted), so you probe
 the channel docs directly and count **channels**. Same signal, different
 units: validate the keyword's sense on channel-doc samples, but don't expect
 the probe count to match the report's row count on channel-field keywords.
+
+## Transcript queries are the slow ones
+
+Measured live (dog-topic group, same body, same scope): **30.5s with
+`transcript` in the field list, 3.7s without**. Six heavy bodies run
+concurrently all fail at ~32s, while light bodies (title/summary, few terms)
+barely degrade under the same concurrency. The expensive shapes are
+`simple_query_string` over `title,summary,transcript` with a multi-term OR
+union and/or chained `-"phrase"` exclusions.
+
+Consequences for probing: measure a heavy boolean group on
+`--fields title,summary` first and only add `transcript` for the groups that
+need it; split a long OR union into separate candidates; and expect
+`probe.py` to re-run a timed-out body once without `transcript` and flag the
+keyword `transcript_dropped` (its counts then exclude transcript-only matches,
+and `transcript_only` / `transcript_share` come back null).
 
 ## Cost
 

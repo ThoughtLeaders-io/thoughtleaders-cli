@@ -42,9 +42,13 @@ Output (stdout): a single JSON object — see OUTPUT CONTRACT at the bottom.
 """
 import argparse
 import json
+import os
 import re
 import sys
 from urllib.parse import quote
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kw_common  # noqa: E402
 
 DEFAULT_APP_URL = "https://app.thoughtleaders.io"
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
@@ -396,8 +400,11 @@ def main():
     ap.add_argument("--app-url", default=DEFAULT_APP_URL, help=f"App base URL (default {DEFAULT_APP_URL})")
     args = ap.parse_args()
 
-    if sys.stdin.isatty():
-        sys.exit("pipe a JSON spec on stdin (see module docstring)")
+    # An agent harness hands this script a stdin that is an open socket: not a
+    # TTY, never at EOF, so `isatty()` said "read it" and the read blocked
+    # forever. Only a real pipe or file counts as a spec being passed.
+    if not kw_common.stdin_is_readable():
+        sys.exit("pass the report spec on stdin (`< spec.json`)")
     try:
         spec = json.loads(sys.stdin.read())
     except json.JSONDecodeError as exc:
