@@ -1,0 +1,20 @@
+{
+  "name": "thoughtleaders-mcp",
+  "interface": {
+    "displayName": "Thoughtleaders Mcp"
+  },
+  "plugins": [
+    {
+      "name": "thoughtleaders-youtube-data",
+      "source": {
+        "source": "local",
+        "path": "./plugins/thoughtleaders-youtube-data"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

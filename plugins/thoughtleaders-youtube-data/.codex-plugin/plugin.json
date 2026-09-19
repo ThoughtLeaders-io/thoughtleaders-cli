@@ -1,0 +1,33 @@
+{
+  "name": "thoughtleaders-youtube-data",
+  "version": "0.2.0",
+  "description": "YouTube research, validated keyword filters and complete channel authenticity workflows using shared ThoughtLeaders skills.",
+  "author": {
+    "name": "ThoughtLeaders Ltd."
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ThoughtLeaders - YouTube Data",
+    "shortDescription": "Research YouTube content, creators and sponsorships.",
+    "longDescription": "YouTube research, validated keyword filters and complete channel authenticity workflows using shared ThoughtLeaders skills.",
+    "developerName": "ThoughtLeaders Ltd.",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Find YouTube channels similar to Marques Brownlee.",
+      "Build a validated keyword filter and channel shortlist for sustainable fashion.",
+      "Audit a YouTube channel for suspicious views and bot comments."
+    ],
+    "websiteURL": "https://thoughtleaders.io"
+  },
+  "mcpServers": "./.mcp.json",
+  "homepage": "https://thoughtleaders.io",
+  "repository": "https://github.com/ThoughtLeaders-io/thoughtleaders-cli",
+  "license": "MIT",
+  "keywords": [
+    "youtube",
+    "transcripts",
+    "sponsorship",
+    "research"
+  ]
+}
