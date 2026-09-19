@@ -1440,3 +1440,11 @@ class TestTopLevelOrAnchors:
     def test_required_any_of_reads_the_candidate(self):
         assert probe.required_any_of({"mode": "sqs", "value": self.EXPR}) is True
         assert probe.required_any_of({"mode": "phrase", "value": "cannes lions"}) is False
+
+
+class TestNormalizedTextParens:
+    def test_enclosing_parentheses_are_ignored(self):
+        assert probe.normalized_text('("cannes lions" | canneslions)') == probe.normalized_text('"cannes lions"  |  canneslions')
+
+    def test_two_separate_groups_keep_their_parentheses(self):
+        assert probe.normalized_text("(a | b) +(c | d)") == "(a | b) +(c | d)"

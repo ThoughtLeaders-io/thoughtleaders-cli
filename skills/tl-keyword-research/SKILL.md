@@ -165,7 +165,7 @@ run is **exactly these turns**, and each Bash turn is **ONE call** (chain the co
   $RUN/resolver.json | probe.py --sheet $RUN/sheet2.md …`) + the round-1 measurement (`probe.py --groups-file $RUN/groups.json
   --residual-vs '<core>' --exclude-phrase … --sheet $RUN/sheet_r1.md`).
 - **T4 — Read `$RUN/sheet2.md` and `$RUN/sheet_r1.md`** (both in this one turn).
-- **T5 — only if a signal or an `unsure` is still open:** Write `$RUN/verdicts_r2.tsv`, then one Bash call (apply + re-measure).
+- **T5 — only if a signal or an `unsure` is still open, or the resolver returned after T3:** Write `$RUN/verdicts_r2.tsv` (and `$RUN/resolver.json`), then one Bash call (apply + resolver-names probe + re-measure).
 - **T6 — one Bash call:** `search_channels.py --intensity --sheet` + `search_videos.py --sheet` (if the user chose trend data) +
   `evidence.py --sheet` (if the user chose channels).
 - **T7 — Read the evidence sheet (and the video sheet).**
@@ -471,8 +471,8 @@ python3 <SKILL_DIR>/scripts/search_videos.py --sort views --distinct-channels \
 `--sheet` is one line per video — date, views, channel (id) and title — with the totals in its header; read it instead of the
 JSON. Videos come back with title, url, publication date, views/likes/duration, and the channel's name + subscribers. Headline
 prevalence comes free from what you already ran: total matching videos + the intensity call's `distinct_channels`. Sense-check the
-top titles against the intent; one-off channels COUNT here. For date-sorted feeds prefer `--fields title,summary` — under a
-non-relevance sort, incidental transcript mentions surface as prominently as genuinely on-topic uploads. Tell the user when one
+top titles against the intent; one-off channels COUNT here. For any non-relevance sort (date OR views) prefer `--fields title,summary` — under such a
+sort, incidental transcript mentions surface as prominently as genuinely on-topic uploads. Tell the user when one
 channel dominates and offer `--distinct-channels`. Run 2a and Step 1 back to back in one Bash call — they are independent.
 
 **Step 2b — Channel targets (if chosen): one evidence call, one judgment.**
@@ -494,7 +494,7 @@ channel dominates and offer `--distinct-channels`. Run 2a and Step 1 back to bac
    intended sense, the channel's own voice), `mixed` (the term in both senses, or on-topic but incidental), `off_topic` (the wrong
    sense — the film festival, someone else's dog), `unknown` (snippet doesn't settle it). Add `adjacent_terms` when a snippet
    shows vocabulary the filter lacks — those are suggestions for the user, never automatic filter changes. Write one TAB-separated
-   line per channel to `$RUN/channel_verdicts.tsv`, `channel_id<TAB>verdict[<TAB>evidence_quote][<TAB>adjacent_terms]`:
+   line per channel to `$RUN/channel_verdicts.tsv`, `channel_id<TAB>verdict[<TAB>evidence_quote][<TAB>adjacent_terms][<TAB>note]` (adjacent terms are filter vocabulary only — reasoning goes in the note column):
    ```
    12345	on_topic	…«Cannes Lions» Grand Prix…	young lions
    67890	off_topic	…the «Cannes» red carpet…

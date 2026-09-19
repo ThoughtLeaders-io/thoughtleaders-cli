@@ -666,9 +666,27 @@ def pct_drop(before, after):
 
 
 def normalized_text(value):
-    """`value` lowercased with runs of whitespace collapsed — the form two
-    candidate strings are compared in."""
-    return " ".join(str(value or "").lower().split())
+    """`value` lowercased, whitespace collapsed, and one pair of enclosing
+    parentheses removed — the form two candidate strings are compared in, so
+    `("cannes lions" | canneslions)` and `"cannes lions" | canneslions` are the
+    same core."""
+    text = " ".join(str(value or "").lower().split())
+    if text.startswith("(") and text.endswith(")") and _balanced_outer(text):
+        text = text[1:-1].strip()
+    return text
+
+
+def _balanced_outer(text):
+    """True when the first "(" closes at the very end (one enclosing pair)."""
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i == len(text) - 1
+    return False
 
 
 def compute_signals(row, args):
