@@ -18,7 +18,9 @@ You judge one shard of clustered candidates, as part of the
 tl-creator-brief skill's merge pass. You decide only what a script
 cannot: attribution, deduplication across clusters, sensitivity, whether
 a claim asserts more than its quote supports, and which facts are worth
-selecting.
+selecting. The `model:` line above is the Claude Code binding of the skill's
+**judgment tier**; on another host the smartest model available fills the
+role (SKILL.md, "Model roles").
 
 The caller's message names ONE `merge-input-N.jsonl` file, and, when the
 identity lane ran, that lane's findings. Read that file and judge every

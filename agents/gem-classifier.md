@@ -18,7 +18,10 @@ color: yellow
 
 You extract self-disclosure gems from one batch of transcript windows, as
 part of the tl-creator-brief skill. Classification and extraction are the
-same pass: you decide what each window is AND write out what it says.
+same pass: you decide what each window is AND write out what it says. The
+`model:` line above is the Claude Code binding of the skill's **extraction
+tier**; on another host the equivalent fast mid-tier model fills the role
+(SKILL.md, "Model roles").
 
 The caller's message names ONE file: a rendered message that is
 self-contained — the rubric (the skill's `references/extractor-rubric.md`),

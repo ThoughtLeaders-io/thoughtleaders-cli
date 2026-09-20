@@ -38,7 +38,7 @@ Usage:
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
 ``batches/batch-NNN.json`` (the capped model-layer batches, one per extractor
-agent, sized to fill one wave of the host's agent cap) and ``corpus.jsonl.gz``
+agent, sized for 20 extractors running at once) and ``corpus.jsonl.gz``
 — the store shape ``verify_quotes.py`` reads, holding the fetched passages as
 cues. Once the cap is taken, the kept windows' real ad-read spans are
 looked up (``sponsor_segments`` below) and ``in_sponsor_read`` is decided from them;
@@ -54,7 +54,6 @@ import gzip
 import html
 import json
 import math
-import os
 import pathlib
 import re
 import sys
@@ -923,23 +922,8 @@ def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int]
     return kept
 
 
-DEFAULT_AGENT_CAP = 20      # concurrent subagents the host runs when nothing says otherwise
+DEFAULT_AGENT_CAP = 20      # extractor agents assumed to run at once: the standard on every host
 MIN_BATCH_SIZE = 5          # below this the per-agent overhead outweighs the parallelism
-
-
-def env_agent_cap() -> int:
-    """How many extractor agents can run at once: $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
-    when the host sets it, else the default of 20. Garbage falls back with a note."""
-    raw = os.environ.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "").strip()
-    if not raw:
-        return DEFAULT_AGENT_CAP
-    try:
-        n = int(raw)
-    except ValueError:
-        print(f"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS={raw!r} is not an integer; "
-              f"using {DEFAULT_AGENT_CAP}", file=sys.stderr)
-        return DEFAULT_AGENT_CAP
-    return n if n >= 1 else DEFAULT_AGENT_CAP
 
 
 def derived_batch_size(windows: int, agent_cap: int) -> int:
@@ -964,8 +948,7 @@ def main() -> int:
                          "personal windows beat more, thinner ones (was 500)")
     ap.add_argument("--batch-size", type=int, default=None,
                     help="windows per batch file (one extractor each); default: enough batches "
-                         "to use every concurrent agent the host allows, "
-                         "ceil(windows / $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS), cap 20 when unset")
+                         "for 20 extractors running at once, ceil(windows / 20), never below 5")
     ap.add_argument("--reserve", type=int, default=0,
                     help="agent slots held by other lanes during the fan-out: "
                          "3 for the brand lanes on a CONNECT build, plus 1 "
@@ -1232,7 +1215,7 @@ def main() -> int:
         for e in corpus.values():
             e["cues"].sort(key=lambda c: c[0])
             fh.write(json.dumps(e, ensure_ascii=False) + "\n")
-    agent_cap = env_agent_cap()
+    agent_cap = DEFAULT_AGENT_CAP
     # Every running agent counts against the host's cap, so a lane in flight
     # during the fan-out costs one extractor slot: with 20 batches for a cap of
     # 20 and the socials lane running, the 20th extractor was rejected and

@@ -53,6 +53,17 @@ Agent names below are written `<plugin>:gem-classifier` and
 `<plugin>:merge-shard`, where `<plugin>` is the installed plugin's namespace
 (`tl-cli`).
 
+**Model roles.** This skill uses two model tiers. The **extraction tier** is
+the provider's fast mid-tier model (Sonnet on Claude Code): the
+gem-classifier, the bio and identity lanes, and the three brand-read lanes.
+The **judgment tier** is the smartest model the provider offers (Opus on
+Claude Code): the merge-shard agent only. On a host where those agents or
+model names are not available, spawn the host's generic subagent with the
+equivalent model pinned explicitly, the fast mid-tier one for extraction
+and the smartest one for judgment, and say so. Never fall back to the
+cheapest model for extraction (a smaller model truncated its output at this
+batch size), and never downgrade the judgment tier; shard it instead.
+
 ## Start the run
 
 Resolve, plan gate, channel context and the reuse check are one command:
@@ -303,12 +314,13 @@ take under a second are chained with `&&` in one command.
    The extractor prompt is two lines: read that one file and follow it
    exactly; one Write, then the one-line receipt. Never paste the message in,
    never two batches per agent, never one at a time, never poll or sleep. If
-   the agent name does not resolve, use `general-purpose` with `model: sonnet`
-   and say so. The cap is `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when
-   unset), which `--reserve` has already been sized against.
+   the agent name does not resolve, use the host's generic subagent pinned
+   to the extraction tier ("Model roles") and say so. The batches are sized
+   for 20 extractors at once, the standard on every host, and `--reserve`
+   has already been taken out of that number.
 
-   - *(socials ON)* **The identity lane**: one `general-purpose` agent,
-     **`model: sonnet`**, briefed exactly like an extractor: read
+   - *(socials ON)* **The identity lane**: one generic subagent on the
+     **extraction tier**, briefed exactly like an extractor: read
      `<corpus>/prompts/identity.md` and follow it; one Write, then the one-line
      receipt. The rendered file carries the lane's brief
      (`references/identity-lane.md`, its one home), the provenance and
@@ -396,9 +408,10 @@ take under a second are chained with `&&` in one command.
 5. **Merge pass: sharded agents decide, the script builds the ledger.**
    One `<plugin>:merge-shard` agent per file in `prepare.json` (`merge-input-N.jsonl`,
    or `merge-input.jsonl` when there is one), all in one message. The agent
-   pins **Opus, deliberately**; shard it rather than downgrade it. If the
-   agent name does not resolve, use `general-purpose` with `model: opus`,
-   say so, and expect the two enum failures its brief exists to prevent: an
+   pins the **judgment tier, deliberately** ("Model roles"); shard it rather
+   than downgrade it. If the agent name does not resolve, use the host's
+   generic subagent pinned to the judgment tier's model, say so, and expect
+   the two enum failures its brief exists to prevent: an
    invented `action` value, and a narrowed claim dated from the line's
    `published` field. Each reads its compact cluster lines, never the
    windows, and returns one JSON object of decisions (`keep` / `fold` /
@@ -493,8 +506,8 @@ Run the reuse check first. Then:
 1. **Brand read: three agents in ONE message, as soon as the brand resolves.**
    On a build that is the fetch message (PROFILE step 1), so the lanes run
    under the extraction and are in before the merge; on a reuse it is
-   immediately. All three are `general-purpose` with an explicit
-   **`model: sonnet`**, never the inherited model, need only the channel and
+   immediately. All three are generic subagents pinned explicitly to the
+   **extraction tier**, never the inherited model, need only the channel and
    brand ids, and are quick and light by design: gathering brand information
    is background, not research. Each writes one file under `<corpus>/` and
    returns one line.

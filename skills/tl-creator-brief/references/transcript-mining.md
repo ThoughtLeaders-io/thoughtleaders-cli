@@ -2,10 +2,10 @@
 
 How a channel's transcripts become a profile. One retrieval flow, one
 extraction fan-out, then judgment. Query credits are not a budget here; the
-budgets are model tokens and tiers — which is why retrieval is a single
-script, extraction runs on sonnet agents that each see one batch of windows
-and nothing else, and the expensive context is spent only on judgment no
-script can encode.
+budgets are model tokens and tiers, which is why retrieval is a single
+script, extraction runs on extraction-tier agents (SKILL.md, "Model roles")
+that each see one batch of windows and nothing else, and the judgment tier
+is spent only on judgment no script can encode.
 
 
 
@@ -106,7 +106,7 @@ minutes later is two passages.
 | `--phrases` | `references/cue-phrases.txt` | the cue list |
 | `--max-windows` | 300 | the ceiling on what reaches the model layer in one round; the selection usually stops earlier, at `--min-score` |
 | `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the tie beneath it; on the density-first rank (0.5 per first-person hit in the fragment, plus the cue weights) 8.0 is sixteen first-person hits alone, or a top-weight cue with ten |
-| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / agent cap)` where the cap is `$CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (20 when unset), never below 5, so 300 windows make 20 × 15 on the standard 20-agent host |
+| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / 20)`, never below 5, so 300 windows make 20 × 15: twenty extractors at once is the standard on every host |
 | `--per-video-cap` | 8 | no single video may own the batch set |
 | `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
 | `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
@@ -187,8 +187,10 @@ of repeating. Do not raise `--max-windows` past what one round can extract.
 
 Every batch file is judged by exactly one extractor: the `<plugin>:gem-classifier`
 agent, `<plugin>` being the installed plugin's namespace (`tl-cli`). The
-agent is a **gem extractor**, `model: sonnet` (a smaller model truncated its
-output at this batch size). One pass decides whether the window is self-
+agent is a **gem extractor** on the **extraction tier** (SKILL.md, "Model
+roles": Sonnet on Claude Code, the provider's fast mid-tier model elsewhere;
+a smaller model truncated its output at this batch size). One pass decides
+whether the window is self-
 disclosure AND writes what it says:
 the third-person claim, the span of the window that proves it, the life
 domain, and the speaker guess with the evidence that decided it. It does
@@ -257,23 +259,23 @@ verification scripts, no Bash, no other Reads, no second Write.
 - **No default-model stand-ins.** If `<plugin>:gem-classifier` does not resolve
   (running from a checkout rather than an installed plugin), copy
   `agents/gem-classifier.md` into `~/.claude/agents/` before the session
-  starts and spawn `gem-classifier`; failing that, spawn `general-purpose`
-  with an explicit `model: sonnet` override and the same two-line prompt —
-  the rendered message already carries the whole rubric.
-  A general-purpose agent on the inherited (expensive) model is the failure
+  starts and spawn `gem-classifier`; failing that, or on a host other than
+  Claude Code, spawn the host's generic subagent pinned explicitly to the
+  extraction tier's model (SKILL.md, "Model roles") with the same two-line
+  prompt; the rendered message already carries the whole rubric.
+  A generic agent on the inherited (expensive) model is the failure
   mode this list exists to prevent.
 
-**Concurrency.** The host runs at most `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`
-agents at once, 20 when unset, and 20 is the standard: leave the variable
-unset. On a CONNECT build the three brand lanes are spawned with the fetch
-and are still running during this fan-out, which is what `--reserve 3` is
-for: they need only the two ids. Do not raise the cap: a second wave queues
-behind it instead of one wave finishing together.
-`fetch_cues.py` reads the cap and sizes the batches to fill one wave
-(Layer 1+2).
+**Concurrency.** Twenty agents at once is the standard on every host, and
+`fetch_cues.py` sizes the batches to fill one wave of twenty (Layer 1+2;
+`--batch-size` overrides it). On a CONNECT build the three brand lanes are
+spawned with the fetch and are still running during this fan-out, which is
+what `--reserve 3` is for: they need only the two ids. Do not spawn past
+what the host runs at once: a second wave queues behind the first instead
+of one wave finishing together.
 
-There is no scripted extractor: every batch is judged by an agent, and the
-only fallback is the `general-purpose` + `model: sonnet` spawn above.
+There is no scripted extractor: every batch is judged by an agent on the
+extraction tier, and the only fallback is the explicit-pin spawn above.
 
 The identity lane, when the socials half is on, joins this same wave on the
 same terms: `scripts/identity_prompt.py render` writes its one message
@@ -337,8 +339,8 @@ assistant message that reads that command's result.
 
 ## Layer 4: cluster, then the sharded merge pass judges
 
-The mechanical bulk — verbatim checking — is code; the judgment slice is ONE
-small Claude pass over the clustered candidates.
+The mechanical bulk, verbatim checking, is code; the judgment slice is ONE
+small judgment-tier pass over the clustered candidates.
 
 **First collapse the repeats, locally:**
 
