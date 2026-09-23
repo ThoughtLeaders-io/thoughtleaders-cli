@@ -13,7 +13,7 @@ is spent only on judgment no script can encode.
 
 ```bash
 python3 <skill>/scripts/fetch_cues.py --channel <channel_id> \
-  --host-terms "<surname>,<company>,<former role>"
+  --host-names "<first name>,<full name>"
 ```
 
 Retrieval and selection are the same query. A boolean `should` of
@@ -99,7 +99,7 @@ minutes later is two passages.
 | flag | default | what it does |
 |---|---|---|
 | `--channel` | required | internal TL channel id, from `tl channels find` |
-| `--host-terms` | none | comma-separated names/companies, read off the window text (never queried): a self-naming ("it's Sam") is `host_anchor` and scores like one cue; a third-person naming ("with Sam") scores nothing and sets `second_voice_hint` |
+| `--host-names` | none | comma-separated **person-name aliases only**, read off the window text (never queried): a self-naming ("it's Sam") is `host_anchor` and scores like one cue; a third-person naming ("with Sam") scores nothing and sets `second_voice_hint`. Never pass brands, companies, roles, employers, products or topics: they are subjects, not speakers. |
 | `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
 | `--anchor-before` / `--anchor-after` | 30 / 15 | seconds the window's highest-weight cue phrase additionally reaches back and forward in that re-read, so the sentence a disclosure sits in survives when the highlighter cut the fragment at the cue |
 | `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
@@ -178,7 +178,7 @@ evidence" needs it.
 **A second round is additive, never a re-run.** One round is what the
 selection keeps (every window above the score floor, at least 150, at most
 the 300 cap) spread over every agent the host runs at once. To go deeper —
-or to use host terms the socials lane turned up after the fetch — run
+or to use a person-name alias the socials lane turned up after the fetch — run
 `fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
 are skipped, so the new batches are new material and the ledger grows instead
 of repeating. Do not raise `--max-windows` past what one round can extract.
@@ -552,12 +552,12 @@ dropped=… selected=… elapsed_s=…`.
 ### Incremental round
 
 Decision `refresh` from `ledger_meta.py check` (round `N` = its `next_round`),
-which `start_run.py` runs and reports under `check`. Given `--host-terms`,
+which `start_run.py` runs and reports under `check`. Given `--host-names`,
 `start_run.py` runs the bounded fetch itself with these flags already filled
 in from that decision; the rest of the round is unchanged:
 
 ```bash
-python3 <skill>/scripts/fetch_cues.py --channel <id> --host-terms "…" --round N \
+python3 <skill>/scripts/fetch_cues.py --channel <id> --host-names "…" --round N \
   --since <latest_video_date> --exclude <corpus>/classified.jsonl
 # fan out extractors over <corpus>/batches-rN only, then
 python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/batches-rN \
@@ -605,25 +605,26 @@ than a mechanical fix goes back through the merge pass, not past it. Verified fa
 summary, the extractors' receipt lines, the assemble summary, the merge
 pass's decisions and the expand summary, and the rendered page.
 
-## Entity expansion: a second round, not a re-scan
+## Name-attribution expansion: a second round, not a re-scan
 
-When a gem surfaces a new entity — "my dog Luna", a spouse's name, a company —
-or the socials lane returns a name the first fetch did not have, deepen the
-ledger with another additive round:
+When the socials lane returns a new **person-name alias for the host** that
+the first fetch did not have, improve attribution in another additive round:
 
 ```bash
 python3 <skill>/scripts/fetch_cues.py --channel <id> \
-  --host-terms "…,Luna,<other new entities>" \
+  --host-names "<existing aliases>,<new host alias>" \
   --exclude <corpus>/<channel_id>/classified.jsonl
 ```
 
 Passages already judged are skipped, so the round costs one fetch (seconds)
 plus one extraction fan-out over genuinely new material. (A *refresh* round —
-new uploads, not new terms — adds `--since <latest_video_date>` so the fetch
+new uploads — adds `--since <latest_video_date>` so the fetch
 is bounded to what the ledger has not seen; an unbounded `--exclude` round
-re-pulls every unjudged passage in the catalogue.) Confirmed entities
-also feed CONNECT's connection probes and improve attribution (a fact tied to a
-known family name anchors the host).
+re-pulls every unjudged cue passage in the catalogue.) Host names are never
+query terms. A pet, spouse, company, employer, product, role or other entity
+belongs in a generated `--phrases` file when a retrieval round needs it; it
+must never go into `--host-names`, because that would turn ordinary subject
+mentions into false second-speaker hints.
 
 ### The bio lane and its corroboration round
 
@@ -642,7 +643,7 @@ instead.
 
 **Corroboration is this same additive round, not a new mechanism.** Terms come
 from the bio facts themselves, one to three per fact, and ride in on
-`--phrases` — `--host-terms` is read off window text and never queried, so it
+`--phrases` — `--host-names` is read off window text and never queried, so it
 cannot carry them, and `references/cue-phrases.txt` is shared and hand-weighted
 and is never edited for one channel:
 
@@ -682,8 +683,10 @@ sibling candidates, language), plus the creator's own links: `websites`, the
 labelled header links they wrote themselves, and `social_links`, the platform
 keys from Postgres unioned with the index's flat list and deduped. Emails are
 dropped. Both stores are empty on plenty of channels, and an empty pair is a
-real answer. This is also where the fetch's `--host-terms` come from: the
-surname, company or former role the About text or AI profile names. Then, once
+real answer. This is also where the fetch's `--host-names` come from:
+person-name aliases the About text or AI profile states (first name, full name,
+an unambiguous surname or nickname). Brands, companies, roles, employers,
+products and topics are excluded. Then, once
 the passages are local, the stats half:
 
 ```bash

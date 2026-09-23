@@ -21,7 +21,7 @@ carries:
    `name_candidates` harvested from the transcripts (the other names the
    creator calls themselves, each with its distinct-video count, whether it
    was said outright and whether it is a variant of the channel name), the
-   host terms and format label the run has called, the facts already known,
+   host-name aliases and format label the run has called, the facts already known,
    and the lookup budget.
 3. The output instructions: where to write the JSON.
 

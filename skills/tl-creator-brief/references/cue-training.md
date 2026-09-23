@@ -16,7 +16,7 @@ channel's improvement.
    no extractors, no merge, no assembler):
 
        python3 scripts/fetch_cues.py --channel <id> --out <corpus> \
-         --host-terms "<first name>,<surname>" \
+         --host-names "<first name>,<full name>" \
          --min-score 0 --min-windows 100000 --max-windows 100000 \
          --per-video-cap 8 --generic-floor 100000
 

@@ -1090,8 +1090,8 @@ def test_same_passage_needs_more_than_half_the_shorter_window():
 
 
 # --------------------------------------------------------------------------- #
-# host terms: read off the window text, never queried. A self-naming is the
-# anchor; a third-person naming is a second voice (Airrack, 2026-09-10)
+# Host names: person-name aliases read off the window text, never queried. A
+# self-naming is the anchor; a third-person naming is a second voice.
 # --------------------------------------------------------------------------- #
 def test_host_naming_tells_a_self_introduction_from_a_third_person_naming():
     self_named, third, hint = fetch_cues.host_naming(
@@ -1112,16 +1112,16 @@ def test_a_third_person_naming_earns_nothing_and_sets_the_hint(tmp_path, monkeyp
     crew = _doc("7:v1", [_frag("my dad", 100, "asked me to move to LA with eric and the boys")])
     plain = _doc("7:v2", [_frag("my dad", 100)])
     summary, kept = _run(tmp_path, monkeypatch, [crew, plain],
-                         argv=("--host-terms", "Eric,Airrack"))
+                         argv=("--host-names", "Eric,Airrack"))
     by = {w["id"]: w for w in kept}
     assert by["7:v1"]["rank_score"] == by["7:v2"]["rank_score"] == 1.5   # no +2 for the name
     assert by["7:v1"]["host_anchor"] is False
     assert by["7:v1"]["host_named_third_person"] == ["eric"]
     assert "with eric" in by["7:v1"]["second_voice_hint"]
     assert by["7:v2"]["second_voice_hint"] is None
-    # the host terms did not join the query: the cue list plus EXTRA_GENERIC only
+    # the host names did not join the query: the cue list plus EXTRA_GENERIC only
     assert summary["phrases"] == 3 + len(fetch_cues.EXTRA_GENERIC)
-    assert summary["host_terms"] == ["Eric", "Airrack"]
+    assert summary["host_names"] == ["Eric", "Airrack"]
     assert summary["third_person_host_windows"] == 1
     assert summary["third_person_host_share"] == 0.5
     assert "third_person_host_share=0.5" in _run.last_funnel
@@ -1129,12 +1129,25 @@ def test_a_third_person_naming_earns_nothing_and_sets_the_hint(tmp_path, monkeyp
 
 def test_a_self_naming_is_the_anchor_and_scores_like_one_cue(tmp_path, monkeypatch):
     doc = _doc("7:v1", [_frag("my dad", 100, "hey guys it's eric and this is his story")])
-    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"))
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-names", "Eric"))
     assert kept[0]["host_anchor"] is True
     assert kept[0]["host_anchor_terms"] == [["eric", "self_named"]]
     assert kept[0]["second_voice_hint"] is None
     assert kept[0]["rank_score"] == 1.5 + fetch_cues.SELF_NAME_BONUS
     assert summary["self_named_windows"] == 1
+
+
+def test_brand_and_role_mentions_are_not_secondary_speakers(tmp_path, monkeypatch):
+    doc = _doc("7:v1", [_frag(
+        "my business", 100,
+        "I'm Kate, an online business coach, and I have sold on Etsy for ten years")])
+    summary, kept = _run(tmp_path, monkeypatch, [doc],
+                         argv=("--host-names", "Kate,Kate Hayes"))
+    assert kept[0]["host_anchor"] is True
+    assert kept[0]["host_named_third_person"] == []
+    assert kept[0]["second_voice_hint"] is None
+    assert summary["third_person_host_windows"] == 0
+    assert summary["third_person_host_share"] == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -1152,7 +1165,7 @@ _TRANSCRIPT = [
 
 def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatch):
     doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
-    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-terms", "Eric"),
+    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-names", "Eric"),
                          transcripts={"7:v1": _TRANSCRIPT})
     w = kept[0]
     assert w["start"] == 100                       # the window's identity is unchanged

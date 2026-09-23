@@ -70,7 +70,7 @@ Resolve, plan gate, channel context and the reuse check are one command:
 
 ```bash
 python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
-  [--host-terms "<surname>,<company>"] [--reserve <N>] \
+  [--host-names "<first name>,<full name>"] [--reserve <N>] \
   [--lanes transcripts+socials] [--rebuild] [--no-refresh] \
   [--creator-brief | --no-creator-brief] [--talking-points <path or text>] \
   [--promoting "<line>"]
@@ -97,16 +97,18 @@ summary on stdout, every stage's own `FUNNEL` line on stderr.
 - **`announcement` is the ledger's own line**: repeat it to the user
   verbatim. `decision` is `reuse`, `refresh` or `build`, and it is never
   silent. See "Reuse" below for what each one means.
-- **Host terms are the one judgment in the opening, so they are not
-  guessed.** With no `--host-terms` the command stops after the reuse check
+- **Host names are the one judgment in the opening, so they are not
+  guessed.** With no `--host-names` the command stops after the reuse check
   and hands back `identity`: the channel name, the About text, the generated
   profile, the websites, the social links and the second-channel candidates.
-  Take the terms from it (surname, company, former role, anything the About
-  text or the profile names) and run PROFILE step 1 in your next message.
-  The channel name alone is not host terms.
-- **`--host-terms` given, the opening is one turn**: the command runs the
+  Take only person-name aliases from it: first name, full name, surname when
+  it is unambiguous, and a stated nickname. **Never pass a brand, company,
+  role, employer, product or topic**: these values drive speaker attribution,
+  so `Etsy` or `online business coach` would turn an ordinary subject mention
+  into a false second-speaker hint. The channel name alone is not host names.
+- **`--host-names` given, the opening is one turn**: the command runs the
   bounded fetch and the context stats too, and `ran` says which stages went.
-  Pass it only when the request already names the terms.
+  Pass it only when the request already names the person.
 
 - **The creator brief's inputs go in here, verbatim, CONNECT only.**
   `--talking-points` and `--promoting` imply `--creator-brief`; with any of
@@ -198,8 +200,9 @@ take under a second are chained with `&&` in one command.
 
    This is the platform's own record of the channel: name, About text, the
    AI profile, sibling-channel candidates, language, and the creator's own
-   links. Read it and take the host terms from it (surname, company, former
-   role, anything the About text or AI profile names).
+   links. Read it and take only the host's person-name aliases from it. Brands,
+   companies, roles, employers, products and topics are identity context, not
+   speaker names, and never go into `--host-names`.
 
    **Identity discovery happens here, not in a lane of its own.** The links
    come from both stores at once: `websites` is the labelled header links the
@@ -216,12 +219,12 @@ take under a second are chained with `&&` in one command.
    truth about the person and rule out the correct creator for not matching it.
 
 1. **Fetch the cue passages**, and spawn the lanes that need only the ids.
-   *(Already run if you passed `--host-terms` to `start_run.py`: check `ran`
+   *(Already run if you passed `--host-names` to `start_run.py`: check `ran`
    on its summary and go to step 2.)*
 
    ```bash
    python3 <skill>/scripts/fetch_cues.py --channel <id> \
-     --host-terms "<surname>,<company>" --reserve <N>
+     --host-names "<first name>,<full name>" --reserve <N>
    ```
 
    On a `refresh` decision, add the round flags from the start summary's
@@ -325,7 +328,7 @@ take under a second are chained with `&&` in one command.
      receipt. The rendered file carries the lane's brief
      (`references/identity-lane.md`, its one home), the provenance and
      sensitivity rules, the links, the About text and AI profile labelled for
-     what they are worth, every `name_candidates` variant, the host terms, the
+     what they are worth, every `name_candidates` variant, the host names, the
      format call and the record format the merge pass accepts. Nothing about
      the lane is typed by hand. It writes `<corpus>/returns/identity.json`:
      the identity it accepted or rejected and why, its `social`/`web` fact

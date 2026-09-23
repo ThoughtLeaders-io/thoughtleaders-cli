@@ -8,8 +8,9 @@ clauses (references/cue-phrases.txt, each apostrophe phrase spelled both
 ways the index knows) selects the videos; ES ``highlight`` returns the
 passages around each hit, with the timed-text ``start`` attributes intact,
 so a 5,000-video channel costs a few dozen small queries instead of a full
-transcript download. Nothing but cue phrases joins that query: the host
-terms are read off the window text afterwards (``host_naming``), where a
+transcript download. Nothing but cue phrases joins that query: person-name
+aliases for the host are read off the window text afterwards
+(``host_naming``), where a
 self-naming is the host and a third-person naming is a second voice. When
 the phrases leave the window cap short, a SECOND pass over the bare
 first-person markers (``GENERIC_TERMS``) fills what is left, and only what
@@ -29,7 +30,7 @@ each kept window is then re-read wider from its transcript
 stays sharp and the extractor still sees the sentences before the cue.
 
 Usage:
-    fetch_cues.py --channel <id> [--host-terms "a,b"] [--out <root>]
+    fetch_cues.py --channel <id> [--host-names "a,b"] [--out <root>]
                   [--max-windows 500] [--batch-size N] [--reserve N]
                   [--generic-floor N] [--fragment-size 900] [--round N]
                   [--read-before 20] [--read-after 10]
@@ -89,7 +90,7 @@ WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
 # across the country to make videos with Marta", promoted by a name bonus and
 # then handed to the host by the solo rule, with many kept windows standing on
 # the name alone with no cue at all. So
-# the host terms no longer join the query, a third-person naming earns
+# the host names no longer join the query, a third-person naming earns
 # nothing and is passed to the extractor as ``second_voice_hint``, and only
 # a self-naming scores, at the weight of one ordinary cue.
 SELF_NAME_LEAD = (r"(?:i'm|i am|it's|it is|this is|my name is|my name's|call me|"
@@ -99,7 +100,7 @@ SELF_NAME_BONUS = 1.0
 
 
 def host_naming(text: str, host_lc: set[str]) -> tuple[list[str], list[str], str | None]:
-    """``(self_named, third_person, hint)`` for the host terms in ``text``:
+    """``(self_named, third_person, hint)`` for the host-name aliases in ``text``:
     the terms the speaker uses of themselves, the terms spoken of or to
     someone else, and a short hint quoting the first third-person naming for
     the extractor (``None`` when there is none). A term named both ways in
@@ -942,7 +943,10 @@ def main() -> int:
                          "so the run writes <out>/<channel>/. Passing a path that already "
                          "ends in the channel id nests it twice")
     ap.add_argument("--phrases", default=str(DEFAULT_PHRASES))
-    ap.add_argument("--host-terms", default="")
+    ap.add_argument("--host-names", default="",
+                    help="comma-separated person-name aliases for the host, e.g. "
+                         "'Kate,Kate Hayes'. Used only for speaker attribution; "
+                         "brands, companies, roles and topics do not belong here")
     ap.add_argument("--max-windows", type=int, default=300,
                     help="passages that reach the model layer in one round; fewer, more "
                          "personal windows beat more, thinner ones (was 500)")
@@ -1001,9 +1005,9 @@ def main() -> int:
     since = a.since.strip() or None
 
     phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
-    host_terms = [t.strip() for t in a.host_terms.split(",") if t.strip()]
-    host_lc = {t.lower() for t in host_terms}
-    # host terms are read off the window text (host_naming), never queried:
+    host_names = [t.strip() for t in a.host_names.split(",") if t.strip()]
+    host_lc = {t.lower() for t in host_names}
+    # Host names are read off the window text (host_naming), never queried:
     # a fragment cut around a bare name carried no cue and no disclosure
     all_phrases = list(phrases)
 
@@ -1253,7 +1257,7 @@ def main() -> int:
         # third-person naming is someone speaking of the host. A high share
         # on a channel labelled solo is a crew channel, and the format call
         # should say multi_host (SKILL.md, the format step).
-        "host_terms": host_terms,
+        "host_names": host_names,
         "self_named_windows": self_named_windows,
         "third_person_host_windows": third_person_windows,
         "third_person_host_share": third_person_share,

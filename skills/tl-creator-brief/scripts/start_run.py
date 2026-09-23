@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The run's opening, as one command instead of five turns.
 
-Resolve, plan gate, channel context, reuse check and (when the host terms are
+Resolve, plan gate, channel context, reuse check and (when the host names are
 already known) the fetch and the context stats. None of these has judgment
 between it and the next: the plan gate and the brand resolution depend on
 nothing, the identity read and the reuse check and the fetch need only the
@@ -9,13 +9,15 @@ channel id, and the stats need only the fetched corpus. Every gap between
 them was an orchestrator turn, and a turn costs more than most of these
 stages do.
 
-**The one judgment in the opening is kept.** Host terms are chosen by reading
-the About text and the generated profile, and the channel name alone is not
-good enough: a channel called "Marta Builds" run with ``"Marta Builds,Marta"``
-as its host terms takes anchor soft mismatches on every "builds". So with no
-``--host-terms`` this stops after the reuse check and
-prints the identity it just read, and the caller picks the terms and runs the
-fetch in its next message. With ``--host-terms`` there is nothing left to
+**The one judgment in the opening is kept.** Host names are person-name
+aliases chosen by reading the About text and generated profile. Brands,
+companies, roles and topics are not host names: treating them as names turns
+ordinary subject mentions into false second-speaker hints. The channel name
+alone is not good enough: a channel called "Marta Builds" run with
+``"Marta Builds,Marta"`` as its host names takes anchor soft mismatches on
+every "builds". So with no ``--host-names`` this stops after the reuse check
+and prints the identity it just read, and the caller picks the aliases and
+runs the fetch in its next message. With ``--host-names`` there is nothing left to
 decide and the whole opening, fetch and stats included, is one command.
 
 The plan gate reports, it does not stop: ``plan`` and ``plan_ok`` are on the
@@ -29,7 +31,7 @@ Exit codes:
     5  bad arguments
 
 Usage:
-    start_run.py --channel <ref> [--brand <ref>] [--host-terms "a,b"]
+    start_run.py --channel <ref> [--brand <ref>] [--host-names "a,b"]
                  [--reserve N] [--lanes transcripts+socials]
                  [--rebuild] [--no-refresh] [--profiles-dir DIR]
                  [--creator-brief | --no-creator-brief]
@@ -168,7 +170,7 @@ def read_check(stdout: str) -> tuple[str, dict]:
 
 
 def identity_block(context_full: pathlib.Path) -> dict:
-    """What the host-terms call is made from. The full file stays on disk; a
+    """What the host-names call is made from. The full file stays on disk; a
     caller that wants the rest opens it."""
     try:
         full = json.loads(context_full.read_text(encoding="utf-8"))
@@ -237,11 +239,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--brand", default=None,
                     help="same forms; CONNECT only. Resolved before anything "
                          "runs, so an unresolvable brand costs no fetch")
-    ap.add_argument("--host-terms", dest="host_terms", default=None,
-                    help="surname, company, former role: the terms the fetch "
-                         "anchors on. Given, this runs the fetch and the "
-                         "stats too; omitted, it stops after the reuse check "
-                         "and prints the identity to choose them from")
+    ap.add_argument("--host-names", dest="host_names", default=None,
+                    help="person-name aliases for the host, e.g. 'Kate,Kate "
+                         "Hayes'. Brands, companies, roles and topics are "
+                         "invalid because these values drive speaker "
+                         "attribution. Given, this runs the fetch and stats "
+                         "too; omitted, it stops after the reuse check and "
+                         "prints the identity to choose them from")
     ap.add_argument("--reserve", type=int, default=0,
                     help="agent slots held back from the extractor wave: 3 "
                          "for the brand lanes on a CONNECT build, plus 1 with "
@@ -352,13 +356,13 @@ def main(argv: list[str] | None = None) -> int:
     if out["decision"] == "reuse":
         out["next"] = ("reuse: PROFILE reports the ledger as it is, CONNECT "
                        "goes straight to the brand read. No fetch.")
-    elif a.host_terms is None:
-        out["next"] = ("host terms are the one call in the opening: read "
+    elif a.host_names is None:
+        out["next"] = ("host names are the one call in the opening: read "
                        "`identity` above, then run fetch_cues.py with them "
                        "(and the context stats) in your next message. Pass "
-                       "--host-terms to have this command do both.")
+                       "--host-names to have this command do both.")
     else:
-        fetch_args = ["--channel", str(cid), "--host-terms", a.host_terms,
+        fetch_args = ["--channel", str(cid), "--host-names", a.host_names,
                       "--reserve", str(a.reserve),
                       "--out", str(profiles / ".corpus")]
         if out["decision"] == "refresh":

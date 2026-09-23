@@ -529,7 +529,7 @@ def cmd_terms(a: argparse.Namespace) -> int:
             all_terms.extend(t for t in terms if t not in all_terms)
         per_fact.append(entry)
     # A generated phrases file, not an edit to the cue list: `fetch_cues.py
-    # --phrases` is the existing way terms reach retrieval (`--host-terms` is
+    # --phrases` is the existing way terms reach retrieval (`--host-names` is
     # read off window text and never queried), and references/cue-phrases.txt
     # is a shared, hand-weighted file this lane has no business touching.
     phrases_path = out / f"bio-terms-r{a.round}.txt"

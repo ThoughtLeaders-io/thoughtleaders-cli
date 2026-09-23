@@ -17,8 +17,8 @@ _SCRIPTS = (Path(__file__).resolve().parents[1]
             / "skills" / "tl-creator-brief" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "_shared"))
-import tl_data  # noqa: E402
 import start_run  # noqa: E402
+import tl_data  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -107,15 +107,15 @@ def env(tmp_path, monkeypatch, capsys):
 # --------------------------------------------------------------------------- #
 # the whole opening in one command
 # --------------------------------------------------------------------------- #
-def test_a_numeric_id_with_host_terms_runs_the_whole_opening(env):
-    rc, out, log = env(["--channel", "42", "--host-terms", "Decker,Airrack",
+def test_a_numeric_id_with_host_names_runs_the_whole_opening(env):
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric,Eric Decker",
                         "--reserve", "3"])
     assert rc == 0
     assert out["channel"] == {"id": 42, "name": None, "resolved_by": "id"}
     assert out["ran"] == ["resolve", "plan_gate", "channel_context",
                           "reuse_check", "fetch", "context_stats"]
     fetch = _of(log, "fetch_cues.py")[0]
-    assert fetch[:6] == ["--channel", "42", "--host-terms", "Decker,Airrack",
+    assert fetch[:6] == ["--channel", "42", "--host-names", "Eric,Eric Decker",
                          "--reserve", "3"]
     # the identity read comes first and takes no corpus; the stats pass does
     identity, stats = _of(log, "channel_context.py")
@@ -134,7 +134,7 @@ def test_the_plan_is_reported_not_enforced(env):
 
 
 def test_an_unreachable_plan_gate_continues_and_says_so(env):
-    rc, out, log = env(["--channel", "42", "--host-terms", "x"],
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"],
                        tl={"whoami": {"stdout": "", "exit": 1}})
     assert rc == 0
     assert out["plan"] is None and out["plan_ok"] is None
@@ -145,10 +145,9 @@ def test_an_unreachable_plan_gate_continues_and_says_so(env):
 # --------------------------------------------------------------------------- #
 # the one judgment in the opening is kept
 # --------------------------------------------------------------------------- #
-def test_without_host_terms_it_stops_and_hands_back_the_identity(env):
-    """Host terms come from the About text and the profile: the channel name
-    alone is what gave HopeScope 22 anchor soft mismatches. So this stage
-    stops here rather than guessing."""
+def test_without_host_names_it_stops_and_hands_back_the_identity(env):
+    """Host names come from the About text and profile, but only person-name
+    aliases are valid. This stage stops rather than guessing."""
     rc, out, log = env(["--channel", "42"])
     assert rc == 0
     assert out["ran"] == ["resolve", "plan_gate", "channel_context", "reuse_check"]
@@ -156,7 +155,7 @@ def test_without_host_terms_it_stops_and_hands_back_the_identity(env):
     assert out["identity"]["about_text"] == "Eric Decker. Stunts."
     assert out["identity"]["generated_profile"] == "large-scale stunt videos"
     assert out["identity"]["websites"] == ["https://airrack.com"]
-    assert "host terms" in out["next"]
+    assert "host names" in out["next"]
 
 
 # --------------------------------------------------------------------------- #
@@ -177,7 +176,7 @@ def test_an_ambiguous_channel_name_asks_before_anything_runs(env):
 
 
 def test_an_unresolvable_brand_costs_no_fetch(env):
-    rc, out, log = env(["--channel", "42", "--brand", "Liquid", "--host-terms", "x"],
+    rc, out, log = env(["--channel", "42", "--brand", "Liquid", "--host-names", "Eric"],
                        tl={
         "brands": {"exit": 1, "stdout": json.dumps(
             {"detail": "Ambiguous match",
@@ -206,7 +205,7 @@ def test_a_resolved_name_is_reported_with_what_resolved_it(env):
 # --------------------------------------------------------------------------- #
 def test_reuse_runs_no_fetch_and_repeats_the_announcement(env):
     rc, out, log = env(
-        ["--channel", "42", "--host-terms", "Decker"],
+        ["--channel", "42", "--host-names", "Eric"],
         announcement="Ledger built 2026-09-01 over 283 videos, 206 facts.",
         decision={"decision": "reuse", "reason": "2 new uploads <= 5",
                   "next_round": 3})
@@ -221,7 +220,7 @@ def test_a_refresh_bounds_the_fetch_to_what_the_ledger_has_not_seen(env, tmp_pat
     corpus = tmp_path / "profiles" / ".corpus" / "42"
     corpus.mkdir(parents=True)
     (corpus / "classified.jsonl").write_text("{}\n")
-    rc, out, log = env(["--channel", "42", "--host-terms", "Decker"],
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"],
                        decision={"decision": "refresh", "reason": "29 new uploads > 5",
                                  "next_round": 2, "latest_video_date": "2026-08-20"})
     assert rc == 0
@@ -232,7 +231,7 @@ def test_a_refresh_bounds_the_fetch_to_what_the_ledger_has_not_seen(env, tmp_pat
 
 
 def test_a_first_build_asks_for_no_round_flags(env):
-    rc, _, log = env(["--channel", "42", "--host-terms", "Decker"])
+    rc, _, log = env(["--channel", "42", "--host-names", "Eric"])
     fetch = _of(log, "fetch_cues.py")[0]
     assert "--round" not in fetch and "--since" not in fetch and "--exclude" not in fetch
 
@@ -249,7 +248,7 @@ def test_the_reuse_check_is_told_the_lanes_and_the_flags(env):
 # failures stop where they happen
 # --------------------------------------------------------------------------- #
 def test_a_failed_fetch_stops_the_chain_and_names_the_stage(env):
-    rc, out, log = env(["--channel", "42", "--host-terms", "Decker"], fetch_exit=2)
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"], fetch_exit=2)
     assert rc == 3
     assert out["failed"] == "fetch_cues"
     assert "context_stats" not in out["ran"]

@@ -6,7 +6,7 @@ Two jobs, one script:
 * **Identity inputs** — the channel row, its About text, and the platform's
   generated profile (``ai.description``), which is usually the better identity
   source because raw About fields are often subscribe-boilerplate. These seed
-  the identity & socials lane and the host-terms for the scan.
+  the identity & socials lane and the host-name aliases for the scan.
 * **Context stats** — once the corpus is local (``--corpus``), format is
   measured from the transcripts themselves, not guessed from titles:
   first-person window density, interview markers, question density, and
