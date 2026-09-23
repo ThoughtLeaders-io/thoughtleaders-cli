@@ -599,12 +599,15 @@ Run the reuse check first. Then:
 3. **Creator brief** (only when `creator_brief` is on). Runs after the page
    renders, on a fit or thin fit; on a no fit, one line says the brief was
    skipped and why. Read `<corpus>/creator-brief-input-<brand_id>.json`, the
-   connections map, and, for any supplied point no card carries, the whole
-   ledger. Write `<corpus>/creator-brief-<brand_id>.md` to
-   `references/creator-brief-template.md`: the six sections in its order,
-   every brand line verbatim, every quote the creator's own with its `&t=`
-   link, second person, and none of the vocabulary written for the AM's
-   eyes. Then one command:
+   connections map, and the whole ledger for every point: the cards are
+   where to start, not the limit. Write `<corpus>/creator-brief-<brand_id>.md` to
+   `references/creator-brief-template.md`: the supplied lines sorted into
+   their sections, the six sections in its order, every brand line verbatim,
+   and each talking point written for this creator from a moment of their
+   own, with the brand's line it covers beneath it: the brand's brief says
+   what to cover, the ledger says how this creator covers it. Every quote
+   with its `&t=` link, second person, and none of the vocabulary written
+   for the AM's eyes. Then one command:
 
    ```bash
    python3 <skill>/scripts/build_html.py --brief --check \

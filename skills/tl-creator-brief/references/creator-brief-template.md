@@ -20,7 +20,7 @@ first names the brand.
 |---|---|---|
 | `## Who is <brand>` | Two to four sentences a creator can read cold: what the product is, who it is for, how it is used | The connections page's About-brand paragraph, tightened. The user's "promoting" line when it adds a product name |
 | `## The creative ask` | What this ad is for and what to promote; the format when the brand stated one | The user's "promoting" line, verbatim, then one or two sentences of framing from the connection map's thesis |
-| `## Key talking points` | One `### ` per brand point. Under each: the creator's own quote as a `>` block with its timestamped link on a `>` continuation line, one line on how that moment meets the product, one "you could" suggestion | The user's talking points (each `###` names one verbatim). The connection map's cards for the moments. The ledger, read whole, when a point has no card |
+| `## Key talking points` | One `### ` per talking point written for this creator: the heading and the body are ours, built on a moment of their own and aimed at their audience; then their quote as a `>` block with its timestamped link on a `>` continuation line; then `**From <brand>'s brief:**` and the brand's line or lines that point covers, verbatim. One closing `### Also from <brand>` holds the brand's talking-point lines no moment carries, verbatim | The user's talking points say what must be covered. The ledger, read whole, says how this creator covers it: the map's cards first, then any confirmed moment from their own life |
 | `## Requirements` | The brand's mandatories, verbatim, as bullets | Whatever the pasted talking points state as required (deliverables, on-screen elements, timing). With none, the ThoughtLeaders defaults below |
 | `## Don't do` | The brand's don'ts verbatim, then craft don'ts from the connections page | Whatever the pasted talking points forbid. The page's Do-not lines, only those about craft |
 | `## Creative approval process` | How the draft gets reviewed and who says go | The pasted talking points when they describe one, otherwise the default below |
@@ -35,17 +35,38 @@ what this is, and that every quote links to the second it was said.
 - Every quote is the creator's own words, verbatim, with its `&t=` link
   inside the blockquote. The checker refuses a quote that is neither a
   verified ledger fact nor one the connections map argued.
-- Every supplied talking point appears verbatim as (or inside) one `###`,
-  either carried by a quote or followed by a line that says "no natural
-  moment" and what to do instead. Nothing the brand asked for is dropped
-  silently, and nothing is reworded.
+- Sort the supplied lines before writing: a mandatory goes under
+  Requirements, a prohibition under Don't do, an approval step under
+  Creative approval process, each once and verbatim. Only what the creator
+  should say or show becomes a `###`. A pasted full brief is sorted, never
+  repeated.
+- The creator's talking points are written for them, not copied from the
+  brand. Take what the brand's brief says must be covered, find the moment
+  in the ledger that lets this creator say it their way, and write the
+  point from that moment: the heading names it ("Your grandmother did it
+  with a slide ruler"), and two to four sentences say what they tell their
+  audience and show on camera, using the moment's own specifics (the
+  person, the object, the creator's own joke) so the point could not be
+  pasted into another creator's brief. The quote follows as the proof that
+  it is theirs; it never stands in for the point.
+- Under every point, `**From <brand>'s brief:**` and the brand's line or
+  lines it covers, verbatim. Group freely: one personal point can carry
+  several of the brand's lines. The heading is never the brand's own line.
+- Read the whole ledger, not only the map's cards: family, origin, habits,
+  tastes and work history all count, and the page's two-thin-card cap does
+  not apply here. A video the channel made about a topic is not a moment of
+  the creator's own. Each point gets a different moment, and there are at
+  least four points when the ledger holds four confirmed moments.
+- What no moment carries goes, verbatim, in one closing `### Also from
+  <brand>`: at most half of the brand's talking-point lines. When the ledger
+  has no confirmed moment at all (a faceless or scripted channel), that list
+  holds everything and says "no natural moment". The checker enforces all
+  of this and names unused moments to try.
 - A requirement, don't or approval step the brand wrote into its talking
-  points appears verbatim in its section. Nothing the brand wrote is dropped
-  or softened.
-- Second person, to the creator, in the creator's register. The "you could"
-  line is a suggestion, never a script.
-- Every creator-facing sentence follows one pattern: what the brand wants,
-  what the creator has said, the idea that joins them.
+  points appears verbatim in its section. Nothing the brand wrote is dropped,
+  reworded or softened.
+- Second person, to the creator, in the creator's register. A talking point
+  says what to cover and how it is theirs, never the words to read.
 - The brief builds the brand up. It never sets the brand against another
   product, app or game, even one the creator plays. A creator's quote may
   name another game; our text does not.
@@ -127,21 +148,24 @@ regular build video, as a segment of the video rather than a pause in it.
 
 ## Key talking points
 
-### Fresh roasted, shipped within two days
+### Your first coffee is already on camera
+
+Every build video opens with you grinding beans before you touch a tool.
+Make that the segment: the Northwind bag arrives, you read the roast date out
+loud, and the first grind of the morning is theirs. Your viewers already know
+the ritual, so they will notice the bag before you name it.
 
 > I have got this whole ritual now where the first thing I do before I touch
 > a tool is grind the beans
 > [Marta Builds, 2026-03-04](https://www.youtube.com/watch?v=EXAMPLE1&t=214s)
 
-Your workshop morning already starts with coffee, on camera, before the
-build. You could let that ritual be the segment: the bag arrives, the date on
-it, the first grind.
+**From Northwind Coffee's brief:**
 
-### A subscription that fits how you actually drink it
+- Fresh roasted, shipped within two days
 
-No natural moment in your videos for this one. Worth saying straight: the
-plan pauses and changes with a tap, and Northwind will send you the details
-to show.
+### Also from Northwind Coffee
+
+- A subscription that fits how you actually drink it
 
 ## Requirements
 

@@ -1300,6 +1300,29 @@ def brief_sections(body: str) -> tuple[str, dict[str, str], list[str], list[str]
     return intro, found, order, unknown
 
 
+ALSO = re.compile(r"(?i)^also from\b")
+_FROM_BRIEF = re.compile(r"(?mi)^\*\*from [^*\n]*brief:?\*\*:?")
+_STOP = set("""a an and are as at be been but by can do for from had has have her his i if in
+into is it its just me my no not of on or our she so than that the their them then there
+they this to too up us was we were what when which who will with would you your yours
+youre ive im dont""".split())
+
+
+def split_brand_lines(sub: str) -> tuple[str, str]:
+    """``(the brand's lines, our words)`` of one talking point: everything from
+    the 'From <brand>'s brief:' label down is the brand's; quotes are neither."""
+    m = _FROM_BRIEF.search(sub)
+    brand_part = sub[m.end():] if m else ""
+    ours = sub[:m.start()] if m else sub
+    ours = re.sub(r"(?m)^>.*$", " ", ours)
+    return brand_part, ours
+
+
+def _content_words(text: str) -> set[str]:
+    words = _norm_words(re.sub(r"\]\([^)]*\)", "]", text or "")).split()
+    return {w for w in words if len(w) > 2 and w not in _STOP}
+
+
 def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                 inp: dict | None) -> list[str]:
     """Contract problems with the creator brief, one line each. Empty means
@@ -1338,23 +1361,43 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
             r"(?mi)^## who is " + re.escape(brand) + r"\s*\??\s*$", body):
         problems.append(f"the first section does not name the brand: ## Who is {brand}")
 
-    # key talking points: each carries the creator's own verified moment, or
-    # says plainly that none was found
+    # key talking points: each is written for this creator, built on a moment
+    # of their own, with the brand's line it covers kept verbatim beneath it;
+    # what no moment carries waits in one closing "Also from <brand>" list
     map_quotes = md_blockquotes(map_md)
     points = found.get("points", "")
     subs = re.split(r"(?m)^### ", points)
     if len(subs) < 2:
         problems.append("no ### talking point under ## Key talking points")
+    supplied_norm = [_norm_words(tp) for tp in (inp or {}).get("talking_points", []) if tp]
+    personal: list[dict] = []          # the ledger fact each point is built on
+    points_subs: list[str] = []        # the creator's talking points, the "also" list apart
+    in_personal = ""                   # brand text the creator's points carry
     for sub in subs[1:]:
-        name = sub.splitlines()[0][:60] if sub.strip() else "(untitled)"
+        heading = sub.splitlines()[0].strip() if sub.strip() else ""
+        name = heading[:60] or "(untitled)"
+        if ALSO.match(heading):
+            if md_blockquotes(sub):
+                problems.append(f"a quote in the closing list; build a talking point on it: {name}")
+            continue
+        points_subs.append(sub)
+        brand_part, ours = split_brand_lines(sub)
+        in_personal += " " + brand_part
+        if _norm_words(heading) in supplied_norm:
+            problems.append(f"the heading is the brand's own line; write the creator's "
+                            f"talking point in its place and keep the line under "
+                            f"'From {brand or '<brand>'}'s brief': {name}")
+        if supplied and not any(tp and tp in _norm_words(brand_part) for tp in supplied_norm):
+            problems.append(f"talking point shows none of the brand's lines verbatim under "
+                            f"'From {brand or '<brand>'}'s brief:': {name}")
         qs = md_blockquotes(sub)
         if not qs:
-            if not NO_MOMENT.search(sub):
-                problems.append(f"talking point carries no quote and does not say "
-                                f"'no natural moment': {name}")
+            problems.append(f"talking point is built on no moment of the creator's own "
+                            f"(no quote): {name}")
             continue
         if not re.search(r"\]\(https?://[^)]*[?&]t=\d", sub):
             problems.append(f"talking point quote has no timestamped link: {name}")
+        carried = None
         for q in qs:
             fact = quote_matches_ledger(q, facts)
             in_map = any(q in mq or mq in q for mq in map_quotes)
@@ -1368,16 +1411,40 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                     problems.append(f"quote is a superseded fact: {name}")
                 if fact.get("staged_only"):
                     problems.append(f"quote is a staged-only fact: {name}")
-        if supplied and not any(_norm_words(tp) in _norm_words(sub)
-                                for tp in inp.get("talking_points", [])):
-            problems.append(f"talking point names none of the brand's supplied points "
-                            f"verbatim: {name}")
+                carried = carried or fact
+        if carried is None:
+            problems.append(f"talking point rests on a topic the channel covered, not a "
+                            f"moment of the creator's own: {name}")
+            continue
+        personal.append(carried)
+        moment = _content_words(f"{carried.get('quote')} {carried.get('claim')}")
+        body_words = _content_words(ours.partition("\n")[2])
+        # the heading may name the moment, but the body has to use it too
+        if len(_content_words(ours) & moment) < 2 or not body_words & moment:
+            problems.append(f"talking point quotes a moment but is not built from it; say what "
+                            f"the creator does with it on camera: {name}")
+        if len(_content_words(ours)) < 15:
+            problems.append(f"talking point is too thin to tell the creator what to say: {name}")
+    problems += personal_coverage(points_subs, personal, facts)
+    if supplied and points_subs:
+        pts = [tp for tp in supplied_norm if tp in _norm_words(points)]
+        carried_n = sum(1 for tp in pts if tp in _norm_words(in_personal))
+        if pts and carried_n * 2 < len(pts) and len(usable_moments(facts)) >= 3:
+            problems.append(f"only {carried_n} of the brand's {len(pts)} talking-point lines "
+                            f"sit inside a talking point written for the creator; move more "
+                            f"out of the closing list and build on them")
+    elif not points_subs and not NO_MOMENT.search(points):
+        problems.append("no talking point written for the creator, and the closing list "
+                        "does not say 'no natural moment'")
 
-    # the brand's own lines, verbatim and all present
+    # the brand's own lines, verbatim and all present: a talking point under
+    # Key talking points, a mandatory, a don't or an approval step in its own
+    # section, each once, so a pasted full brief is sorted rather than repeated
     if inp:
-        norm_points = _norm_words(points)
+        placed = _norm_words(" ".join(found.get(k, "") for k in
+                                      ("points", "requirements", "dont", "approval")))
         for tp in inp.get("talking_points", []):
-            if _norm_words(tp) not in norm_points:
+            if _norm_words(tp) not in placed:
                 problems.append(f"supplied talking point missing or reworded: {tp[:50]!r}")
         if inp.get("promoting") and _norm_words(inp["promoting"]) not in _norm_words(found.get("ask", "")):
             problems.append("the brand's 'promoting' line is not in The creative ask verbatim")
@@ -1420,6 +1487,52 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
             if fq and fq in norm_body:
                 problems.append(f"withheld-tier quote on the page ({tier_of(f)})")
                 break
+    return problems
+
+
+_KIDS = re.compile(r"\b(child|children|kids?|daughters?|sons?|baby|babies|pregnan\w*)\b", re.I)
+
+
+def usable_moments(facts: list[dict] | None) -> list[dict]:
+    """Confirmed, unwithheld moments of the creator's own, said on camera: what
+    a talking point can be built on without a human opting anything in."""
+    return [f for f in facts or []
+            if str(f.get("confidence")) == "confirmed" and tier_of(f) == "none"
+            and f.get("quote") and re.search(r"[?&]t=\d", str(f.get("url") or ""))
+            and not f.get("superseded_by") and not f.get("staged_only")
+            and str(f.get("provenance") or "transcript") == "transcript"
+            # a child the merge left at tier none is still not an angle to push
+            and not _KIDS.search(f"{f.get('claim')} {f.get('quote')}")]
+
+
+def personal_coverage(subs: list[str], personal: list[dict],
+                      facts: list[dict] | None) -> list[str]:
+    """The brief is personal or it is the brand's brief with a name on it: at
+    least four talking points written for the creator (fewer only when the
+    ledger holds fewer confirmed moments), each on a moment of its own."""
+    problems: list[str] = []
+    ids = [str(f.get("fact_id") or id(f)) for f in personal]
+    if len(set(ids)) < len(ids):
+        problems.append("the same moment of the creator's carries two talking points; "
+                        "give each point its own")
+    usable = usable_moments(facts)
+    need = min(4, len({str(f.get("fact_id")) for f in usable}))
+    if len(set(ids)) >= need:
+        return problems
+    used = set(ids)
+    spare = sorted((f for f in usable if str(f.get("fact_id")) not in used),
+                   key=lambda f: (not f.get("selected"), -(f.get("recurrence") or 0)))
+    # one per life domain first, so the hint shows the breadth of the ledger
+    firsts, domains = [], set()
+    for f in spare:
+        if f.get("domain") not in domains:
+            firsts.append(f)
+            domains.add(f.get("domain"))
+    hints = (firsts + [f for f in spare if f not in firsts])[:8]
+    problems.append(
+        f"only {len(set(ids))} talking points are built on a moment of the creator's own; "
+        f"at least {need} should, and the ledger has confirmed moments unused, for example: "
+        + "; ".join(f"{h.get('claim')} ({h.get('domain')})" for h in hints))
     return problems
 
 

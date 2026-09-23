@@ -4,6 +4,7 @@ connections page. The retrieval and assembly stages have their own files,
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1159,14 +1160,16 @@ _BRIEF_MD = (
     "## The creative ask\n\n"
     "Acme is promoting the new salmon recipe. One integration inside a regular upload.\n\n"
     "## Key talking points\n\n"
-    "### Rescue dogs first, always\n\n"
+    "### Luna came from the shelter, and so does this story\n\n"
+    "Open on the day Luna arrived from the shelter last spring, then the first bowl of "
+    "the salmon recipe. Your viewers met her that week. You could open on her and let the "
+    "food come second.\n\n"
     "> we finally adopted luna from the shelter last spring and she\n"
     "> [Patterrz, 2026](https://www.youtube.com/watch?v=abc&t=12s)\n\n"
-    "Luna's adoption is the story Acme wants told. You could open on her and let the "
-    "food come second.\n\n"
-    "### Show the bag on camera\n\n"
-    "No natural moment in your videos for this one; worth doing straight, "
-    "the bag in frame while Luna eats.\n\n"
+    "**From Acme's brief:**\n\n"
+    "- Rescue dogs first, always\n\n"
+    "### Also from Acme\n\n"
+    "- Show the bag on camera\n\n"
     "## Requirements\n\n"
     "- Say the full name, Acme Salmon Recipe, once\n\n"
     "## Don't do\n\n"
@@ -1255,11 +1258,9 @@ def test_the_check_wants_all_six_sections_in_order(tmp_path):
 
 
 def test_the_check_refuses_a_dropped_or_reworded_brand_line(tmp_path):
-    dropped = _BRIEF_MD.replace("### Show the bag on camera\n\nNo natural moment in your "
-                                "videos for this one; worth doing straight, the bag in "
-                                "frame while Luna eats.\n\n", "")
+    dropped = _BRIEF_MD.replace("- Show the bag on camera\n\n", "")
     assert any("supplied talking point missing" in p for p in _problems(tmp_path, dropped))
-    reworded = _BRIEF_MD.replace("### Rescue dogs first, always", "### Rescue dogs come first")
+    reworded = _BRIEF_MD.replace("- Rescue dogs first, always", "- Rescue dogs come first")
     problems = _problems(tmp_path, reworded)
     assert any("supplied talking point missing or reworded" in p for p in problems)
     promoting = _BRIEF_MD.replace("Acme is promoting the new salmon recipe.",
@@ -1268,11 +1269,25 @@ def test_the_check_refuses_a_dropped_or_reworded_brand_line(tmp_path):
                for p in _problems(tmp_path, promoting))
 
 
-def test_a_talking_point_without_a_quote_must_say_no_natural_moment(tmp_path):
-    md = _BRIEF_MD.replace("No natural moment in your videos for this one; worth doing "
-                           "straight, the bag in frame while Luna eats.",
-                           "Show the bag on camera while Luna eats.")
-    assert any("does not say 'no natural moment'" in p for p in _problems(tmp_path, md))
+def test_a_talking_point_without_a_moment_fails(tmp_path):
+    md = re.sub(r"> we finally.*\n> \[Patterrz.*\n", "", _BRIEF_MD)
+    assert any("built on no moment" in p for p in _problems(tmp_path, md))
+
+
+def test_the_heading_is_never_the_brands_own_line(tmp_path):
+    md = _BRIEF_MD.replace("### Luna came from the shelter, and so does this story",
+                           "### Rescue dogs first, always")
+    assert any("heading is the brand's own line" in p for p in _problems(tmp_path, md))
+
+
+def test_a_point_that_quotes_a_moment_must_be_built_from_it(tmp_path):
+    md = _BRIEF_MD.replace(
+        "Open on the day Luna arrived from the shelter last spring, then the first bowl of "
+        "the salmon recipe. Your viewers met her that week. You could open on her and let the "
+        "food come second.",
+        "Acme makes a great recipe for dogs everywhere, and viewers will enjoy hearing about "
+        "the recipe, the brand, the bag and the price of quality food today.")
+    assert any("not built from it" in p for p in _problems(tmp_path, md))
 
 
 def test_nothing_written_for_the_brands_eyes_reaches_the_creator(tmp_path):
@@ -1300,3 +1315,98 @@ def test_the_brief_frontmatter_carries_no_platform_internals(tmp_path):
 def test_talking_points_supplied_must_agree_with_the_input_file(tmp_path):
     md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
     assert any("talking_points_supplied says false" in p for p in _problems(tmp_path, md))
+
+
+def test_a_pasted_full_brief_is_sorted_not_repeated(tmp_path):
+    """A brand that pastes its whole brief has mandatories and don'ts among
+    the lines; each belongs in its own section once, not under a ###."""
+    inp = {**_INPUT, "talking_points": _INPUT["talking_points"]
+           + ["Say the full name, Acme Salmon Recipe, once", "No vet or medical claims"]}
+    proc, res = _brief(tmp_path, _BRIEF_MD, inp)
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+
+
+_WORDS = ("kayak paddle", "sourdough starter", "vinyl records", "night shift",
+          "chess club", "garden shed")
+
+
+def _moments(n: int) -> list[dict]:
+    return [{"fact_id": f"f{10 + i}", "claim": f"talks about the {w}", "domain": d,
+             "confidence": "confirmed", "sensitivity": "none", "recurrence": 1,
+             "quote": f"i spent years with my {w} and never regretted it",
+             "url": f"https://www.youtube.com/watch?v=m{i}&t={i + 1}s"}
+            for i, (d, w) in enumerate(zip(("tastes", "habits", "origin", "work", "family",
+                                            "beliefs"), _WORDS))][:n]
+
+
+def _points_brief(moments: list[dict], also: int, brand_lines: int = 1) -> tuple[str, dict]:
+    subs, lines = [], []
+    for i, f in enumerate(moments):
+        w = f["quote"].split("my ")[1].split(" and")[0]
+        mine = [f"Brand line {i}.{j}" for j in range(brand_lines)]
+        lines += mine
+        subs.append(f"### Your {w} is the way in\n\nTell your viewers about the {w}, the years "
+                    f"you spent with it, and show where Acme fits beside it on camera today.\n\n"
+                    f"> {f['quote']}\n> [Video, 0:01]({f['url']})\n\n**From Acme's brief:**\n\n"
+                    + "\n".join(f"- {m}" for m in mine) + "\n")
+    rest = [f"Leftover line {k}" for k in range(also)]
+    lines += rest
+    closing = "### Also from Acme\n\n" + "\n".join(f"- {r}" for r in rest) + "\n"
+    if not moments:
+        closing += "\nNo natural moment in your videos for these.\n"
+    md = re.sub(r"(?s)## Key talking points\n.*?## Requirements",
+                "## Key talking points\n\n" + "\n".join(subs) + "\n" + closing
+                + "\n## Requirements", _BRIEF_MD)
+    return md, {**_INPUT, "talking_points": lines}
+
+
+def test_enough_points_built_on_moments_passes(tmp_path):
+    md, inp = _points_brief(_moments(4), 2)
+    proc, res = _brief(tmp_path, md, inp, _FACTS + _moments(6))
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+
+
+def test_too_few_personal_points_fails_with_hints(tmp_path):
+    md, inp = _points_brief(_moments(2), 1)
+    problems = _problems(tmp_path, md, inp, _FACTS + _moments(6))
+    gap = [p for p in problems if "built on a moment of the creator" in p]
+    assert gap and "at least 4 should" in gap[0] and "origin" in gap[0], problems
+
+
+def test_most_brand_lines_must_sit_inside_personal_points(tmp_path):
+    md, inp = _points_brief(_moments(4), 9)
+    problems = _problems(tmp_path, md, inp, _FACTS + _moments(6))
+    assert any("sit inside a talking point written for the creator" in p for p in problems)
+
+
+def test_a_topic_the_channel_covered_is_not_a_personal_moment(tmp_path):
+    """A category-precedent quote passes because the connections map argued
+    it, but it is a topic, not the creator's own life."""
+    md = _BRIEF_MD.replace("> we finally adopted luna from the shelter last spring and she\n",
+                           "> we finally adopted luna\n")
+    facts = [f for f in _FACTS if f["fact_id"] != "f1"]
+    assert any("topic the channel covered" in p for p in _problems(tmp_path, md, facts=facts))
+
+
+def test_one_moment_cannot_carry_two_points(tmp_path):
+    m = _moments(1)
+    md, inp = _points_brief(m + [dict(m[0])], 0)
+    assert any("carries two talking points" in p
+               for p in _problems(tmp_path, md, inp, _FACTS + _moments(6)))
+
+
+def test_a_channel_with_no_confirmed_moments_may_hold_everything_in_the_closing_list(tmp_path):
+    """A faceless or scripted channel has nothing of its own to build on; the
+    gate never asks for moments the ledger does not have."""
+    md, inp = _points_brief([], 4)
+    proc, res = _brief(tmp_path, md, inp, [dict(f, confidence="unconfirmed") for f in _FACTS])
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+
+
+def test_a_child_left_at_tier_none_is_never_suggested(tmp_path):
+    kid = {"fact_id": "f40", "claim": "has two children", "domain": "family",
+           "confidence": "confirmed", "sensitivity": "none", "recurrence": 9, "selected": True,
+           "quote": "i have two children and they", "url": "https://www.youtube.com/watch?v=k&t=3s"}
+    md, inp = _points_brief(_moments(1), 1)
+    problems = _problems(tmp_path, md, inp, _FACTS + _moments(4) + [kid])
+    assert not any("has two children" in p for p in problems), problems
