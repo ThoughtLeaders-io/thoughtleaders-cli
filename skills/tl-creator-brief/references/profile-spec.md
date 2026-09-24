@@ -278,7 +278,10 @@ holds, in this order:
    link INSIDE the blockquote, so put the attribution on a `>` continuation
    line, not below the quote. `--check` also requires the quote to be a
    ledger fact's verified quote (or a probe window, on a category-precedent
-   card), and refuses a superseded or `staged_only` fact.
+   card), and refuses a superseded or `staged_only` fact. Every quote on the
+   page that matches a ledger fact, precedent cards included, passes the same
+   publication gate, and its link must name that fact's video at that fact's
+   timestamp.
 2. **What the brand offers that meets it**, and which brand-read lane that
    came from (`[web]`, `[social: instagram]`, ad-read sample, sponsorship
    patterns).

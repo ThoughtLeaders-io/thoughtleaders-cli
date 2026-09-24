@@ -78,6 +78,7 @@ import pathlib
 import re
 import sys
 import time
+import urllib.parse
 from collections import Counter, defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -579,6 +580,9 @@ def bio_corroborated(fact: dict, index: dict[str, dict]) -> bool:
     ledger, is it a transcript fact, and did its quote survive verification."""
     target = index.get(str(fact.get("corroborated_by") or ""))
     if target is None or target.get("provenance") != "transcript":
+        return False
+    # a retired fact keeps its quote as history, but its evidence was rejected
+    if target.get("retired_reason"):
         return False
     if str((target.get("verify") or {}).get("match") or "").lower() == "no":
         return False
@@ -1127,6 +1131,85 @@ def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | No
     return None
 
 
+def _video_and_time(url: str) -> tuple[str | None, int | None]:
+    """``(video id, seconds)`` of a YouTube link; ``t=`` may be 512, 512s or 8m32s."""
+    parts = urllib.parse.urlsplit(html.unescape(url or ""))
+    query = urllib.parse.parse_qs(parts.query)
+    vid = (query.get("v") or [None])[0]
+    if vid is None and parts.netloc.endswith("youtu.be"):
+        vid = parts.path.strip("/") or None
+    raw = (query.get("t") or [""])[0]
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?", raw)
+    if not raw or not m or not any(m.groups()):
+        return vid, None
+    h, mnt, s = (int(g or 0) for g in m.groups())
+    return vid, h * 3600 + mnt * 60 + s
+
+
+# caption cues start on whole seconds, and a link may round either way
+_CITE_SLACK_S = 2
+
+
+def citation_problem(quote_norm: str, links: list[str], source_quote: str,
+                     source_url: str) -> str | None:
+    """Why a quote's links do not point at the evidence it quotes, or None.
+
+    The source is the ledger fact (or the connections-map quote) the passage
+    matched. Every timed link in the quote must name the source's video, at
+    the source's timestamp. A shorter excerpt may start later inside the
+    passage, so the link may run ahead by at most one second per word that
+    precedes the excerpt: speech never runs slower than that, so a later
+    timestamp is a different moment."""
+    want_vid, want_t = _video_and_time(source_url)
+    if want_vid is None or want_t is None:
+        return "its source has no timestamped video link to check it against"
+    lead = 0
+    src = _norm_words(source_quote)
+    pos = src.find(quote_norm) if quote_norm else -1
+    if pos > 0:
+        lead = len(src[:pos].split())
+    for link in links:
+        vid, t = _video_and_time(link)
+        if t is None:
+            continue
+        if vid != want_vid:
+            return f"links to video {vid}, but the quote is from {want_vid}"
+        if not want_t - _CITE_SLACK_S <= t <= want_t + lead + _CITE_SLACK_S:
+            return f"links to {t}s, but the quote is said at {want_t}s"
+    return None
+
+
+def quote_links(block: str) -> list[str]:
+    """Every link target inside one quote block, markdown or rendered HTML."""
+    return (re.findall(r'href="([^"]*)"', block)
+            + re.findall(r"\]\(([^)\s]*)\)", block))
+
+
+def quote_text(block_html: str) -> str:
+    """The normalised quoted words of one rendered blockquote, links dropped."""
+    block_html = re.sub(r"<a\b[^>]*>.*?</a>", " ", block_html, flags=re.S)
+    return _norm_words(re.sub(r"<[^>]+>", " ", block_html))
+
+
+def ineligible_on_page(page_text: str, facts: list[dict] | None,
+                       index: dict[str, dict], seen: set[str]) -> list[tuple[dict, str]]:
+    """Ledger facts whose verified quote appears anywhere on the page, quoted
+    or not, that the publication gate refuses. ``seen`` holds fact ids already
+    reported, so one fact is named once."""
+    norm = _norm_words(page_text)
+    out = []
+    for f in facts or []:
+        fid = str(f.get("fact_id"))
+        fq = _norm_words(str(f.get("quote") or ""))
+        if fid in seen or len(fq.split()) < 4 or fq not in norm:
+            continue
+        reason = angle_ineligible_reason(f, index)
+        if reason:
+            seen.add(fid)
+            out.append((f, reason))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # --check: the mechanical half of a QA pass, in the renderer
 # --------------------------------------------------------------------------- #
@@ -1189,23 +1272,34 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
     thin = 0
     strong = 0
     index = {str(f.get("fact_id")): f for f in (facts or [])}
+    flagged: set[str] = set()      # fact ids already reported as ineligible
     for title, rest in kinds["conn"]:
         name = plain(title)[:60]
-        quote = _BLOCKQUOTE.search(rest)
-        if not quote:
+        quotes = _BLOCKQUOTE.findall(rest)
+        if not quotes:
             problems.append(f"connection carries no quote: {name}")
-        elif not _TIMED_LINK.search(quote.group(0)):
+        elif not _TIMED_LINK.search(quotes[0]):
             problems.append(f"connection quote has no timestamped link: {name}")
+        # A precedent card quotes a probe window, so it is exempt from ledger
+        # membership. It is not exempt from the publication gate: a ledger
+        # fact it happens to quote is judged like any other.
         is_precedent = "precedent" in plain(title).lower()
-        if quote and facts and not is_precedent:
-            fact = quote_matches_ledger(quote.group(0), facts)
+        for quote in quotes if facts else []:
+            fact = quote_matches_ledger(quote, facts)
             if fact is None:
-                problems.append(f"connection quote matches no ledger fact: {name}")
-            else:
-                reason = angle_ineligible_reason(fact, index)
-                if reason:
-                    problems.append(f"connection quotes an ineligible fact "
-                                    f"({fact.get('fact_id')}, {reason}): {name}")
+                if not is_precedent:
+                    problems.append(f"connection quote matches no ledger fact: {name}")
+                continue
+            reason = angle_ineligible_reason(fact, index)
+            if reason:
+                flagged.add(str(fact.get("fact_id")))
+                problems.append(f"connection quotes an ineligible fact "
+                                f"({fact.get('fact_id')}, {reason}): {name}")
+            cite = citation_problem(quote_text(quote), quote_links(quote),
+                                    str(fact.get("quote") or ""), str(fact.get("url") or ""))
+            if cite:
+                problems.append(f"connection quote's link does not point at "
+                                f"{fact.get('fact_id')} ({cite}): {name}")
         strength = strength_of(title)
         if strength is None:
             problems.append(f"connection heading has no strength tag "
@@ -1227,6 +1321,12 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
         problems.append(f"price, cost or rate language on the page: "
                         f"{m.group(0).strip()!r}")
         break
+    # the cards are not the only place a quote can sit: the About, Thesis and
+    # caveat sections are on the brand's page too, quoted or inline
+    for f, reason in ineligible_on_page(re.sub(r"\]\([^)]*\)", "]", body),
+                                        facts, index, flagged):
+        problems.append(f"the page quotes an ineligible fact ({f.get('fact_id')}, "
+                        f"{reason}): {str(f.get('claim'))[:50]}")
 
     # Only angle-eligible facts may be selected for the brand-facing summary.
     for f in (facts or []):
@@ -1288,14 +1388,22 @@ _AGAINST = re.compile(r"\b(instead of|put (?:\w+ )?down|better than|ditch(?:ing)
                       r"|swap(?:ping)? out|rather than (?:playing|using|opening))\b", re.I)
 
 
-def md_blockquotes(md: str) -> list[str]:
-    """The normalised text of every `>` block, attribution links dropped."""
+def md_quote_blocks(md: str) -> list[tuple[str, list[str]]]:
+    """``(normalised text, link targets)`` of every `>` block: the quoted
+    words with attribution links dropped, and the links kept apart so each
+    citation can be checked against the passage it cites."""
     out = []
     for m in re.finditer(r"((?:^> ?.*\n?)+)", md, re.M):
-        text = re.sub(r"^> ?", "", m.group(1), flags=re.M)
-        text = re.sub(r"\[[^\]]*\]\([^)]*\)", " ", text)
-        out.append(_norm_words(text))
-    return [q for q in out if q]
+        block = re.sub(r"^> ?", "", m.group(1), flags=re.M)
+        text = _norm_words(re.sub(r"\[[^\]]*\]\([^)]*\)", " ", block))
+        if text:
+            out.append((text, quote_links(block)))
+    return out
+
+
+def md_blockquotes(md: str) -> list[str]:
+    """The normalised text of every `>` block, attribution links dropped."""
+    return [text for text, _links in md_quote_blocks(md)]
 
 
 def brief_sections(body: str) -> tuple[str, dict[str, str], list[str], list[str]]:
@@ -1379,7 +1487,9 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     # key talking points: each is written for this creator, built on a moment
     # of their own, with the brand's line it covers kept verbatim beneath it;
     # what no moment carries waits in one closing "Also from <brand>" list
-    map_quotes = md_blockquotes(map_md)
+    map_blocks = md_quote_blocks(map_md)
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
+    flagged: set[str] = set()          # fact ids already reported as ineligible
     points = found.get("points", "")
     subs = re.split(r"(?m)^### ", points)
     if len(subs) < 2:
@@ -1405,7 +1515,7 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         if supplied and not any(tp and tp in _norm_words(brand_part) for tp in supplied_norm):
             problems.append(f"talking point shows none of the brand's lines verbatim under "
                             f"'From {brand or '<brand>'}'s brief:': {name}")
-        qs = md_blockquotes(sub)
+        qs = md_quote_blocks(sub)
         if not qs:
             problems.append(f"talking point is built on no moment of the creator's own "
                             f"(no quote): {name}")
@@ -1413,20 +1523,32 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         if not re.search(r"\]\(https?://[^)]*[?&]t=\d", sub):
             problems.append(f"talking point quote has no timestamped link: {name}")
         carried = None
-        for q in qs:
+        for q, links in qs:
             fact = quote_matches_ledger(q, facts)
-            in_map = any(q in mq or mq in q for mq in map_quotes)
-            if fact is None and not in_map:
+            in_map = next(((mq, ml) for mq, ml in map_blocks if q in mq or mq in q), None)
+            if fact is None and in_map is None:
                 problems.append(f"quote is neither a ledger fact nor one the connections "
                                 f"map argued: {name}")
             if fact is not None:
-                index = {str(f.get("fact_id")): f for f in (facts or [])}
                 reason = angle_ineligible_reason(fact, index)
                 if reason:
+                    flagged.add(str(fact.get("fact_id")))
                     label = ("withheld-tier fact" if reason.startswith("withheld tier")
                              else "ineligible fact")
                     problems.append(f"quote uses a {label} ({reason}): {name}")
+                cite = citation_problem(q, links, str(fact.get("quote") or ""),
+                                        str(fact.get("url") or ""))
                 carried = carried or fact
+            elif in_map is not None:
+                # a map-only quote is cited where the map cites it
+                mq, ml = in_map
+                timed = [u for u in ml if _video_and_time(u)[1] is not None]
+                cite = citation_problem(q, links, mq, timed[0] if timed else "")
+            else:
+                cite = None
+            if cite:
+                problems.append(f"the quote's link does not point at the moment it "
+                                f"quotes ({cite}): {name}")
         if carried is None:
             problems.append(f"talking point rests on a topic the channel covered, not a "
                             f"moment of the creator's own: {name}")
@@ -1495,13 +1617,22 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     m = _AGAINST.search(ours)
     if m:
         problems.append(f"sets the brand against something else: {m.group(0)!r}")
-    norm_body = _norm_words(no_links)
-    for f in facts or []:
-        if tier_of(f) in WITHHELD and f.get("quote"):
-            fq = _norm_words(str(f["quote"]))
-            if fq and fq in norm_body:
-                problems.append(f"withheld-tier quote on the page ({tier_of(f)})")
-                break
+    # The template bans ineligible material in every section, not only under
+    # the talking points: every other quote on the page goes through the same
+    # gate, and then the whole page is scanned for a ledger quote written
+    # inline without the `>`.
+    elsewhere = intro + "".join(found[k] for k in found if k != "points")
+    for q, _links in md_quote_blocks(elsewhere):
+        fact = quote_matches_ledger(q, facts)
+        reason = fact and angle_ineligible_reason(fact, index)
+        if reason:
+            flagged.add(str(fact.get("fact_id")))
+            problems.append(f"quote outside the talking points uses an ineligible fact "
+                            f"({reason}): {str(fact.get('claim'))[:50]}")
+    for f, reason in ineligible_on_page(no_links, facts, index, flagged):
+        label = ("withheld-tier quote" if tier_of(f) in WITHHELD
+                 else "quote of an ineligible fact")
+        problems.append(f"{label} on the page ({reason}): {str(f.get('claim'))[:50]}")
     return problems
 
 

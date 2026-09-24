@@ -1080,6 +1080,16 @@ def bio_gate(facts: list[dict]) -> tuple[list[dict], list[dict]]:
     return kept, dropped
 
 
+def corroboration_holds(target: dict | None) -> bool:
+    """Whether a fact can still corroborate a bio claim: a transcript fact,
+    not said only inside a staged premise, and not retired. The renderer's
+    ``bio_corroborated`` asks the same question again at the other end."""
+    return (target is not None
+            and target.get("provenance") == "transcript"
+            and not target.get("staged_only")
+            and not target.get("retired_reason"))
+
+
 def selectable(fact: dict) -> bool:
     """Whether a fact may carry ``selected``, which is what reaches a
     brand-facing page's "who they are" section.
@@ -1431,12 +1441,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if target not in fact_index:
             continue
         if (fact_index[fact_id].get("provenance") == BIO
-                and (fact_index[target].get("provenance") != "transcript"
-                     or fact_index[target].get("staged_only"))):
-            # Only an upload can verify an About box, and not one that said it
-            # inside a staged premise: that is the confidence cap the
-            # transcript lane already applied, and corroboration may not
-            # override it from the outside.
+                and not corroboration_holds(fact_index[target])):
+            # Only an upload can verify an About box, not one that said it
+            # inside a staged premise (the confidence cap the transcript lane
+            # already applied), and not one whose evidence was rejected.
             bio_uncorroborated.append([fact_id, target])
             continue
         fact_index[fact_id]["confidence"] = "confirmed"
@@ -1478,6 +1486,21 @@ def cmd_expand(a: argparse.Namespace) -> int:
             tier_inherited.append([fact_id, str(fact.get("sensitivity")), new_tier])
             fact["sensitivity"] = new_tier
             fact["sensitive"] = new_tier in WITHHELD
+
+    # A bio fact confirmed on an earlier run is only as good as the upload that
+    # confirmed it. When that transcript fact is retired or gone, the bio fact
+    # goes back to being the creator's own unverified words: the gate below
+    # then keeps it off the page, or drops it at a sensitive tier.
+    bio_corroboration_lost: list[list[str]] = []
+    for f in facts:
+        link = str(f.get("corroborated_by") or "")
+        if f.get("provenance") != BIO or not link:
+            continue
+        if corroboration_holds(fact_index.get(link)):
+            continue
+        f.pop("corroborated_by", None)
+        f["confidence"] = "unconfirmed"
+        bio_corroboration_lost.append([str(f.get("fact_id")), link])
 
     # An unconfirmed bio claim carried from an earlier ledger lives only as
     # long as the About text still says it. The carried record never passes the
@@ -1650,6 +1673,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
                         for f in bio_dropped],
         "bio_expired": bio_expired,
         "bio_corroboration_refused": bio_uncorroborated,
+        "bio_corroboration_lost": bio_corroboration_lost,
         "enum_aliases": enum_aliases,
         "corroborated": corroborated,
         "reconciled": reconciled,

@@ -1029,6 +1029,55 @@ def test_dropping_a_rejudged_cluster_retires_its_existing_fact(tmp_path):
     assert fact["selected"] is False
 
 
+def test_retiring_a_transcript_fact_uncorroborates_the_bio_fact_it_confirmed(tmp_path):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"members": {
+        "v1:10": {"fact": "f001"},
+        "v2:20": {"dropped": "earlier rejection"}}}))
+    old = _fact("f001", claim="guest anecdote", video="v1", start=10,
+                members=["v1:10"])
+    bio = _bio_ledger_fact("f002", claim="runs a pottery studio", tier="none",
+                           confidence="confirmed")
+    bio.update(corroborated_by="f001", selected=True)
+    existing = _existing(tmp_path, [old, bio])
+    clustered = _write_clusters(tmp_path, [
+        _cluster("guest anecdote", video="v1",
+                 members=[_member("v1", 10), _member("v2", 20)])])
+    dpath = _decisions(
+        tmp_path,
+        {"c001": {"action": "drop", "reason": "guest misattributed as host"}})
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out, existing=existing, state=state)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    assert facts["f001"]["retired_reason"] == "guest misattributed as host"
+    bio = facts["f002"]
+    assert bio["confidence"] == "unconfirmed" and bio["unverified_bio"] is True
+    assert bio["selected"] is False and "corroborated_by" not in bio
+    assert json.loads(proc.stdout)["bio_corroboration_lost"] == [["f002", "f001"]]
+
+
+def test_a_sensitive_bio_fact_that_loses_its_corroboration_leaves_the_ledger(tmp_path):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"members": {
+        "v1:10": {"fact": "f001"},
+        "v2:20": {"dropped": "earlier rejection"}}}))
+    old = _fact("f001", claim="guest anecdote", video="v1", start=10,
+                members=["v1:10"])
+    bio = _bio_ledger_fact("f002", claim="has ADHD", tier="clinical",
+                           confidence="confirmed")
+    bio["corroborated_by"] = "f001"
+    existing = _existing(tmp_path, [old, bio])
+    clustered = _write_clusters(tmp_path, [
+        _cluster("guest anecdote", video="v1",
+                 members=[_member("v1", 10), _member("v2", 20)])])
+    dpath = _decisions(tmp_path, {"c001": {"action": "drop", "reason": "guest"}})
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out, existing=existing, state=state)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "f002" not in _facts(out)
+
+
 # --------------------------------------------------------------------------- #
 # a re-judged cluster reconciles the fact ids it did not keep
 # --------------------------------------------------------------------------- #

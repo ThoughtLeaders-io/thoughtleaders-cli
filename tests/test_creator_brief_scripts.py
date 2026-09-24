@@ -1153,6 +1153,63 @@ def test_connection_check_applies_sensitivity_to_the_fact_actually_quoted():
     assert any("fewer than three videos" in p for p in problems)
 
 
+_CLINICAL = {
+    "fact_id": "f9", "claim": "was diagnosed with depression",
+    "quote": "my doctor diagnosed me with depression last year",
+    "url": "https://www.youtube.com/watch?v=dep&t=40s",
+    "provenance": "transcript", "confidence": "confirmed",
+    "sensitivity": "clinical", "recurrence": 1, "selected": False,
+}
+_CLINICAL_QUOTE = ("> my doctor diagnosed me with depression last year "
+                   "[watch](https://youtube.com/w?v=dep&t=40s)\n\n")
+
+
+def test_connection_check_gates_a_precedent_card_that_quotes_a_ledger_fact():
+    import build_html
+    md = _CONN_MD.replace("Bakes sourdough weekly [social: instagram]\n",
+                          _CLINICAL_QUOTE + "Bakes sourdough weekly [social: instagram]\n")
+    problems = build_html.check_page(md, _FACTS + [_CLINICAL], _META)
+    assert any("f9" in p and "fewer than three videos" in p for p in problems)
+
+
+def test_connection_check_gates_every_quote_on_a_card_not_only_the_first():
+    import build_html
+    md = _CONN_MD.replace("Acme sells dog food [web]\n", _CLINICAL_QUOTE + "Acme sells dog food [web]\n")
+    problems = build_html.check_page(md, _FACTS + [_CLINICAL], _META)
+    assert any("f9" in p and "fewer than three videos" in p for p in problems)
+
+
+def test_connection_check_gates_a_quote_outside_the_cards():
+    import build_html
+    md = _CONN_MD.replace("Acme is a direct-to-consumer dog food brand [web: product pages].\n",
+                          "Acme is a direct-to-consumer dog food brand [web: product pages].\n\n"
+                          + _CLINICAL_QUOTE)
+    problems = build_html.check_page(md, _FACTS + [_CLINICAL], _META)
+    assert any("the page quotes an ineligible fact (f9" in p for p in problems)
+
+
+def test_connection_check_binds_the_quote_link_to_the_quoted_moment():
+    import build_html
+    assert not any("does not point at" in p
+                   for p in build_html.check_page(_CONN_MD, _FACTS, _META))
+    for link, why in (("v=DIFFERENT&t=12s", "links to video DIFFERENT"),
+                      ("v=abc&t=9999s", "links to 9999s")):
+        md = _CONN_MD.replace("v=abc&t=12s", link)
+        problems = build_html.check_page(md, _FACTS, _META)
+        assert any("does not point at f1" in p and why in p for p in problems), problems
+
+
+def test_a_retired_transcript_fact_no_longer_corroborates_a_bio_fact():
+    import build_html
+    target = _transcript_fact(retired_reason="guest misattributed as host")
+    bio = _bio_fact(confidence="confirmed", unverified_bio=False, corroborated_by="f1")
+    index = {"f1": target, "f2": bio}
+    assert build_html.bio_corroborated(bio, index) is False
+    assert "not corroborated" in build_html.angle_ineligible_reason(bio, index)
+    target.pop("retired_reason")
+    assert build_html.bio_corroborated(bio, index) is True
+
+
 # build_html.py --brief: the creator-friendly brief, the second deliverable
 # --------------------------------------------------------------------------- #
 _INPUT = {
@@ -1288,6 +1345,42 @@ def test_the_check_refuses_a_low_recurrence_clinical_quote_even_when_not_selecte
         "my doctor diagnosed me with depression last year")
     problems = _problems(tmp_path, md, facts=facts)
     assert any("fewer than three videos" in p for p in problems)
+
+
+def test_the_check_refuses_an_ineligible_quote_in_any_section(tmp_path):
+    # David's repro: the clinical quote sits under Requirements, not a talking point
+    md = _BRIEF_MD.replace(
+        "## Requirements\n\n",
+        "## Requirements\n\n> my doctor diagnosed me with depression last year\n\n")
+    problems = _problems(tmp_path, md, facts=_FACTS + [_CLINICAL])
+    assert any("outside the talking points" in p and "fewer than three videos" in p
+               for p in problems), problems
+    # and written inline, without the `>`
+    md = _BRIEF_MD.replace("- No vet or medical claims",
+                           "- No vet or medical claims, my doctor diagnosed me with "
+                           "depression last year")
+    problems = _problems(tmp_path, md, facts=_FACTS + [_CLINICAL])
+    assert any("quote of an ineligible fact on the page" in p for p in problems), problems
+
+
+def test_the_check_binds_each_quote_link_to_the_moment_it_quotes(tmp_path):
+    for link, why in (("watch?v=DIFFERENT&t=9999s", "links to video DIFFERENT"),
+                      ("watch?v=abc&t=9999s", "links to 9999s")):
+        md = _BRIEF_MD.replace("watch?v=abc&t=12s", link)
+        problems = _problems(tmp_path, md)
+        assert any("does not point at the moment" in p and why in p for p in problems), problems
+
+
+def test_an_excerpt_may_link_a_few_seconds_into_its_passage():
+    import build_html
+    src = "we finally adopted luna from the shelter last spring and she"
+    url = "https://www.youtube.com/watch?v=abc&t=12s"
+    excerpt = build_html._norm_words("luna from the shelter last spring")
+    # four words precede the excerpt: up to four seconds later, plus rounding
+    ok = ["https://youtu.be/abc?t=15"]
+    assert build_html.citation_problem(excerpt, ok, src, url) is None
+    late = ["https://www.youtube.com/watch?v=abc&t=1m"]
+    assert "links to 60s" in build_html.citation_problem(excerpt, late, src, url)
 
 
 def test_the_check_wants_all_six_sections_in_order(tmp_path):

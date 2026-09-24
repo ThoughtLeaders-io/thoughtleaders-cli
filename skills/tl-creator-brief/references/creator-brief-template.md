@@ -34,7 +34,8 @@ what this is, and that every quote links to the second it was said.
 
 - Every quote is the creator's own words, verbatim, with its `&t=` link
   inside the blockquote. The checker refuses a quote that is neither a
-  verified ledger fact nor one the connections map argued.
+  verified ledger fact nor one the connections map argued, and a link to any
+  other video or timestamp than the one that fact or card carries.
 - Sort the supplied lines before writing: a mandatory goes under
   Requirements, a prohibition under Don't do, an approval step under
   Creative approval process, each once and verbatim. Only what the creator
