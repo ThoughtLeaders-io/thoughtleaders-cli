@@ -762,8 +762,13 @@ def test_query_body_carries_since_into_the_filter():
         body["query"]["bool"]["filter"]
 
 
+def test_refresh_since_backfills_for_late_arriving_captions():
+    assert fetch_cues.refresh_since("2026-05-01") == "2026-01-31"
+    assert fetch_cues.refresh_since(None) is None
+
+
 # --------------------------------------------------------------------------- #
-# batch size follows the host's concurrent-agent cap
+# batch size follows the documented cross-host cap
 # --------------------------------------------------------------------------- #
 def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
     assert fetch_cues.derived_batch_size(500, 20) == 25
@@ -773,25 +778,17 @@ def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
     assert fetch_cues.derived_batch_size(0, 40) == fetch_cues.MIN_BATCH_SIZE
 
 
-def test_agent_cap_comes_from_the_environment_or_defaults_to_20(monkeypatch, capsys):
-    monkeypatch.delenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", raising=False)
-    assert fetch_cues.env_agent_cap() == fetch_cues.DEFAULT_AGENT_CAP == 20
-    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "40")
-    assert fetch_cues.env_agent_cap() == 40
-    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "lots")
-    assert fetch_cues.env_agent_cap() == 20
-    assert "not an integer" in capsys.readouterr().err
-    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "0")
-    assert fetch_cues.env_agent_cap() == 20
+def test_agent_cap_is_the_documented_cross_host_standard():
+    assert fetch_cues.DEFAULT_AGENT_CAP == 20
 
 
-def test_run_derives_the_batch_size_from_the_cap_unless_the_flag_is_given(tmp_path, monkeypatch):
+def test_run_derives_the_batch_size_from_the_standard_unless_the_flag_is_given(
+        tmp_path, monkeypatch):
     docs = [_doc(f"7:v{i}", [_frag("i grew up", 100), _frag("my dad", 400)])
             for i in range(6)]                                   # 12 windows
-    monkeypatch.setenv("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "2")
     summary, kept = _run(tmp_path, monkeypatch, docs, census_total=6, langs={"en": 6})
-    assert len(kept) == 12 and summary["batch_size"] == 6 and summary["agent_cap"] == 2
-    assert len(summary["batches"]) == 2
+    assert len(kept) == 12 and summary["batch_size"] == 5 and summary["agent_cap"] == 20
+    assert len(summary["batches"]) == 3
     summary, _ = _run(tmp_path, monkeypatch, docs, argv=("--batch-size", "5"),
                       census_total=6, langs={"en": 6})
     assert summary["batch_size"] == 5 and len(summary["batches"]) == 3
@@ -829,6 +826,22 @@ def test_generic_fallback_is_skipped_when_the_phrases_fill_the_cap(tmp_path, mon
     assert summary["generic_fallback"]["floor"] == 1
     assert [(w["id"], w["retrieval"]) for w in kept] == [("7:v1", "phrase")]
     assert "generic_fallback=skipped generic_windows=0" in _run.last_funnel
+
+
+def test_generic_fallback_excludes_auto_dubbed_tracks_on_an_english_channel(
+        tmp_path, monkeypatch):
+    dubbed = _doc("7:pl", [_pronoun_frag(100)])
+    dubbed["transcript_language"] = "pl"
+    monkeypatch.setattr(fetch_cues, "channel_language", lambda channel: "en")
+    summary, kept = _run(
+        tmp_path, monkeypatch,
+        [_doc("7:en", [_frag("i grew up", 100)])],
+        argv=("--max-windows", "2"),
+        langs={"en": 1, "pl": 1},
+        generic_docs=[dubbed],
+    )
+    assert [w["id"] for w in kept] == ["7:en"]
+    assert summary["dubbed_excluded"] == {"pl": 1}
 
 
 def test_generic_fallback_fills_only_the_shortfall_behind_every_phrase_window(

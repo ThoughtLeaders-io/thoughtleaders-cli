@@ -54,6 +54,28 @@ class DataError(RuntimeError):
     """A query executed but failed or returned something unreadable."""
 
 
+class IncompleteDataError(DataError):
+    """A successful response was truncated and is unsafe to publish or cache."""
+
+
+def _require_complete(data) -> None:
+    """Reject a successful response whose rows were cut by a billing quota."""
+    if not isinstance(data, dict) or not data.get("_billing_quota_exhausted"):
+        return
+    retry = data.get("_billing_earliest_retry_at")
+    quota = data.get("_billing_quota") or {}
+    detail = []
+    if quota.get("queries_max") is not None:
+        detail.append(f"queries {quota.get('queries_used')}/{quota.get('queries_max')}")
+    if quota.get("rows_max") is not None:
+        detail.append(f"rows {quota.get('rows_used')}/{quota.get('rows_max')}")
+    raise IncompleteDataError(
+        "tl returned a quota-truncated response; no partial rows were accepted"
+        + (f" ({', '.join(detail)})" if detail else "")
+        + (f". Retry at {retry}" if retry else "")
+    )
+
+
 def _child_env() -> dict[str, str]:
     # Force UTF-8 in the child so `tl`'s output survives Windows consoles
     # whose default codec would mangle it before we ever see the JSON.
@@ -114,7 +136,9 @@ def _tl_json(args: list[str], *, input_text: str | None = None,
     if not out:
         return None
     try:
-        return json.loads(out)
+        data = json.loads(out)
+        _require_complete(data)
+        return data
     except json.JSONDecodeError as exc:
         raise DataError(
             f"tl {' '.join(args[:3])} returned non-JSON output: {out[:300]}"
@@ -125,6 +149,11 @@ def _rows(data) -> list[dict]:
     if data is None:
         return []
     if isinstance(data, dict):
+        # Raw-data quota exhaustion can be a successful HTTP response whose
+        # rows stop at the remaining allowance. Returning those rows as an
+        # ordinary list turns "incomplete" into false evidence that no more
+        # records exist.
+        _require_complete(data)
         # A 200 with premium fields withheld carries "_upgrade_required"
         # next to the rows. Unwrapping past it would let a plan-gated run
         # read the gaps as "no data exists" (e.g. a complete-looking corpus

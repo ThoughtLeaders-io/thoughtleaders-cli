@@ -60,6 +60,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from datetime import date, timedelta
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -80,6 +81,7 @@ CUE_RX = re.compile(r'<text start="([\d.]+)"[^>]*>')
 NON_EN_WINDOWS_PER_VIDEO = 3
 NON_EN_WINDOW_WORDS = 80
 WINDOW_SPAN = 30        # seconds a passage is assumed to occupy from its start
+REFRESH_OVERLAP_DAYS = 90
 
 # A host term in a window is two different signals. "hey guys it's Marta" or
 # "my name is Marta" is the host naming THEMSELVES: the strongest in-text proof
@@ -348,6 +350,17 @@ def is_english(code: str | None) -> bool:
     return c in ENGLISH_CODES or c.startswith("en-") or c.endswith("-en")
 
 
+def refresh_since(value: str | None) -> str | None:
+    """Backfill refreshes so captions that arrive after upload are revisited."""
+    if not value:
+        return None
+    try:
+        return (date.fromisoformat(value[:10])
+                - timedelta(days=REFRESH_OVERLAP_DAYS)).isoformat()
+    except ValueError:
+        raise ValueError(f"--since must be YYYY-MM-DD, got {value!r}")
+
+
 def census(channel: int) -> tuple[int, dict[str, int]]:
     """Transcript-bearing uploads for the coverage ratio, split by language."""
     body = {"size": 0, "track_total_hits": True,
@@ -581,6 +594,9 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
         return "none"
     try:
         segments = sponsor_segments(refs)
+    except tl_data.IncompleteDataError:
+        # A truncated id lookup is not "these videos have no ad reads".
+        raise
     except BaseException as exc:              # noqa: BLE001 — reported, not raised
         print(f"sponsor-span lookup failed ({type(exc).__name__}: "
               f"{str(exc)[:120]}) — keeping the regex heuristic", file=sys.stderr)
@@ -1002,7 +1018,11 @@ def main() -> int:
                     "its cost scales with the new uploads, not the catalogue")
     a = ap.parse_args()
     t0 = time.monotonic()
-    since = a.since.strip() or None
+    requested_since = a.since.strip() or None
+    try:
+        since = refresh_since(requested_since)
+    except ValueError as exc:
+        ap.error(str(exc))
 
     phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
     host_names = [t.strip() for t in a.host_names.split(",") if t.strip()]
@@ -1015,11 +1035,15 @@ def main() -> int:
     queries_note = f"{len(YEARS)} year buckets"
     try:
         videos_with_transcript, langs = census(a.channel)
+    except tl_data.IncompleteDataError:
+        raise
     except Exception as exc:  # census is reporting, never a gate
         videos_with_transcript, langs = 0, {}
         print(f"census failed: {exc}", file=sys.stderr)
     try:
         latest_video_date = latest_upload(a.channel)
+    except tl_data.IncompleteDataError:
+        raise
     except Exception as exc:  # reporting, never a gate
         latest_video_date = None
         print(f"latest-upload lookup failed: {exc}", file=sys.stderr)
@@ -1046,6 +1070,8 @@ def main() -> int:
     elif non_en_total:
         try:
             non_en_docs = fetch_non_english(a.channel, since=since)
+        except tl_data.IncompleteDataError:
+            raise
         except Exception as exc:
             non_en_failed = True
             print(f"non-English fetch failed: {exc}", file=sys.stderr)
@@ -1134,6 +1160,11 @@ def main() -> int:
                         and selection.get("stop_reason") == "score_floor")
     if floor > 0 and len(kept) < floor and not stopped_on_floor:
         gdocs = fetch_all_years(a.channel, GENERIC_TERMS, a, since)
+        if dubbed_excluded:
+            # The fallback's bare "I" can match words in an auto-dubbed track
+            # even when no English cue phrase did. Apply the same exclusion to
+            # both retrieval paths before either can create windows.
+            gdocs = [d for d in gdocs if is_english(d.get("transcript_language"))]
         generic_windows = build_windows(gdocs, corpus=corpus, done=done, seen=seen,
                                         host_lc=host_lc, recurring=recurring,
                                         retrieval="generic")
@@ -1234,6 +1265,8 @@ def main() -> int:
     elapsed = round(time.monotonic() - t0, 1)
     summary = {
         "channel": a.channel, "round": a.round, "phrases": len(all_phrases), "queries": queries_note,
+        "requested_since": requested_since, "effective_since": since,
+        "refresh_overlap_days": REFRESH_OVERLAP_DAYS if requested_since else 0,
         "videos_with_transcript": videos_with_transcript, "languages": langs,
         "channel_language": chan_lang,
         "dubbed_excluded": dubbed_excluded,

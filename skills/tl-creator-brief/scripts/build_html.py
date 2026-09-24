@@ -590,6 +590,32 @@ def unverified_bio(fact: dict, index: dict[str, dict]) -> bool:
     return fact.get("provenance") == "bio" and not bio_corroborated(fact, index)
 
 
+def angle_ineligible_reason(fact: dict, index: dict[str, dict] | None = None) -> str | None:
+    """Why a fact may not support a brand-facing angle.
+
+    This is the single publication-policy gate for the connections page and
+    creator brief. Sensitive facts can still inform the page's risk warning;
+    they may not become a positive angle or talking point unless this gate
+    allows them.
+    """
+    if fact.get("retired_reason"):
+        return "retired after its evidence was rejected"
+    if fact.get("superseded_by"):
+        return f"superseded by {fact.get('superseded_by')}"
+    if fact.get("staged_only"):
+        return "said only inside a staged premise"
+    tier = tier_of(fact)
+    if tier in WITHHELD or tier == "withheld":
+        return f"withheld tier {tier}"
+    if (tier == "clinical"
+            and str(fact.get("provenance") or "transcript") == "transcript"
+            and int(fact.get("recurrence") or 0) < 3):
+        return "clinical fact discussed in fewer than three videos"
+    if index is not None and unverified_bio(fact, index):
+        return "written bio claim not corroborated by a transcript"
+    return None
+
+
 def tier_badge(fact: dict) -> str:
     tier = tier_of(fact)
     if tier == "none":
@@ -755,20 +781,7 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
     """
     index = {str(f.get("fact_id")): f for f in facts}
     usable = [f for f in facts
-              if not f.get("superseded_by") and tier_of(f) not in WITHHELD
-              # what a creator writes about themselves is a lead, not a fact:
-              # until an upload says the same thing it stays off this strip and
-              # out of every connection, in its own labelled block below
-              and not unverified_bio(f, index)
-              and tier_of(f) != "withheld" and not f.get("staged_only")
-              # the merge pass's own rule for `selected`: a clinical fact is
-              # public only where the creator made it so, three or more videos
-              # for a transcript fact; the fall-back to most-recurring facts
-              # must not route around it (otherwise a two-video clinical fact
-              # can reach a brand-facing strip)
-              and not (tier_of(f) == "clinical"
-                       and (f.get("provenance") or "transcript") == "transcript"
-                       and int(f.get("recurrence") or 0) < 3)]
+              if angle_ineligible_reason(f, index) is None]
 
     def key(f: dict):
         return (bool(f.get("selected")), f.get("confidence") == "confirmed",
@@ -1093,22 +1106,24 @@ def _norm_words(text: str) -> str:
 
 
 def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | None:
-    """The ledger fact whose verified quote contains this card's quote (or is
-    contained by it), or None. Normalised on words, never on punctuation."""
+    """The ledger fact that contains this complete quoted passage.
+
+    Attribution links are removed, but no words from the quotation itself are
+    discarded. A short excerpt may match a longer verified ledger quote; a
+    longer quote with an invented ending may never match a shorter source.
+    """
     if not facts:
         return None
-    # the attribution (a link's anchor text, a dash, a name and a date) sits
-    # inside the blockquote too; drop the anchors, then compare the quote's
-    # leading words against every ledger quote, shortening from the tail
+    # The attribution link sits inside the blockquote too. Drop that complete
+    # anchor, then compare the entire remaining passage.
     stripped = re.sub(r"<a\b[^>]*>.*?</a>", " ", quote_html, flags=re.S)
     q = _norm_words(re.sub(r"<[^>]+>", " ", stripped))
-    q_words = q.split()
-    quotes = [_norm_words(str(f.get("quote") or "")) for f in facts]
-    for n in range(min(len(q_words), 40), 3, -1):
-        head = " ".join(q_words[:n])
-        for f, fq in zip(facts, quotes):
-            if fq and (head in fq or fq in head):
-                return f
+    if len(q.split()) < 4:
+        return None
+    for f in facts:
+        fq = _norm_words(str(f.get("quote") or ""))
+        if fq and q in fq:
+            return f
     return None
 
 
@@ -1173,6 +1188,7 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
     # otherwise quote an unrelated family fact to argue a format claim)
     thin = 0
     strong = 0
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
     for title, rest in kinds["conn"]:
         name = plain(title)[:60]
         quote = _BLOCKQUOTE.search(rest)
@@ -1185,12 +1201,11 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
             fact = quote_matches_ledger(quote.group(0), facts)
             if fact is None:
                 problems.append(f"connection quote matches no ledger fact: {name}")
-            elif fact.get("superseded_by"):
-                problems.append(f"connection quotes a superseded fact "
-                                f"({fact.get('fact_id')}): {name}")
-            elif fact.get("staged_only"):
-                problems.append(f"connection quotes a staged-only fact "
-                                f"({fact.get('fact_id')}): {name}")
+            else:
+                reason = angle_ineligible_reason(fact, index)
+                if reason:
+                    problems.append(f"connection quotes an ineligible fact "
+                                    f"({fact.get('fact_id')}, {reason}): {name}")
         strength = strength_of(title)
         if strength is None:
             problems.append(f"connection heading has no strength tag "
@@ -1213,14 +1228,14 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
                         f"{m.group(0).strip()!r}")
         break
 
-    # withheld tiers never reach a brand-facing page
+    # Only angle-eligible facts may be selected for the brand-facing summary.
     for f in (facts or []):
-        if tier_of(f) in WITHHELD and f.get("selected"):
-            problems.append(f"selected fact at withheld tier "
-                            f"{tier_of(f)}: {str(f.get('claim'))[:50]}")
+        reason = angle_ineligible_reason(f, index)
+        if reason and f.get("selected"):
+            problems.append(f"selected fact is not publishable ({reason}): "
+                            f"{str(f.get('claim'))[:50]}")
     # the merge pass owns this rule; this end is the backstop, and it re-derives
     # corroboration from the evidence link rather than trusting `confidence`
-    index = {str(f.get("fact_id")): f for f in (facts or [])}
     for f in (facts or []):
         if f.get("selected") and unverified_bio(f, index):
             problems.append(f"selected fact the creator only wrote about themselves, "
@@ -1354,7 +1369,7 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
             problems.append(f"missing section: ## {label.replace('<brand>', brand or '<brand>')}")
     if order != [k for k in expected if k in found]:
         problems.append("sections out of order; the template fixes: "
-                        + ", ".join(l for _k, l, _m in BRIEF_SECTIONS))
+                        + ", ".join(label for _key, label, _match in BRIEF_SECTIONS))
     for h in unknown:
         problems.append(f"a section the template does not have: ## {h[:50]}")
     if brand and "who" in found and not re.search(
@@ -1405,12 +1420,12 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                 problems.append(f"quote is neither a ledger fact nor one the connections "
                                 f"map argued: {name}")
             if fact is not None:
-                if tier_of(fact) in WITHHELD:
-                    problems.append(f"quote is a withheld-tier fact ({tier_of(fact)}): {name}")
-                if fact.get("superseded_by"):
-                    problems.append(f"quote is a superseded fact: {name}")
-                if fact.get("staged_only"):
-                    problems.append(f"quote is a staged-only fact: {name}")
+                index = {str(f.get("fact_id")): f for f in (facts or [])}
+                reason = angle_ineligible_reason(fact, index)
+                if reason:
+                    label = ("withheld-tier fact" if reason.startswith("withheld tier")
+                             else "ineligible fact")
+                    problems.append(f"quote uses a {label} ({reason}): {name}")
                 carried = carried or fact
         if carried is None:
             problems.append(f"talking point rests on a topic the channel covered, not a "
@@ -1496,10 +1511,11 @@ _KIDS = re.compile(r"\b(child|children|kids?|daughters?|sons?|baby|babies|pregna
 def usable_moments(facts: list[dict] | None) -> list[dict]:
     """Confirmed, unwithheld moments of the creator's own, said on camera: what
     a talking point can be built on without a human opting anything in."""
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
     return [f for f in facts or []
             if str(f.get("confidence")) == "confirmed" and tier_of(f) == "none"
             and f.get("quote") and re.search(r"[?&]t=\d", str(f.get("url") or ""))
-            and not f.get("superseded_by") and not f.get("staged_only")
+            and angle_ineligible_reason(f, index) is None
             and str(f.get("provenance") or "transcript") == "transcript"
             # a child the merge left at tier none is still not an angle to push
             and not _KIDS.search(f"{f.get('claim')} {f.get('quote')}")]

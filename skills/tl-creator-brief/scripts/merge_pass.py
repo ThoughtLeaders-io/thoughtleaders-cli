@@ -1095,6 +1095,8 @@ def selectable(fact: dict) -> bool:
     the other end of the pipeline. That check is the backstop; this is the
     end that owns the rule, so nothing is left to be caught at render time.
     Nothing opts itself in: the fill-to-target loop reads this too."""
+    if fact.get("retired_reason"):
+        return False
     tier = fact.get("sensitivity")
     if tier in ("children", "location"):
         return False
@@ -1108,6 +1110,8 @@ def selectable(fact: dict) -> bool:
 
 
 def unselectable_reason(fact: dict) -> str:
+    if fact.get("retired_reason"):
+        return f"retired: {fact['retired_reason']}"
     tier = fact.get("sensitivity")
     if tier in ("children", "location"):
         return f"withheld tier {tier}"
@@ -1205,6 +1209,21 @@ def cmd_expand(a: argparse.Namespace) -> int:
     additive = [r for r in records if r["status"] == "additive"]
     for rec in additive:
         assigned[rec["c"]] = rec["fact_id"]
+
+    # A drop can re-judge evidence that previously owned an active fact. That
+    # old fact must not fall through to the blanket carry-forward below.
+    # Preserve it as retired history unless another surviving cluster still
+    # owns the same fact id this round.
+    reused_ids = set(assigned.values())
+    reused_ids.update(t for t in terminal.values() if str(t).startswith("f"))
+    retired_by_drop: dict[str, str] = {}
+    for key, dec in decisions.items():
+        if dec.get("action") != "drop":
+            continue
+        reason = str(dec.get("reason") or "evidence rejected by the merge pass")
+        for old in by_c[key].get("known") or []:
+            if old not in reused_ids:
+                retired_by_drop[old] = reason
 
     # identity-lane facts are numbered after the clusters
     identity_ids: list[str] = []
@@ -1384,6 +1403,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if fact_id in fact_index:
             continue
         carried = dict(prior)
+        if fact_id in retired_by_drop:
+            carried["retired_reason"] = retired_by_drop[fact_id]
+            carried["selected"] = False
         if fact_id in keys_by_fact:      # something folded into it this round
             seed_from_existing(fact_id)
             carried["members"] = keys_by_fact[fact_id]
@@ -1513,11 +1535,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # left off the page, and every refusal carries its reason. Otherwise a
     # shard's picks can put a garbled-caption name on the page ahead of
     # confirmed, recurring facts.
-    active = [f for f in facts if not f.get("superseded_by")]
+    active = [f for f in facts
+              if not f.get("superseded_by") and not f.get("retired_reason")]
     eligible = {str(f["fact_id"]) for f in active if selectable(f)}
-    confirmed_eligible = [str(f["fact_id"]) for f in active
-                          if str(f["fact_id"]) in eligible
-                          and f.get("confidence") == "confirmed"]
     picked: list[str] = []
     ignored: dict[str, str] = {}
     # the agent names c* ids, f* ids, and an identity fact's own `ref`

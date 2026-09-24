@@ -134,7 +134,7 @@ def test_multiple_return_files_merge_and_a_later_file_overrides(tmp_path):
     assert len(gems) == 2
 
 
-def test_a_duplicate_within_one_file_stays_invalid_even_if_a_later_file_is_clean(
+def test_a_clean_retry_clears_an_earlier_duplicate_for_the_same_index(
         tmp_path):
     wins = [_window(0), _window(1)]
     batches = tmp_path / "batches"
@@ -142,8 +142,8 @@ def test_a_duplicate_within_one_file_stays_invalid_even_if_a_later_file_is_clean
     batches.mkdir()
     returns.mkdir()
     (batches / "batch-000.json").write_text(json.dumps(wins))
-    # index 0 appears twice WITHIN this one file: invalid, and that taint is
-    # per-index for the whole batch, not undone by a later file's clean entry
+    # Index 0 appears twice in the original file, then the documented retry
+    # supplies one unambiguous replacement.
     (returns / "batch-000.extract.json").write_text(json.dumps({
         "batch": "000", "windows": 2,
         "gems": [_gem(0, wins[0]), _gem(0, wins[0])],
@@ -157,8 +157,27 @@ def test_a_duplicate_within_one_file_stays_invalid_even_if_a_later_file_is_clean
          "--out", str(out)], capture_output=True, text=True)
     respawn = json.loads((out / "respawn.json").read_text())
     rows = [json.loads(x) for x in (out / "classified.jsonl").read_text().splitlines()]
-    assert respawn == {"000": [0]}
-    assert [r["verdict"]["i"] for r in rows] == [1]
+    assert respawn == {}
+    assert {r["verdict"]["i"] for r in rows} == {0, 1}
+
+
+def test_a_later_duplicate_retry_invalidates_an_earlier_clean_verdict(tmp_path):
+    wins = [_window(0)]
+    batches, returns, out = (tmp_path / "batches", tmp_path / "returns",
+                             tmp_path / "out")
+    batches.mkdir()
+    returns.mkdir()
+    (batches / "batch-000.json").write_text(json.dumps(wins))
+    (returns / "batch-000.extract.json").write_text(json.dumps({
+        "batch": "000", "windows": 1, "gems": [_gem(0, wins[0])], "not_gems": []}))
+    (returns / "batch-000.extract.r2.json").write_text(json.dumps({
+        "batch": "000", "windows": 1,
+        "gems": [_gem(0, wins[0]), _gem(0, wins[0])], "not_gems": []}))
+    subprocess.run(
+        [sys.executable, str(_SCRIPTS / "assemble_extracts.py"),
+         "--batches", str(batches), "--returns", str(returns), "--out", str(out)],
+        capture_output=True, text=True)
+    assert json.loads((out / "respawn.json").read_text()) == {"000": [0]}
 
 
 def test_append_adds_a_later_rounds_rows_to_the_existing_outputs(tmp_path):

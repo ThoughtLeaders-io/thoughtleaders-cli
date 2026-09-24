@@ -131,8 +131,10 @@ def raw_claim(gem: dict) -> str:
     kept gem); the window text is the fallback so a claimless gem is still
     compared on something it actually said.
     """
-    notable = str((gem.get("verdict") or {}).get("notable") or "").strip()
-    return notable or str((gem.get("window") or {}).get("text") or "")
+    verdict = gem.get("verdict") or {}
+    claim = str(verdict.get("claim") or "").strip()
+    notable = str(verdict.get("notable") or "").strip()
+    return claim or notable or str((gem.get("window") or {}).get("text") or "")
 
 
 def negated(text: str) -> bool:
@@ -176,8 +178,8 @@ def similar(a: dict, b: dict) -> bool:
         # contradictory polarity or different numbers — the same words do not
         # make the same fact
         return False
-    a_claim = content_words((a.get("verdict") or {}).get("notable"))
-    b_claim = content_words((b.get("verdict") or {}).get("notable"))
+    a_claim = content_words(raw_claim(a))
+    b_claim = content_words(raw_claim(b))
     if a_claim and b_claim:
         claim = jaccard(a_claim, b_claim)
         if claim >= CLAIM_THRESHOLD:

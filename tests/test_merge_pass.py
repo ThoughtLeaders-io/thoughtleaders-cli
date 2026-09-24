@@ -16,8 +16,8 @@ from pathlib import Path
 _SCRIPTS = (Path(__file__).resolve().parents[1]
             / "skills" / "tl-creator-brief" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
-import store_io  # noqa: E402
 import merge_pass  # noqa: E402
+import store_io  # noqa: E402
 
 _MERGE = _SCRIPTS / "merge_pass.py"
 
@@ -1004,6 +1004,29 @@ def test_a_dropped_member_beside_a_known_one_forces_a_rejudge(tmp_path):
     row = json.loads((tmp_path / "p" / "merge-input.jsonl")
                      .read_text(encoding="utf-8").strip())
     assert row["known"] == ["f001"] and row["dropped_members"] == 1
+
+
+def test_dropping_a_rejudged_cluster_retires_its_existing_fact(tmp_path):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"members": {
+        "v1:10": {"fact": "f001"},
+        "v2:20": {"dropped": "earlier rejection"}}}))
+    old = _fact("f001", claim="guest anecdote", video="v1", start=10,
+                members=["v1:10"])
+    old["selected"] = True
+    existing = _existing(tmp_path, [old])
+    clustered = _write_clusters(tmp_path, [
+        _cluster("guest anecdote", video="v1",
+                 members=[_member("v1", 10), _member("v2", 20)])])
+    dpath = _decisions(
+        tmp_path,
+        {"c001": {"action": "drop", "reason": "guest misattributed as host"}})
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out, existing=existing, state=state)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    fact = _facts(out)["f001"]
+    assert fact["retired_reason"] == "guest misattributed as host"
+    assert fact["selected"] is False
 
 
 # --------------------------------------------------------------------------- #

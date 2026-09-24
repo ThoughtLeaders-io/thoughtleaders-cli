@@ -960,9 +960,11 @@ def test_drop_unverified_writes_a_clean_file_and_refills_selected(tmp_path):
     summary = json.loads(proc.stdout)
     assert summary["partial"] == 1 and summary["dropped"] == 1
     kept = {r["fact_id"]: r for r in
-            (json.loads(l) for l in (tmp_path / "facts.jsonl.verified.jsonl").read_text().splitlines())}
+            (json.loads(line) for line in
+             (tmp_path / "facts.jsonl.verified.jsonl").read_text().splitlines())}
     assert set(kept) == {"f001", "f003", "f004", "f005"}
-    rejected = [json.loads(l) for l in (tmp_path / "facts.jsonl.rejected.jsonl").read_text().splitlines()]
+    rejected = [json.loads(line) for line in
+                (tmp_path / "facts.jsonl.rejected.jsonl").read_text().splitlines()]
     assert [r["fact_id"] for r in rejected] == ["f002"]
     assert rejected[0]["verify"]["match"] == "partial"
     # the lost pick is re-filled by the strongest eligible confirmed fact:
@@ -1137,6 +1139,20 @@ def test_check_refuses_a_sensitive_uncorroborated_bio_fact_in_the_ledger():
     assert any("should have been dropped" in p for p in problems)
 
 
+def test_connection_check_applies_sensitivity_to_the_fact_actually_quoted():
+    import build_html
+    fact = {
+        "fact_id": "f1", "claim": "was diagnosed with depression",
+        "quote": "my doctor diagnosed me with depression last year",
+        "url": "https://youtube.com/watch?v=abc&t=12s",
+        "provenance": "transcript", "confidence": "confirmed",
+        "sensitivity": "clinical", "recurrence": 1, "selected": False,
+    }
+    md = _CONN_MD.replace("we finally adopted luna", "my doctor diagnosed me with depression last year")
+    problems = build_html.check_page(md, [fact], _META)
+    assert any("fewer than three videos" in p for p in problems)
+
+
 # build_html.py --brief: the creator-friendly brief, the second deliverable
 # --------------------------------------------------------------------------- #
 _INPUT = {
@@ -1238,6 +1254,16 @@ def test_the_check_refuses_a_quote_the_creator_never_said(tmp_path):
     assert any("neither a ledger fact nor" in p for p in _problems(tmp_path, md))
 
 
+def test_the_check_refuses_a_real_prefix_with_an_invented_ending(tmp_path):
+    md = _BRIEF_MD.replace(
+        "we finally adopted luna from the shelter last spring and she",
+        "we finally adopted luna and this supplement cured my illness")
+    problems = _problems(tmp_path, md)
+    assert problems
+    assert any("moment of the creator's own" in p or "neither a ledger fact nor" in p
+               for p in problems)
+
+
 def test_the_check_refuses_a_withheld_tier_quote(tmp_path):
     facts = [dict(f) for f in _FACTS]
     facts[3]["quote"] = "maple started school this week and cried"   # children tier
@@ -1246,6 +1272,22 @@ def test_the_check_refuses_a_withheld_tier_quote(tmp_path):
         "> maple started school this week and cried\n")
     problems = _problems(tmp_path, md, facts=facts)
     assert any("withheld-tier" in p for p in problems)
+
+
+def test_the_check_refuses_a_low_recurrence_clinical_quote_even_when_not_selected(tmp_path):
+    facts = [dict(f) for f in _FACTS]
+    facts[0].update(
+        quote="my doctor diagnosed me with depression last year",
+        claim="was diagnosed with depression",
+        sensitivity="clinical",
+        recurrence=1,
+        selected=False,
+    )
+    md = _BRIEF_MD.replace(
+        "we finally adopted luna from the shelter last spring and she",
+        "my doctor diagnosed me with depression last year")
+    problems = _problems(tmp_path, md, facts=facts)
+    assert any("fewer than three videos" in p for p in problems)
 
 
 def test_the_check_wants_all_six_sections_in_order(tmp_path):

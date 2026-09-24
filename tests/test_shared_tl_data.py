@@ -7,9 +7,7 @@ from the exit code alone — the stub's stderr deliberately avoids the old
 magic words ("auth", "credit", "403") to prove no string sniffing remains.
 """
 
-import importlib
 import json
-import os
 import stat
 import sys
 from pathlib import Path
@@ -119,3 +117,17 @@ class TestBadOutput:
     def test_empty_output_is_empty_rows_not_an_error(self, tmp_path, monkeypatch):
         _use(monkeypatch, _stub(tmp_path, stdout=""))
         assert tl_data.db_pg("SELECT 1") == []
+
+    def test_quota_truncated_success_is_not_unwrapped_as_complete_rows(self):
+        response = {
+            "results": [{"id": 1}],
+            "_billing_quota_exhausted": True,
+            "_billing_earliest_retry_at": "2026-09-25T09:00:00+00:00",
+            "_billing_quota": {
+                "queries_used": 10, "queries_max": 10,
+                "rows_used": 250, "rows_max": 500,
+            },
+        }
+        with pytest.raises(tl_data.IncompleteDataError,
+                           match="quota-truncated response"):
+            tl_data._rows(response)

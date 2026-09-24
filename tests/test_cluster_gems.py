@@ -20,8 +20,8 @@ import cluster_gems  # noqa: E402
 
 def _gem(video_id, *, notable, text, phrase=None, domain="tastes",
          speaker="host", sensitive=False, start=10, rank=4,
-         published="2020-01-01"):
-    return {
+         published="2020-01-01", claim=None):
+    gem = {
         "window": {"id": f"1:{video_id}", "video_id": video_id,
                    "start": start, "published": published, "text": text,
                    "recurring_phrase": phrase, "rank_score": rank},
@@ -30,6 +30,9 @@ def _gem(video_id, *, notable, text, phrase=None, domain="tastes",
                     "notable": notable},
         "error": None,
     }
+    if claim is not None:
+        gem["verdict"]["claim"] = claim
+    return gem
 
 
 def _claims(gem_a, gem_b):
@@ -63,6 +66,14 @@ def test_near_identical_claims_merge_without_a_phrase():
     a = _gem("v1", notable="Has a cat named Leo", text="chatter one", phrase=None)
     b = _gem("v2", notable="has a cat named Leo", text="chatter two", phrase=None)
     assert [len(c) for c in _claims(a, b)] == [2]
+
+
+def test_specific_claims_override_matching_notable_summaries_for_compatibility():
+    a = _gem("v1", notable="Keeps cats at home", claim="He has 2 cats",
+             text="I have two cats at home", domain="pets")
+    b = _gem("v2", notable="Keeps cats at home", claim="He has 3 cats",
+             text="I have three cats at home", domain="pets")
+    assert [len(c) for c in _claims(a, b)] == [1, 1]
 
 
 # --------------------------------------------------------------------------- #

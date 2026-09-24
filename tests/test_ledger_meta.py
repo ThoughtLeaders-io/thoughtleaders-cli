@@ -12,8 +12,8 @@ from pathlib import Path
 _SCRIPTS = (Path(__file__).resolve().parents[1]
             / "skills" / "tl-creator-brief" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
-import store_io  # noqa: E402
 import ledger_meta  # noqa: E402
+import store_io  # noqa: E402
 
 
 def _jsonl(path: Path, rows: list[dict], gz: bool = False) -> Path:
@@ -101,12 +101,12 @@ def test_write_falls_back_to_the_corpus_when_no_fetch_summary(tmp_path):
     profiles, corpus = _build_dir(tmp_path)
     (corpus / "fetch.json").unlink(), (corpus / "fetch-r2.json").unlink()
     ledger_meta.main(["write", "--channel", "42", "--profiles-dir", str(profiles),
-                      "--rounds", "1", "--credits-spent", "1840"])
+                      "--rounds", "1"])
     meta = _header(profiles)
     assert meta["latest_video_date"] == "2026-08-20"    # newest stored video
     assert meta["coverage"]["videos_with_transcript"] == 0
     assert meta["missing"] == ["fetch.json"]
-    assert meta["rounds"] == 1 and meta["credits_spent"] == 1840
+    assert meta["rounds"] == 1 and "credits_spent" not in meta
 
 
 def test_write_carries_descriptive_fields_over_from_the_existing_header(tmp_path):
@@ -118,7 +118,7 @@ def test_write_carries_descriptive_fields_over_from_the_existing_header(tmp_path
                                     "source": "social_links", "extra": "dropped"}]}))
     ledger_meta.main(["write", "--channel", "42", "--profiles-dir", str(profiles),
                       "--channel-name", "Patterrz", "--format", "solo",
-                      "--format-evidence", "fp 41/1k", "--credits-spent", "12",
+                      "--format-evidence", "fp 41/1k",
                       "--lanes", "transcripts+socials", "--context", str(ctx)])
     first = _header(profiles)
     assert first["lanes"] == "transcripts+socials"
@@ -140,8 +140,7 @@ def test_write_carries_descriptive_fields_over_from_the_existing_header(tmp_path
     ledger_meta.main(["write", "--channel", "42", "--profiles-dir", str(profiles),
                       "--rounds", "3"])
     again = _header(profiles)
-    for key in ("channel_name", "format", "format_evidence", "credits_spent", "lanes",
-                "context"):
+    for key in ("channel_name", "format", "format_evidence", "lanes", "context"):
         assert again[key] == first[key], key
     assert again["rounds"] == 3
     # and a value passed again wins

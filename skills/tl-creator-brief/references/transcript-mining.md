@@ -113,7 +113,7 @@ minutes later is two passages.
 | `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
 | `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |
 | `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
-| `--round` / `--since` | 1 / none | an incremental round: `--round N` batches into `batches-rN/`, `--since <YYYY-MM-DD>` bounds the fetch to uploads after the ledger's `latest_video_date` (without it a round re-pulls every unjudged passage in the catalogue) |
+| `--round` / `--since` | 1 / none | an incremental round: `--round N` batches into `batches-rN/`; `--since <YYYY-MM-DD>` uses the ledger's `latest_video_date` as a requested watermark, then deliberately backfills 90 days so an upload whose captions arrived late is not skipped forever (`requested_since`, `effective_since` and `refresh_overlap_days` are reported) |
 
 **`cue-phrases.txt`** is one phrase per line, `#` for comments, and
 `phrase | weight` gives each phrase its weight: 3 for a specific durable fact
@@ -135,8 +135,9 @@ spans the back catalogue rather than the last twelve months.
 **Dubbed tracks.** On an English-language channel (the channel record's
 `language`), a non-English `transcript_language` is a YouTube auto-dubbed
 audio track, not the creator's words, and a quote cut from one is a quote the
-creator never spoke. The fetch excludes
-those tracks (no windows, no sampling) and reports them as `dubbed_excluded`
+creator never spoke. Both the phrase pass and the generic first-person fallback
+apply the same exclusion before building windows. The fetch excludes those
+tracks (no windows, no sampling) and reports them as `dubbed_excluded`
 in the summary and the FUNNEL line; `verify_quotes.py --channel-language`
 is the backstop for a corpus fetched before this rule, reporting `dubbed`,
 which never publishes. A non-English channel keeps the own-language
@@ -616,11 +617,11 @@ python3 <skill>/scripts/fetch_cues.py --channel <id> \
   --exclude <corpus>/<channel_id>/classified.jsonl
 ```
 
-Passages already judged are skipped, so the round costs one fetch (seconds)
-plus one extraction fan-out over genuinely new material. (A *refresh* round —
-new uploads — adds `--since <latest_video_date>` so the fetch
-is bounded to what the ledger has not seen; an unbounded `--exclude` round
-re-pulls every unjudged cue passage in the catalogue.) Host names are never
+Passages already judged are skipped, so the overlap does not send old work
+back to the extractors. A *refresh* round adds
+`--since <latest_video_date>`; fetch applies a 90-day overlap to catch delayed
+captions while `--exclude` removes passages already judged. An unbounded
+`--exclude` round re-pulls every unjudged cue passage in the catalogue. Host names are never
 query terms. A pet, spouse, company, employer, product, role or other entity
 belongs in a generated `--phrases` file when a retrieval round needs it; it
 must never go into `--host-names`, because that would turn ordinary subject

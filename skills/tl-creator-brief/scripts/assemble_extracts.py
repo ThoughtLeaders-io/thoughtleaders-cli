@@ -150,6 +150,14 @@ def merge_return_files(efs: list[pathlib.Path], problems: list) -> tuple[dict, d
             if isinstance(x, dict) and isinstance(x.get("i"), int):
                 counts[x["i"]] = counts.get(x["i"], 0) + 1
         dups = {i for i, c in counts.items() if c > 1}
+        # This file is a later verdict for every index it carries. A valid
+        # retry clears an earlier duplicate; a duplicate in the retry removes
+        # and invalidates an earlier valid verdict.
+        for i in counts:
+            bad_idx.discard(i)
+        for i in dups:
+            merged_g.pop(i, None)
+            merged_ng.pop(i, None)
         bad_idx.update(dups)
         for x in g_list:
             if isinstance(x, dict) and isinstance(x.get("i"), int) and x["i"] not in dups:
@@ -160,6 +168,12 @@ def merge_return_files(efs: list[pathlib.Path], problems: list) -> tuple[dict, d
                 merged_g.pop(x["i"], None)
                 merged_ng[x["i"]] = x
     return merged_g, merged_ng, bad_idx
+
+
+def return_file_key(path: pathlib.Path) -> tuple[int, str]:
+    """Base extraction first, then retries in numeric rather than lexical order."""
+    m = re.search(r"\.r(\d+)\.json$", path.name)
+    return (int(m.group(1)) if m else 0, path.name)
 
 
 def main() -> int:
@@ -192,7 +206,8 @@ def main() -> int:
                   "publish as a quote at a timestamp that does not exist. Run "
                   "`bio_lane.py facts` on that batch's returns instead.", file=sys.stderr)
             return 2
-        efs = sorted(pathlib.Path(a.returns).glob(f"batch-{n}.extract*.json"))
+        efs = sorted(pathlib.Path(a.returns).glob(f"batch-{n}.extract*.json"),
+                     key=return_file_key)
         r = {"expected": len(wins), "file": bool(efs), "gems": 0, "problems": []}
         if not efs:
             respawn[n] = list(range(len(wins)))

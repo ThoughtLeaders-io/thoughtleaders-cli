@@ -1,18 +1,58 @@
 ---
 name: tl-creator-brief
-tl-blurb: creator self-disclosure profile, and its connections to a brand
-description: >
-  Mine a YouTube creator's own transcripts (and, opt-in, their socials and the
-  web) for the places they talk about THEMSELVES, their history, family, pets,
-  habits and tastes, and build a reusable creator profile. Optionally map that
-  profile's real connections to a named brand. Triggers: "creator profile",
-  "what do we know about [creator]", "find self references", "creator brand
+tl-blurb: verified creator profile → brand connections → creator-ready brief
+description: |
+  Turn a YouTube creator's own words into a reusable, evidence-backed profile
+  and, when a brand is named, the honest connections between that creator and
+  the campaign. Invoke whenever the user asks for a "creator profile", "what
+  do we know about [creator]", "find self references", "creator-brand
   connection", "personal angle for [channel]", "creator brief", "creator
   talking points", "a brief I can send the creator", "creator-facing brief",
-  "talking points for [channel]", "/tl-creator-brief".
+  "talking points for [channel]", or `/tl-creator-brief`. It mines the
+  creator's transcripts for first-person disclosures, verifies every retained
+  quote against its timestamped source, resolves contradictions and
+  sensitivity, and writes a reusable fact ledger. With a brand, it also
+  researches the brand, produces an internal connection map (including an
+  honest thin-fit or no-fit verdict), and can produce a creator-ready brief
+  whose talking points join the brand's exact requirements to moments the
+  creator genuinely discussed. Social and web identity research is OPT-IN;
+  the creator-facing brief is OPT-IN and requires the brand's baseline
+  talking points and promoted product. With neither choice stated, ask once
+  for the missing choices before paid research; autonomous/fast runs use
+  transcripts only and skip the creator-facing brief. Also invoke for HELP
+  asks about this skill; explain the modes and choices without running
+  queries.
 ---
 
-# Creator Profile & Connections
+# tl-creator-brief — creator → verified profile → honest brand connection
+
+Turn scattered first-person moments into a **verified creator record** that
+can be reused, then use that record to decide what a brand may honestly build
+on. The value is not merely finding personal-sounding transcript fragments:
+it is proving who spoke, preserving the exact words and timestamp, reconciling
+repetition and contradiction, applying sensitivity rules, and refusing to
+turn a weak or unsafe connection into a pitch.
+
+## When to invoke / skip
+
+Invoke for creator self-disclosure research, a reusable creator profile, an
+internal creator × brand fit assessment, or talking points/brief copy tailored
+to a booked or proposed creator campaign.
+
+Skip when the user only wants channel discovery, performance or authenticity
+analysis, a generic brand brief with no creator, or keyword/topic research.
+Use the corresponding TL skill instead. A channel name alone is not permission
+to add social/web research or a creator-facing deliverable; those remain the
+user's choices below.
+
+## Help mode — explain without running
+
+For "help", "how does this work?", "what are the options?" or "describe this
+skill", run no scripts and spend no credits. Explain PROFILE vs CONNECT, the
+optional socials lane, the optional creator-facing brief, the evidence and
+sensitivity rules, and what files each path produces. Then offer to start.
+
+## Choosing the mode and deliverables
 
 Two modes, one contract:
 
@@ -649,11 +689,21 @@ Run the reuse check first. Then:
   tiers; a script hints and the merge pass decides. A lane record naming a
   person a withheld-tier transcript fact already names inherits that tier.
   Beliefs are not sensitive. No protected-trait inference, ever.
+- **Withheld from angles is not hidden from risk assessment.** The connection
+  writer reads every verified tier when deciding fit and "Where this could go
+  wrong": for example, public discussion of sobriety can rule out an alcohol
+  campaign. State only the minimum category-level warning, never the private
+  detail, and never turn the warning into a talking point.
 - **Nothing is dropped, demoted or superseded for being uncertain.** A
   staged-premise claim or a contradiction is checked against the whole
   channel (`authenticate.py`) and judged on dated evidence; what cannot be
   settled stays in the ledger at `unconfirmed`.
-- **Verbatim or not at all**; a partial quote match never publishes, and a
-  dubbed track is not the creator's words.
+- **Verbatim or not at all**; the complete displayed quotation must be
+  contained in its verified ledger source. Matching a prefix never licenses
+  an invented ending. A partial quote match never publishes, and a dubbed
+  track is not the creator's words.
+- **Incomplete data never looks complete.** A successful response marked
+  quota-truncated stops the run before rows are cached, watermarks advance or
+  a deliverable publishes. Surface the retry information and resume later.
 - **An empty answer is a real answer**: "no evidence found", with the
   coverage numbers that bound it.
