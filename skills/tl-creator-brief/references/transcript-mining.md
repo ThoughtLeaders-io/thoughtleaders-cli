@@ -1,0 +1,755 @@
+# Transcript mining
+
+How a channel's transcripts become a profile. One retrieval flow, one
+extraction fan-out, then judgment. Query credits are not a budget here; the
+budgets are model tokens and tiers, which is why retrieval is a single
+script, extraction runs on extraction-tier agents (SKILL.md, "Model roles")
+that each see one batch of windows and nothing else, and the judgment tier
+is spent only on judgment no script can encode.
+
+
+
+## Layer 1+2: fetch the cue passages, one script
+
+```bash
+python3 <skill>/scripts/fetch_cues.py --channel <channel_id> \
+  --host-names "<first name>,<full name>"
+```
+
+Retrieval and selection are the same query. A boolean `should` of
+`match_phrase` clauses over the cue phrases selects the videos, and the
+index's `highlight` returns the passages around each hit with the timed-text
+`start` attributes intact — so a 5,000-video channel costs a few dozen small
+queries instead of a full transcript download, and every passage is born with
+its `&t=` link. Nothing is downloaded that the model layer will not read.
+
+Only cue phrases go into that query. Every phrase holding an apostrophe is
+sent twice, as written and as the index spells a double-encoded caption
+apostrophe (`i'm from` and `i 39 m from`), because both spellings live in the
+same channel and the second is usually the commoner one. The bare
+first-person markers (`GENERIC_TERMS` in `fetch_cues.py`: `i`, `my`,
+`myself`, `i'm`, `i am`, `i've`, `i'd`, `i'll`, `i was`) are a **second pass,
+not part of the first**. They run only when the phrase pass keeps fewer
+windows than `--generic-floor` (default: the cap), and they fill just the
+shortfall: a phrase window always ranks ahead of a fallback window, whatever
+the two scored, and a fallback passage within 30 s of a phrase passage is
+dropped as a repeat. Every window says which pass produced it in
+`retrieval` (`phrase`, `generic`, `non_english_sample`).
+
+The highlight fragments come back as raw timed-text: about half of every
+fragment is `<text start=… dur=…>` markup and entity escapes, which the index
+stores and cannot strip server-side (no script fields), so `--fragment-size`
+counts raw characters and 600 buys about 45 spoken words. `clean()` strips
+the markup and keeps each cue's `start` in the corpus; nothing the extractor
+reads carries a tag.
+
+**Rank narrow, read wide.** The highlighter cuts its fragment around the cue
+phrase, and a disclosure usually ends at its cue: "the shop wasn't going to
+pay for itself, so I sold my car and moved back in with my parents" fires
+on the last clause, while the biography sits in the sentences before it,
+where no phrase fires and no fragment is ever cut. Without the re-read that
+context is not demoted, it is absent from the whole candidate pool. So the cap
+is taken on the narrow fragment, which keeps the ranking sharp,
+and then every kept window is re-read from its stored transcript, from
+`--read-before` seconds ahead of its first cue to `--read-after` seconds past
+its last (20 / 10 by default), and that wider text is what the extractor
+sees. The cues the read added join `corpus.jsonl.gz`, so a quote cut from the
+context verifies to its own second. A window says `context_added` and
+`read_span`; the summary says `read_span.source` (`transcript`, or
+`fragment_only` when the lookup failed and the fragments stayed as they were).
+
+**Host terms are read, not queried.** A host name in a window is two
+different signals. "Hey guys it's Sam" is the host naming themselves:
+`host_anchor`, the strongest
+in-text proof of voice, worth one ordinary cue in the rank.  "With Sam",
+"Sam asked me", "Sam, one sec" is someone else speaking of or to the host,
+so the first-person cue beside it is probably theirs: worth nothing in the
+rank, and passed to the extractor as `second_voice_hint`, quoting the
+naming. The names never join the query: a fragment cut around a bare name
+carries no cue and no disclosure.
+
+**The cap is a ceiling, not a target.** Below the few windows that carry
+more than one personal signal, a channel's candidate pool is usually a long
+tie at exactly one weight-2 cue ("my mom" and nothing else), which the rank
+can only break by publish year; filling a fixed cap spends most of its seats
+inside that tie. So the selection takes every window at or above `--min-score`
+(8.0), fills
+down to `--min-windows` (150) when a thin channel leaves that short, and
+stops. `--max-windows` still bounds a channel with more strong windows than
+one round can extract. The summary's `selection.stop_reason` says which
+rule ended the pass: `score_floor`, `cap`, or `exhausted` (the pool ran
+out). A pass that stopped on the floor did not run short, so the generic
+fallback does not treat it as a shortfall; an explicit `--generic-floor`
+still fills to that number.
+
+**One passage, one seat.** A creator re-cuts a segment into a retitled
+upload and the highlighter returns it once per video, at full score each
+time. Two windows from different videos are the
+same passage when more than half of the shorter one's eight-word runs appear
+in the other (never fewer than three, so a shared greeting alone does not
+match). The first-kept copy stays and its `recurrence_videos` counts the
+uploads it recurs in, which the extractor reads as "said more than once";
+the folded copies stay in `windows.jsonl.gz` with `duplicate_of` pointing at
+the seat they lost to. Repeats inside one video are not this: the fetch
+already drops a repeat within 30 s, and a creator repeating herself five
+minutes later is two passages.
+
+**Flags:**
+
+| flag | default | what it does |
+|---|---|---|
+| `--channel` | required | internal TL channel id, from `tl channels find` |
+| `--host-names` | none | comma-separated **person-name aliases only**, read off the window text (never queried): a self-naming ("it's Sam") is `host_anchor` and scores like one cue; a third-person naming ("with Sam") scores nothing and sets `second_voice_hint`. Never pass brands, companies, roles, employers, products or topics: they are subjects, not speakers. |
+| `--read-before` / `--read-after` | 20 / 10 | seconds of transcript re-read around each KEPT window (before its first cue, after its last) once the cap is taken; `0` and `0` keeps the bare fragments |
+| `--anchor-before` / `--anchor-after` | 30 / 15 | seconds the window's highest-weight cue phrase additionally reaches back and forward in that re-read, so the sentence a disclosure sits in survives when the highlighter cut the fragment at the cue |
+| `--out` | `tl-creator-profiles/.corpus` | corpus root; the channel id becomes a subdirectory, so concurrent channels never collide |
+| `--phrases` | `references/cue-phrases.txt` | the cue list |
+| `--max-windows` | 300 | the ceiling on what reaches the model layer in one round; the selection usually stops earlier, at `--min-score` |
+| `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops at the first window below `--min-score` once `--min-windows` are kept, instead of filling the cap from the tie beneath it; on the density-first rank (0.5 per first-person hit in the fragment, plus the cue weights) 8.0 is sixteen first-person hits alone, or a top-weight cue with ten |
+| `--batch-size` | derived | windows per batch file, one per extractor agent; default `ceil(windows kept / 20)`, never below 5, so 300 windows make 20 × 15: twenty extractors at once is the standard on every host |
+| `--per-video-cap` | 8 | no single video may own the batch set |
+| `--fragment-size` / `--fragments-per-doc` | 900 / 10 | RANKING width in raw characters (about half is markup, so 900 is about 70 spoken words around the cue) and how many per video; what the extractor reads is the wider `--read-before` / `--read-after` span |
+| `--generic-floor` | `--max-windows` | run the first-person fallback pass only when the phrases keep fewer windows than this, and fill just the shortfall; `0` never runs it |
+| `--page-size` / `--concurrency` | 150 / 4 | paging and parallel year buckets |
+| `--reserve` | 0 | agent slots held by other lanes during the fan-out: `3` for the brand lanes on a CONNECT build, plus `1` when the socials lane is on. Batches are sized against `agent cap - reserve`, so the last extractor is not rejected and relaunched a wave later: 300 windows make 17 × 18 rather than 20 × 15 on a 20-agent host with three lanes in flight |
+| `--exclude` | none | a `classified.jsonl` from an earlier round: passages already judged (same video, start within 30 s) are skipped |
+| `--round` / `--since` | 1 / none | an incremental round: `--round N` batches into `batches-rN/`; `--since <YYYY-MM-DD>` uses the ledger's `latest_video_date` as a requested watermark, then deliberately backfills 90 days so an upload whose captions arrived late is not skipped forever (`requested_since`, `effective_since` and `refresh_overlap_days` are reported) |
+
+**`cue-phrases.txt`** is one phrase per line, `#` for comments, and
+`phrase | weight` gives each phrase its weight: 3 for a specific durable fact
+about the person ("i was born", "i'm sober"), 2 for a personal relation,
+possession or habit ("my dad", "i go to the gym"), 1 for generic first-person
+framing, 0.5 for weak framing ("i love"). The weight is domain-neutral (a
+health phrase and a work phrase at the same weight are worth the same) and it
+is both the search boost, so the highlighter's slots go to a video's most
+personal passages, and the window's rank, so those are what reach the
+extractors. A leading
+`~` marks a **recurring bit** — a greeting, a sign-off, a channel catchphrase
+that fires in nearly every upload ("~welcome back to", "~my name is"). Those
+still score, but they are capped hard, so a channel's fixed intro can seed a
+few windows and never fill the batch set. Ordinary phrases are capped at the
+larger of 12 windows or 8% of the cap; no single video passes
+`--per-video-cap`; ties are spread across the channel's years, so a profile
+spans the back catalogue rather than the last twelve months.
+
+**Dubbed tracks.** On an English-language channel (the channel record's
+`language`), a non-English `transcript_language` is a YouTube auto-dubbed
+audio track, not the creator's words, and a quote cut from one is a quote the
+creator never spoke. Both the phrase pass and the generic first-person fallback
+apply the same exclusion before building windows. The fetch excludes those
+tracks (no windows, no sampling) and reports them as `dubbed_excluded`
+in the summary and the FUNNEL line; `verify_quotes.py --channel-language`
+is the backstop for a corpus fetched before this rule, reporting `dubbed`,
+which never publishes. A non-English channel keeps the own-language
+sampling: there the source language is the creator's voice.
+
+**Ad reads.** Windows are built with a regex heuristic in `in_sponsor_read`,
+and once the cap is taken the kept windows' real sponsored spans are looked up
+by video id (`sponsor_segments` in `fetch_cues.py`) and the flag is decided from them —
+a window overlaps a read when `[start, start+30]` meets a sponsored span
+padded 75 s either side. The lookup is authoritative when it succeeds; the
+heuristic stays when it fails. The summary's `sponsor_source` says which one
+decided; when it reads `regex_fallback` the ad-read flags are heuristic only.
+
+**Output**, under `<out>/<channel_id>/`:
+
+- `windows.jsonl.gz` — every passage found, ranked (a window carries
+  `video_id` + `start`, not an assembled watch URL; whoever shows one builds
+  `…watch?v=<video_id>&t=<start>s` at that point).
+- `batches/batch-NNN.json` — the capped set, one file per extractor agent,
+  sized to fill one wave of the host's agent cap (`--batch-size`).
+- `corpus.jsonl.gz` — the same store shape the verifiers read, holding the
+  fetched passages as cues (plus the cues the read-around added to the kept
+  windows), so `verify_quotes.py` runs unchanged. It is **passages, not transcripts**: `channel_context.py`'s
+  corpus stats over it are a format hint, not a coverage census.
+
+The summary (stdout) and one `FUNNEL stage=fetch_cues …` line (stderr) carry
+`videos_matched`, `passages`, `windows_capped`, `phrase_windows`,
+`generic_fallback` (`ran`, `skipped` or `off`), `generic_windows`, `batches`,
+`sponsor_source`, `read_span` (source and how many windows widened),
+`self_named`, `third_person_host`, `third_person_host_share` and `elapsed_s`.
+The voice counts are over the kept windows: `self_named` windows carry a
+`host_anchor`, `third_person_host` windows carry a `second_voice_hint`, and
+the share feeds the format call (a solo-looking channel above about 0.25 is a
+crew channel and is labelled `multi_host`). When the fallback ran, those windows fired no
+cue, and the coverage header should not count them as phrase evidence. `passages` minus `windows_capped` is what stayed out of this
+round — carry it into the profile's coverage header, because "absence is not
+evidence" needs it.
+
+**A second round is additive, never a re-run.** One round is what the
+selection keeps (every window above the score floor, at least 150, at most
+the 300 cap) spread over every agent the host runs at once. To go deeper —
+or to use a person-name alias the socials lane turned up after the fetch — run
+`fetch_cues.py … --exclude <out>/classified.jsonl`: passages already judged
+are skipped, so the new batches are new material and the ledger grows instead
+of repeating. Do not raise `--max-windows` past what one round can extract.
+
+## Layer 3: extraction — one fan-out, one message per agent
+
+Every batch file is judged by exactly one extractor: the `<plugin>:gem-classifier`
+agent, `<plugin>` being the installed plugin's namespace (`tl-cli`). The
+agent is a **gem extractor** on the **extraction tier** (SKILL.md, "Model
+roles": Sonnet on Claude Code, the provider's fast mid-tier model elsewhere;
+a smaller model truncated its output at this batch size). One pass decides
+whether the window is self-
+disclosure AND writes what it says:
+the third-person claim, the span of the window that proves it, the life
+domain, and the speaker guess with the evidence that decided it. It does
+not tier sensitivity: `assemble_extracts.py` attaches a keyword hint
+(`tier_hint.py`) and the merge pass owns the tier. The rubric has ONE home:
+`references/extractor-rubric.md`, which names the two `evidence-rules.md`
+sections it applies.
+
+The extractor never assembles its own input. `scripts/extractor_prompt.py`
+renders ONE self-contained message per batch — the rubric, those two
+evidence sections, the context block and the batch's windows as JSON, plus
+where to write the output — so the agent reads exactly one file and has
+nothing else to fetch:
+
+```bash
+python3 <skill>/scripts/extractor_prompt.py \
+  --batch <corpus>/<channel_id>/batches/batch-007.json \
+  --context <corpus>/<channel_id>/context.json \
+  --write-to <corpus>/<channel_id>/returns/batch-007.extract.json \
+  --out <corpus>/<channel_id>/prompts/batch-007.md
+```
+
+`context.json` is written once after the channel context brief:
+`{"channel_name", "host_names", "known_facts", "format_label",
+"format_evidence"}`. Render every batch in one shell loop (a fraction of a
+second each); the rendered message is ~35 KB for 25 windows.
+
+Run the fan-out exactly like this:
+
+1. **The batch files already exist.** `fetch_cues.py` wrote them. Do not
+   re-fetch, do not re-batch, do not read `windows.jsonl.gz`.
+2. **Render all prompts in one command**, then `ls <prompts_dir>/batch-*.md`
+   is the work queue; each path is claimed exactly once.
+3. **Spawn all N agents as N `Agent` tool_use blocks in ONE assistant
+   message**, with nothing else in flight — every running agent counts
+   against the host's concurrency cap, and an agent that queues behind the
+   cap starts minutes late. One spawn per message is a bug, not a slow
+   success — the same one-message rule governs every fan-out in this skill.
+4. **Each agent's prompt is two lines**: read this one file
+   (`<prompts_dir>/batch-NNN.md`) and follow it exactly; it is
+   self-contained, read nothing else, run nothing, one Write, then the
+   one-line receipt. Never paste the rendered message into the prompt, never
+   a transcript, never a second batch.
+5. **Each agent writes its file and returns one line**
+   (`batch=NNN windows=<n> gems=<n>`). Results live in the file; the return
+   line is a receipt. Then stop the turn and consume the completion
+   notifications as they arrive.
+6. **Never validate returns by hand** — `assemble_extracts.py` does it
+   mechanically (Layer 3b). Track claimed batches; never spawn the same batch
+   twice.
+
+Each agent is three turns — Read the message, Write the JSON, reply the
+receipt — so a batch cannot turn into an open-ended session: no
+verification scripts, no Bash, no other Reads, no second Write.
+
+**Forbidden in this fan-out, without exception:**
+
+- **No polling.** No `ls`-and-count loops, no re-reading the returns directory
+  to see whether agents finished.
+- **No `sleep`**, and specifically never `sleep` with
+  `run_in_background: true` — a backgrounded sleep returns instantly, so it
+  waits for nothing while looking like a wait. A genuine timed wait on
+  external state uses `Monitor` with an until-condition.
+- **No sequential spawning**, no batching-of-batches, no "start with two and
+  see how it goes".
+- **No default-model stand-ins.** If `<plugin>:gem-classifier` does not resolve
+  (running from a checkout rather than an installed plugin), copy
+  `agents/gem-classifier.md` into `~/.claude/agents/` before the session
+  starts and spawn `gem-classifier`; failing that, or on a host other than
+  Claude Code, spawn the host's generic subagent pinned explicitly to the
+  extraction tier's model (SKILL.md, "Model roles") with the same two-line
+  prompt; the rendered message already carries the whole rubric.
+  A generic agent on the inherited (expensive) model is the failure
+  mode this list exists to prevent.
+
+**Concurrency.** Twenty agents at once is the standard on every host, and
+`fetch_cues.py` sizes the batches to fill one wave of twenty (Layer 1+2;
+`--batch-size` overrides it). On a CONNECT build the three brand lanes are
+spawned with the fetch and are still running during this fan-out, which is
+what `--reserve 3` is for: they need only the two ids. Do not spawn past
+what the host runs at once: a second wave queues behind the first instead
+of one wave finishing together.
+
+There is no scripted extractor: every batch is judged by an agent on the
+extraction tier, and the only fallback is the explicit-pin spawn above.
+
+The identity lane, when the socials half is on, joins this same wave on the
+same terms: `scripts/identity_prompt.py render` writes its one message
+(`references/identity-lane.md` plus the channel context and the record
+enums), the agent reads that file and writes `returns/identity.json`, and
+`identity_prompt.py slice` validates the records and files them per merge
+shard once `prepare` has sized the shards.
+
+Print the stage's own funnel line from the returned receipts:
+`FUNNEL stage=extract batches=… agents=… windows=… gems=… elapsed_s=…`.
+
+The model catches what no cue list can: "I'm allergic to peanuts", "we finally
+finished the nursery", proper nouns read through misspellings, sarcasm and
+hypotheticals. That is why the fetch layer gates nothing beyond the cap.
+
+## Layer 3b: assemble — the contract is checked, not trusted
+
+```bash
+python3 <skill>/scripts/assemble_extracts.py \
+  --batches <corpus>/<channel_id>/batches \
+  --returns <corpus>/<channel_id>/returns \
+  --out <corpus>/<channel_id> [--min-coverage 0.95]
+```
+
+Per batch it checks that every index `0 … N-1` appears exactly once across
+`gems` and `not_gems`; that each verdict's echoed `start` matches the window
+it claims (a hard check — a verdict about a different window is not a
+verdict); that the enums are valid; and that the `quote_span` resolves to a
+contiguous substring of the window text, which it **cuts mechanically**, so
+every published quote is verbatim by construction rather than by trust. The
+five-word `anchor` is advisory (agents normalise punctuation) and mismatches
+are only counted, as `anchor_soft_mismatches` in the summary: a verdict whose
+echoed anchor did not match the window's first five words after
+normalisation, most often a caption apostrophe or a host term the agent
+re-spelled. Informational, never a failure, and never a reason to re-judge.
+
+It writes `classified.jsonl` (every judged window, and the `--exclude` input
+for a later round), `gems.jsonl` (the cluster step's input), `candidates.jsonl`
+and `respawn.json`. Windows that failed a check or were skipped are
+**unjudged**: they stay out of those files and are listed in
+`respawn.json`. **Coverage decides the exit code**, not perfection: with
+`unjudged / expected` within the `--min-coverage` threshold (default 0.95,
+so up to 15 of 300 windows) it exits **0** and the run continues; a few
+lost windows may not even be gems, and they remain reachable through a later
+`--exclude` round (unjudged passages are not in `classified.jsonl`, so the
+next fetch offers them again). It exits **3** only below the threshold, or
+when a batch file has no return file at all (an extractor that never ran);
+then re-judge exactly the listed windows — `extractor_prompt.py --indexes
+3,7 --write-to …/batch-NNN.extract.r2.json`, one agent per batch — and
+re-run assemble (with `--append` on a later round: it replaces that round's
+earlier rows for the same windows, so a re-assembly after a re-judge never
+stacks a second copy of the round's gems). **Nothing is hand-patched** — a
+hand-edited return is an unverifiable quote.
+
+Assemble, cluster and merge-prepare are three quick scripts with no
+judgment between them: run them as ONE `&&`-chained shell command as soon
+as the fan-out's receipts are in, with each stage's JSON summary redirected
+to a file and only the FUNNEL lines on stderr reaching you; exit 3 from
+assemble stops the chain by design. Spawn the merge agent in the same
+assistant message that reads that command's result.
+
+## Layer 4: cluster, then the sharded merge pass judges
+
+The mechanical bulk, verbatim checking, is code; the judgment slice is ONE
+small judgment-tier pass over the clustered candidates.
+
+**First collapse the repeats, locally:**
+
+```bash
+python3 <skill>/scripts/cluster_gems.py --in gems.jsonl
+```
+
+A long back catalogue answers the same question hundreds of times, and a
+favourite-game line can recur across dozens of uploads. The script writes
+`gems-clustered.jsonl` beside the input, one line per claim, in
+the same shape as a gem line, so there is exactly one format downstream — and
+`gems-clustered.slim.jsonl`, the same lines without the window text (verdict,
+video, start, date, members), which is what the merge pass reads: a
+channel's clusters fit one agent's read that way.
+Singletons pass through as clusters of 1. Each line adds `occurrences` and
+`members` (`video_id`, `start`, `published` for every member, the
+representative included), and the representative is the cluster's
+highest-information member, so nothing the merge pass needs is left behind.
+
+Merging is conservative on purpose: gems must share a life domain, a speaker
+guess and a sensitivity hint, their one-line claims must agree, including on
+polarity ("has kids" never merges into "does not have kids") and on numbers
+("has 2 cats" never merges into "has 3 cats") — and every
+member must match every other member. Near-duplicates that fail any of those
+stay separate — a missed merge costs a few tokens, a false merge would delete
+a distinct fact. Do not hand-merge what the script left apart.
+
+**The merge pass returns decisions, never records.** A script prepares the
+input, each shard's agent returns a few kilobytes of judgment, and the same
+script expands them into the ledger.
+
+```bash
+python3 <skill>/scripts/merge_pass.py prepare \
+  --clustered <corpus>/gems-clustered.jsonl --format <label> --channel <id> --out <corpus> \
+  [--existing tl-creator-profiles/<channel_id>-facts.jsonl --state <corpus>/merge-state.json] \
+  [--shards N]
+```
+
+`prepare` numbers the clusters `c001…` and writes `merge-input.jsonl`: one
+compact line per cluster the agent must judge — `c`, `domain`, `speaker`,
+`tier`, `conf` (the extractor's confirmed/likely), `claim`, `quote`,
+`title`, `published`, `videos` (distinct video_ids over the members), `occ`,
+`ad_read` (every member inside a sponsor read), `anchor` (a host anchor on
+some member), `format_hint`, `lang`, `notable`. No window text, no member
+list. Before the agent sees anything it applies the parts of
+`evidence-rules.md` no judgment is needed for: `guest` and `cohost` voices
+are dropped (a second named voice is unattributable on any format);
+`unclear` is dropped on interview and multi-host formats (a window's own
+`format_hint` beats the channel label); on solo and faceless-scripted
+channels `unclear` and `narration` stay in as the host, capped at
+`unconfirmed`. Caps beat overrides: the agent can lower a confidence, never
+lift a capped cluster to `confirmed`. Those never reach the agent and are counted as
+`auto_dropped`.
+
+**Shard by default.** The input is split by life domain into N files for N
+agents (a fold may cross a domain, but an agent can only fold what it can
+see, so a shard holding whole domains keeps the findable folds inside one
+agent's read), spawned in ONE message like the extraction fan-out. `prepare`
+sizes N itself as `clusters / 40`, floor 1, ceiling 6, so the cluster and
+prepare scripts chain in one command; `--shards N` overrides it.
+
+**Authenticate before the shard reads.** With `--channel`, `prepare` runs
+`scripts/authenticate.py` over the shard files it just wrote. Two kinds of
+line get one channel-scoped `match_phrase` query each (the cue phrase the
+quote holds plus the claim's entity, `size` 50, at most `--max-queries` 30
+per run): a claim in a durable domain (home, relationships, family, work,
+origin, health) whose window carries `format_hint: staged`, and every pair of
+clusters that cannot both be current (two homes naming different places; a
+husband and a boyfriend), which are also marked `conflicts_with` on both
+lines. The result lands on the line as `probe`: how many uploads say it, the
+newest and oldest dates, how many of those uploads are staged, and a sample
+of titles. `probe.json` beside the shard files holds the same, keyed by
+cluster id, for `expand`. The shard decides with that evidence in front of it; the
+rules it applies are in `agents/merge-shard.md` and `evidence-rules.md`:
+found in a non-staged upload is the person's, found only in staged uploads
+is kept `unconfirmed` and marked `staged_only`, a conflict goes to the newest
+dated evidence (the identity lane's `seen_date` counts), and **nothing is
+dropped for being uncertain**.
+
+**The biggest domain sets the floor.** Shards hold whole domains, so a channel
+whose clusters pile into one domain cannot split below that domain's size:
+when `work` alone holds half the clusters, raising N changes nothing.
+Read the per-file line counts from `prepare`'s JSON before assuming more
+shards will help, and expect the saving to be set by the largest shard rather
+than by the average.
+
+Each shard's reply is saved as its own `merge-decisions-r1-sN.json` and all of
+them are passed to `expand` as repeated `--decisions` flags. `selected` is
+**unioned** across the files rather than replaced, because each shard can only
+nominate from the domains it saw; `expand` still owns the final count.
+
+Each shard's agent reads its `merge-input-N.jsonl` (`merge-input.jsonl` when
+there is one shard; plus the identity lane's findings when that lane ran) and
+**never the windows, never a transcript**. It decides
+what a script cannot, per `evidence-rules.md`:
+
+- attribution reasoning the features cannot encode (recurrence never
+  confirms on a multi-host channel; an ad-read fact must recur outside
+  reads);
+- deduplication across clusters the script left apart for good reason but
+  which say the same thing about the same fact — a `fold`;
+- the sensitivity tier: the input `tier` is a script's keyword hint, and the
+  agent sets the real one for every kept cluster; a stated allergy is
+  `lifestyle`, not `none` and not `clinical`;
+- **dropping any candidate whose claim asserts more than its quote
+  supports** — or narrowing the claim to what the quote says; never the
+  wider claim. A drop is never for doubt: a staged or contradicted claim is
+  judged on its `probe`, and kept at `unconfirmed` when the probe settles
+  nothing;
+- superseded-fact resolution (latest wins, history kept), confidence
+  overrides where a rule above changes the default, and its proposed
+  `selected` picks.
+
+It returns ONE JSON object as its final message — never a file of records:
+
+```json
+{"decisions": {
+   "c001": {"action": "keep"},
+   "c013": {"action": "fold", "target": "c012"},
+   "c014": {"action": "drop", "reason": "claim asserts more than the quote supports"},
+   "c015": {"action": "keep", "tier": "lifestyle"},
+   "c016": {"action": "keep", "claim": "narrowed to what the quote says"},
+   "c017": {"action": "keep", "confidence": "unconfirmed"},
+   "c018": {"action": "keep", "supersedes": "c003"},
+   "c019": {"action": "keep", "gloss": "English translation of a non-English quote"},
+   "c040": {"action": "fold", "target": "f007"}},
+ "selected": ["c012", "c001", "f007", "s1"],
+ "facts": [{"ref": "s1", "provenance": "social", "claim": "runs a pottery studio",
+            "domain": "work", "sensitivity": "none",
+            "source_url": "https://instagram.com/…", "seen_date": "2026-09-02",
+            "corroborates": "c012"}]}
+```
+
+`action` is a closed set of exactly three values, `keep`, `fold` and
+`drop`; `expand` rejects anything else and does not alias it the way it
+aliases near-miss enum *values*. Every other judgment is a key alongside
+`action`, never a value of it: `target`, `reason`, `tier`, `claim`,
+`confidence`, `supersedes`, `gloss`. `confidence` is `confirmed` or
+`unconfirmed` only. And a narrowed `claim` may not carry a number absent
+from both the quote and the cluster claim, which includes a year taken from
+the line's own `published` field: anchor it as "as of this video" instead.
+`supersedes` names exactly ONE id and is never a list: where one fact
+replaces two, supersede the closest and give the other its own decision.
+
+Every cluster in the input appears exactly once. `facts` is the identity
+lane's output when that lane ran: one record per `social`/`web` disclosure
+(never a quote, never a video — lanes do not masquerade), with its URL and
+seen-date; `corroborates` names the cluster or existing fact it confirms,
+which lifts both to `confirmed` (cross-lane corroboration is the top tier —
+a social or web fact alone stays `unconfirmed`, and the agent cannot declare
+otherwise). Across a sharded merge `facts` is **unioned by `ref`**, later
+file winning per ref, so each shard carries the lane records that sit beside
+the clusters it can see rather than every shard repeating the whole lane; a
+shard with none returns `"facts": []` and drops nothing. A compact input line
+carrying `dropped_members: N` is a cluster
+that gained a passage the last round dropped — it is asked again rather than
+silently joining a fact. `fold`/`supersedes`
+targets are kept clusters, or existing `f…` facts on a refresh. A fold MAY
+cross a life domain: the extractor files each passage on its own, so one fact
+routinely arrives as two candidates in two domains, and the merged fact takes
+the target's domain. `expand` counts the crossings in
+`folded_across_domains` rather than refusing them. The orchestrator saves the reply as
+`<corpus>/merge-decisions-rN.json` and runs
+
+```bash
+python3 <skill>/scripts/merge_pass.py expand \
+  --clustered <corpus>/gems-clustered.jsonl --decisions <corpus>/merge-decisions-rN.json \
+  --format <label> --channel <channel_id> --out <corpus>/facts.jsonl \
+  [--existing … --state …] [--fallback-original]
+```
+
+`expand` validates first: totality, unknown ids, targets (a fold must name a
+kept cluster, or an existing fact when refreshing), fold cycles, a
+supersession that resolves to the fact itself or a cycle, **a supersession
+that points against the dated evidence** (the superseded cluster's newest
+upload in `probe.json`, or an identity-lane record corroborating it, is
+newer than the superseder's; refused with both dates in the message), enums,
+identity records, and
+a narrowed claim that introduces a number token its quote and cluster claim
+lack, and exits **3** with the offending ids and reasons. The
+orchestrator re-asks the agent for exactly those ids ONCE and passes the
+reply as a second `--decisions` file (later files override earlier ones per
+id); on a second failure it runs with `--fallback-original`, which keeps the
+cluster's own claim for the still-offending ids and names them in the
+summary. Bounded: two asks, never a loop, never a hand edit.
+
+Then it builds every record from the cluster's representative: claim
+(narrowed if given), domain, quote, video, window `start`, the derived
+`url`, `published`; **recurrence = distinct `video_id`s over the cluster
+and everything folded into it**, never `occurrences`; confidence = the
+agent's override, else the format-gated default — solo: the extractor's
+`confirmed`→confirmed, `likely`→unconfirmed; interview/multi-host or a
+window hinting interview/reaction: confirmed only with a host anchor; a
+cluster entirely inside sponsor reads, or a solo `unclear`/narration voice,
+caps at unconfirmed; the tier and its derived `sensitive` flag;
+`superseded_by`; `members` (the passage keys the fact was built from);
+`selected`: the agent's picks ranked and taken while `confirmed` (an
+`unconfirmed` pick is refused, with its reason in `selected_ignored`), then
+filled to 40 across the active ledger: confirmed facts seen in two or more
+videos first, then confirmed by rank, then `unconfirmed` only up to a floor
+of 20; `staged_only` facts and the withheld tiers are never eligible. A lane
+record naming a person a withheld-tier transcript fact already names is
+raised to that tier (`tier_inherited`). fact_ids
+are `f001…` in cluster order on a fresh build. It writes `facts.jsonl`
+(working file, no header), `merge-state.json`, and prints
+`FUNNEL stage=merge clusters=… judged=… auto_dropped=… facts=… folded=…
+dropped=… selected=… elapsed_s=…`.
+
+### Incremental round
+
+Decision `refresh` from `ledger_meta.py check` (round `N` = its `next_round`),
+which `start_run.py` runs and reports under `check`. Given `--host-names`,
+`start_run.py` runs the bounded fetch itself with these flags already filled
+in from that decision; the rest of the round is unchanged:
+
+```bash
+python3 <skill>/scripts/fetch_cues.py --channel <id> --host-names "…" --round N \
+  --since <latest_video_date> --exclude <corpus>/classified.jsonl
+# fan out extractors over <corpus>/batches-rN only, then
+python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/batches-rN \
+  --returns <corpus>/returns-rN --out <corpus> --append && \
+python3 <skill>/scripts/cluster_gems.py --in <corpus>/gems.jsonl && \
+python3 <skill>/scripts/merge_pass.py prepare --clustered <corpus>/gems-clustered.jsonl \
+  --format <label> --existing tl-creator-profiles/<id>-facts.jsonl \
+  --state <corpus>/merge-state.json --out <corpus>
+# merge agents as usual, then expand with the same --existing --state, verify, and
+python3 <skill>/scripts/ledger_meta.py write --channel <id> --from <corpus>/facts.jsonl.verified.jsonl --rounds N
+```
+
+Cost scales with the new uploads, not the corpus. `expand` starts from the
+existing ledger rather than a blank page. `prepare --existing --state` maps every re-clustered cluster
+by its **member keys** (`<video_id>:<window start>` — never the fact's
+`start`, which the verifier rewrites): members all known to one existing
+fact → additive, judgment carried, recurrence recomputed, not sent to the
+agent; members known to two or more facts, or one that also carries a passage
+dropped last round → re-judged, with those `f…` ids listed for the agent (a
+kept re-judged cluster keeps the first inherited id and marks the others
+superseded by it, their evidence pooled); every member
+previously dropped → stays dropped; no known member → new. Only the new and
+re-judged clusters reach the agent, along with a compact list of the
+existing facts to fold into or supersede. `expand` keeps every fact_id,
+continues numbering after the existing max, marks a superseded fact (never
+deletes it), and asserts every existing fact is claimed by exactly one
+cluster.
+
+**Then verify in bulk, locally:**
+
+```bash
+python3 <skill>/scripts/verify_quotes.py --in facts.jsonl \
+  --corpus tl-creator-profiles/.corpus/<channel_id>/corpus.jsonl.gz
+```
+
+Every transcript-provenance quote is located in the stored passages. Only
+`match: "exact"` publishes, and its located timestamp is authoritative.
+`partial` and `none` are flagged, never accepted: fix the quote to the
+caption text the result shows, or drop the fact. A quote that needs more
+than a mechanical fix goes back through the merge pass, not past it. Verified facts become `<channel_id>-facts.jsonl` via `ledger_meta.py write
+--from`, which puts the build's meta record on line 1 of the same file per
+`references/profile-spec.md`.
+
+**The orchestrating context never sees raw transcripts.** It sees the fetch
+summary, the extractors' receipt lines, the assemble summary, the merge
+pass's decisions and the expand summary, and the rendered page.
+
+## Name-attribution expansion: a second round, not a re-scan
+
+When the socials lane returns a new **person-name alias for the host** that
+the first fetch did not have, improve attribution in another additive round:
+
+```bash
+python3 <skill>/scripts/fetch_cues.py --channel <id> \
+  --host-names "<existing aliases>,<new host alias>" \
+  --exclude <corpus>/<channel_id>/classified.jsonl
+```
+
+Passages already judged are skipped, so the overlap does not send old work
+back to the extractors. A *refresh* round adds
+`--since <latest_video_date>`; fetch applies a 90-day overlap to catch delayed
+captions while `--exclude` removes passages already judged. An unbounded
+`--exclude` round re-pulls every unjudged cue passage in the catalogue. Host names are never
+query terms. A pet, spouse, company, employer, product, role or other entity
+belongs in a generated `--phrases` file when a retrieval round needs it; it
+must never go into `--host-names`, because that would turn ordinary subject
+mentions into false second-speaker hints.
+
+### The bio lane and its corroboration round
+
+The creator's own written bio is retrieved, filtered and judged separately
+(`scripts/bio_lane.py`; `SKILL.md` has the flow, `evidence-rules.md` has what a
+`bio` fact is worth). Two things about it belong here, because they are
+retrieval:
+
+**The bio batch is not a transcript batch.** Its windows carry no `video_id`
+and their `start` is a character offset into the written text, not a playback
+position. `assemble_extracts.py` refuses them outright: that path stamps every
+row `provenance: transcript` with the window's video and start, so an
+unguarded bio window would publish as a quote at a timestamp that does not
+exist. `bio_lane.py facts` mints identity-lane records from those returns
+instead.
+
+**Corroboration is this same additive round, not a new mechanism.** Terms come
+from the bio facts themselves, one to three per fact, and ride in on
+`--phrases` — `--host-names` is read off window text and never queried, so it
+cannot carry them, and `references/cue-phrases.txt` is shared and hand-weighted
+and is never edited for one channel:
+
+```bash
+python3 <skill>/scripts/bio_lane.py terms --facts bio-facts.json \
+  --channel <id> --out <corpus-parent> --round 2      # writes bio-terms-r2.txt
+python3 <skill>/scripts/fetch_cues.py --channel <id> --out <corpus-parent> --round 2 \
+  --phrases <corpus>/<id>/bio/bio-terms-r2.txt \
+  --exclude <corpus>/<id>/classified.jsonl --generic-floor 0
+# …the usual fan-out over batches-r2/, then:
+python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/<id>/batches-r2 \
+  --returns <corpus>/<id>/returns-r2 --out <corpus>/<id> --append
+```
+
+`--generic-floor 0` keeps the round from filling its cap with first-person
+fallback passages that have nothing to do with the terms. `--append` is
+REQUIRED: without it the round REPLACES `classified.jsonl` and round 1's ledger
+is lost. `bio_lane.py terms` also writes `bio-probe.json`, one narrow ES body
+per fact (the retrieval filter shape, same apostrophe variants) for checking
+whether a term appears on the channel at all before paying for a round.
+
+Two known limits, neither worth a retrieval change on its own: the round's
+phrase list still picks up `EXTRA_GENERIC`, and all terms share one window
+budget, so a common term can eat coverage another fact needed. `terms` records
+the terms per fact so a starved fact is visible in the summary.
+
+## The channel context brief
+
+The identity half runs **before the fetch**, with no corpus:
+
+```bash
+python3 <skill>/scripts/channel_context.py --channel <id> > <corpus>/context-full.json
+```
+
+That is the platform's record of the channel (name, About text, AI profile,
+sibling candidates, language), plus the creator's own links: `websites`, the
+labelled header links they wrote themselves, and `social_links`, the platform
+keys from Postgres unioned with the index's flat list and deduped. Emails are
+dropped. Both stores are empty on plenty of channels, and an empty pair is a
+real answer. This is also where the fetch's `--host-names` come from:
+person-name aliases the About text or AI profile states (first name, full name,
+an unambiguous surname or nickname). Brands, companies, roles, employers,
+products and topics are excluded. Then, once
+the passages are local, the stats half:
+
+```bash
+python3 <skill>/scripts/channel_context.py --channel <id> --corpus <corpus>/corpus.jsonl.gz \
+  --per-video-out <corpus>/per-video.jsonl > <corpus>/context-full.json
+# the model calls the label from context-full.json, then:
+python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
+  --format-label <label> --format-evidence "…" [--host-names "…"] [--known-facts "…"] \
+  --write-context <corpus>/context.json
+```
+
+The second command writes the compact `context.json` every extractor prompt
+takes; nothing about it is typed by hand.
+
+The corpus pass also writes `name_candidates`, the other names the creator
+calls themselves, harvested from the fetched passages by naming cue ("my name
+is", "call me", "my nickname", "my username", "my Instagram"). Each row carries
+its distinct-video count, `said_outright`, and `channel_name_variant`: true
+when the token is a short relative of the channel name, which is what separates
+the host from a guest introducing themselves in a challenge video. The variants
+are the identity lane's search terms, since the channel name is frequently not
+the name the profiles are under. They are search terms only; a name enters the
+ledger solely as a
+transcript fact with its own quote.
+
+After the fetch, format is measured rather than guessed: first-person
+density, interview markers, question density, title hints (including
+`staged_share`, the share of titles that read as a prank, challenge, stunt
+or skit; the format call names it when it is above a tenth, because it
+tells the merge shard how much of the channel is a set-up). The corpus it reads
+is now the fetched **passages**, not whole transcripts, so the densities are a
+format hint on the material the profile is actually built from, never a
+coverage census. A model
+read of a small sample (3–5 videos' worth of windows) plus these stats calls
+the label — solo / interview / multi-host / faceless-scripted — **with
+evidence**. One number from the fetch summary joins the call:
+`third_person_host_share`, the share of kept windows that name the host in
+the third person ("with Sam", "Sam asked me"). A channel with one face on
+the thumbnail and a crew behind the camera reads as solo on every other stat
+while other people hold the microphone for much of the transcript; above
+about 0.25 the label is `multi_host` and the evidence line says so
+("multi_host: 41% of kept windows name the host in the third person"). The label
+exists for two reasons only:
+
+1. It is the attribution context handed to the classifier: interview means
+   guest voices contaminate; solo means everything is the host.
+2. Near-zero first-person density flags "likely faceless" early, so model
+   tokens aren't spent on a channel with nothing to find.
+
+Nothing exits early. A faceless channel with one personal Q&A upload still
+surfaces it; the flag only reorders effort and sets expectations in the
+profile header.
+
+## Speed
+
+Wall clock is the extraction fan-out plus the merge pass; the fetch and the
+local scripts (assemble, cluster, expand, verify) are seconds. The model's
+share of a profile build is the fan-out plus a handful of turns: the identity
+lane, the format call, one merge pass. **One extractor per batch, one merge
+agent per shard, one optional socials lane**, not one per window and not one
+per fact.
+
+Every stage prints its own `elapsed_s` on its `FUNNEL` line, so "it was slow"
+is always answerable with a stage name. Rounds are the knob that matters:
+going deeper means another `--exclude` round rather than a bigger cap.
