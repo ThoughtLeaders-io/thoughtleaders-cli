@@ -1,6 +1,9 @@
 """Auth0 login flows: browser-based PKCE and headless device code."""
 
+import base64
+import html
 import http.server
+import json
 import secrets
 import threading
 import time
@@ -12,8 +15,8 @@ import httpx
 from rich.console import Console
 
 from tl_cli.auth.pkce import generate_pkce_pair
-from tl_cli.auth.token_store import StoredTokens, save_tokens
-from tl_cli.config import get_config
+from tl_cli.auth.token_store import StoredTokens, clear_tokens, load_tokens, save_tokens
+from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT, get_config
 
 console = Console(stderr=True)
 
@@ -27,13 +30,22 @@ class _CallbackResult:
     state: str | None = None
 
 
-def login_browser() -> StoredTokens:
+def web_signin_url(config) -> str:
+    """Where the browser goes once the CLI login has completed: the platform's
+    own sign-in, so the browser that just signed the CLI in ends up signed in to
+    the web platform too. `from=cli` lands it on a page that says the command
+    line is ready."""
+    return f"{config.api_url.rstrip('/')}/signin?go=1&from=cli"
+
+
+def login_browser(open_browser: bool = True) -> StoredTokens:
     """Run the Auth0 PKCE login flow with a local browser.
 
     1. Generate PKCE pair + state
     2. Start localhost callback server
-    3. Open browser to Auth0 /authorize
-    4. Wait for callback with authorization code
+    3. Open browser to Auth0 /authorize (or just print the URL)
+    4. Wait for callback with authorization code; send the browser on to the
+       platform's sign-in so the web session (and the extension) follow
     5. Exchange code for tokens
     6. Store tokens
     """
@@ -43,8 +55,17 @@ def login_browser() -> StoredTokens:
     result = _CallbackResult()
 
     # Start callback server on the fixed port (must match Auth0 allowed callback URLs)
-    from tl_cli.config import DEFAULT_AUTH0_CALLBACK_PORT
-    server, port = _start_callback_server(result, state, DEFAULT_AUTH0_CALLBACK_PORT)
+    try:
+        server, port = _start_callback_server(
+            result, state, DEFAULT_AUTH0_CALLBACK_PORT, success_redirect=web_signin_url(config)
+        )
+    except OSError as exc:
+        console.print(
+            f"[red]Could not listen on port {DEFAULT_AUTH0_CALLBACK_PORT} for the login callback "
+            f"({exc.strerror or exc}).[/red] Close whatever is using it, or run: "
+            "tl auth login --method device"
+        )
+        raise SystemExit(1) from exc
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -61,20 +82,25 @@ def login_browser() -> StoredTokens:
     }
     auth_url = f"https://{config.auth0_domain}/authorize?{urllib.parse.urlencode(params)}"
 
-    console.print("[bold]Opening browser for login...[/bold]")
-    console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
-    webbrowser.open(auth_url)
+    if open_browser:
+        console.print("[bold]Opening browser for login...[/bold]")
+        console.print(f"[dim]If the browser doesn't open, visit:[/dim]\n{auth_url}\n")
+        open_in_browser(auth_url)
+    else:
+        console.print(f"[bold]Open this URL in a browser on this machine:[/bold]\n{auth_url}\n")
 
     # Wait for callback (timeout after 120 seconds)
     deadline = time.time() + 120
     while result.code is None and result.error is None:
         if time.time() > deadline:
             server.shutdown()
+            server.server_close()
             console.print("[red]Login timed out. Please try again.[/red]")
             raise SystemExit(1)
         time.sleep(0.1)
 
     server.shutdown()
+    server.server_close()
 
     if result.error:
         console.print(f"[red]Login failed: {result.error}[/red]")
@@ -129,7 +155,10 @@ def login_device_code() -> StoredTokens:
     console.print()
     console.print(f"[bold]And enter the code:[/bold]  [cyan bold]{user_code}[/cyan bold]")
     console.print()
-    console.print(f"[dim]The code expires in {expires_in // 60} minutes. After you have logged in successfully, please wait until the system is notified.[/dim]")
+    console.print(
+        f"[dim]The code expires in {expires_in // 60} minutes. After you have logged in "
+        "successfully, please wait until the system is notified.[/dim]"
+    )
 
     # Poll for token
     deadline = time.time() + expires_in
@@ -184,8 +213,41 @@ def login_device_code() -> StoredTokens:
     raise SystemExit(1)
 
 
-def refresh_access_token(refresh_token: str) -> StoredTokens:
-    """Use a refresh token to get a new access token."""
+def open_in_browser(url: str) -> bool:
+    """Open `url` in the user's browser. False when it could not be opened —
+    a missing or misconfigured browser raises from `webbrowser` on some
+    platforms, and the caller always has a URL to print instead."""
+    try:
+        return webbrowser.open(url)
+    except Exception:  # noqa: BLE001 — anything here just means "print the URL"
+        return False
+
+
+def forget_session(rejected_access_token: str) -> None:
+    """Drop this machine's session after ThoughtLeaders refused it as signed out.
+
+    A 401 with `code: signed_out` means these credentials belong to a session
+    the user has since ended — on the web, from the extension, or from another
+    CLI. Refreshing would only mint another token for it, so the CLI revokes
+    its refresh token (best-effort) and clears the store. Two cases are left
+    alone: an API key, which is not a session and cannot be re-obtained by
+    `tl auth login`; and a store that no longer holds the token that was
+    refused — a newer sign-in, or a refresh another `tl` process did, has
+    replaced it, and that credential has not been refused.
+    """
+    tokens = load_tokens()
+    if tokens is None or tokens.is_api_key:
+        return
+    if tokens.access_token != rejected_access_token:
+        return
+    if tokens.refresh_token:
+        revoke_refresh_token(tokens.refresh_token)
+    clear_tokens()
+
+
+def refresh_access_token(tokens: StoredTokens) -> StoredTokens:
+    """Use the stored refresh token to get a new access token. Everything else
+    about the session — who signed in — carries over."""
     config = get_config()
 
     response = httpx.post(
@@ -193,7 +255,7 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         json={
             "grant_type": "refresh_token",
             "client_id": config.auth0_client_id,
-            "refresh_token": refresh_token,
+            "refresh_token": tokens.refresh_token,
         },
     )
 
@@ -202,14 +264,14 @@ def refresh_access_token(refresh_token: str) -> StoredTokens:
         raise SystemExit(2)
 
     data = response.json()
-    tokens = StoredTokens(
+    refreshed = StoredTokens(
         access_token=data["access_token"],
-        refresh_token=data.get("refresh_token", refresh_token),
+        refresh_token=data.get("refresh_token", tokens.refresh_token),
         expires_at=time.time() + data.get("expires_in", 3600),
-        email=None,  # Not returned on refresh
+        email=tokens.email,
     )
-    save_tokens(tokens)
-    return tokens
+    save_tokens(refreshed)
+    return refreshed
 
 
 def revoke_refresh_token(refresh_token: str) -> bool:
@@ -273,26 +335,35 @@ def _exchange_code(
     )
 
 
-def _extract_email_from_jwt(token: str) -> str | None:
-    """Extract email from JWT payload without full verification (already trusted from Auth0)."""
-    import base64
-    import json
-
+def _jwt_claims(token: str) -> dict:
+    """The payload of a JWT without verification (already trusted from Auth0);
+    empty when the string is not a JWT."""
     try:
         payload_part = token.split(".")[1]
-        # Add padding
-        padding = 4 - len(payload_part) % 4
-        payload_part += "=" * padding
-        payload = json.loads(base64.urlsafe_b64decode(payload_part))
-        return payload.get("email")
+        payload_part += "=" * (4 - len(payload_part) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_part))
+        return claims if isinstance(claims, dict) else {}
     except Exception:
-        return None
+        return {}
+
+
+def _extract_email_from_jwt(token: str) -> str | None:
+    email = _jwt_claims(token).get("email")
+    return email if isinstance(email, str) else None
 
 
 def _start_callback_server(
-    result: _CallbackResult, expected_state: str, port: int = 0
+    result: _CallbackResult,
+    expected_state: str,
+    port: int = 0,
+    success_redirect: str | None = None,
 ) -> tuple[http.server.HTTPServer, int]:
-    """Start a temporary HTTP server to receive the OAuth callback."""
+    """Start a temporary HTTP server to receive the OAuth callback.
+
+    On success the browser is redirected to `success_redirect` when given
+    (the platform's sign-in, see `web_signin_url`), otherwise shown a static
+    "you can close this tab" page. Failures always get the static page.
+    """
 
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -324,6 +395,11 @@ def _start_callback_server(
                 return
 
             result.code = code
+            if success_redirect:
+                self.send_response(302)
+                self.send_header("Location", success_redirect)
+                self.end_headers()
+                return
             self._respond(
                 "Login successful! You can close this tab and return to the terminal."
             )
@@ -332,12 +408,12 @@ def _start_callback_server(
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            html = f"""<!DOCTYPE html>
+            page = f"""<!DOCTYPE html>
 <html><head><title>TL CLI Login</title></head>
 <body style="font-family: system-ui; text-align: center; padding: 60px;">
-<h2>{message}</h2>
+<h2>{html.escape(message)}</h2>
 </body></html>"""
-            self.wfile.write(html.encode())
+            self.wfile.write(page.encode())
 
         def log_message(self, format, *args):
             pass  # Suppress HTTP logs

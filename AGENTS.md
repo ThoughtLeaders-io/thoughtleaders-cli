@@ -19,7 +19,7 @@ When adding a new data command, follow this pattern. See `sponsorships.py` for t
 
 ## Auth Flow (`auth/`)
 
-- **PKCE + Auth0**: Browser-based login with localhost callback server (`login.py`)
+- **PKCE + Auth0**: Browser-based login with a localhost callback server (`login.py`) against `auth.thoughtleaders.io`, the host the web platform and the Chrome extension sign in on, so a browser already signed in to the platform completes `tl auth login` without a password; the callback then sends that browser to the platform's `/signin?go=1&from=cli` so the web session follows. `tl auth logout` posts once to `/auth/sign-out` and ThoughtLeaders signs the user out everywhere; the CLI then revokes its refresh token and clears the local store. A 401 with `code: signed_out` means the session ended elsewhere, so the client drops its credentials instead of refreshing (`forget_session`).
 - **Token Storage** (`token_store.py`): OS keyring primary, `~/.config/tl/credentials.json` fallback (chmod 0o600)
 - **Env override**: `TL_API_KEY` env var takes priority over keyring (for CI)
 - **Auto-refresh**: `TLClient` refreshes expired tokens on 401

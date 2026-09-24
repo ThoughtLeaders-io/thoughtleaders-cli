@@ -14,6 +14,7 @@ from tl_cli.output.formatter import (
     _output_markdown,
     _sanitize_for_json,
     detect_format,
+    output,
     output_single,
 )
 
@@ -555,3 +556,49 @@ class TestDetailValuesAreNotMarkup:
     def test_empty_nested_field_name_survives(self, capsys):
         output_single({"[b]rows": []}, "table")
         assert "[b]rows" in capsys.readouterr().out
+
+
+class TestAutoColumnsWideResults:
+    """Auto-detected columns: only the terminal table is capped at 8.
+
+    Regression for `tl db pg ... --csv` silently dropping every column past
+    the eighth (the same cap leaked into --md and --toon).
+    """
+
+    COLS = [f"col{i:02d}" for i in range(1, 13)]  # 12 columns
+
+    def _data(self):
+        return {
+            "results": [{c: i for i, c in enumerate(self.COLS, start=1)}],
+            "total": 1,
+            "usage": None,
+            "_breadcrumbs": [],
+        }
+
+    def test_csv_emits_every_column(self, capsys):
+        output(self._data(), "csv")
+        rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
+        assert rows[0] == self.COLS
+        assert rows[1] == [str(i) for i in range(1, 13)]
+
+    def test_md_emits_every_column(self, capsys):
+        output(self._data(), "md")
+        header = capsys.readouterr().out.splitlines()[0]
+        assert [c.strip() for c in header.strip("|").split("|")] == self.COLS
+
+    def test_toon_emits_every_column(self, capsys):
+        output(self._data(), "toon")
+        out = capsys.readouterr().out
+        assert all(c in out for c in self.COLS)
+
+    def test_table_caps_auto_columns_at_eight(self, capsys, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "200")  # keep Rich from ellipsizing headers
+        output(self._data(), "table")
+        out = capsys.readouterr().out
+        assert "col08" in out
+        assert "col09" not in out
+
+    def test_explicit_columns_never_capped(self, capsys):
+        output(self._data(), "csv", columns=self.COLS)
+        rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
+        assert rows[0] == self.COLS
