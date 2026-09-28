@@ -22,8 +22,7 @@ import sys
 import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 
 import pathlib as _pathlib
-import sys as _sys
-_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data
 
 import channel_lookup

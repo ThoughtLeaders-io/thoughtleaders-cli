@@ -37,8 +37,7 @@ import score as score_mod
 import video_integrity
 
 import pathlib as _pathlib
-import sys as _sys
-_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data
 
 import channel_lookup
