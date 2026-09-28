@@ -343,11 +343,12 @@ stops — a no-fit verdict is the deliverable, not a failure.
 Opt-in, when the user asked for a version they can send to the creator. The
 brief writer reads `<corpus>/creator-brief-input-<brand_id>.json`
 (`tl-creator-brief-input/v1`: `talking_points` and `promoting`, verbatim from
-the user, and `supplied`), the
+the user, `brand_brief`, the pasted brief as it came, and `supplied`), the
 connection map and the whole ledger for every point, and writes `<corpus>/creator-brief-<brand_id>.md`. Its frontmatter is
 `schema: tl-creator-brief/v1`, `channel_name`, `brand_name`,
-`talking_points_supplied`, and nothing else: no ids, no filenames. The six
-sections, their sources, the rules and an invented example are in
+`talking_points_supplied`, and nothing else: no ids, no filenames. With a
+`brand_brief` the body is the brand's document mirrored, with For you blocks;
+otherwise the six sections. Both layouts, the rules and invented examples are in
 `creator-brief-template.md`; `build_html.py --brief --check` enforces them
 and the render is named `<brand>-creator-brief-<creator>.html`.
 

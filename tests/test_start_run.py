@@ -308,7 +308,9 @@ def test_talking_points_imply_the_brief_and_are_written_verbatim(env, tmp_path):
                                      'Say "complete and balanced", their words']
     assert rec["promoting"] == "the new salmon recipe" and rec["supplied"] is True
     assert set(rec) == {"schema", "channel_id", "channel_name", "brand_id", "brand_name",
-                        "promoting", "talking_points", "supplied", "written_at"}
+                        "promoting", "talking_points", "brand_brief", "supplied", "written_at"}
+    # and the brief itself as pasted, bullets, order and all: the page mirrors it
+    assert rec["brand_brief"] == points.read_text().strip()
     assert Path(out["creator_brief_input"]).name == "creator-brief-input-7.json"
 
 

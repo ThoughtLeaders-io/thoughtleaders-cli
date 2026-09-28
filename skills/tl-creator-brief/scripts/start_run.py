@@ -212,23 +212,28 @@ CREATOR_BRIEF_INPUT_SCHEMA = "tl-creator-brief-input/v1"
 _BULLET = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
 
 
-def read_lines(value: str | None) -> list[str]:
-    """A path or literal text -> the brand's own lines, verbatim.
-
-    A path that exists is read; anything else is the text itself. Lines are
-    split on newlines, bullets and numbering stripped, blanks dropped. Nothing
-    is reworded: what the brand wrote is what the brief writer sees.
-    """
+def read_text(value: str | None) -> str:
+    """A path or literal text -> the text. A path that exists is read;
+    anything else is the text itself."""
     if value is None:
-        return []
-    text = value
+        return ""
     candidate = pathlib.Path(value)
     try:
         if len(value) < 1024 and candidate.is_file():
-            text = candidate.read_text(encoding="utf-8")
+            return candidate.read_text(encoding="utf-8")
     except OSError:
         pass
-    lines = [_BULLET.sub("", ln).strip() for ln in text.splitlines()]
+    return value
+
+
+def read_lines(value: str | None) -> list[str]:
+    """A path or literal text -> the brand's own lines, verbatim.
+
+    Lines are split on newlines, bullets and numbering stripped, blanks
+    dropped. Nothing is reworded: what the brand wrote is what the brief
+    writer sees.
+    """
+    lines = [_BULLET.sub("", ln).strip() for ln in read_text(value).splitlines()]
     return [ln for ln in lines if ln]
 
 
@@ -243,6 +248,9 @@ def creator_brief_input(a, channel: dict, brand: dict) -> dict:
         "brand_name": brand.get("name"),
         "promoting": (a.promoting or "").strip() or None,
         "talking_points": points,
+        # the brand's brief as pasted, headings and order kept: the creator
+        # brief mirrors it and adds the creator's own versions of its points
+        "brand_brief": read_text(a.talking_points).strip() or None,
         # supplied: the brand said what it wants; False means the brief is
         # built from the connection map alone and its header says so
         "supplied": bool(points or (a.promoting or "").strip()),

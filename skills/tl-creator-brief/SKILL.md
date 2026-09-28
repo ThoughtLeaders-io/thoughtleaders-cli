@@ -14,10 +14,11 @@ description: |
   sensitivity, and writes a reusable fact ledger. With a brand, it also
   researches the brand, produces an internal connection map (including an
   honest thin-fit or no-fit verdict), and can produce a creator-ready brief
-  whose talking points join the brand's exact requirements to moments the
-  creator genuinely discussed. Social and web identity research is OPT-IN;
-  the creator-facing brief is OPT-IN and requires the brand's baseline
-  talking points and promoted product. With neither choice stated, ask once
+  whose talking points are built from the creator's own gems and lead to the
+  brand: the brand's own brief mirrored when it sent one, a six-section
+  fallback when it did not. Social and web identity research is OPT-IN;
+  the creator-facing brief is OPT-IN and asks once for the brand's brief
+  and what it is promoting. With neither choice stated, ask once
   for the missing choices before paid research; autonomous/fast runs use
   transcripts only and skip the creator-facing brief. Also invoke for HELP
   asks about this skill; explain the modes and choices without running
@@ -201,12 +202,13 @@ message; on a reuse run this question stands alone:
 > - **Yes**: you also get a creator-friendly brief.
 
 On **Yes**, one follow-up, and that is the whole interview: paste the
-brand's baseline talking points (or a file path) and what the brand is
-promoting. Then re-run `start_run.py` with the answers as `--talking-points`
+brand's brief or its talking points (or a file path) and what the brand is
+promoting; "we have none" is an answer too. Then re-run `start_run.py` with the answers as `--talking-points`
 and `--promoting` before anything else, so the input file exists before the
-connection pass. Requirements, don'ts and the approval process are never
-asked for: the brief takes them from the pasted talking points when the
-brand included them, otherwise from the template's defaults. A flag skips the question; nothing
+connection pass. With a brief pasted, the creator brief mirrors it; with
+only the promoting line or nothing, it takes the template's six sections and
+their defaults. Requirements, don'ts and the approval process are never
+asked for separately. A flag skips the question; nothing
 answers it silently. Autonomous, unattended or fast runs: no brief, nothing
 asked, and the completion line says so.
 
@@ -677,14 +679,29 @@ Run the reuse check first. Then:
    skipped and why. Read `<corpus>/creator-brief-input-<brand_id>.json`, the
    connections map, the whole ledger for every point (the cards are where to
    start, not the limit), and in `<corpus>/brand-tl.json` any read this
-   creator already ran for the brand, so a re-book does not repeat it. For
-   each of the brand's lines, pick the moment that best backs it up, not
-   just a true one. Write `<corpus>/creator-brief-<brand_id>.md` to
-   `references/creator-brief-template.md`: the supplied lines sorted into
-   their sections, the six sections in its order, every brand line verbatim,
-   and each talking point written for this creator from a moment of their
-   own, with the brand's line it covers beneath it: the brand's brief says
-   what to cover, the ledger says how this creator covers it. Every quote
+   creator already ran for the brand, so a re-book does not repeat it (the
+   check refuses a moment said inside one of those reads).
+   Start from the creator's gems, not the brand's list: search the finished
+   ledger (never a new retrieval round; the ledger stays as built) and for
+   each gem that fits the brand (a story with its people and details, a
+   turning point, a thing they built, a habit kept for years, how they
+   describe themselves), ask
+   what it lets this creator say about the product that no other creator
+   could, and write that as the talking point. Then place each brand line
+   under the point whose gem backs it best; a gem that leads to the product
+   but to none of the brand's lines becomes a creative talking point under
+   the brand's promoting line. Write `<corpus>/creator-brief-<brand_id>.md`
+   to `references/creator-brief-template.md`, in the layout the input file
+   picks. **The brand sent a brief** (`brand_brief` set): the page is their
+   document, word for word in their order, with a For you block, written
+   for this creator from a gem of theirs, under each talking point a gem
+   backs, and at most two creative blocks after their last point. **Only a
+   promoting line, or nothing** (no `brand_brief`): the six sections, every
+   point built from a gem; with no brief at all, the product facts come
+   from the page's About brand section and the rest follows the template's
+   "When the brand sent no brief". Either way the brand's brief says what
+   must be covered and the gems say what only this creator can say about
+   it. Every quote
    with its `&t=` link, second person, and none of the vocabulary written
    for the AM's eyes. Then one command:
 

@@ -292,5 +292,6 @@ register and nothing else. What counts as evidence is the same: a quote is
 the creator's own verified words with its timestamp, or it is not on the
 page. Withheld tiers stay withheld whatever the section, and a fact the
 connections page used only to say what not to say is never turned into a
-talking point. The brand's lines are the brand's, verbatim; ours join the
-brand's ask to the creator's own moment and stop there.
+talking point. The brand's lines are the brand's, verbatim; ours start
+from the creator's own moment and join it to the brand's ask, or to the
+product itself when the moment says something the brand's lines do not.

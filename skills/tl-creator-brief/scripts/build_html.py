@@ -72,6 +72,7 @@ the same offline; nothing else is fetched and there is no script.
 from __future__ import annotations
 
 import argparse
+import gzip
 import html
 import json
 import pathlib
@@ -1518,8 +1519,231 @@ def _content_words(text: str) -> set[str]:
     return {w for w in words if len(w) > 2 and w not in _STOP}
 
 
+_FOR_YOU = re.compile(r"(?s)<!--\s*for-you\s*-->(.*?)<!--\s*/for-you\s*-->")
+_FOR_YOU_HEAD = re.compile(r"^\s*\*\*\s*for you:\s*(.+?)\s*\*\*\s*$", re.I)
+MIRROR_CREATIVE_CAP = 2   # gem-led points that follow none of the brand's lines
+
+
+def mirror_mode(inp: dict | None) -> bool:
+    """The brand sent its own brief: the creator brief is that document, in
+    its headings, order and words, with the creator's own version of each
+    talking point written in beneath it. Without one, the six sections."""
+    return bool(inp and inp.get("supplied") and str(inp.get("brand_brief") or "").strip())
+
+
+def for_you_parts(block: str) -> tuple[str, str]:
+    """``(heading, our words)`` of one For you block; quotes are neither."""
+    lines = block.strip().splitlines()
+    m = _FOR_YOU_HEAD.match(lines[0]) if lines else None
+    heading = m.group(1).strip() if m else ""
+    rest = "\n".join(lines[1:] if m else lines)
+    return heading, heading + "\n" + re.sub(r"(?m)^>.*$", " ", rest)
+
+
+def check_mirror(body: str, facts: list[dict] | None, map_md: str, inp: dict,
+                 corpus_cues: dict[str, list] | None = None,
+                 brand: str = "") -> list[str]:
+    """Contract problems with a creator brief that mirrors the brand's own:
+    their document word for word in its order, and a For you block, built on
+    a gem of the creator's, under the talking points a gem backs."""
+    problems: list[str] = []
+    blocks = _FOR_YOU.findall(body)
+    rest = _FOR_YOU.sub(" ", body)
+    if re.search(r"<!--\s*/?\s*for-you", rest):
+        problems.append("a <!-- for-you --> marker without its closing <!-- /for-you -->")
+    # the brand's document, word for word and in its order; formatting (a
+    # heading mark, a bullet) may be added, a word may not
+    want = _norm_words(str(inp.get("brand_brief"))).split()
+    got = _norm_words(rest).split()
+    if got != want:
+        i = next((k for k, (x, y) in enumerate(zip(got, want)) if x != y),
+                 min(len(got), len(want)))
+        near = " ".join(want[max(0, i - 4):i + 6]) or " ".join(got[max(0, i - 4):i + 6])
+        problems.append(f"the brand's brief is not kept word for word in its order; it "
+                        f"changes near: '{near}'")
+    if not blocks:
+        problems.append("no For you block under any of the brand's talking points; write "
+                        "the creator's version of each point a gem of theirs backs")
+    supplied_norm = [_norm_words(tp) for tp in inp.get("talking_points", []) if tp]
+    map_blocks = md_quote_blocks(map_md)
+    precedent_blocks = md_precedent_quotes(map_md)
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
+    flagged: set[str] = set()
+    personal: list[dict] = []
+    ours_all = ""
+    for blk in blocks:
+        heading, ours = for_you_parts(blk)
+        name = heading[:60] or "(untitled)"
+        if not heading:
+            problems.append("a For you block does not open with **For you: <the point>**")
+        elif _norm_words(heading) in supplied_norm:
+            problems.append(f"the For you heading is the brand's own line; write the "
+                            f"creator's version of it: {name}")
+        pp, carried = point_problems(blk, ours, name, facts, index, map_blocks,
+                                     precedent_blocks, flagged)
+        problems += pp
+        if carried is not None:
+            personal.append(carried)
+            pr = prior_read_problem(carried, brand, corpus_cues, name)
+            if pr:
+                problems.append(pr)
+        ours_all += "\n" + ours
+    problems += personal_coverage(blocks, personal, facts,
+                                  cap=len(supplied_norm) + MIRROR_CREATIVE_CAP)
+    # the bans hold on OUR words; the brand's document is theirs to phrase
+    ours_plain = re.sub(r"\]\([^)]*\)", "]", ours_all)
+    for pat in _BRIEF_BANNED:
+        m = re.search(pat, ours_all, re.I)
+        if m:
+            problems.append(f"brand-side material on the creator page: {m.group(0)!r}")
+    for rx, label in ((_FACT_ID, "a fact id on the page"),
+                      (_PLATFORM_ID, "a platform id on the page")):
+        m = rx.search(ours_plain)
+        if m:
+            problems.append(f"{label}: {m.group(0)}")
+    for rx, label in ((_MONEY, "price, cost or rate language"),
+                      (_CTA, "CTA wording on the page (the brand owns the CTA)"),
+                      (_AGAINST, "sets the brand against something else")):
+        m = rx.search(ours_plain)
+        if m:
+            problems.append(f"{label}: {m.group(0).strip()!r}")
+    no_links = re.sub(r"\]\([^)]*\)", "]", body)
+    for f, reason in ineligible_on_page(no_links, facts, index, flagged):
+        label = ("withheld-tier quote" if tier_of(f) in WITHHELD
+                 else "quote of an ineligible fact")
+        problems.append(f"{label} on the page ({reason}): {str(f.get('claim'))[:50]}")
+    return problems
+
+
+PRIOR_READ_SPAN = 45   # seconds either side of a moment the brand's name must not sit
+
+
+def load_corpus_cues(in_path: pathlib.Path | None) -> dict[str, list] | None:
+    """``corpus.jsonl.gz`` beside the map: each video's timed transcript cues,
+    by video id. None when the run left no corpus there."""
+    if in_path is None:
+        return None
+    p = in_path.parent / "corpus.jsonl.gz"
+    if not p.is_file():
+        return None
+    out: dict[str, list] = {}
+    try:
+        with gzip.open(p, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                vid = str(d.get("id") or "").rsplit(":", 1)[-1]
+                if vid:
+                    out[vid] = d.get("cues") or []
+    except OSError:
+        return None
+    return out
+
+
+def prior_read_problem(fact: dict, brand: str, cues_by_video: dict[str, list] | None,
+                       name: str) -> str | None:
+    """A re-book never repeats the last read: a moment said inside the
+    creator's own earlier read for this brand is the ad talking, not a gem.
+    The video is one the brand sponsored (its transcript says so) and the
+    brand's name sits within PRIOR_READ_SPAN seconds of the moment."""
+    if not cues_by_video or not brand:
+        return None
+    vid, t = _video_and_time(str(fact.get("url") or ""))
+    cues = cues_by_video.get(vid or "")
+    if not cues or t is None:
+        return None
+    b = r"\b" + r"\s+".join(re.escape(w) for w in brand.lower().split()) + r"\b"
+    text = " ".join(str(c[1]) for c in cues if len(c) > 1).lower()
+    sponsored = re.search(
+        r"(?:sponsored by|thanks? (?:you )?to|brought to you by|partner(?:ed|ing)? with"
+        r"|in partnership with)\s+(?:\w+\s+){0,3}?" + b + "|" + b
+        + r"\s+(?:for sponsoring|is sponsoring|sponsored)", text)
+    if not sponsored:
+        return None
+    near = [c for c in cues if len(c) > 1 and abs(float(c[0]) - t) <= PRIOR_READ_SPAN]
+    if not any(re.search(b, str(c[1]).lower()) for c in near):
+        return None
+    return (f"talking point rests on a moment from inside the creator's own {brand} read "
+            f"({vid} at {t // 60}:{t % 60:02d}); a re-book never repeats the last read, "
+            f"build it on a gem from outside it: {name}")
+
+
+def point_problems(sub: str, ours: str, name: str, facts: list[dict] | None,
+                   index: dict, map_blocks: list, precedent_blocks: list,
+                   flagged: set[str]) -> tuple[list[str], dict | None]:
+    """One talking point written for the creator: the problems with it, and
+    the moment of their own it is built on (None when it has none). The same
+    rules hold in both layouts."""
+    problems: list[str] = []
+    qs = md_quote_blocks(sub)
+    if not qs:
+        problems.append(f"talking point is built on no moment of the creator's own "
+                        f"(no quote): {name}")
+        return problems, None
+    if not re.search(r"\]\(https?://[^)]*[?&]t=\d", sub):
+        problems.append(f"talking point quote has no timestamped link: {name}")
+    carried = None
+    for q, links in qs:
+        fact = quote_matches_ledger(q, facts)
+        in_map = next(((mq, ml) for mq, ml in map_blocks if q in mq or mq in q), None)
+        if fact is None and in_map is None:
+            problems.append(f"quote is neither a ledger fact nor one the connections "
+                            f"map argued: {name}")
+        if fact is not None:
+            reason = angle_ineligible_reason(fact, index)
+            if reason:
+                flagged.add(str(fact.get("fact_id")))
+                label = ("withheld-tier fact" if reason.startswith("withheld tier")
+                         else "ineligible fact")
+                problems.append(f"quote uses a {label} ({reason}): {name}")
+            elif str(fact.get("confidence")) != "confirmed":
+                # the ledger holds it, nothing pins it to the host: not a
+                # moment to hand the creator as their own
+                problems.append(f"talking point rests on an unconfirmed fact "
+                                f"({fact.get('fact_id')}): {name}")
+            cite = citation_problem(q, links, str(fact.get("quote") or ""),
+                                    str(fact.get("url") or ""))
+            if str(fact.get("confidence")) == "confirmed":
+                carried = carried or fact
+        elif in_map is not None:
+            # a map-only quote is cited where the map cites it
+            mq, ml = in_map
+            timed = [u for u in ml if _video_and_time(u)[1] is not None]
+            cite = citation_problem(q, links, mq, timed[0] if timed else "")
+            # a precedent window the map argued, in the creator's own first
+            # person and at a timestamp, is their moment as much as a
+            # ledger fact is: refusing it as "a topic the channel covered"
+            # was what turned a host's own bank story away
+            if (timed and mq in precedent_blocks and q in mq
+                    and _FIRST_PERSON.search(mq)):
+                carried = carried or {"fact_id": f"probe:{timed[0]}", "claim": "",
+                                      "quote": mq, "url": timed[0],
+                                      "confidence": "confirmed", "provenance": "probe"}
+        else:
+            cite = None
+        if cite:
+            problems.append(f"the quote's link does not point at the moment it "
+                            f"quotes ({cite}): {name}")
+    if carried is None:
+        problems.append(f"talking point rests on a topic the channel covered, not a "
+                        f"moment of the creator's own: {name}")
+        return problems, None
+    moment = _content_words(f"{carried.get('quote')} {carried.get('claim')}")
+    body_words = _content_words(ours.partition("\n")[2])
+    # the heading may name the moment, but the body has to use it too
+    if len(_content_words(ours) & moment) < 2 or not body_words & moment:
+        problems.append(f"talking point quotes a moment but is not built from it; say what "
+                        f"the creator does with it on camera: {name}")
+    if len(_content_words(ours)) < 15:
+        problems.append(f"talking point is too thin to tell the creator what to say: {name}")
+    return problems, carried
+
+
 def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
-                inp: dict | None) -> list[str]:
+                inp: dict | None,
+                corpus_cues: dict[str, list] | None = None) -> list[str]:
     """Contract problems with the creator brief, one line each. Empty means
     it can be sent."""
     problems: list[str] = []
@@ -1541,6 +1765,10 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     elif (fm["talking_points_supplied"].lower() == "true") != supplied:
         problems.append(f"talking_points_supplied says {fm['talking_points_supplied']} "
                         f"but the input file says {supplied}")
+
+    if mirror_mode(inp):
+        return problems + check_mirror(body, facts, map_md, inp, corpus_cues,
+                                       brand)
 
     intro, found, order, unknown = brief_sections(body)
     expected = [k for k, _l, _m in BRIEF_SECTIONS]
@@ -1568,6 +1796,10 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     if len(subs) < 2:
         problems.append("no ### talking point under ## Key talking points")
     supplied_norm = [_norm_words(tp) for tp in (inp or {}).get("talking_points", []) if tp]
+    # a creative point is one a gem of the creator's carries and none of the
+    # brand's lines do: it stands under the brand's promoting line instead
+    promoting_norm = _norm_words(str((inp or {}).get("promoting") or ""))
+    anchors = supplied_norm + ([promoting_norm] if promoting_norm else [])
     personal: list[dict] = []          # the ledger fact each point is built on
     points_subs: list[str] = []        # the creator's talking points, the "also" list apart
     in_personal = ""                   # brand text the creator's points carry
@@ -1575,81 +1807,34 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         heading = sub.splitlines()[0].strip() if sub.strip() else ""
         name = heading[:60] or "(untitled)"
         if ALSO.match(heading):
+            if not supplied and not NO_MOMENT.search(sub):
+                problems.append(f"'Also from {brand or '<brand>'}' on a brief the brand sent no "
+                                f"lines for; build every point on a gem instead")
             if md_blockquotes(sub):
                 problems.append(f"a quote in the closing list; build a talking point on it: {name}")
             continue
         points_subs.append(sub)
         brand_part, ours = split_brand_lines(sub)
+        if not supplied and _FROM_BRIEF.search(sub):
+            problems.append(f"'From {brand or '<brand>'}'s brief:' on a brief the brand sent no "
+                            f"lines for; there is nothing of theirs to quote: {name}")
         in_personal += " " + brand_part
         if _norm_words(heading) in supplied_norm:
             problems.append(f"the heading is the brand's own line; write the creator's "
                             f"talking point in its place and keep the line under "
                             f"'From {brand or '<brand>'}'s brief': {name}")
-        if supplied and not any(tp and tp in _norm_words(brand_part) for tp in supplied_norm):
+        if supplied and not any(tp and tp in _norm_words(brand_part) for tp in anchors):
             problems.append(f"talking point shows none of the brand's lines verbatim under "
-                            f"'From {brand or '<brand>'}'s brief:': {name}")
-        qs = md_quote_blocks(sub)
-        if not qs:
-            problems.append(f"talking point is built on no moment of the creator's own "
-                            f"(no quote): {name}")
-            continue
-        if not re.search(r"\]\(https?://[^)]*[?&]t=\d", sub):
-            problems.append(f"talking point quote has no timestamped link: {name}")
-        carried = None
-        for q, links in qs:
-            fact = quote_matches_ledger(q, facts)
-            in_map = next(((mq, ml) for mq, ml in map_blocks if q in mq or mq in q), None)
-            if fact is None and in_map is None:
-                problems.append(f"quote is neither a ledger fact nor one the connections "
-                                f"map argued: {name}")
-            if fact is not None:
-                reason = angle_ineligible_reason(fact, index)
-                if reason:
-                    flagged.add(str(fact.get("fact_id")))
-                    label = ("withheld-tier fact" if reason.startswith("withheld tier")
-                             else "ineligible fact")
-                    problems.append(f"quote uses a {label} ({reason}): {name}")
-                elif str(fact.get("confidence")) != "confirmed":
-                    # the ledger holds it, nothing pins it to the host: not a
-                    # moment to hand the creator as their own
-                    problems.append(f"talking point rests on an unconfirmed fact "
-                                    f"({fact.get('fact_id')}): {name}")
-                cite = citation_problem(q, links, str(fact.get("quote") or ""),
-                                        str(fact.get("url") or ""))
-                if str(fact.get("confidence")) == "confirmed":
-                    carried = carried or fact
-            elif in_map is not None:
-                # a map-only quote is cited where the map cites it
-                mq, ml = in_map
-                timed = [u for u in ml if _video_and_time(u)[1] is not None]
-                cite = citation_problem(q, links, mq, timed[0] if timed else "")
-                # a precedent window the map argued, in the creator's own first
-                # person and at a timestamp, is their moment as much as a
-                # ledger fact is: refusing it as "a topic the channel covered"
-                # was what turned a host's own bank story away
-                if (timed and mq in precedent_blocks and q in mq
-                        and _FIRST_PERSON.search(mq)):
-                    carried = carried or {"fact_id": f"probe:{timed[0]}", "claim": "",
-                                          "quote": mq, "url": timed[0],
-                                          "confidence": "confirmed", "provenance": "probe"}
-            else:
-                cite = None
-            if cite:
-                problems.append(f"the quote's link does not point at the moment it "
-                                f"quotes ({cite}): {name}")
-        if carried is None:
-            problems.append(f"talking point rests on a topic the channel covered, not a "
-                            f"moment of the creator's own: {name}")
-            continue
-        personal.append(carried)
-        moment = _content_words(f"{carried.get('quote')} {carried.get('claim')}")
-        body_words = _content_words(ours.partition("\n")[2])
-        # the heading may name the moment, but the body has to use it too
-        if len(_content_words(ours) & moment) < 2 or not body_words & moment:
-            problems.append(f"talking point quotes a moment but is not built from it; say what "
-                            f"the creator does with it on camera: {name}")
-        if len(_content_words(ours)) < 15:
-            problems.append(f"talking point is too thin to tell the creator what to say: {name}")
+                            f"'From {brand or '<brand>'}'s brief:' (a creative point the "
+                            f"brand did not write carries its promoting line): {name}")
+        pp, carried = point_problems(sub, ours, name, facts, index, map_blocks,
+                                     precedent_blocks, flagged)
+        problems += pp
+        if carried is not None:
+            personal.append(carried)
+            pr = prior_read_problem(carried, brand, corpus_cues, name)
+            if pr:
+                problems.append(pr)
     problems += personal_coverage(points_subs, personal, facts)
     if supplied and points_subs:
         pts = [tp for tp in supplied_norm if tp in _norm_words(points)]
@@ -1741,7 +1926,7 @@ def usable_moments(facts: list[dict] | None) -> list[dict]:
 
 
 def personal_coverage(subs: list[str], personal: list[dict],
-                      facts: list[dict] | None) -> list[str]:
+                      facts: list[dict] | None, cap: int | None = None) -> list[str]:
     """The brief is personal or it is the brand's brief with a name on it: at
     least four talking points written for the creator (fewer only when the
     ledger holds fewer confirmed moments), each on a moment of its own."""
@@ -1752,6 +1937,8 @@ def personal_coverage(subs: list[str], personal: list[dict],
                         "give each point its own")
     usable = usable_moments(facts)
     need = min(4, len({str(f.get("fact_id")) for f in usable}))
+    if cap is not None:
+        need = min(need, cap)
     if len(set(ids)) >= need:
         return problems
     used = set(ids)
@@ -1798,6 +1985,9 @@ _BRIEF_CSS = """<style>
 .brief h3{margin:1.6rem 0 .4rem;font-size:1.05rem}
 .brief blockquote{border-left:3px solid var(--accent);margin:.6rem 0;padding:.2rem 0 .2rem 1rem;color:var(--quote)}
 .brief .note{font-size:.9em;color:var(--ink-2)}
+.brief .for-you{border:1px solid var(--accent);border-radius:8px;margin:.8rem 0 1.2rem;padding:.2rem 1rem .6rem}
+.brief .for-you .fy-label{font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:.6rem 0 0}
+.brief .for-you h4{margin:.2rem 0 .4rem;font-size:1rem}
 </style>"""
 
 
@@ -1812,7 +2002,23 @@ def render_brief(md_text: str, inp: dict | None) -> tuple[str, str, str]:
         chips.append("built from the creator's own material; no brand talking points supplied")
     header_extra = ('<ul class="meta">'
                     + "".join(f"<li>{html.escape(c)}</li>" for c in chips) + "</ul>")
-    body_html = _BRIEF_CSS + '<div class="brief">' + render_markdown(body) + "</div>"
+    if mirror_mode(inp):
+        # the brand's document as they wrote it, the creator's versions of its
+        # points set in beneath the lines they belong to
+        parts = _FOR_YOU.split(body)
+        inner = ""
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                inner += render_markdown(part)
+                continue
+            heading, _ours = for_you_parts(part)
+            rest = "\n".join(part.strip().splitlines()[1:])
+            inner += ('<div class="for-you"><p class="fy-label">For you</p>'
+                      f"<h4>{inline(html.escape(heading, quote=False))}</h4>"
+                      + render_markdown(rest) + "</div>")
+    else:
+        inner = render_markdown(body)
+    body_html = _BRIEF_CSS + '<div class="brief">' + inner + "</div>"
     eyebrow = "creator brief"
     return (title, page_html(title, eyebrow, header_extra, body_html),
             page_fragment(title, eyebrow, header_extra, body_html))
@@ -1867,7 +2073,8 @@ def main() -> None:
         map_md = pathlib.Path(a.connections).read_text(encoding="utf-8")
         inp = (json.loads(pathlib.Path(a.brief_input).read_text(encoding="utf-8"))
                if a.brief_input else None)
-        problems = check_brief(text, facts, map_md, inp)
+        problems = check_brief(text, facts, map_md, inp,
+                               load_corpus_cues(pathlib.Path(a.connections)))
         if facts is None:
             problems.append("no ledger given: the quotes cannot be verified")
         if a.check:

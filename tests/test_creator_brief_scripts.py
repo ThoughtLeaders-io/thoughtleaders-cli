@@ -3,6 +3,7 @@ connections page. The retrieval and assembly stages have their own files,
 ``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No real network.
 """
 
+import gzip
 import json
 import re
 import subprocess
@@ -1293,6 +1294,9 @@ def test_a_clean_brief_passes_and_renders_named_by_names(tmp_path):
 
 def test_an_unsupplied_brief_says_so_in_its_header(tmp_path):
     md = _BRIEF_MD.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    # no brief from the brand: nothing of theirs sits under the point or after it
+    md = md.replace("**From Acme's brief:**\n\n- Rescue dogs first, always\n\n", "")
+    md = md.replace("### Also from Acme\n\n- Show the bag on camera\n\n", "")
     inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None}
     proc, res = _brief(tmp_path, md, inp, check=False)
     assert proc.returncode == 0 and not res["problems"], res["problems"]
@@ -1512,6 +1516,123 @@ def test_most_brand_lines_must_sit_inside_personal_points(tmp_path):
     md, inp = _points_brief(_moments(4), 9)
     problems = _problems(tmp_path, md, inp, _FACTS + _moments(6))
     assert any("sit inside a talking point written for the creator" in p for p in problems)
+
+
+def test_a_creative_point_may_stand_under_the_promoting_line(tmp_path):
+    """A gem that leads to the product but to none of the brand's lines is a
+    creative talking point: it carries the promoting line instead."""
+    md, inp = _points_brief(_moments(4), 2)
+    md = md.replace("- Brand line 3.0\n", "- the new salmon recipe\n")
+    inp = {**inp, "talking_points": [t for t in inp["talking_points"] if t != "Brand line 3.0"]}
+    proc, res = _brief(tmp_path, md, inp, _FACTS + _moments(6))
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+    lost = md.replace("- the new salmon recipe\n", "- a line the brand never wrote\n")
+    assert any("shows none of the brand's lines verbatim" in p
+               for p in _problems(tmp_path, lost, inp, _FACTS + _moments(6)))
+
+
+def test_with_no_brand_brief_every_point_is_built_on_a_gem(tmp_path):
+    """No brief from the brand: the points lead from the creator's gems, and
+    there is nothing of the brand's to quote under them or leave over."""
+    md, _inp = _points_brief(_moments(4), 0)
+    md = md.replace("talking_points_supplied: true", "talking_points_supplied: false")
+    inp = {**_INPUT, "supplied": False, "talking_points": [], "promoting": None}
+    quoting = _problems(tmp_path, md, inp, _FACTS + _moments(6))
+    assert any("nothing of theirs to quote" in p for p in quoting), quoting
+    assert any("build every point on a gem" in p for p in quoting), quoting
+    clean = re.sub(r"\*\*From Acme's brief:\*\*\n\n(- [^\n]*\n)*", "", md)
+    clean = re.sub(r"(?s)### Also from Acme\n.*?(?=## Requirements)", "", clean)
+    proc, res = _brief(tmp_path, clean, inp, _FACTS + _moments(6))
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+
+
+def _mirror_brief(moments: list[dict], brand_lines: list[str]) -> tuple[str, dict]:
+    """The brand's own brief, as pasted, with a For you block under each of
+    its first len(moments) lines."""
+    out = ["---", "schema: tl-creator-brief/v1", 'channel_name: "Patterrz"', "brand_name: Acme",
+           "talking_points_supplied: true", "---", "", "## Campaign overview", ""]
+    for i, line in enumerate(brand_lines):
+        out.append(f"- {line}\n")
+        if i < len(moments):
+            f = moments[i]
+            w = f["quote"].split("my ")[1].split(" and")[0]
+            out.append(f"<!-- for-you -->\n**For you: Your {w} is the way in**\n\n"
+                       f"Tell your viewers about the {w}, the years you spent with it, and "
+                       f"show where Acme fits beside it on camera today.\n\n"
+                       f"> {f['quote']}\n> [Video, 0:01]({f['url']})\n<!-- /for-you -->\n")
+    pasted = "Campaign overview\n" + "\n".join(f"- {ln}" for ln in brand_lines)
+    return "\n".join(out), {**_INPUT, "talking_points": ["Campaign overview"] + brand_lines,
+                            "brand_brief": pasted}
+
+
+def test_a_brand_brief_is_mirrored_with_the_creators_versions_beneath(tmp_path):
+    lines = [f"Brand line {k}" for k in range(5)] + ["Do not mention competitors"]
+    md, inp = _mirror_brief(_moments(4), lines)
+    proc, res = _brief(tmp_path, md, inp, _FACTS + _moments(6))
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+    proc, res = _brief(tmp_path, md, inp, _FACTS + _moments(6), check=False)
+    page = Path(res["html"]).read_text()
+    assert page.count('class="for-you"') == 4 and "<h2>Campaign overview</h2>" in page
+    assert "Who is Acme" not in page      # no default sections on a mirrored brief
+
+
+def test_a_mirrored_brief_keeps_the_brands_words_and_order(tmp_path):
+    lines = [f"Brand line {k}" for k in range(5)]
+    md, inp = _mirror_brief(_moments(4), lines)
+    for broken in (md.replace("- Brand line 4", "- Brand line four"),
+                   md.replace("- Brand line 4\n", ""),
+                   md.replace("## Campaign overview", "## Who is Acme\n\nAcme makes dog food.")):
+        problems = _problems(tmp_path, broken, inp, _FACTS + _moments(6))
+        assert any("not kept word for word" in p for p in problems), problems
+
+
+def test_a_mirrored_brief_still_needs_its_points_built_on_gems(tmp_path):
+    lines = [f"Brand line {k}" for k in range(5)]
+    md, inp = _mirror_brief(_moments(2), lines)
+    problems = _problems(tmp_path, md, inp, _FACTS + _moments(6))
+    assert any("at least 4 should" in p for p in problems), problems
+    md, inp = _mirror_brief(_moments(4), lines)
+    lazy = re.sub(r"Tell your viewers about the [^\n]*\n", "Acme is great food for any dog "
+                  "owner who wants a healthy happy pet every single day.\n", md)
+    problems = _problems(tmp_path, lazy, inp, _FACTS + _moments(6))
+    assert any("not built from it" in p for p in problems), problems
+
+
+def _corpus(tmp_path: Path, cues: list) -> None:
+    """corpus.jsonl.gz beside the map: video m0's timed cues."""
+    with gzip.open(tmp_path / "corpus.jsonl.gz", "wt", encoding="utf-8") as fh:
+        fh.write(json.dumps({"id": "42:m0", "cues": cues}) + "\n")
+
+
+def test_a_moment_from_the_creators_own_read_for_the_brand_is_refused(tmp_path):
+    """A re-book never repeats the last read: the kayak line sits inside the
+    creator's earlier Acme read, so it is the ad talking, not a gem."""
+    md, inp = _points_brief(_moments(4), 2)
+    facts = _FACTS + _moments(6)
+    _corpus(tmp_path, [[0.0, "this video is sponsored by acme"],
+                       [1.0, "i spent years with my kayak paddle and never regretted it"],
+                       [4.0, "and acme makes it so easy"]])
+    problems = _problems(tmp_path, md, inp, facts)
+    assert any("own Acme read" in p for p in problems), problems
+    # the same line in a video Acme did not sponsor is the creator's own
+    _corpus(tmp_path, [[1.0, "i spent years with my kayak paddle and never regretted it"],
+                       [4.0, "i feed acme to my dog"]])
+    proc, res = _brief(tmp_path, md, inp, facts)
+    assert proc.returncode == 0 and res["ok"], res["problems"]
+    # and a moment far from the read, in a sponsored video, is still theirs
+    _corpus(tmp_path, [[1.0, "i spent years with my kayak paddle and never regretted it"],
+                       [300.0, "this part of the video is sponsored by acme"],
+                       [310.0, "acme makes it so easy"]])
+    proc, res = _brief(tmp_path, md, inp, facts)
+    assert not any("own Acme read" in p for p in res["problems"]), res["problems"]
+
+
+def test_the_prior_read_guard_holds_on_a_mirrored_brief(tmp_path):
+    md, inp = _mirror_brief(_moments(4), [f"Brand line {k}" for k in range(5)])
+    _corpus(tmp_path, [[0.0, "thanks to acme for sponsoring this video"],
+                       [2.0, "acme is great"]])
+    problems = _problems(tmp_path, md, inp, _FACTS + _moments(6))
+    assert any("own Acme read" in p for p in problems), problems
 
 
 def test_a_topic_the_channel_covered_is_not_a_personal_moment(tmp_path):
