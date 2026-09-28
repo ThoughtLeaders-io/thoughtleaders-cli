@@ -289,6 +289,7 @@ def _install_standalone_skills(plugin_root: Path) -> int:
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
                 count += 1
+        _copy_shared_support(skills_src, CLAUDE_SKILLS_DIR)
 
     # Commands: commands/<name>.md → ~/.claude/commands/<name>.md
     commands_src = plugin_root / "commands"
@@ -300,6 +301,20 @@ def _install_standalone_skills(plugin_root: Path) -> int:
             count += 1
 
     return count
+
+
+def _copy_shared_support(skills_src: Path, target_dir: Path) -> None:
+    """Copy `skills/_shared/` (helper modules skills import across skill
+    directories) alongside the installed skills. It carries no SKILL.md, so
+    the skill loops skip it, but installed scripts resolve it relative to
+    their own path and fail without it."""
+    shared_src = skills_src / "_shared"
+    if not shared_src.is_dir():
+        return
+    dst = target_dir / "_shared"
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(shared_src, dst)
 
 
 def _install_command_shim() -> Path:
@@ -653,6 +668,7 @@ def _install_skill_trees(plugin_root: Path, target_dir: Path) -> int:
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
                 count += 1
+        _copy_shared_support(skills_src, target_dir)
     if count > 0 or target_dir.exists():
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / ".tl-version").write_text(__version__)

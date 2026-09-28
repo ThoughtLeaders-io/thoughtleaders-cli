@@ -1,0 +1,64 @@
+# trained 2026-09-15 on 3847 labeled windows, 8 channels (scripts/train_cues.py; see references/cue-training.md)
+# One phrase per line, # for comments, a leading ~ marks a recurring bit.
+# Multi-word phrases only: a bare pronoun matches every transcript and is
+# handled by the fallback pass in fetch_cues.py, never listed here.
+# Apostrophes are fine as written: fetch_cues.py also queries each of these
+# the way the index spells an encoded caption apostrophe (i'm -> i 39 m).
+#
+# "phrase | weight" says how personal and durable the statement behind the
+# phrase usually is. It is domain-neutral on purpose: a health phrase and a
+# work phrase at the same weight are worth the same. The weight is both the
+# search boost (which passages of a video come back) and the rank (which
+# passages reach the extractors), so the most personal statements bubble up.
+#   3   a specific, durable fact about the person: origin, a diagnosis, a
+#       marriage, a job change, an identity statement ("i was born", "i'm sober")
+#   2   a personal relation, possession or habit that usually carries a fact
+#       ("my dad", "my house", "i go to the gym")
+#   1   generic first-person framing that sometimes carries one ("i believe")
+#   0.5 weak framing that mostly does not ("i love", "i always")
+# A phrase with no weight counts 1 (0.5 if fetch_cues.py lists it as weak).
+# origin / background
+i grew up | 0.5
+# family
+my mom | 2
+my dad | 2
+my brother | 3
+my wife | 2
+my girlfriend | 0.5
+# pets
+# home
+# work / money
+my business | 1
+# health
+my diet | 2
+my workout | 0.5
+my hair | 3
+# habits / tastes / style
+my favorite | 3
+i hate | 0.5
+i always | 3
+i never | 0.5
+i read | 0.5
+# beliefs / identity
+i believe | 0.5
+personally i | 1
+# recurring bits / audience  (~ = fires in most uploads; capped in the model batches)
+~welcome back to | 1
+~my name is | 1
+~you guys know | 0.5
+~my channel | 1
+~this channel | 1
+# experiences
+the first time i | 2
+
+# mined 2026-09-15 from positive windows the phrase list missed (train_cues.py step 6)
+my training | 3
+i've been doing | 3
+i usually | 3
+i started | 3
+i have a | 3
+my body | 2
+my back | 2
+i decided | 1
+i'm pretty | 1
+i tried | 0.5
