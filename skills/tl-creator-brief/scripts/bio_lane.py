@@ -393,6 +393,31 @@ def facts_from_returns(windows: list[dict], returns: dict) -> tuple[list[dict], 
     return facts, skipped
 
 
+def route_to_shards(facts: list[dict], prepare_path: pathlib.Path,
+                    out_dir: pathlib.Path) -> dict[str, int]:
+    """``bio-facts-sN.json`` per merge shard: the records whose life domain
+    that shard holds, a record no shard holds going to the first. The merge
+    agent's message names its file next to ``identity-facts-sN.json``."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import identity_prompt  # sibling  # noqa: E402
+    prepare = json.loads(prepare_path.read_text(encoding="utf-8"))
+    shards = identity_prompt.shard_domains(prepare)
+    if not shards:
+        shards = [(str(out_dir / "merge-input.jsonl"), set())]
+    files: dict[str, list[dict]] = {f: [] for f, _ in shards}
+    for rec in facts:
+        home = next((f for f, doms in shards if rec.get("domain") in doms), shards[0][0])
+        files[home].append(rec)
+    written: dict[str, int] = {}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for f, recs in files.items():
+        n = identity_prompt.shard_index(f)
+        p = out_dir / f"bio-facts-s{n}.json"
+        p.write_text(json.dumps(recs, ensure_ascii=False, indent=1), encoding="utf-8")
+        written[str(p)] = len(recs)
+    return written
+
+
 def cmd_facts(a: argparse.Namespace) -> int:
     windows = json.loads(pathlib.Path(a.batch).read_text(encoding="utf-8"))
     returns = json.loads(pathlib.Path(a.returns).read_text(encoding="utf-8"))
@@ -406,6 +431,13 @@ def cmd_facts(a: argparse.Namespace) -> int:
         pathlib.Path(a.out).write_text(json.dumps(out, indent=1, ensure_ascii=False),
                                        encoding="utf-8")
         out["facts_file"] = str(a.out)
+    if a.prepare:
+        # route each record to the merge shard that holds its life domain, as
+        # identity_prompt.py slice does for the socials lane; until now every
+        # run did this by hand
+        out["shard_files"] = route_to_shards(facts, pathlib.Path(a.prepare),
+                                             pathlib.Path(a.out).parent if a.out
+                                             else pathlib.Path(a.prepare).parent)
     print(json.dumps(out, indent=1, ensure_ascii=False))
     print(f"FUNNEL stage=bio_facts windows={len(windows)} facts={len(facts)} "
           f"skipped={len(skipped)}", file=sys.stderr)
@@ -430,6 +462,13 @@ TERM_STOP = {
     "people", "thing", "things", "time", "times", "year", "years", "day", "days",
     "started", "starting", "started", "make", "makes", "making", "made", "get", "gets",
     "like", "likes", "love", "loves", "really", "always", "never", "every",
+    # verbs and reflexives an About text is written in, never said on camera
+    "describes", "describe", "described", "himself", "herself", "themselves", "holds",
+    "creates", "creating", "create", "created", "shares", "sharing", "share", "brings",
+    "bringing", "helps", "helping", "help", "explores", "exploring", "covers", "covering",
+    "focuses", "focused", "focus", "dedicated", "passionate", "welcome", "official",
+    "internet", "online", "program", "programs", "based", "known", "featured", "series",
+    "episodes", "episode", "weekly", "daily", "latest", "best", "top", "new",
 }
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z'’-]*")
 MAX_TERMS = 3
@@ -584,6 +623,9 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--batch", required=True, help="the bio batch those returns judged")
     f.add_argument("--returns", required=True, help="batch-000.extract.json from the extractor")
     f.add_argument("--out", default=None, help="write the records here as well as stdout")
+    f.add_argument("--prepare", default=None,
+                   help="prepare.json from merge_pass.py prepare: also write "
+                        "bio-facts-sN.json per merge shard, by life domain")
 
     t = sub.add_parser("terms", help="corroboration terms, the probe, and the round recipe")
     t.add_argument("--facts", required=True, help="bio-facts.json from `bio_lane.py facts`")

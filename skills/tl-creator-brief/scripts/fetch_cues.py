@@ -519,6 +519,7 @@ def fetch_year(channel: int, phrases: list[str], year: int, size: int,
 # counts, and a query failure raises (never a silent empty span list).
 # --------------------------------------------------------------------------- #
 SPONSOR_PAD = 75      # an ad read runs past the seconds the detector flags
+UNLOCATED = (-1.0, -1.0)   # a spoken read the index logged at second 0: somewhere, unknown where
 IDS_CHUNK = 1000
 ES_CONCURRENCY = 4    # parallel id-chunk fetches for the sponsor-span lookup
 
@@ -544,8 +545,11 @@ def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
             if not isinstance(end, (int, float)) or end < start:
                 end = start
             # (0, 0) is a detection with no located position; padded, it
-            # would wrongly claim the opening of the video as an ad read.
+            # would wrongly claim the opening of the video as an ad read. The
+            # video DID carry a spoken read somewhere, so it is recorded as
+            # unlocated and the regex heuristic keeps deciding its windows.
             if start <= 0 and end <= 0:
+                out[str(row.get("id"))].append(UNLOCATED)
                 continue
             out[str(row.get("id"))].append((float(start), float(end)))
     return out
@@ -606,8 +610,14 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
         segs = segments.get(w["id"]) or []
         span = w.get("read_span")           # the widened read when there is one
         lo, hi = (span[0], span[1]) if span else (w["start"], w["start"] + WINDOW_SPAN)
-        w["in_sponsor_read"] = any(lo <= e + pad and hi >= s - pad
-                                   for s, e in segs)
+        located = [(s, e) for s, e in segs if (s, e) != UNLOCATED]
+        overlaps = any(lo <= e + pad and hi >= s - pad for s, e in located)
+        # a read the index logged at second 0 is somewhere in this video, and
+        # the lookup cannot say where: the regex verdict stands for it, so an
+        # old ad read ("build it with squarespace") is not handed on as an
+        # organic moment
+        keep_regex = UNLOCATED in segs and bool(w.get("in_sponsor_read"))
+        w["in_sponsor_read"] = overlaps or keep_regex
     return "brand_mentions"
 
 
@@ -941,14 +951,17 @@ def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int]
 
 DEFAULT_AGENT_CAP = 20      # extractor agents assumed to run at once: the standard on every host
 MIN_BATCH_SIZE = 5          # below this the per-agent overhead outweighs the parallelism
+MAX_BATCH_SIZE = 15         # above this an extractor's reply hits its output limit and is cut off
 
 
 def derived_batch_size(windows: int, agent_cap: int) -> int:
     """The batch size that spreads the kept windows over every agent the host
-    allows in one wave: ceil(windows / cap), never below MIN_BATCH_SIZE."""
+    allows in one wave: ceil(windows / cap), never below MIN_BATCH_SIZE and
+    never above MAX_BATCH_SIZE (a 19-window batch cut 4 of 16 extractors off
+    at their output limit; a second wave is cheaper than a re-ask)."""
     if windows <= 0:
         return MIN_BATCH_SIZE
-    return max(MIN_BATCH_SIZE, -(-windows // max(1, agent_cap)))
+    return min(MAX_BATCH_SIZE, max(MIN_BATCH_SIZE, -(-windows // max(1, agent_cap))))
 
 
 def main() -> int:

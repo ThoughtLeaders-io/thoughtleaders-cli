@@ -41,6 +41,44 @@ _LIFESTYLE = re.compile(r"\b(glasses|contacts|contact lens\w*|diet|vegan|vegetar
                         r"smok\w*|drink\w*|alcohol|sunscreen|hair loss)\b", re.I)
 
 
+_CHILD_WORD = (r"(?:sons?|daughters?|kids?|child|children|baby|babies|toddlers?|newborn|twins|"
+               r"stepsons?|stepdaughters?|little ones?)")
+_CHILD_ANY = re.compile(
+    # the creator's own child: a possessive or a having-verb before the word
+    r"\b(?:my|our|his|her|their|the)\s+(?:\w+\s+){0,2}?" + _CHILD_WORD + r"\b"
+    r"|\b(?:has|have|had|having|got|expecting|welcomed|raising|adopted)\s+(?:a|an|one|two|three|four|"
+    r"five|\d+|another|new|twin|baby)\s+(?:\w+\s+)?" + _CHILD_WORD + r"\b"
+    r"|\b(?:new\s+baby|newborn|nieces?|nephews?|grandchild(?:ren)?|granddaughters?|grandsons?|"
+    r"pregnan\w*|gave birth|birth of (?:our|their|his|her))\b",
+    re.I)
+_CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|when (?:i|she|he|they) (?:was|were) "
+                         r"(?:a )?(?:child|kid|little)|childhood|(?:her|his|their|my) (?:own )?"
+                         r"(?:mum|mom|mother|dad|father|parents)\b)", re.I)
+
+
+_MONEY_ANY = re.compile(r"[$€£]\s?\d|\b\d[\d,.]*\s?(?:k|grand|bucks|dollars?|euros?|pounds|"
+                        r"usd|eur|gbp|thousand|million)\b", re.I)
+
+
+def names_child(*texts: str | None) -> bool:
+    """A child, grandchild, niece or nephew is named, whatever tier the merge
+    left the fact at. Being a parent is ordinary (``tier_for`` says ``none``),
+    but a fact about the child is never an angle and never rendered on a
+    brand-facing page: the protective backstop both ends of the pipeline
+    share."""
+    blob = " ".join(t for t in texts if t)
+    # the creator's own childhood is their story, not a child's
+    return bool(_CHILD_ANY.search(_CHILD_SELF.sub(" ", blob)))
+
+
+def names_money(*texts: str | None) -> bool:
+    """A sum of money (income, spend, a price) in the claim or the quote.
+    Rendering it beside a brand's pricing conversation is what the money ban
+    on the page exists to stop, so the fact stays in the ledger and off the
+    page."""
+    return bool(_MONEY_ANY.search(" ".join(t for t in texts if t)))
+
+
 def tier_for(*texts: str | None) -> str:
     """The most protective tier any of the texts (claim, notable, quote) hints at."""
     blob = " ".join(t for t in texts if t)

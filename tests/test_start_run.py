@@ -111,7 +111,9 @@ def test_a_numeric_id_with_host_names_runs_the_whole_opening(env):
     rc, out, log = env(["--channel", "42", "--host-names", "Eric,Eric Decker",
                         "--reserve", "3"])
     assert rc == 0
-    assert out["channel"] == {"id": 42, "name": None, "resolved_by": "id"}
+    # the stub's "channels" answer is what `tl channels show 42` returns too,
+    # so a numeric ref now carries the record's name instead of null
+    assert out["channel"]["id"] == 42 and out["channel"]["resolved_by"] == "id"
     assert out["ran"] == ["resolve", "plan_gate", "channel_context",
                           "reuse_check", "fetch", "context_stats"]
     fetch = _of(log, "fetch_cues.py")[0]
@@ -198,6 +200,24 @@ def test_a_resolved_name_is_reported_with_what_resolved_it(env):
     assert rc == 0
     assert out["channel"] == {"id": 32402, "name": "Airrack",
                               "resolved_by": "tl channels find"}
+
+
+def test_a_numeric_id_still_gets_its_name_from_show(env):
+    rc, out, _ = env(["--channel", "42"], tl={
+        "channels": {"stdout": json.dumps({"results": [{"id": 42, "name": "Nub Raids"}]})},
+        "whoami": {"stdout": json.dumps({"organization": {"plan": "Superuser"}})},
+    })
+    assert rc == 0
+    assert out["channel"] == {"id": 42, "name": "Nub Raids", "resolved_by": "id"}
+
+
+def test_a_numeric_id_whose_show_fails_keeps_name_none(env):
+    rc, out, _ = env(["--channel", "42"], tl={
+        "channels": {"stdout": "", "exit": 3},
+        "whoami": {"stdout": json.dumps({"organization": {"plan": "Superuser"}})},
+    })
+    assert rc == 0
+    assert out["channel"] == {"id": 42, "name": None, "resolved_by": "id"}
 
 
 # --------------------------------------------------------------------------- #

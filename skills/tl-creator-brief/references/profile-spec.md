@@ -313,7 +313,10 @@ from the confirm-only probe).
 format.** A card is
 **strong** when the quoted fact itself names the thing the brand offers (a
 creator who says they order from one delivery app every week, for that app;
-a creator who names four family members, for a family plan). It is **thin**
+a creator who names four family members, for a family plan). Naming is not
+enough on its own: a fact the creator uses to argue against the product's
+whole category is not a card of any strength, it is a risk for "Where this
+could go wrong", and the map says no fit when nothing else connects. It is **thin**
 when the link runs through the channel's premise ("her format is unboxing,
 the brand ships collectible drops", quoting a fact about her parents'
 collection) or a generic trait any brand could borrow ("she prices things

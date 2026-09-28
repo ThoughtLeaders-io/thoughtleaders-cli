@@ -180,6 +180,10 @@ The message's OUTPUT section says whether you Write it to a named file
 - `life_domain`: one of `origin`, `family`, `pets`, `home`, `work`, `money`,
   `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`.
 - `speaker_guess`: `host`, `guest`, `cohost`, `narration`, or `unclear`.
+  `cohost` is a second creator of the channel (the other half of a two-host
+  show), whose gems are kept and judged like the host's; `guest` is someone
+  passing through, whose facts never reach the ledger. On a multi-host
+  channel say which host in `speaker_evidence`.
 - `speaker_evidence`: ≤10 words naming what decided the voice: the format
   label, `in_sponsor_read`, a `host_anchor`, a name or role in the window, a
   question being answered, the `format_hint`.

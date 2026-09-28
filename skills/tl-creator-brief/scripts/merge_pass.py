@@ -95,6 +95,7 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import tier_hint  # noqa: E402
 from store_io import read_ledger, write_ledger  # noqa: E402
 
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health",
@@ -1090,6 +1091,15 @@ def corroboration_holds(target: dict | None) -> bool:
             and not target.get("retired_reason"))
 
 
+def moment_key(fact: dict) -> tuple | None:
+    """The passage a transcript fact quotes: video plus timestamp. None for a
+    fact with no located moment (a bio or social record)."""
+    vid, start = fact.get("video"), fact.get("start")
+    if not vid or start is None:
+        return None
+    return (str(vid), int(float(start)))
+
+
 def selectable(fact: dict) -> bool:
     """Whether a fact may carry ``selected``, which is what reaches a
     brand-facing page's "who they are" section.
@@ -1116,6 +1126,10 @@ def selectable(fact: dict) -> bool:
         return False
     if tier == "clinical" and fact.get("provenance") == "transcript":
         return int(fact.get("recurrence") or 0) >= 3
+    if tier_hint.names_child(fact.get("claim"), fact.get("quote")):
+        return False
+    if tier_hint.names_money(fact.get("claim"), fact.get("quote")):
+        return False
     return True
 
 
@@ -1131,6 +1145,10 @@ def unselectable_reason(fact: dict) -> str:
         return "written in their own bio; no upload corroborates it"
     if tier == "clinical":
         return "clinical below three videos"
+    if tier_hint.names_child(fact.get("claim"), fact.get("quote")):
+        return "names a child"
+    if tier_hint.names_money(fact.get("claim"), fact.get("quote")):
+        return "names a sum of money"
     return "not eligible"
 
 
@@ -1563,6 +1581,21 @@ def cmd_expand(a: argparse.Namespace) -> int:
     eligible = {str(f["fact_id"]) for f in active if selectable(f)}
     picked: list[str] = []
     ignored: dict[str, str] = {}
+    # one moment, one pick: the same passage split into two facts in two
+    # domains ("used to live with my parents": family, home) is one thing the
+    # creator said, and the page must not say it twice
+    moments: set[tuple] = set()
+
+    def take(fact: dict) -> None:
+        picked.append(str(fact["fact_id"]))
+        mk = moment_key(fact)
+        if mk is not None:
+            moments.add(mk)
+
+    def fresh(fact: dict) -> bool:
+        mk = moment_key(fact)
+        return mk is None or mk not in moments
+
     # the agent names c* ids, f* ids, and an identity fact's own `ref`
     pick_map = {**assigned, **identity_by_ref}
     proposed: list[dict] = []
@@ -1586,7 +1619,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if len(picked) >= SELECTED_TARGET:
             ignored[fact_id] = f"over the {SELECTED_TARGET}-fact target"
             continue
-        picked.append(fact_id)
+        if not fresh(fact):
+            ignored[fact_id] = "same moment as a fact already picked"
+            continue
+        take(fact)
     # fill: confirmed facts seen in two or more videos first, then confirmed
     # by rank; unconfirmed only up to the floor, so a thin ledger still
     # introduces the person and a rich one never pads with guesses
@@ -1594,23 +1630,23 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if len(picked) >= SELECTED_TARGET:
             break
         fact_id = str(fact["fact_id"])
-        if (fact_id in eligible and fact_id not in picked
+        if (fact_id in eligible and fact_id not in picked and fresh(fact)
                 and fact.get("confidence") == "confirmed"
                 and int(fact.get("recurrence") or 0) >= 2):
-            picked.append(fact_id)
+            take(fact)
     for fact in sorted(active, key=rank_key):
         if len(picked) >= SELECTED_TARGET:
             break
         fact_id = str(fact["fact_id"])
-        if (fact_id in eligible and fact_id not in picked
+        if (fact_id in eligible and fact_id not in picked and fresh(fact)
                 and fact.get("confidence") == "confirmed"):
-            picked.append(fact_id)
+            take(fact)
     for fact in sorted(active, key=rank_key):
         if len(picked) >= SELECTED_MIN:
             break
         fact_id = str(fact["fact_id"])
-        if fact_id in eligible and fact_id not in picked:
-            picked.append(fact_id)
+        if fact_id in eligible and fact_id not in picked and fresh(fact):
+            take(fact)
     chosen = set(picked)
     # a pick refused as unconfirmed that the floor then filled in anyway is
     # on the page after all; only a refusal that stuck is worth reporting

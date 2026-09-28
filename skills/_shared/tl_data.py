@@ -40,6 +40,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 TL_BIN = os.environ.get("TL_CLI_BIN", "tl")
 DEFAULT_TIMEOUT = 180
@@ -130,9 +131,33 @@ def _tl(args: list[str], *, input_text: str | None = None,
     return proc.stdout
 
 
+_TRANSIENT = ("timed out", "rate-limited or server error", "read operation timed out")
+TRANSIENT_RETRIES = 1        # one more try, after a short pause
+TRANSIENT_PAUSE_S = 3.0
+
+
+def _tl_retrying(args: list[str], *, input_text: str | None = None,
+                 timeout: int = DEFAULT_TIMEOUT) -> str:
+    """``_tl`` with one retry on a transient failure (a timed-out read, a
+    rate limit, a 5xx). One slow Elasticsearch read must not end a run that
+    spent an hour of agents before it; anything else propagates unchanged."""
+    attempt = 0
+    while True:
+        try:
+            return _tl(args, input_text=input_text, timeout=timeout)
+        except CliUnavailable:
+            raise
+        except DataError as exc:
+            msg = str(exc).lower()
+            if attempt >= TRANSIENT_RETRIES or not any(t in msg for t in _TRANSIENT):
+                raise
+            attempt += 1
+            time.sleep(TRANSIENT_PAUSE_S)
+
+
 def _tl_json(args: list[str], *, input_text: str | None = None,
              timeout: int = DEFAULT_TIMEOUT):
-    out = _tl(args, input_text=input_text, timeout=timeout).strip()
+    out = _tl_retrying(args, input_text=input_text, timeout=timeout).strip()
     if not out:
         return None
     try:

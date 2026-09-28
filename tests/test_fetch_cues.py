@@ -533,6 +533,27 @@ def test_real_sponsor_spans_decide_the_flag_and_are_recorded(
     assert summary["sponsor_flagged"] == 1
 
 
+def test_an_unlocated_read_keeps_the_regex_verdict_for_that_video(
+        tmp_path, monkeypatch):
+    """The index logged the sponsor mention at second 0: the video has a read
+    somewhere, the lookup cannot say where. The regex heuristic stands for
+    it, so an old ad read is not handed on as an organic moment."""
+    summary, kept = _run(tmp_path, monkeypatch,
+                         [_doc("7:vid1", [_AD, _frag("my dad", 900)])],
+                         spans=lambda refs: {"7:vid1": [fetch_cues.UNLOCATED]})
+    assert summary["sponsor_source"] == "brand_mentions"
+    flags = {w["start"]: w["in_sponsor_read"] for w in kept}
+    assert flags == {300: True, 900: False}
+
+
+def test_sponsor_chunk_records_an_unlocated_read_instead_of_dropping_it(monkeypatch):
+    monkeypatch.setattr(fetch_cues.tl_data, "db_es", lambda body: [
+        {"id": "7:vid1", "brand_mentions": [
+            {"type": "sponsored", "field": "transcript", "start_ts": 0, "end_ts": 0},
+            {"type": "sponsored", "field": "transcript", "start_ts": 100, "end_ts": 140}]}])
+    assert fetch_cues._sponsor_chunk(["7:vid1"]) == {"7:vid1": [fetch_cues.UNLOCATED, (100.0, 140.0)]}
+
+
 def test_a_failed_span_lookup_falls_back_to_the_regex_and_says_so(
         tmp_path, monkeypatch):
     def boom(refs):
@@ -771,7 +792,7 @@ def test_refresh_since_backfills_for_late_arriving_captions():
 # batch size follows the documented cross-host cap
 # --------------------------------------------------------------------------- #
 def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
-    assert fetch_cues.derived_batch_size(500, 20) == 25
+    assert fetch_cues.derived_batch_size(500, 20) == fetch_cues.MAX_BATCH_SIZE   # 25 would cut extractors off
     assert fetch_cues.derived_batch_size(500, 40) == 13        # 39 batches, one wave of 40
     assert fetch_cues.derived_batch_size(300, 40) == 8         # from the windows kept, not the cap
     assert fetch_cues.derived_batch_size(30, 40) == fetch_cues.MIN_BATCH_SIZE
@@ -800,9 +821,11 @@ def test_reserve_leaves_room_for_lanes_running_beside_the_fan_out():
     20 with the socials lane running meant the 20th extractor was rejected and
     relaunched a wave later."""
     cap = 20
-    assert fetch_cues.derived_batch_size(500, cap) == 25            # 20 batches
-    assert fetch_cues.derived_batch_size(500, cap - 1) == 27        # 19 batches
-    assert -(-500 // fetch_cues.derived_batch_size(500, cap - 1)) == 19
+    assert fetch_cues.derived_batch_size(200, cap) == 10            # 20 batches
+    assert fetch_cues.derived_batch_size(200, cap - 1) == 11        # 19 batches
+    assert -(-200 // fetch_cues.derived_batch_size(200, cap - 1)) == 19
+    # and a batch never grows past what an extractor can answer in full
+    assert fetch_cues.derived_batch_size(500, cap) == fetch_cues.MAX_BATCH_SIZE
     # reserving more than the cap can never produce zero or negative batches
     assert fetch_cues.derived_batch_size(500, max(1, cap - 99)) >= 1
 

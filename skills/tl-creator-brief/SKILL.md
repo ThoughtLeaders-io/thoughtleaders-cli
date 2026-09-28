@@ -146,6 +146,9 @@ summary on stdout, every stage's own `FUNNEL` line on stderr.
   role, employer, product or topic**: these values drive speaker attribution,
   so `Etsy` or `online business coach` would turn an ordinary subject mention
   into a false second-speaker hint. The channel name alone is not host names.
+  **When nothing in `identity` names a person** (an org channel, a faceless
+  one, an About text with no name), pass no host names at all: a name from
+  your own memory of the channel is a guess, and the rule is no guesses.
 - **`--host-names` given, the opening is one turn**: the command runs the
   bounded fetch and the context stats too, and `ran` says which stages went.
   Pass it only when the request already names the person.
@@ -391,25 +394,29 @@ take under a second are chained with `&&` in one command.
      `batch` strips boilerplate (YouTube placeholder copy, business-inquiry
      lines, bare emails/URLs/hashtags/handles, subscribe calls) and reports
      every dropped line with its reason; what survives is judged by the SAME
-     rubric, which is what rejects "the best gaming channel on YouTube". Pass
-     `--socials-bio <corpus>/socials-bio.json` (written by
-     `identity_prompt.py slice`, step 4) when the identity lane returned
-     confirmed profile bios.
+     rubric, which is what rejects "the best gaming channel on YouTube".
+     `--socials-bio <corpus>/socials-bio.json` exists for a REFRESH: that
+     file is written by `identity_prompt.py slice` in step 4, after this
+     wave has already run, so on a build the first bio batch never has it.
      The records it mints are `provenance: "bio"` identity-lane facts: they go
      in the merge agent's `facts` list, and `evidence-rules.md` owns what they
-     are worth. **Never feed a bio batch to `assemble_extracts.py`** — it
+     are worth. **Never feed a bio batch to `assemble_extracts.py`**: it
      refuses them, because that path stamps every row as a transcript quote
      with a video and a timestamp.
-   - **Then corroborate them.** `bio_lane.py terms` derives 1-3 search terms
-     per bio fact and writes a generated phrases file plus the exact round
-     recipe; run it as an additive `fetch_cues.py --round N` pass (see
-     `references/transcript-mining.md`). The recipe carries its own window
-     budget (`--max-windows`, five per term, at most 60) so a long About text
-     never crowds the gem hunt out of the extractor cap. A bio fact no upload
-     corroborates is never a claim and never an angle: non-sensitive ones
-     render in their own "In their own words (unverified)" block, sensitive
-     ones are dropped, and on a refresh an unverified one survives only while
-     the About text still says it (`expand` reports `bio_expired`).
+   - **Corroboration runs AFTER step 4's assemble, not here.** The
+     corroboration round is an `--exclude <corpus>/classified.jsonl` pass, and
+     `classified.jsonl` exists only once the first round is assembled. So:
+     `bio_lane.py facts` (step 4, with `--prepare`, below) mints the records,
+     `bio_lane.py terms` derives 1-3 search terms per bio fact and writes a
+     generated phrases file plus the exact round recipe, and that recipe runs
+     as an additive `fetch_cues.py --round N` pass between step 4 and step 5
+     (see `references/transcript-mining.md`). The recipe carries its own
+     window budget (`--max-windows`, five per term, at most 60) so a long
+     About text never crowds the gem hunt out of the extractor cap. A bio fact
+     no upload corroborates is never a claim and never an angle: non-sensitive
+     ones render in their own "In their own words (unverified)" block,
+     sensitive ones are dropped, and on a refresh an unverified one survives
+     only while the About text still says it (`expand` reports `bio_expired`).
 
 4. **Assemble, cluster, prepare, authenticate: one command.** As soon as the
    receipts are in:
@@ -433,6 +440,21 @@ take under a second are chained with `&&` in one command.
    every pair of contradicting clusters gets one channel-scoped query, and
    the evidence lands on the merge-input line (`staged`, `conflicts_with`,
    `probe`). `prepare.json` lists the shard files and sizes.
+
+   **Then route the bio facts to the shards** (every build; this is what
+   used to be done by hand):
+
+   ```bash
+   python3 <skill>/scripts/bio_lane.py facts --batch <corpus>/bio/batch-000.json \
+     --returns <corpus>/bio/batch-000.extract.json --out <corpus>/bio-facts.json \
+     --prepare <corpus>/prepare.json
+   ```
+
+   With `--prepare` it also writes `<corpus>/bio-facts-sN.json` per shard,
+   each holding the records whose life domain that shard judges (a record no
+   shard holds goes to the first), and reports the files under
+   `shard_files`. Each merge agent's message names its file, next to the
+   socials lane's `identity-facts-sN.json` when there is one.
 
    *(socials ON)* Put one more command on the end of that chain:
 
@@ -464,12 +486,14 @@ take under a second are chained with `&&` in one command.
    uncertain**: a staged or contradicted claim is kept and judged on the
    probe's evidence, per `evidence-rules.md`.
 
-   *(socials ON)* Each shard's message also names its
-   `<corpus>/identity-facts-sN.json`: the lane records whose domains sit
-   beside the clusters it can see, so `corroborates` can reach them. `expand`
-   unions the shards' `facts` by `ref`, so a shard whose file is empty returns
-   `"facts": []` and costs nothing. Socials OFF means no lane and no files.
-   Then:
+   Each shard's message names its `<corpus>/bio-facts-sN.json` (step 4)
+   and, *(socials ON)*, its `<corpus>/identity-facts-sN.json`: the lane
+   records whose domains sit beside the clusters it can see, so
+   `corroborates` can reach them. `expand` unions the shards' `facts` by
+   `ref`, so a shard whose file is empty returns `"facts": []` and costs
+   nothing. On a two-host channel the compact lines carry `speaker: cohost`
+   for the second host: those are the second creator's facts, judged and
+   kept like the host's, never folded into one person. Then:
 
    ```bash
    python3 <skill>/scripts/merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl \
@@ -588,10 +612,17 @@ Run the reuse check first. Then:
      naming the brand (for a hydration drink: the creator's own words on
      hangovers, workouts, travel dehydration). It picks its own terms, returns
      term counts plus the strongest windows with `&t=` links, and is
-     confirm-only. Budget: at most 3 ES queries, `size` 10 or less each, one
-     pass, no deepening, and **the file is written as soon as the third query
+     confirm-only. **A window inside one of the creator's own sponsored
+     reads is never a precedent**: on a re-book, half the probe's hits can be
+     the creator reading this very brand's script in an earlier video. Drop a
+     window that names the brand or a competitor, a discount code or a link,
+     and any window whose `brand_mentions` span of type `sponsored` covers
+     it. Budget: at most 3 ES queries, `size` 10 or less each, one pass, no
+     deepening, and **the file is written as soon as the third query
      returns**, whatever it holds, gaps in `coverage.note`. Every query in the
-     foreground, never a background job.
+     foreground, never a background job. `build_html.py --check` reads this
+     file when it sits beside the map and refuses a precedent card whose
+     quote is not one of its windows.
 
 2. **Connection pass.** Start when the merge decisions are saved and the
    TL-data lane is in. The site lane and the probe join if present; a lane
@@ -606,7 +637,12 @@ Run the reuse check first. Then:
      ledger fact, and the quoted fact itself must name the thing the brand
      offers for the card to be **strong**; a link that runs through the
      channel's premise ("her format is unboxing, the brand ships drops") or a
-     generic trait ("she talks about value") is **thin**. Each heading
+     generic trait ("she talks about value") is **thin**. **The stance
+     counts before the strength does**: a fact the creator tells to argue
+     AGAINST what the brand sells (a car-repair bill told as the reason not
+     to own a car, for a repair-cover brand) is never a card, whatever it
+     names. It goes to "Where this could go wrong", and a ledger whose only
+     product-naming facts are of that kind is a no-fit map. Each heading
      carries type and strength: `## … — **adjacent** · **thin**`. At most two
      thin cards; when no card is strong, the Thesis says **thin fit** in so
      many words, names the one or two honest angles and what to confirm
@@ -639,8 +675,11 @@ Run the reuse check first. Then:
 3. **Creator brief** (only when `creator_brief` is on). Runs after the page
    renders, on a fit or thin fit; on a no fit, one line says the brief was
    skipped and why. Read `<corpus>/creator-brief-input-<brand_id>.json`, the
-   connections map, and the whole ledger for every point: the cards are
-   where to start, not the limit. Write `<corpus>/creator-brief-<brand_id>.md` to
+   connections map, the whole ledger for every point (the cards are where to
+   start, not the limit), and in `<corpus>/brand-tl.json` any read this
+   creator already ran for the brand, so a re-book does not repeat it. For
+   each of the brand's lines, pick the moment that best backs it up, not
+   just a true one. Write `<corpus>/creator-brief-<brand_id>.md` to
    `references/creator-brief-template.md`: the supplied lines sorted into
    their sections, the six sections in its order, every brand line verbatim,
    and each talking point written for this creator from a moment of their

@@ -543,3 +543,20 @@ def test_the_hint_errs_protective_and_never_tiers_a_parent_as_children():
     assert tier_hint.tier_for("quit drinking two years ago") == "lifestyle"
     assert tier_hint.tier_for("went to rehab") == "clinical"
     assert tier_hint.tier_for(None, "", "grew up in Ohio") == "none"
+
+
+def test_a_cohost_gem_reaches_the_ledger_and_guests_are_counted(tmp_path):
+    """The second host of a two-host show was labelled cohost and dropped
+    without a count: about half the facts of every such channel. Cohost
+    gems are kept (the merge shard sees `speaker`); guests and narration
+    stay out and the summary says how many."""
+    wins = [_window(0), _window(1), _window(2)]
+    proc, summary, _rows, gems, cands, *_ = _run(tmp_path, wins, {
+        "gems": [_gem(0, wins[0], speaker_guess="host"),
+                 _gem(1, wins[1], speaker_guess="cohost"),
+                 _gem(2, wins[2], speaker_guess="guest")],
+        "not_gems": []})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert {g["verdict"]["speaker_guess"] for g in gems} == {"host", "cohost"}
+    assert len(cands) == 2
+    assert summary["gems_dropped_by_speaker"] == {"guest": 1}

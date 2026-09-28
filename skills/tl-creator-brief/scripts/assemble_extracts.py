@@ -47,6 +47,7 @@ import pathlib
 import re
 import sys
 import time
+from collections import Counter
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # noqa: E402  sibling: the keyword sensitivity hint
@@ -54,6 +55,7 @@ import tier_hint  # noqa: E402  sibling: the keyword sensitivity hint
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health", "habits",
            "tastes", "beliefs", "relationships", "other"}
 SPEAKERS = {"host", "guest", "cohost", "narration", "unclear"}
+KEPT_SPEAKERS = ("host", "cohost", "unclear")     # whose gems reach the ledger
 SENSITIVITY = {"none", "lifestyle", "clinical", "children", "location"}
 WITHHELD = {"clinical", "children", "location"}   # excluded from connection angles by default
 DEFAULT_MIN_COVERAGE = 0.95
@@ -195,6 +197,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     rows, gems, cands, respawn, report = [], [], [], {}, {}
     missing_batches: list[str] = []
+    dropped_by_speaker: Counter = Counter()
     for bf in sorted(glob.glob(os.path.join(a.batches, "batch-*.json"))):
         n = os.path.basename(bf)[6:9]
         wins = json.load(open(bf, encoding="utf-8"))
@@ -269,7 +272,13 @@ def main() -> int:
                 v["sensitivity_source"] = "extractor"
             v["sensitive"] = v["sensitivity"] in WITHHELD
             rows.append({"window": w, "verdict": v, "error": None})
-            if v["speaker_guess"] in ("host", "unclear"):
+            # a cohost on a multi-host channel is one of the creators, not a
+            # guest: dropping "cohost" silently lost about half the facts of
+            # every two-host show. The merge shard sees `speaker` on its line
+            # and keeps the two people apart; guests and narration stay out.
+            if v["speaker_guess"] not in KEPT_SPEAKERS:
+                dropped_by_speaker[v["speaker_guess"]] += 1
+            if v["speaker_guess"] in KEPT_SPEAKERS:
                 r["gems"] += 1
                 gems.append({"window": w, "verdict": v, "error": None})
                 cands.append({"fact_id": f"b{n}-{i:03d}", "claim": v.get("claim"), "domain": v["life_domain"],
@@ -318,6 +327,7 @@ def main() -> int:
     elapsed = round(time.monotonic() - t0, 1)
     print(json.dumps({"batches": len(report), "windows_expected": expected, "windows_assembled": len(rows),
                       "gems": len(gems), "unjudged_windows": unjudged, "coverage": coverage,
+                      "gems_dropped_by_speaker": dict(dropped_by_speaker),
                       "min_coverage": a.min_coverage, "missing_batches": missing_batches,
                       "respawn": respawn,
                       "problems": {k: r["problems"] for k, r in report.items() if r["problems"]},

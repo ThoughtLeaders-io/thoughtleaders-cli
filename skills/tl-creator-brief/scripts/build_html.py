@@ -82,6 +82,7 @@ import urllib.parse
 from collections import Counter, defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import tier_hint  # sibling module  # noqa: E402
 from store_io import read_ledger  # sibling module  # noqa: E402
 
 BADGES = {
@@ -530,6 +531,17 @@ def caveat_block(sections: list[tuple[str, str]]) -> str:
 _BLOCKQUOTE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
 
 
+_DASH_SPACED = re.compile(r"\s+[\u2014\u2013]\s+")
+_DASH_ANY = re.compile(r"[\u2014\u2013]")
+
+
+def no_dashes(text: str, sep: str = ", ") -> str:
+    """Em and en dashes never reach a page. A spaced dash becomes ``sep`` (a
+    middle dot on a card heading, where the spec puts one between the tags;
+    a comma in prose) and a dash inside a word becomes a plain hyphen."""
+    return _DASH_ANY.sub("-", _DASH_SPACED.sub(sep, text))
+
+
 def connection_cards(sections: list[tuple[str, str]], intro: str = "") -> str:
     """Each connection section becomes one ranked card; the section order IS
     the ranking, so cards are numbered."""
@@ -537,6 +549,7 @@ def connection_cards(sections: list[tuple[str, str]], intro: str = "") -> str:
     for title, rest in sections:
         # a leading "1. " in the heading duplicates the card's own numeral
         title = re.sub(r"^\d+[.)]\s*", "", title)
+        title = no_dashes(title, " · ")
         cards.append(f'<li><div class="body"><h3>{title}</h3>{rest}</div></li>')
     out = f'<div class="prose">{intro}</div>' if intro else ""
     if cards:
@@ -617,6 +630,13 @@ def angle_ineligible_reason(fact: dict, index: dict[str, dict] | None = None) ->
         return "clinical fact discussed in fewer than three videos"
     if index is not None and unverified_bio(fact, index):
         return "written bio claim not corroborated by a transcript"
+    # the protective backstops the merge pass shares: a fact about a child
+    # left at tier none, or one carrying a sum of money, is in the ledger and
+    # never on a brand-facing page
+    if tier_hint.names_child(fact.get("claim"), fact.get("quote"), fact.get("source_excerpt")):
+        return "names a child"
+    if tier_hint.names_money(fact.get("claim"), fact.get("quote"), fact.get("source_excerpt")):
+        return "names a sum of money"
     return None
 
 
@@ -664,7 +684,7 @@ def tallies(facts: list[dict]) -> list[str]:
     withheld = (sum(tiers[t] for t in WITHHELD) + tiers["withheld"]
                 + sum(1 for f in facts if tier_of(f) == "clinical"
                       and int(f.get("recurrence") or 0) < 3))
-    tier_text = (", ".join(tier_parts) + (f" — {withheld} withheld from angles" if withheld else "")
+    tier_text = (", ".join(tier_parts) + (f", {withheld} withheld from angles" if withheld else "")
                  if tier_parts else "all at tier none")
     return [f"{len(facts)} facts: {conf}",
             f"sensitivity: {tier_text}",
@@ -680,7 +700,7 @@ def coverage_line(meta: dict) -> str:
                      "transcript videos matched")
     if cov.get("windows_judged"):
         parts.append(f"{cov['windows_judged']} passages judged")
-    return f"{', '.join(parts) if parts else 'coverage not recorded'} — absence is not evidence"
+    return f"{', '.join(parts) if parts else 'coverage not recorded'}; absence is not evidence"
 
 
 def build_line(meta: dict) -> str:
@@ -737,12 +757,12 @@ def context_section(meta: dict) -> str:
             note = "read (socials lane)" if _norm(raw) in were_read else "linked but unread"
         else:
             note = "read (socials lane)" if lane_ran else "linked but unread (socials lane not run)"
-        items.append(f"<li>{shown} — {note}</li>")
+        items.append(f"<li>{shown}: {note}</li>")
     for c in sibs:
         name = html.escape(str(c.get("name") or c.get("link") or ""))
         ident = c.get("id") or c.get("channel_id")
         tail = f" (id {html.escape(str(ident))})" if ident else ""
-        items.append(f"<li>{name}{tail} — not mined</li>")
+        items.append(f"<li>{name}{tail}: not mined</li>")
     return ('<h3>Other channels and platforms</h3>'
             f'<ul class="links">{"".join(items)}</ul>')
 
@@ -888,7 +908,9 @@ def own_words_section(facts: list[dict] | None) -> str:
     index = {str(f.get("fact_id")): f for f in facts}
     picks = [f for f in facts
              if unverified_bio(f, index) and not f.get("superseded_by")
-             and tier_of(f) not in WITHHELD and tier_of(f) not in ("clinical", "withheld")]
+             and tier_of(f) not in WITHHELD and tier_of(f) not in ("clinical", "withheld")
+             and not tier_hint.names_child(f.get("claim"), f.get("source_excerpt"))
+             and not tier_hint.names_money(f.get("claim"), f.get("source_excerpt"))]
     if not picks:
         return ""
     lis = []
@@ -908,7 +930,7 @@ def own_words_section(facts: list[dict] | None) -> str:
     return ('<h2>In their own words (unverified)</h2>'
             '<p class="caveat">Written by the creator on their own page. Nothing in '
             'the uploads confirms it yet, so none of it is used as a claim or an '
-            'angle above — read it as a lead to check, not as a fact.</p>'
+            'angle above. Read it as a lead to check, not as a fact.</p>'
             f'<ul class="own-words">{"".join(lis)}</ul>')
 
 
@@ -983,6 +1005,9 @@ def page_body(title: str, eyebrow: str, header_extra: str, body: str) -> str:
 
 
 def page_html(title: str, eyebrow: str, header_extra: str, body: str) -> str:
+    # the last gate: nothing the writer typed, and nothing a template line
+    # carried, puts an em or en dash on a page
+    title, header_extra, body = no_dashes(title), no_dashes(header_extra), no_dashes(body)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1004,6 +1029,7 @@ def page_fragment(title: str, eyebrow: str, header_extra: str, body: str) -> str
     document shell itself), then the content. Publishing the full document
     through that tool nests one HTML document inside another, and the page
     then cannot be published at all."""
+    title, header_extra, body = no_dashes(title), no_dashes(header_extra), no_dashes(body)
     return (f"<title>{html.escape(title)}</title>\n"
             f'<link rel="stylesheet" href="{FONTS}">\n'
             f"<style>{CSS}</style>\n"
@@ -1247,10 +1273,32 @@ def section_kinds(md_text: str, meta: dict) -> dict[str, list]:
     return kinds
 
 
-def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
+def probe_texts(probe: dict | None) -> list[str]:
+    """The normalised text of every window the category probe returned."""
+    if not isinstance(probe, dict):
+        return []
+    return [_norm_words(str(w.get("text") or "")) for w in (probe.get("windows") or [])
+            if isinstance(w, dict) and str(w.get("text") or "").strip()]
+
+
+def load_probe(in_path: pathlib.Path | None) -> dict | None:
+    """``category-probe.json`` beside the map, when the probe lane wrote one."""
+    if in_path is None:
+        return None
+    p = in_path.parent / "category-probe.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def check_page(md_text: str, facts: list[dict] | None, meta: dict,
+               probe: dict | None = None) -> list[str]:
     """Contract problems with the deliverable, as one line each. Empty means
-    the page is publishable."""
+    the page is publishable. ``probe`` is the category probe's file when one
+    exists: a precedent card quotes one of its windows, or fails."""
     problems: list[str] = []
+    windows = probe_texts(probe)
     fm, body = parse_frontmatter(md_text)
     creator = fm.get("channel_name") or meta.get("channel_name") or ""
     kinds = section_kinds(md_text, meta)
@@ -1262,7 +1310,7 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
         if not kinds[key]:
             problems.append(f"missing section: {label}")
     if not kinds["caveat"]:
-        problems.append("missing section: ## Where this could go wrong — an "
+        problems.append("missing section: ## Where this could go wrong, an "
                         "honest mismatch is required even on a strong fit")
 
     # every connection card must carry its evidence, and the evidence must be
@@ -1289,6 +1337,12 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
             if fact is None:
                 if not is_precedent:
                     problems.append(f"connection quote matches no ledger fact: {name}")
+                elif windows:
+                    q = _norm_words(re.sub(r"<[^>]+>", " ",
+                                           re.sub(r"<a\b[^>]*>.*?</a>", " ", quote, flags=re.S)))
+                    if not any(q and q in w for w in windows):
+                        problems.append(f"precedent quote is not a window the category "
+                                        f"probe returned (category-probe.json): {name}")
                 continue
             reason = angle_ineligible_reason(fact, index)
             if reason:
@@ -1331,7 +1385,10 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict) -> list[str]:
     # Only angle-eligible facts may be selected for the brand-facing summary.
     for f in (facts or []):
         reason = angle_ineligible_reason(f, index)
-        if reason and f.get("selected"):
+        # the child and money backstops only keep a fact off the page; a
+        # ledger built before them can still carry such a pick, and the
+        # writer cannot change the ledger, so they are not the writer's fault
+        if reason and f.get("selected") and not reason.startswith("names "):
             problems.append(f"selected fact is not publishable ({reason}): "
                             f"{str(f.get('claim'))[:50]}")
     # the merge pass owns this rule; this end is the backstop, and it re-derives
@@ -1401,6 +1458,18 @@ def md_quote_blocks(md: str) -> list[tuple[str, list[str]]]:
     return out
 
 
+def md_precedent_quotes(md: str) -> set[str]:
+    """The normalised text of every `>` block under a category-precedent
+    heading of the map: the probe windows the map argued, which are the
+    creator's own words at a timestamp even though no ledger fact holds them."""
+    out: set[str] = set()
+    for section in re.split(r"(?m)^## ", md)[1:]:
+        heading = section.splitlines()[0] if section else ""
+        if "precedent" in heading.lower():
+            out.update(text for text, _links in md_quote_blocks(section))
+    return out
+
+
 def md_blockquotes(md: str) -> list[str]:
     """The normalised text of every `>` block, attribution links dropped."""
     return [text for text, _links in md_quote_blocks(md)]
@@ -1439,6 +1508,9 @@ def split_brand_lines(sub: str) -> tuple[str, str]:
     ours = sub[:m.start()] if m else sub
     ours = re.sub(r"(?m)^>.*$", " ", ours)
     return brand_part, ours
+
+
+_FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|ive|i'd|i'll|me|my|mine|myself|we|we're|our)\b", re.I)
 
 
 def _content_words(text: str) -> set[str]:
@@ -1488,6 +1560,7 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     # of their own, with the brand's line it covers kept verbatim beneath it;
     # what no moment carries waits in one closing "Also from <brand>" list
     map_blocks = md_quote_blocks(map_md)
+    precedent_blocks = md_precedent_quotes(map_md)
     index = {str(f.get("fact_id")): f for f in (facts or [])}
     flagged: set[str] = set()          # fact ids already reported as ineligible
     points = found.get("points", "")
@@ -1536,14 +1609,29 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                     label = ("withheld-tier fact" if reason.startswith("withheld tier")
                              else "ineligible fact")
                     problems.append(f"quote uses a {label} ({reason}): {name}")
+                elif str(fact.get("confidence")) != "confirmed":
+                    # the ledger holds it, nothing pins it to the host: not a
+                    # moment to hand the creator as their own
+                    problems.append(f"talking point rests on an unconfirmed fact "
+                                    f"({fact.get('fact_id')}): {name}")
                 cite = citation_problem(q, links, str(fact.get("quote") or ""),
                                         str(fact.get("url") or ""))
-                carried = carried or fact
+                if str(fact.get("confidence")) == "confirmed":
+                    carried = carried or fact
             elif in_map is not None:
                 # a map-only quote is cited where the map cites it
                 mq, ml = in_map
                 timed = [u for u in ml if _video_and_time(u)[1] is not None]
                 cite = citation_problem(q, links, mq, timed[0] if timed else "")
+                # a precedent window the map argued, in the creator's own first
+                # person and at a timestamp, is their moment as much as a
+                # ledger fact is: refusing it as "a topic the channel covered"
+                # was what turned a host's own bank story away
+                if (timed and mq in precedent_blocks and q in mq
+                        and _FIRST_PERSON.search(mq)):
+                    carried = carried or {"fact_id": f"probe:{timed[0]}", "claim": "",
+                                          "quote": mq, "url": timed[0],
+                                          "confidence": "confirmed", "provenance": "probe"}
             else:
                 cite = None
             if cite:
@@ -1649,7 +1737,7 @@ def usable_moments(facts: list[dict] | None) -> list[dict]:
             and angle_ineligible_reason(f, index) is None
             and str(f.get("provenance") or "transcript") == "transcript"
             # a child the merge left at tier none is still not an angle to push
-            and not _KIDS.search(f"{f.get('claim')} {f.get('quote')}")]
+            and not tier_hint.names_child(f.get("claim"), f.get("quote"))]
 
 
 def personal_coverage(subs: list[str], personal: list[dict],
@@ -1807,7 +1895,7 @@ def main() -> None:
             print("BRIEF CONTRACT: " + "; ".join(problems), file=sys.stderr)
         return
 
-    problems = check_page(text, facts, meta)
+    problems = check_page(text, facts, meta, load_probe(in_path))
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))

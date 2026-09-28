@@ -78,6 +78,25 @@ def funnel(**fields) -> None:
           file=sys.stderr)
 
 
+def show_name(kind: str, ident: int) -> str | None:
+    """The record's name for a numeric ref, from ``tl <kind> show <id> --json``.
+
+    An id resolves without a lookup, but a summary and a creator-brief input
+    that say ``null`` where the channel and brand names belong are what the
+    writer reads back as "Creator" and "Brand". One bounded call; any failure
+    leaves the name None, exactly as before."""
+    try:
+        proc = subprocess.run([tl_data.TL_BIN, kind, "show", str(ident), "--json"],
+                              capture_output=True, text=True, timeout=FIND_TIMEOUT)
+        data = json.loads(proc.stdout) if proc.returncode == 0 else {}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    rows = data.get("results") if isinstance(data, dict) else None
+    row = rows[0] if isinstance(rows, list) and rows else (data if isinstance(data, dict) else {})
+    name = row.get("name") or row.get("channel_name")
+    return str(name).strip() or None if name else None
+
+
 def resolve(kind: str, ref: str) -> dict:
     """``{"id": N, "name": …}`` for one record, or ``{"candidates": [...]}``.
 
@@ -87,7 +106,7 @@ def resolve(kind: str, ref: str) -> dict:
     """
     ref = ref.strip()
     if NUMERIC.fullmatch(ref):
-        return {"id": int(ref), "name": None, "resolved_by": "id"}
+        return {"id": int(ref), "name": show_name(kind, int(ref)), "resolved_by": "id"}
     try:
         proc = subprocess.run([tl_data.TL_BIN, kind, "find", ref, "--json"],
                               capture_output=True, text=True,

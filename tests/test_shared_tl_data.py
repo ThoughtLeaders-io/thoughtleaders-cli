@@ -131,3 +131,38 @@ class TestBadOutput:
         with pytest.raises(tl_data.IncompleteDataError,
                            match="quota-truncated response"):
             tl_data._rows(response)
+
+
+class TestTransientRetry:
+    def _flaky(self, tmp_path: Path, first_exit: int, first_err: str) -> Path:
+        """A fake `tl` that fails once, then answers."""
+        marker = tmp_path / "tried"
+        script = tmp_path / "tl-flaky.py"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            f"m = {str(marker)!r}\n"
+            "if not os.path.exists(m):\n"
+            "    open(m, 'w').write('1')\n"
+            f"    sys.stderr.write({first_err!r}); sys.exit({first_exit})\n"
+            "sys.stdout.write('{\"results\": [{\"id\": 1}]}')\n")
+        runner = tmp_path / "tl"
+        runner.write_text(f"#!/bin/sh\nexec {sys.executable} {script} \"$@\"\n")
+        runner.chmod(runner.stat().st_mode | stat.S_IEXEC)
+        return runner
+
+    def test_a_timed_out_read_is_retried_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tl_data, "TRANSIENT_PAUSE_S", 0)
+        _use(monkeypatch, self._flaky(tmp_path, 1, "Error: The read operation timed out"))
+        assert tl_data.db_es({"size": 1}) == [{"id": 1}]
+
+    def test_a_rate_limit_is_retried_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tl_data, "TRANSIENT_PAUSE_S", 0)
+        _use(monkeypatch, self._flaky(tmp_path, 3, "slow down"))
+        assert tl_data.db_pg("SELECT 1") == [{"id": 1}]
+
+    def test_a_plain_failure_is_not_retried(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tl_data, "TRANSIENT_PAUSE_S", 0)
+        _use(monkeypatch, self._flaky(tmp_path, 1, "no such table"))
+        with pytest.raises(tl_data.DataError, match="no such table"):
+            tl_data.db_pg("SELECT 1")

@@ -196,7 +196,7 @@ def test_connections_page_leads_with_who_they_are_then_ranked_cards(tmp_path):
     conn = rest.split("<h2>About this ledger</h2>")[0]
     # the cards: numbered by order, type badge, provenance labels kept
     assert '<ol class="conn">' in conn and conn.count('<li><div class="body">') == 2
-    assert "<h3>Adopted a rescue dog — " in conn      # the "1." is the card's numeral
+    assert "<h3>Adopted a rescue dog · " in conn      # the "1." is the card's numeral
     assert 'class="badge badge-direct">direct</span>' in conn
     assert 'class="badge badge-precedent">category precedent</span>' in conn
     assert "[web]" in conn and "social: instagram" in conn
@@ -228,8 +228,8 @@ def test_the_ledger_footer_carries_the_honesty_surfaces(tmp_path):
     assert "6 facts: 5 confirmed, 1 unconfirmed" in footer
     # f3 is clinical but discussed in 3 videos, so it is usable in angles and
     # not counted as withheld; children + location are
-    assert "1 lifestyle, 1 clinical, 1 children, 1 location — 2 withheld from angles" in footer
-    assert ("287/412 transcript videos matched, 500 passages judged — "
+    assert "1 lifestyle, 1 clinical, 1 children, 1 location, 2 withheld from angles" in footer
+    assert ("287/412 transcript videos matched, 500 passages judged; "
             "absence is not evidence") in footer
     assert "format: solo · corpus 2019-04-02 → 2026-08-20 · lanes: transcripts" in footer
     assert "2 rounds · built 2026-08-31" in footer
@@ -241,7 +241,7 @@ def test_a_passing_clinical_mention_counts_as_withheld(tmp_path):
     html = _render_conn(tmp_path, _CONN_MD, facts=[
         {"claim": "takes medication", "domain": "health", "sensitivity": "clinical",
          "recurrence": 1}])
-    assert "1 clinical — 1 withheld from angles" in html
+    assert "1 clinical, 1 withheld from angles" in html
 
 
 def test_old_boolean_ledgers_count_as_withheld(tmp_path):
@@ -262,7 +262,7 @@ def test_the_footer_lists_linked_platforms_and_sibling_channels(tmp_path):
     assert 'href="https://instagram.com/patterrz"' in footer
     assert "linked but unread (socials lane not run)" in footer
     assert 'href="javascript' not in html and "javascript:x" in footer
-    assert "Patterrz Clips (id 43) — not mined" in footer
+    assert "Patterrz Clips (id 43): not mined" in footer
     read = _render_conn(tmp_path, _CONN_MD, meta=dict(meta, lanes="transcripts+socials"))
     assert "read (socials lane)" in read and "unread" not in read
 
@@ -1545,3 +1545,97 @@ def test_a_child_left_at_tier_none_is_never_suggested(tmp_path):
     md, inp = _points_brief(_moments(1), 1)
     problems = _problems(tmp_path, md, inp, _FACTS + _moments(4) + [kid])
     assert not any("has two children" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------- #
+# 2026-09-28 go-live fixes
+# --------------------------------------------------------------------------- #
+def test_no_em_dash_reaches_a_rendered_page(tmp_path):
+    md = _CONN_MD.replace("Acme is a direct-to-consumer dog food brand",
+                          "Acme is a dog food brand — direct to consumer")
+    html = _render_conn(tmp_path, md)
+    assert "\u2014" not in html and "\u2013" not in html
+    assert "Acme is a dog food brand, direct to consumer" in html
+    assert "<h3>Adopted a rescue dog · " in html
+
+
+def test_a_child_or_money_fact_at_tier_none_stays_off_the_page(tmp_path):
+    facts = [dict(f) for f in _FACTS] + [
+        {"fact_id": "f8", "claim": "has a son", "domain": "family", "confidence": "confirmed",
+         "sensitivity": "none", "sensitive": False, "recurrence": 6, "selected": True,
+         "quote": "my son loves this game more than i do",
+         "url": "https://www.youtube.com/watch?v=s&t=1s"},
+        {"fact_id": "f9", "claim": "borrowed money from her parents", "domain": "money",
+         "confidence": "confirmed", "sensitivity": "none", "sensitive": False,
+         "recurrence": 3, "selected": True,
+         "quote": "i borrowed $30,000 from my parents to start the shop",
+         "url": "https://www.youtube.com/watch?v=b&t=2s"},
+        {"fact_id": "f10", "claim": "earns from adsense", "domain": "money",
+         "provenance": "bio", "confidence": "unconfirmed", "sensitivity": "none",
+         "source_excerpt": "I make $20 monthly from Google Adsense", "source_url": "https://x.y/a"}]
+    html = _render_conn(tmp_path, _CONN_MD, facts=facts)
+    assert "has a son" not in html and "my son" not in html
+    assert "$30,000" not in html and "borrowed" not in html
+    assert "$20" not in html and "Adsense" not in html
+    import build_html
+    assert build_html.angle_ineligible_reason(facts[-3]) == "names a child"
+    assert build_html.angle_ineligible_reason(facts[-2]) == "names a sum of money"
+
+
+def test_a_precedent_quote_must_be_a_window_the_probe_returned(tmp_path):
+    import build_html
+    md = _CONN_MD.replace(
+        "## Streams on Sundays — **category precedent**\n\n",
+        "## Walks every morning — **category precedent** · **strong**\n\n"
+        "> every morning i walk the dog before work [watch](https://youtube.com/w?v=p&t=40s)\n\n")
+    md = md.replace("## 1. Adopted a rescue dog — **direct**", "## 1. Adopted a rescue dog — **direct** · **strong**")
+    md = md.replace("## About Acme", "## Thesis\n\nA fit.\n\n## About Acme")
+    md += "\n## Where this could go wrong\n\nNothing much.\n"
+    facts = [dict(f) for f in _FACTS]
+    probe_ok = {"windows": [{"text": "so every morning i walk the dog before work and then"}]}
+    probe_bad = {"windows": [{"text": "a window about something else entirely here"}]}
+    assert not [p for p in build_html.check_page(md, facts, _META, probe_ok)
+                if "probe" in p]
+    assert any("not a window the category probe returned" in p
+               for p in build_html.check_page(md, facts, _META, probe_bad))
+    # without a probe file the precedent card is judged as before
+    assert not [p for p in build_html.check_page(md, facts, _META, None) if "probe" in p]
+
+
+def test_an_unconfirmed_ledger_fact_is_not_a_personal_moment(tmp_path):
+    facts = [dict(f) for f in _FACTS]
+    facts[0]["confidence"] = "unconfirmed"
+    problems = _problems(tmp_path, _BRIEF_MD, facts=facts)
+    assert any("rests on an unconfirmed fact" in p for p in problems)
+
+
+def test_a_first_person_precedent_window_the_map_argued_is_personal(tmp_path):
+    """The host's own bank story, quoted from the probe under a precedent
+    card, was refused as "a topic the channel covered"."""
+    conn = _CONN_MD.replace(
+        "## Streams on Sundays — **category precedent**\n\n",
+        "## Fought the bank — **category precedent** · **strong**\n\n"
+        "> i had to fight my bank for weeks to raise the card limit [watch](https://youtube.com/w?v=p&t=40s)\n\n")
+    md = _BRIEF_MD.replace(
+        "> we finally adopted luna from the shelter last spring and she\n"
+        "> [Patterrz, 2026](https://www.youtube.com/watch?v=abc&t=12s)\n\n",
+        "> i had to fight my bank for weeks to raise the card limit\n"
+        "> [Patterrz, 2026](https://youtube.com/w?v=p&t=40s)\n\n")
+    md = md.replace("Open on the day Luna arrived from the shelter last spring, then the first bowl of "
+                    "the salmon recipe. Your viewers met her that week. You could open on her and let the "
+                    "food come second.",
+                    "Open on the weeks you had to fight the bank to raise the card limit, then what "
+                    "a card that just works would have saved you. Your viewers know that story.")
+    src = tmp_path / "creator-brief-7.md"
+    src.write_text(md)
+    cpath = tmp_path / "connections-7.md"
+    cpath.write_text(conn)
+    facts = [f for f in _FACTS if f["fact_id"] != "f1"]
+    ip = tmp_path / "creator-brief-input-7.json"
+    ip.write_text(json.dumps(_INPUT))
+    proc = subprocess.run([sys.executable, str(_SCRIPTS / "build_html.py"), "--brief",
+                           "--in", str(src), "--connections", str(cpath),
+                           "--facts", str(_write_ledger(tmp_path, facts)),
+                           "--input", str(ip), "--check"], capture_output=True, text=True)
+    problems = json.loads(proc.stdout)["problems"]
+    assert not any("topic the channel covered" in p for p in problems), problems

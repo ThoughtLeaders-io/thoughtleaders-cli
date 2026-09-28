@@ -295,6 +295,10 @@ NAME_EXPLICIT = re.compile(
     r"([A-Za-z]{2,20})", re.I)
 # Function words and channel-intro filler that sit beside every naming cue.
 NAME_STOP = frozenset("""
+believe happens million still than then there these they thing things think those though
+through today together took toward tried true turn under until using want wanted watch
+watching week weeks went were what when where which while will with within without word
+words work working world would year years yes yet
 about actually add after all also and another any are around away back because been
 before being best better big but call called came can cause come comes coming could
 day did didn does doing don down each even ever every everyone first for from get gets

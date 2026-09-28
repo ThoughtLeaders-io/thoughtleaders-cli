@@ -1604,3 +1604,50 @@ def test_selectable_refuses_an_uncorroborated_bio_fact():
     assert merge_pass.selectable(fact) is False
     assert "no upload corroborates it" in merge_pass.unselectable_reason(fact)
     assert merge_pass.selectable({**fact, "confidence": "confirmed"}) is True
+
+
+def test_one_moment_is_selected_once_even_when_it_became_two_facts(tmp_path):
+    """"used to live with my parents" landed in family AND home, both
+    selected, and the page said it twice."""
+    clustered = _write_clusters(tmp_path, [
+        _cluster("used to live with parents", video="v1", start=10, domain="family",
+                 quote="i used to live with my parents a few years ago"),
+        _cluster("lived at the family home", video="v1", start=10, domain="home",
+                 quote="i used to live with my parents a few years ago"),
+        _cluster("moved to austin", video="v2", start=50, domain="home")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    same = [f for f in facts.values() if f["start"] == 10]
+    assert len(same) == 2
+    assert sum(1 for f in same if f["selected"]) == 1
+    assert next(f for f in facts.values() if f["start"] == 50)["selected"] is True
+
+
+def test_a_child_fact_left_at_tier_none_is_never_selected(tmp_path):
+    clustered = _write_clusters(tmp_path, [
+        _cluster("has a son", video="v1", domain="family", tier="none",
+                 quote="my son loves this game more than i do"),
+        _cluster("moved to austin", video="v2", domain="home")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    kid = next(f for f in facts.values() if f["claim"] == "has a son")
+    assert kid["selected"] is False
+    assert merge_pass.unselectable_reason(kid) == "names a child"
+
+
+def test_a_fact_naming_a_sum_of_money_is_never_selected(tmp_path):
+    clustered = _write_clusters(tmp_path, [
+        _cluster("borrowed money from parents", video="v1", domain="money",
+                 quote="i borrowed $30,000 from my parents to start"),
+        _cluster("moved to austin", video="v2", domain="home")])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    loan = next(f for f in facts.values() if "borrowed" in f["claim"])
+    assert loan["selected"] is False
+    assert merge_pass.unselectable_reason(loan) == "names a sum of money"

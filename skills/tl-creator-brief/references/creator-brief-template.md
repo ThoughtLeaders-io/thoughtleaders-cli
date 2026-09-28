@@ -44,12 +44,27 @@ what this is, and that every quote links to the second it was said.
 - The creator's talking points are written for them, not copied from the
   brand. Take what the brand's brief says must be covered, find the moment
   in the ledger that lets this creator say it their way, and write the
-  point from that moment: the heading names it ("Your grandmother did it
-  with a slide ruler"), and two to four sentences say what they tell their
+  point from that moment: the heading names it ("Your first coffee is
+  already on camera"), and two to four sentences say what they tell their
   audience and show on camera, using the moment's own specifics (the
   person, the object, the creator's own joke) so the point could not be
   pasted into another creator's brief. The quote follows as the proof that
   it is theirs; it never stands in for the point.
+- Pick the moment that best backs up the brand's line, not just a true one.
+  The best moment is the creator already living what the brand claims (the
+  creator who grinds beans on camera every morning, for a brand whose line
+  is about the first cup). Test it: would a viewer who heard the moment
+  accept the brand's line as following from it? If not, choose another
+  moment, or leave the line in the closing list. One sentence of the body
+  makes that step from the moment to the product; a story set beside the
+  product with no step between them reads as nonsense, however true it is.
+- The brand's evidence needs backing too. A research point, study or claim
+  in the brand's brief goes under the talking point whose moment backs it
+  (the creator who says they are careful about what they read is the one to
+  carry the study), not left for the closing list when a moment fits.
+- On a re-book, do not repeat the last read. When the TL data lane's
+  sponsored reads show this creator already ran a read for the brand, read
+  it first and build on moments that read did not use.
 - Under every point, `**From <brand>'s brief:**` and the brand's line or
   lines it covers, verbatim. Group freely: one personal point can carry
   several of the brand's lines. The heading is never the brand's own line.

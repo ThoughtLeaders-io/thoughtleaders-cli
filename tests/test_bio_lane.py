@@ -313,6 +313,35 @@ def test_facts_cli_writes_the_records(tmp_path):
     assert written["facts"][0]["provenance"] == "bio"
 
 
+def test_facts_cli_routes_the_records_to_the_merge_shards(tmp_path):
+    """No script sent the bio facts to the shards; every run did it by hand."""
+    windows = _bio_batch()
+    batch = tmp_path / "batch-000.json"
+    batch.write_text(json.dumps(windows))
+    returns = tmp_path / "batch-000.extract.json"
+    returns.write_text(json.dumps({"batch": "000", "windows": 1,
+                                   "gems": [_gem()], "not_gems": []}))
+    shard1 = tmp_path / "merge-input-1.jsonl"
+    shard1.write_text(json.dumps({"c": "c001", "domain": "work"}) + "\n")
+    shard2 = tmp_path / "merge-input-2.jsonl"
+    shard2.write_text(json.dumps({"c": "c002", "domain": "other-domain"}) + "\n")
+    prepare = tmp_path / "prepare.json"
+    prepare.write_text(json.dumps({"files": [str(shard1), str(shard2)]}))
+    out = tmp_path / "bio-facts.json"
+    proc = subprocess.run([sys.executable, str(_SCRIPTS / "bio_lane.py"), "facts",
+                           "--batch", str(batch), "--returns", str(returns),
+                           "--out", str(out), "--prepare", str(prepare)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    res = json.loads(proc.stdout)
+    domain = res["facts"][0]["domain"]
+    files = {Path(k).name: v for k, v in res["shard_files"].items()}
+    assert set(files) == {"bio-facts-s1.json", "bio-facts-s2.json"}
+    home = "bio-facts-s1.json" if domain == "work" else "bio-facts-s1.json" if domain != "other-domain" else "bio-facts-s2.json"
+    assert files[home] == 1 and sum(files.values()) == 1
+    assert json.loads((tmp_path / home).read_text())[0]["provenance"] == "bio"
+
+
 # --------------------------------------------------------------------------- #
 # corroboration: terms, probe, round recipe
 # --------------------------------------------------------------------------- #
