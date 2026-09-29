@@ -105,11 +105,11 @@ from the report's `MetaDataUri`; read it before trusting a column name.
 | Performance by Day | One row per day | Grouped numbers |
 | Advanced Action Listing | One row per action | The only report with each action's status |
 
-Grouped report columns (checked on a Partner account, September 2026):
+Grouped report columns (checked on Brand and Partner accounts, September 2026):
 
 | Column | Meaning |
 |---|---|
-| `Clicks` | Unique clicks |
+| `Clicks` (Brand Performance by Day: `zzzclicks`; raw clicks `totalzzzclicks`) | Unique clicks |
 | `Actions` | Approved plus pending, reversals excluded. No status split |
 | `Sales`, `Leads`, `Calls`, `Mobile_Installs` | Actions split by type |
 | `Sale_Amount` | Sale value ("Revenue" on the Brand dashboard) |
@@ -149,7 +149,8 @@ live accounts in September 2026; API names come from Impact's documentation.
 | Social platform | none | `social_platform` | none |
 | Partner property | none | `property_type`, `property_name` | `property_type`, `property_name` |
 
-Report pages return rows with blank columns left out: a missing column on a row means blank.
+Web app reports return only the columns the view shows, and blanks as "". A needed column absent
+from every row is hidden, not blank: add it on screen (SKILL.md stage 2).
 
 ## Traps
 

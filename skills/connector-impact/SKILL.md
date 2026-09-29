@@ -26,7 +26,8 @@ translates Impact terms into TL terms and joins the two datasets.
 Read before any analysis:
 - `references/impact-to-tl-mapping.md`: vocabulary, metric rules, join keys, dates, costs, currency.
 - `references/impact-schema.md`: Impact objects, fields, filters and traps.
-- TL fields: the `tl` skill's references.
+- TL fields: the `tl` skill's `business-glossary.md` and `postgres-schema.md`;
+  `elasticsearch-schema.md` for video lookups.
 
 ## When to use
 
@@ -81,8 +82,9 @@ every sum and ratio with a calculation (SQL or a quick code step), never by hand
 4. Identify the account type from the API base or the web app address (mapping 5). IF it differs
    from the account the user described, stop and tell the user.
 5. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
-6. Record the currency the Impact figures are in (the report's or export's currency) and the TL
-   deals' `price_currency`. IF they differ, tell the user now and apply mapping 2.3.
+6. Record the currency the Impact figures are in and the TL deals' `price_currency`. On a
+   report, the figures' currency is its display-currency setting; do not change it. IF the two
+   differ, tell the user now and apply mapping 2.3.
 7. State the scope back: brand, window, view, states (approved headline, pending separate),
    currencies.
 
@@ -106,17 +108,19 @@ ORDER BY asp.channel_id, al.publish_date
 LIMIT 1000
 ```
 
-- IF creators are named: add `AND asp.channel_id IN (...)` with every TL channel record of those
-  creators (their YouTube channel and any separate TikTok or Instagram record, found by exact name
-  or handle with the `tl` skill's bulk lookup, `postgres-schema.md`). IF a creator has more than
-  one record, ask the user which to include; "all" means one creator across platforms.
+- IF creators are named: add `AND asp.channel_id IN (...)` with every TL record of those
+  creators. Find records by exact match (the `tl` skill's bulk lookup) on the channel name, the
+  handle, and every handle in the channel's `social_links` and `url`, against other records'
+  `common_name` and `url`. IF more than one record matches, list them with their URLs and ask
+  which to include; "all" means one creator across platforms.
 - Each deal's platform comes from its ad spot's `ad_format` (mapping 1.4).
 - IF no rows: continue. Every partner goes to "not booked through TL" or "not a TL creator"
   (mapping 4.4).
 - Run the coverage count (mapping 3.5) and tell the user which join keys this brand's deals have.
 
-Get views from TL's video index in one call, by the `article_id` of the YouTube deals. Every other
-live deal has no TL views (mapping 4.2):
+Get views from TL's video index in one call. A YouTube deal's video id is its `article_id`, or
+else the id in its `media_url` (the video link; `urls` holds destination links). A deal with
+neither, or on another platform, has no TL views (mapping 4.2):
 
 ```bash
 tl db es '{"size": <number of videos>, "query": {"terms": {"id": ["<article_id>", "..."]}},
@@ -126,8 +130,8 @@ tl db es '{"size": <number of videos>, "query": {"terms": {"id": ["<article_id>"
 ### 2. Impact side
 
 1. Partners: id, name, website, property URLs (`list_partners`, `GET .../MediaPartners`, or the
-   Partners screen). IF creators are named, search only for those creators' partners, by their
-   aliases (mapping 3.1).
+   Partners screen search; report partner filters are capped). IF creators are named, search
+   only for those creators' partners, by their aliases (mapping 3.1).
 2. Action-level data for the partners in scope (Advanced Action Listing, or `GET .../Actions`
    filtered with `ActionDateStart` / `ActionDateEnd`): date, status, event type, promo code, Ad,
    SubIds, SharedId, social platform, sale amount, commission. Group by partner, date, status and
@@ -136,6 +140,10 @@ tl db es '{"size": <number of videos>, "query": {"terms": {"id": ["<article_id>"
    Performance by Partner / by Day report).
 4. Map every column to its name in the schema's *Field names by route* table before any math.
    Name any column not in it before using it.
+
+Web app route: before reading a report, set its filters (dates, status, partner, channel) to the
+run's scope and add any needed column that the view does not return, on screen only. Never save,
+schedule, export or download.
 
 IF the route returns lifetime totals only, tell the user decay over time is unavailable.
 
