@@ -19,9 +19,9 @@ unless another table is named; confirm an unfamiliar column with `tl schema pg`.
 | Contract / `ContractId`, `ContractName` | none | Commission terms. Not a TL IO. |
 | Ad / `AdId`, `AdName`, `AdType` | Loosely `tracking_url` | A tracking link or creative. Not a TL Ad Spot. |
 | Tracking or vanity link (often `<brand>.sjv.io`) | `tracking_url` | Issued per partner. |
-| Promo code / `Action.PromoCode` | `cta_text` (web app: promo code) | Rarely filled in TL (3.1). |
+| Promo code / `Action.PromoCode` | `cta_text` (web app: promo code) | Rarely filled in TL (3.5). |
 | Action, Conversion / `Action` | `conversions` (count only) | One sale, sign-up or install credited to a partner. |
-| Event type / `ActionTrackerId`, `ActionTrackerName`, `EventCode` | none | The brand's label ("Online Sale", "App Install"). Never sum across types without saying so. |
+| Event type / `ActionTrackerId`, `ActionTrackerName`, `EventCode` | none | The brand's label ("Online Sale", "Subscription", "Top-up"). Counts are shown per type (section 2). |
 | Action inquiry / `ActionInquiry` | none | A partner claiming an uncredited sale. |
 | Transactions, Requests, Content, Refer & Earn, Data Lab | none | Out of scope. |
 
@@ -45,8 +45,24 @@ unless another table is named; confirm an unfamiliar column with `tl schema pg`.
 | `APPROVED` | Locked or manually approved | Headline numbers |
 | `PENDING` | In the brand's review window, can reverse | Shown beside approved, labelled "pending" |
 | `REVERSED` | Refund, fraud, duplicate or credited elsewhere | Excluded; report the count |
+| `N/A (Media Source)` | Not a commissionable state | Excluded from approved and pending; report the count |
 
-Impact dashboard totals include pending. Every number states which states it includes.
+Match state values case-insensitively (reports write "Approved", the API `APPROVED`). Impact
+dashboard totals include pending. Every number states which states it includes.
+
+### 1.4 Deal platform
+
+A TL deal's platform comes from its ad spot's `ad_format`, not from the channel record:
+
+| `ad_format` | Platform | TL views |
+|---|---|---|
+| 4 | YouTube | From the video index, by `article_id` |
+| 8 | TikTok | None |
+| 9 | Instagram | None |
+| Any other | Other placement (newsletter, stream, X) | None |
+
+Older deals can sit under the creator's YouTube channel with a TikTok or Instagram ad spot; newer
+ones can be separate TL channel records for the same creator.
 
 ## 2. Metrics
 
@@ -62,6 +78,9 @@ Impact dashboard totals include pending. Every number states which states it inc
 | none | | Paid to TL: `price` + `price_currency` | TL only. |
 | none | | Sponsorship CPM: Paid to TL ÷ the video's current TL views × 1,000 | Always computed. Never from projected views (2.2). |
 | none | | `performance_grade` | Never set by this skill. |
+
+Event types: show approved actions per event type, plus a total labelled "all event types".
+Sales revenue and commission sum across types.
 
 Other cross metrics:
 - Actions per 1,000 views and clicks per 1,000 views (Impact ÷ TL views × 1,000): in the table.
@@ -100,12 +119,12 @@ TL views × 1,000); actions and clicks per 1,000 views. No figure that adds comm
 
 | Line | Definition |
 |---|---|
-| TL videos included | Every live sold TL deal for this brand and creator, to today |
+| TL videos included | Every live sold TL deal for this brand and creator, across the creator's TL records in scope, to today |
 | Paid to TL | Sum of those prices, in the price currency |
 | Commission since the first TL video | Approved, first TL go-live to today, converted (2.3) |
 | Commission before the first TL video | Approved, from the start of Impact data to the day before the first go-live. Own line, labelled "outside TL bookings". Not added to any all-in figure |
 | All-in cost | Paid to TL + commission since the first TL video |
-| Views to date | Current TL views of those videos. Count each video once (same `article_id` or `media_url`); each deal's price still counts. Never channel total views |
+| Views to date | Current TL views of those videos. Count each video once (same `article_id` or `media_url`); each deal's price still counts. Deals with no TL views are listed by id and left out. Never channel total views |
 | Sponsorship CPM / all-in CPM | Paid to TL ÷ views × 1,000 / all-in cost ÷ views × 1,000 |
 | Approved actions since the first TL video | Impact, same dates as the commission |
 | Sponsorship / all-in cost per action | Paid to TL ÷ actions / all-in cost ÷ actions |
@@ -121,15 +140,14 @@ TL views × 1,000); actions and clicks per 1,000 views. No figure that adds comm
 
 ### 2.3 Currency
 
-First record which currency the Impact figures are in: reports can show them already converted by
-Impact. IF they are already in the TL `price_currency`, do not convert again, and say Impact
-converted them. IF the Impact currency equals the TL `price_currency`: no conversion. ELSE:
+Every money heading names its currency, in every case, e.g. "Paid to TL (USD)", "Sales revenue,
+Impact (EUR)". Record the currency of the Impact figures from the report or export; reports have a
+display-currency setting, so say so when Impact has already converted them.
 
-- **Layer 1, always:** every money figure in its own currency, with the currency in the column
-  name, e.g. "Paid to TL (USD)", "Sales revenue, Impact (EUR)". Money divided by a count or by
-  views (sponsorship CPM, sponsorship cost per action) stays in Layer 1.
-- **Layer 2, when money is compared with money** (everything in the all-in block): add a
-  converted column beside the Layer 1 column, never in place of it.
+- IF the Impact figures are in the TL `price_currency`: no conversion.
+- ELSE, when money is compared with money (everything in the all-in block): add a converted column
+  beside the original one, never in place of it. Money divided by a count or by views (sponsorship
+  CPM, sponsorship cost per action) is not converted.
   - Convert the Impact figure into the price currency. Never convert the TL price.
   - Rate: the ECB euro reference rate, averaged over the month of the Impact activity. Convert
     each month at its own rate, then sum. Convert other currencies through the euro.
@@ -139,23 +157,55 @@ converted them. IF the Impact currency equals the TL `price_currency`: no conver
 
 ## 3. Identity join
 
-Stop at the first key that resolves. Record the key and a confidence.
+Two steps: partner to creator (3.2), then action to deal where the data allows (3.3).
 
-| # | Impact field | TL field | Resolves | Strength | Notes |
-|---|---|---|---|---|---|
-| 1 | Partner tracking or vanity link | `tracking_url` | Deal | Strong | Exact match, ignoring `https://`, `www.` and a trailing slash |
-| 2 | `Properties[].Url` (YouTube) | `thoughtleaders_channel.url`, `external_channel_id` | Channel | Strong | |
-| 3 | Handle in `Properties[]` or `Website` | `thoughtleaders_channel.common_name` | Channel | Strong if exact | |
-| 4 | `Action.PromoCode` | `cta_text` | Deal | Strong, rarely present | `UPPER(cta_text) = UPPER('<code>')`. `cta_text` can be a sentence containing the code, so also try `cta_text ILIKE '%<code>%'` and read the hit |
-| 5 | `SharedId` (Action, Click), `PartnerRelated.SubId1-3` (Click), `PartnerValues.Value1-3` (Partner) | `adlink.id` or `thoughtleaders_channel.id` | Deal or channel | Strong if a TL id was put there | No standing convention; check a sample first |
-| 6 | `MediaPartnerName` | `channel_name` | Channel | Weak | Often a legal name or an agency; needs a second signal |
-| 7 | `MediaPartnerId` | none | | | TL stores no Impact partner id |
+### 3.1 Creator aliases
 
-Look up keys 2, 3 and 6 as SKILL.md stage 3 describes. Never open or resolve a tracking link
-(no browser visit, no redirect-following `curl`); a link on the brand's own short domain stays
-unresolved.
+For each creator in scope, collect from TL: `channel_name` and `common_name` of every TL record of
+the creator (the YouTube channel and any separate TikTok or Instagram record), the handle in each
+record's `url`, and the handles in `social_links`. Compare case-insensitively, ignoring `@`,
+spaces and punctuation.
 
-### 3.1 Coverage count
+### 3.2 Partner to creator
+
+Stop at the first key that resolves.
+
+| # | Impact field | TL field | Strength | Notes |
+|---|---|---|---|---|
+| 1 | Partner tracking or vanity link | `tracking_url` | Strong | Exact match, ignoring `https://`, `www.` and a trailing slash |
+| 2 | `Properties[].Url` | `url` or `external_channel_id` of any of the creator's records | Strong | |
+| 3 | Partner name, `Website` or a `Properties[]` handle | An alias (3.1) | Strong if exact | |
+| 4 | `SharedId`, SubIds or `PartnerValues` holding a TL id | `adlink.id` or `thoughtleaders_channel.id` | Strong if a TL id is there | Check a sample first |
+| 5 | Promo code on the partner's own actions | Contains an alias (3.1), e.g. code "JANE10" for "Jane Cooks" | Medium | Needs a second signal |
+| 6 | Partner name | `channel_name` | Weak | Needs a second signal |
+| 7 | `MediaPartnerId` | none | | TL stores no Impact partner id |
+
+Second signals (a medium or weak key needs at least one):
+- The partner's first action falls within 14 days after the creator's first TL go-live for the brand.
+- The partner's Impact contract name mentions ThoughtLeaders.
+- A property URL, country or partner group consistent with the TL record.
+
+### 3.3 Action to deal (per-video evidence)
+
+| Impact field | TL field | Notes |
+|---|---|---|
+| Tracking link | `tracking_url` on only one deal | |
+| Promo code | `cta_text` on only one deal | `UPPER(cta_text) = UPPER('<code>')`. `cta_text` can be a sentence containing the code: search within this brand's deals only (`pb.brand_id` filter) with `cta_text ILIKE '%<code>%'` |
+| `SharedId` or a SubId holding the TL deal id | `adlink.id` | |
+| Ad unique to one video | `media_url` of one deal | Only when the Ad's name or link identifies the video |
+| Social platform or property on the action | Deal platform (1.4) | Separates platforms, not videos (4.5) |
+
+Never open or resolve a tracking link (no browser visit, no redirect-following `curl`); a link on
+the brand's own short domain stays unresolved.
+
+### 3.4 The creator's codes credited to other partners
+
+Collect the promo codes on the creator's own actions. Actions using those codes but credited to
+another partner (often a coupon site) go on their own line under the creator, "creator's code,
+credited to <partner>", with counts, sales revenue and commission. They are not added to the
+creator's totals.
+
+### 3.5 Coverage count
 
 ```sql
 SELECT COUNT(*) AS sold,
@@ -168,8 +218,8 @@ WHERE pb.brand_id = <brand_id> AND al.publish_status = 3
 LIMIT 5
 ```
 
-Promo codes are almost never filled and TL click columns are empty; tracking-link coverage varies
-by brand. IF keys 1, 4 and 5 are thin, the main path is keys 2, 3 and 6 plus the go-live timeline.
+Promo codes are almost never stored in TL and TL click columns are empty; tracking-link coverage
+varies by brand. IF the deal keys in 3.3 are thin, the result is a go-live timeline.
 
 ## 4. Dates
 
@@ -178,17 +228,23 @@ link, code or id.
 
 ### 4.1 Per-video evidence
 
-Per-video evidence is a tracking link or promo code stored on only one TL deal (keys 1, 4), or a
-SharedId or SubId holding the TL deal id (key 5). With it, attribute performance to that deal in
-windows from its `publish_date` (default 0 to 30, 31 to 90, over 90 days).
+Per-video evidence is any deal key in 3.3 except the platform. With it, attribute performance to
+that deal in windows from its `publish_date` (default 0 to 30, 31 to 90, over 90 days).
 
 ### 4.2 Go-live timeline (no per-video evidence)
 
 Never attribute performance to individual videos. Build one row per go-live date of this brand
 and creator, each with Impact's numbers from that date to the day before the next go-live.
 
-- Deals live on the same day share one row with all their deal ids; views are summed, with each
-  video's views in brackets. Go-lives on different days are always separate rows, however close.
+- Deals live on the same day share one row with all their deal ids. Views are summed counting
+  each video once (same `article_id` or `media_url`), with each video's views in brackets.
+  Go-lives on different days are always separate rows, however close.
+- A deal with no TL views (non-YouTube platform, or no `article_id`) is listed in its row as "no
+  TL views" and left out of views, CPM and per-1,000-view figures.
+- IF a row's Paid to TL is 0 (a deal included in a package priced on another deal), its CPM reads
+  "no price on this row". The creator total and the block carry the package price.
+- Under the table, name every deal on a non-YouTube ad spot, and every YouTube deal with no video
+  link, as "social post or unlinked video, no TL views".
 - IF a TL video went live before the window: the latest such deal is the first row, keeps its
   real date, is marked "went live before the window", and its period starts at the window start.
   ELSE the first row is "before the first TL video" (window start to the day before the first
@@ -225,11 +281,21 @@ Impact partner totals are lifetime and hide decay. Never judge a creator on a li
     `projected_views` (frozen when TL first indexed it), as a percent change.
 - Money compared across groups goes into one currency per 2.3, with the rate shown.
 
+### 4.5 Social platforms
+
+- IF the creator's actions carry a platform split (social platform, property, or an Ad per
+  platform): report the YouTube lane against the TL YouTube deals (Paid to TL, TL views, 4.2), and
+  each social lane with Impact's results and what the brand paid through Impact as its cost. TL's
+  social deals are listed in their lane with no TL views.
+- ELSE: one timeline and one block for the creator across all platforms. Social deals are listed
+  with "no TL views" and named under the table (4.2).
+
 ## 5. Account type
 
 | | Brand account | Partner account (TL's or a creator's) |
 |---|---|---|
 | API base | `/Advertisers/{AccountSID}/` | `/Mediapartners/{AccountSID}/` |
+| Web app address | `/secure/advertiser/` | `/secure/mediapartner/` |
 | The brand | The account | `CampaignName` on each row, via `tl brands find` |
 | The channel | Each partner | Not the partner; use the link, promo code or SharedId |
 | `Payout` means | Commission the brand pays | Commission this account earns |

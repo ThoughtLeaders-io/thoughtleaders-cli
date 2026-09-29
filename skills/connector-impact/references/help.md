@@ -17,6 +17,7 @@ live, views, what the sponsorship cost. This skill lines the two up, so you can 
     `https://mcp.impact.com/mcp` and sign in with your Impact login.
   - The Impact API, with a read-only token you create in Impact (Settings → Technical → API).
   - A CSV export from Impact's Reports (Performance by Partner or by Day), dropped into the chat.
+  - The Impact website, open and signed in in your browser. Slowest, but no setup.
 
 Never paste an Impact password or token into the chat.
 
@@ -35,9 +36,14 @@ Your choice of views (you'll be asked if you don't say):
 
 ## How matching works
 
-In order: the tracking link on the deal, the YouTube link on the Impact partner's profile, the
-creator's handle, a promo code, a TL id stored in the link, and last the partner's name, which is
-double-checked. If TL doesn't have a creator's channel yet, you'll be asked for the link; their
+In order: the tracking link, the links on the Impact partner's profile, the creator's handles on
+any platform, a TL id stored in the link, a promo code containing the creator's name, and last the
+partner's name. The weaker matches are double-checked, for example against the date of the first
+TL video. If a partner could be more than one TL channel, you're asked which to include.
+
+YouTube, TikTok and Instagram deals for the same creator are read together, as one creator.
+TikTok and Instagram posts have no TL views, so they're listed but left out of view-based
+figures. If TL doesn't have a creator's channel yet, you'll be asked for the link; their
 TL data takes about a day to fill in.
 
 ## Dates

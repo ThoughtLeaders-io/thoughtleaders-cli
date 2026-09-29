@@ -12,6 +12,7 @@ The user brings one route. This skill never holds a login.
 | Impact MCP | Custom connector `https://mcp.impact.com/mcp`, signed in with the user's Impact login | Most questions; aggregates on Impact's side |
 | Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API) | Action-level detail, long ranges |
 | CSV export | Reports: Performance by Partner, Performance by Day, Advanced Action Listing | No setup |
+| Impact web app | The user's own browser, already signed in. Read report pages only: no downloads, no settings, no answers to pop-ups | When none of the above is set up. Slowest route; same report data |
 
 MCP tools on a Brand account:
 
@@ -35,7 +36,7 @@ Filters: `ActionDateStart` / `ActionDateEnd` (on `EventDate`; use these for wind
 |---|---|---|
 | `Id` | string | Action id |
 | `CampaignId`, `CampaignName` | integer, string | Program |
-| `ActionTrackerId`, `ActionTrackerName`, `EventCode` | integer, string, string | Event type |
+| `ActionTrackerId`, `ActionTrackerName`, `EventCode` | integer, string, string | Event type, named by the brand. List the types present before any math |
 | `MediaPartnerId`, `MediaPartnerName` | integer, string | Credited partner |
 | `State` | string | `PENDING`, `APPROVED`, `REVERSED` |
 | `AdId` | integer | Ad or link behind the winning click |
@@ -121,11 +122,34 @@ On a Partner account the labels say "Earnings" instead of "Cost" (Action Earning
 Earnings); the underlying columns are the same. Reports have a display-currency setting, so
 figures can arrive already converted by Impact.
 
-Advanced Action Listing columns include `Action_Id`, `oid`, `Status`, `status_detail`,
-`Event_Type`, `Referral_Date`, `Action_Date`, `Locking_Date`, `Actual_Clearing_Date`,
-`Sale_Amount`, `Payout`, `Original_Payout`, `Bonus_Payout`, `Promo_Code`, `SubId1` to `SubId3`,
-`SharedId`, `Ad`, `Referring_URL`, `Customer_Id`, `original_currency` and
-`original_currency_sale_amount`.
+## Field names by route
+
+Map every column to its row here before any math. Brand and Partner report names were checked on
+live accounts in September 2026; API names come from Impact's documentation.
+
+| Field | Brand API (Action) | Brand report (Advanced Action Listing) | Partner report |
+|---|---|---|---|
+| Action id | `Id` | `Action_Id` | `Action_Id` |
+| Order id | `Oid` | `OID` | `oid` |
+| Conversion date | `EventDate` | `Action_Date` | `Action_Date` |
+| Click date | `ReferringDate` | `Referral_Date` | `Referral_Date` |
+| Locking date | `LockingDate` | `locking_date` | `Locking_Date` |
+| State | `State` | `Status` ("Approved", "Pending", "Reversed", "N/A (Media Source)") | `Status` |
+| Event type | `ActionTrackerName` | `Action_Tracker` ("Event Type") | `Event_Type` |
+| Partner | `MediaPartnerId`, `MediaPartnerName` | `mp_id`, `Media_Partner` | none (the brand is `Campaign`) |
+| Sale amount | `Amount` | `Sale_Amount` ("Revenue") | `Sale_Amount` |
+| Commission | `Payout` | `Payout` ("Action Cost") | `Payout` ("Action Earnings") |
+| Bonus | none | `bonus_cost` | `Bonus_Payout` |
+| Client cost | `ClientCost` | `Client_Cost` (can be 0 on every row: take Total Cost from a grouped report) | none |
+| Promo code | `PromoCode` | `Promo_Code` | `Promo_Code` |
+| SharedId | `SharedId` | `Shared_Id` | `SharedId` |
+| SubIds | Click `PartnerRelated.SubId1-3` | `SubId1` to `SubId3` | `SubId1` to `SubId3` |
+| Ad | `AdId` | `Ad`, `ad_id`, `ad_type` | `Ad` |
+| Contract | none | `IO_ID`, `IO` | `io_name` |
+| Social platform | none | `social_platform` | none |
+| Partner property | none | `property_type`, `property_name` | `property_type`, `property_name` |
+
+Report pages return rows with blank columns left out: a missing column on a row means blank.
 
 ## Traps
 
