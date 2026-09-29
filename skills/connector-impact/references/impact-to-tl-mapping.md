@@ -82,6 +82,11 @@ ones can be separate TL channel records for the same creator.
 Event types: show approved actions per event type, plus a total labelled "all event types".
 Sales revenue and commission sum across types.
 
+**Breakdown table**, under each view, per creator: one section each for event type, promo code and
+Ad, with approved actions, pending actions, sales revenue and commission per value. Skip a section
+only when that field is blank on every action. Clicks are not split: Impact counts them per
+partner, not per code, type or sale.
+
 Other cross metrics:
 - Actions per 1,000 views and clicks per 1,000 views (Impact ÷ TL views × 1,000): in the table.
 - Return on sponsorship and all-in return: in the to-date block only (2.2).
@@ -255,7 +260,8 @@ and creator, each with Impact's numbers from that date to the day before the nex
   Impact cannot tell them apart. Each period shows what came in after that go-live and before
   the next one. Earlier videos were still live and may have driven part of it."
 - Columns: Go-live date · TL deal(s) · TL views · Paid to TL · Sponsorship CPM · Impact period ·
-  Clicks · Approved actions · Pending · Sales revenue, Impact · Affiliate commission, Impact.
+  Clicks · Approved actions (one column per event type when there is more than one, plus "all
+  event types") · Pending · Sales revenue, Impact · Affiliate commission, Impact.
 - Decay view or on request: one row per week, go-live weeks marked, same rules.
 
 ### 4.3 Lifetime totals

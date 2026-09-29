@@ -184,8 +184,8 @@ show both, labelled; never overwrite or average.
 
 In this order:
 1. Scope line: brand, window, states, currencies and conversion rates used, Impact route.
-2. The chosen views as tables, each followed by a breakdown by event type, promo code and Ad
-   (only those with more than one value) and its "All-in cost to date" block (mapping 2.2).
+2. The chosen views as tables, each followed by its breakdown table and its "All-in cost to
+   date" block (mapping 2.2).
    Label every figure TL or Impact, and every money column with its currency.
 3. Join table: partner → channel → deal, key, confidence.
 4. Creators not booked through TL, then partners that are not TL creators, then TL deals with no
