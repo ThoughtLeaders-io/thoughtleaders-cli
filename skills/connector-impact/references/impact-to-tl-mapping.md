@@ -73,7 +73,7 @@ ones can be separate TL channel records for the same creator.
 | Action Cost | sum of `Payout` | none | Affiliate commission paid to the creator through Impact. Never the TL price (2.1). |
 | Revenue | sum of `Amount` | `revenue` + `revenue_currency` | The brand's sales. In TL, "revenue" means sold deal price. Write "sales revenue (Impact)". |
 | Total Cost | sum of `ClientCost` | none | Commission plus Impact fees and bonuses; not the creator's cost. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
-| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. |
+| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. IF more than half the actions carry a promo code, omit it and say sales are code-tracked. |
 | none | | Views: CLI `views` (video index, by `article_id`), `counted_views`, `projected_views_at_purchase_date` | TL only. Impact has no views. |
 | none | | Paid to TL: `price` + `price_currency` | TL only. |
 | none | | Sponsorship CPM: Paid to TL ÷ the video's current TL views × 1,000 | Always computed. Never from projected views (2.2). |
@@ -117,8 +117,9 @@ Commission accumulates while the fee is fixed, so a combined figure is valid onl
 videos and the same dates.
 
 **Table rows** (scorecard or timeline): Impact clicks, approved actions, pending actions,
-conversion rate, sales revenue, commission; TL views, Paid to TL, sponsorship CPM (Paid to TL ÷
-TL views × 1,000); actions and clicks per 1,000 views. No figure that adds commission to Paid to TL.
+conversion rate, sales revenue and commission (approved only); TL views, Paid to TL, sponsorship
+CPM (Paid to TL ÷ TL views × 1,000); actions and clicks per 1,000 views. No figure that adds
+commission to Paid to TL.
 
 **Block**, one per creator, under the table:
 
@@ -127,7 +128,7 @@ TL views × 1,000); actions and clicks per 1,000 views. No figure that adds comm
 | TL videos included | Every live sold TL deal for this brand and creator, across the creator's TL records in scope, to today |
 | Paid to TL | Sum of those prices, in the price currency |
 | Commission since the first TL video | Approved, first TL go-live to today, converted (2.3) |
-| Commission before the first TL video | Approved, from the start of Impact data to the day before the first go-live. Own line, labelled "outside TL bookings". Not added to any all-in figure |
+| Commission before the first TL video | Approved, from the partner's first action to the day before the first go-live. Own line, labelled "outside TL bookings". Not added to any all-in figure |
 | All-in cost | Paid to TL + commission since the first TL video |
 | Views to date | Current TL views of those videos. Count each video once (same `article_id` or `media_url`); each deal's price still counts. Deals with no TL views are listed by id and left out. Never channel total views |
 | Sponsorship CPM / all-in CPM | Paid to TL ÷ views × 1,000 / all-in cost ÷ views × 1,000 |
@@ -156,8 +157,9 @@ display-currency setting, so say so when Impact has already converted them.
   - Convert the Impact figure into the price currency. Never convert the TL price.
   - Rate: the ECB euro reference rate, averaged over the month of the Impact activity. Convert
     each month at its own rate, then sum. Convert other currencies through the euro.
-  - Look the rate up; never use one from memory. IF no rate is found, stop at Layer 1 and say a
-    rate is needed.
+  - Look the rate up; never use one from memory. IF the month's average is not yet published,
+    average that month's published daily rates and say so. IF no rate is found, show the original
+    currency only and say a rate is needed.
   - Show the rates used in the column name or a note.
 
 ## 3. Identity join
@@ -205,10 +207,10 @@ the brand's own short domain stays unresolved.
 
 ### 3.4 The creator's codes credited to other partners
 
-Collect the promo codes on the creator's own actions. Actions using those codes but credited to
-another partner (often a coupon site) go on their own line under the creator, "creator's code,
-credited to <partner>", with counts, sales revenue and commission. They are not added to the
-creator's totals.
+The creator's codes are the promo codes on the creator's own actions that contain an alias
+(3.1). Actions using them but credited to another partner go on their own line under the creator,
+"creator's code, credited to <partner>", with counts, sales revenue and commission, not added to
+the creator's totals.
 
 ### 3.5 Coverage count
 
@@ -244,12 +246,14 @@ and creator, each with Impact's numbers from that date to the day before the nex
 - Deals live on the same day share one row with all their deal ids. Views are summed counting
   each video once (same `article_id` or `media_url`), with each video's views in brackets.
   Go-lives on different days are always separate rows, however close.
-- A deal with no TL views (non-YouTube platform, or no `article_id`) is listed in its row as "no
-  TL views" and left out of views, CPM and per-1,000-view figures.
-- IF a row's Paid to TL is 0 (a deal included in a package priced on another deal), its CPM reads
-  "no price on this row". The creator total and the block carry the package price.
+- A video attached to deals on several go-live dates counts its views on its first row only;
+  later rows read "views counted on <date>".
+- A deal with no TL views (non-YouTube platform, or no video id, Stage 1) is listed in its row
+  as "no TL views" and left out of views, CPM and per-1,000-view figures.
+- IF any deal in the timeline is priced 0 (package pricing), sponsorship CPM appears only on the
+  creator total and in the block; rows show Paid to TL without a CPM.
 - Under the table, name every deal on a non-YouTube ad spot, and every YouTube deal with no video
-  link, as "social post or unlinked video, no TL views".
+  id (Stage 1), as "social post or unlinked video, no TL views".
 - IF a TL video went live before the window: the latest such deal is the first row, keeps its
   real date, is marked "went live before the window", and its period starts at the window start.
   ELSE the first row is "before the first TL video" (window start to the day before the first
@@ -259,9 +263,8 @@ and creator, each with Impact's numbers from that date to the day before the nex
 - Directly above the table, write: "All of this creator's videos use the same Impact link, so
   Impact cannot tell them apart. Each period shows what came in after that go-live and before
   the next one. Earlier videos were still live and may have driven part of it."
-- Columns: Go-live date · TL deal(s) · TL views · Paid to TL · Sponsorship CPM · Impact period ·
-  Clicks · Approved actions (one column per event type when there is more than one, plus "all
-  event types") · Pending · Sales revenue, Impact · Affiliate commission, Impact.
+- Columns: go-live date, TL deal(s), Impact period, then the table rows of 2.2. Approved actions
+  get one column per event type when there is more than one, plus "all event types".
 - Decay view or on request: one row per week, go-live weeks marked, same rules.
 
 ### 4.3 Lifetime totals
@@ -289,6 +292,7 @@ Impact partner totals are lifetime and hide decay. Never judge a creator on a li
 
 ### 4.5 Social platforms
 
+- A lane is a deal platform (1.4), whichever TL record the deal sits on.
 - IF the creator's actions carry a platform split (social platform, property, or an Ad per
   platform): report the YouTube lane against the TL YouTube deals (Paid to TL, TL views, 4.2), and
   each social lane with Impact's results and what the brand paid through Impact as its cost. TL's
