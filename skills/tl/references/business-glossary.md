@@ -112,6 +112,13 @@ AMs use "PV" loosely. There are three different DB fields, each meaning somethin
 
 When an AM says "what's the PV on this channel?" — they almost always mean `channel.projected_views`. When they say "what was the PV on this deal?" — they mean `adlink.projected_views_at_purchase_date`. When they say "did we hit the VG?" — they mean `adlink.view_guarantee_hit_date IS NOT NULL`.
 
+## Reads vs Sponsored Videos (Elasticsearch)
+
+| Business Term | DB Concept | Notes |
+|--------------|------------|-------|
+| **Read** (sponsored read) | A video with a `brand_mentions` element where, **on the same element**, `id = <brand_id>`, `type = "sponsored"` and `field = "transcript"` | The creator speaks the sponsorship out loud in the video ("this video is sponsored by…"). A brand link in the description with nothing said on camera is **not** a read. Must be a `nested` query — three separate top-level terms can match across different mentions. See [elasticsearch-schema.md](elasticsearch-schema.md#count-reads-for-a-brand-spoken-sponsorships). |
+| **Sponsored video** (all sponsored) | `sponsored_brand_mentions = <brand_id>` | Any sponsored detection, wherever it was found — includes link-only videos (`field = "summary"`, the description). A superset of reads; don't report it as a reads count. |
+
 ## Channel Sponsorship Signals
 
 Two derived metrics on the indexed channel doc that AMs use to qualify a channel before pitching. Both are pre-aggregated in the search index, computed against historical sponsored-content patterns.

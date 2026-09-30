@@ -165,6 +165,33 @@ tl db es '{
 }'
 ```
 
+This matches every sponsored detection, including link-only videos where the brand appears only in the description. For videos where the creator actually speaks the sponsorship, use the reads query below.
+
+### Count reads for a brand (spoken sponsorships)
+
+A **read** is a sponsored mention found in the transcript. All three conditions must hold on the **same** `brand_mentions` element, so they go inside one `nested` query:
+
+```bash
+tl db es '{
+  "size": 0,
+  "track_total_hits": true,
+  "query": {"bool": {"filter": [
+    {"term": {"doc_type": "article"}},
+    {"range": {"publication_date": {"gte": "2025-09-30", "lte": "2026-09-30"}}},
+    {"nested": {
+      "path": "brand_mentions",
+      "query": {"bool": {"filter": [
+        {"term": {"brand_mentions.id": 2403}},
+        {"term": {"brand_mentions.type": "sponsored"}},
+        {"term": {"brand_mentions.field": "transcript"}}
+      ]}}
+    }}
+  ]}}
+}'
+```
+
+Swap `"field": "transcript"` for `"summary"` to get description/link-only detections. Returned docs list all of their mentions, not just the matching one (see the `brand_mentions` row above).
+
 ### Search videos for a single channel
 
 ```bash
