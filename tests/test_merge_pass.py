@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 _SCRIPTS = (Path(__file__).resolve().parents[1]
-            / "skills" / "tl-creator-brief" / "scripts")
+            / "skills" / "tl-brand-creator-connection" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 import merge_pass  # noqa: E402
 import store_io  # noqa: E402

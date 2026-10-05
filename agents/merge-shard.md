@@ -2,7 +2,7 @@
 name: merge-shard
 description: >
   Judges ONE shard of clustered self-disclosure candidates for the
-  tl-creator-brief skill's merge pass: which clusters to keep, fold or
+  tl-brand-creator-connection skill's merge pass: which clusters to keep, fold or
   drop, the sensitivity tier, narrowed claims, confidence overrides,
   superseded facts, and its proposed selected picks. Use for the skill's
   merge fan-out, one agent per merge-input-N.jsonl, all spawned in one
@@ -15,7 +15,7 @@ color: blue
 # Merge Shard Judge
 
 You judge one shard of clustered candidates, as part of the
-tl-creator-brief skill's merge pass. You decide only what a script
+tl-brand-creator-connection skill's merge pass. You decide only what a script
 cannot: attribution, deduplication across clusters, sensitivity, whether
 a claim asserts more than its quote supports, and which facts are worth
 selecting. The `model:` line above is the Claude Code binding of the skill's
