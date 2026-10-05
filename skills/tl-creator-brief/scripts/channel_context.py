@@ -3,11 +3,11 @@
 
 Two jobs, one script:
 
-* **Identity inputs** — the channel row, its About text, and the platform's
+* **Identity inputs**: the channel row, its About text, and the platform's
   generated profile (``ai.description``), which is usually the better identity
   source because raw About fields are often subscribe-boilerplate. These seed
   the identity & socials lane and the host-name aliases for the scan.
-* **Context stats** — once the corpus is local (``--corpus``), format is
+* **Context stats**: once the corpus is local (``--corpus``), format is
   measured from the transcripts themselves, not guessed from titles:
   first-person window density, interview markers, question density, and
   per-title second-voice hints. Deterministic numbers only; the label
@@ -15,7 +15,7 @@ Two jobs, one script:
   read of a small sample WITH this evidence, per references/transcript-mining.md.
 
 Nothing here is a gate. Near-zero first-person density flags "likely faceless"
-early so model tokens are spent accordingly — but nothing exits early, and a
+early so model tokens are spent accordingly, but nothing exits early, and a
 faceless channel with one personal Q&A upload still gets scanned.
 
 Usage:
@@ -220,12 +220,12 @@ YT_LINK = re.compile(
 
 
 def second_channel_candidates(row: dict, doc: dict) -> list[dict]:
-    """Other YouTube channels this creator points at — often the gem mine.
+    """Other YouTube channels this creator points at, often the gem mine.
 
     A big channel's smaller vlog/second channel is frequently where the
     personal material lives. Candidates come from the channel's own pointers:
     YouTube links among its social links, and YouTube links or "my second
-    channel" phrasing in the About text. Detection only — resolving a
+    channel" phrasing in the About text. Detection only, resolving a
     candidate to a TL channel id (`tl channels find`) and deciding to scan it
     belongs to the identity & socials lane.
     """
@@ -416,7 +416,7 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
         return {"videos_measured": 0}
     # The first-person stats are English regex counts; on other languages
     # (pro-drop Spanish, subject-omitting Japanese) they measure nothing, so
-    # they are computed over English-language videos only — and a channel
+    # they are computed over English-language videos only, and a channel
     # with no English videos gets null, never "likely faceless".
     en_videos = [v for v in per_video
                  if not v["language"] or v["language"].startswith("en")]
@@ -433,7 +433,7 @@ def corpus_stats(corpus_path: pathlib.Path) -> dict:
             "fp_per_1k_words_p10": None,
             "likely_faceless": None,
             "language_note": ("no English-language videos: first-person "
-                              "density is not meaningful here — format and "
+                              "density is not meaningful here, format and "
                               "faceless calls belong to the model read of a "
                               "sample, with no lexical prior"),
             "videos_with_interview_markers": sum(
@@ -523,6 +523,16 @@ def _split(raw: str | None, sep: str) -> list[str]:
     return [x.strip() for x in (raw or "").split(sep) if x.strip()]
 
 
+def spoken_host_name(full: dict) -> list[str]:
+    """The host's own name when the channel record names nobody: the name
+    candidate said outright ("my name is ...") in the most uploads, two at
+    least. Never the channel name, which is often not what the host is called."""
+    rows = [r for r in full.get("name_candidates") or []
+            if r.get("said_outright") and int(r.get("videos") or 0) >= 2]
+    rows.sort(key=lambda r: -int(r.get("videos") or 0))
+    return [str(rows[0]["name"]).capitalize()] if rows else []
+
+
 def write_context(full: dict, *, format_label: str, format_evidence: str,
                   host_names: list[str] | None = None,
                   known_facts: list[str] | None = None) -> dict:
@@ -542,7 +552,7 @@ def write_context(full: dict, *, format_label: str, format_evidence: str,
     # premise and recognise the host's name or business through caption errors
     return {
         "channel_name": name,
-        "host_names": host_names or ([name] if name else []),
+        "host_names": host_names or spoken_host_name(full),
         "known_facts": known_facts or [],
         "channel_about": clip(full.get("about_text"), 700),
         "channel_ai_profile": clip(full.get("generated_profile"), 900),
@@ -605,7 +615,8 @@ def main() -> None:
     ap.add_argument("--format-evidence", dest="format_evidence", default="",
                     help="one line of evidence for the label")
     ap.add_argument("--host-names", dest="host_names", default=None,
-                    help="comma-separated; default: the channel name")
+                    help="comma-separated; default: the name the host says on camera "
+                         "in two or more uploads, else none")
     ap.add_argument("--known-facts", dest="known_facts", default=None,
                     help="semicolon-separated facts already known about the host")
     ap.add_argument("--corpus", default=None,

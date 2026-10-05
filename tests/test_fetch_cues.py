@@ -1199,9 +1199,17 @@ _TRANSCRIPT = [
 ]
 
 
+def test_the_default_read_is_thirty_seconds_each_side():
+    """Wide enough to hold the reply to a line and the question it answers,
+    which is how a line is attributed to the right speaker."""
+    assert fetch_cues.READ_BEFORE_S == 30 and fetch_cues.READ_AFTER_S == 30
+
+
 def test_kept_windows_are_re_read_wider_from_the_transcript(tmp_path, monkeypatch):
     doc = _doc("7:v1", [_frag("my dad", 100, "and my family behind")])
-    summary, kept = _run(tmp_path, monkeypatch, [doc], argv=("--host-names", "Eric"),
+    # the fixture is cut for a 20 s / 10 s read; the default is pinned below
+    summary, kept = _run(tmp_path, monkeypatch, [doc],
+                         argv=("--host-names", "Eric", "--read-before", "20", "--read-after", "10"),
                          transcripts={"7:v1": _TRANSCRIPT})
     w = kept[0]
     assert w["start"] == 100                       # the window's identity is unchanged
@@ -1371,6 +1379,7 @@ def test_the_heaviest_cue_reaches_further_than_the_fragment_edges(tmp_path, monk
     frag = ('<text start="100"><em>my dad</em> drove a truck and</text>'
             '<text start="104"><em>i was born</em> in a small town</text>')
     _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], phrases=_WEIGHTED,
+                   argv=("--read-before", "20", "--read-after", "10"),
                    transcripts={"7:v1": _TRANSCRIPT_ANCHOR})
     w = kept[0]
     assert w["read_span"] == [75.0, 118.0]
@@ -1378,6 +1387,7 @@ def test_the_heaviest_cue_reaches_further_than_the_fragment_edges(tmp_path, monk
     assert "more salt" not in w["text"]
     # the margins are flags, and 0/0 falls back to the plain read
     _, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], phrases=_WEIGHTED,
-                   argv=("--anchor-before", "0", "--anchor-after", "0"),
+                   argv=("--anchor-before", "0", "--anchor-after", "0",
+                         "--read-before", "20", "--read-after", "10"),
                    transcripts={"7:v1": _TRANSCRIPT_ANCHOR})
     assert kept[0]["read_span"] == [80.0, 112.0]

@@ -2,7 +2,7 @@
 """The ledger's meta header, and the reuse decision built on it.
 
 One machine file per creator: ``<profiles>/<channel_id>-facts.jsonl``, whose
-FIRST line is the meta record (``"schema": "tl-creator-meta/v2"`` — what the
+FIRST line is the meta record (``"schema": "tl-creator-meta/v2"``: what the
 build was: when, over which videos, what it found) and whose every following
 line is one fact. There is no ``<channel_id>-meta.json`` sidecar any more;
 everything goes through ``scripts/store_io.py``.
@@ -16,15 +16,15 @@ Two subcommands:
 
     With ``--from``, the verified working facts (``verify_quotes.py``'s
     output) become the ledger: every transcript fact must carry
-    ``verify.match == "exact"`` — anything else refuses the write with the
-    offending fact ids and exit 2 — the ``verify`` key is stripped, every
+    ``verify.match == "exact"``: anything else refuses the write with the
+    offending fact ids and exit 2, the ``verify`` key is stripped, every
     other field is kept, and the file is written with the header first.
     Without ``--from`` the existing ledger's header is rewritten in place:
     the facts are untouched, the counts are recounted from the build's
     files, and descriptive fields not passed again (name, format, lanes,
     credits, channel context) are carried over from the old header.
 
-    Counts come from the build's own files — the ledger (facts, counted
+    Counts come from the build's own files, the ledger (facts, counted
     through ``store_io``), the passage store (videos matched, corpus
     window), the windows files (passages), classified.jsonl (windows
     judged), gems.jsonl (gems) and the fetch summaries (videos with
@@ -219,7 +219,7 @@ def build_meta(channel: int, profiles_dir: pathlib.Path, corpus_dir: pathlib.Pat
 
 
 def count_uploads_since(channel: int, since: str) -> int:
-    """Uploads dated after ``since`` — one count, no documents fetched."""
+    """Uploads dated after ``since``: one count, no documents fetched."""
     body = {"size": 0, "track_total_hits": True,
             "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
                                           {"term": {"channel.id": channel}},
@@ -283,7 +283,7 @@ def decide(meta: dict, new_videos: int | None, *, rebuild: bool, no_refresh: boo
 
 
 class Unverified(Exception):
-    """Raised by ``verified_facts`` — the ids that did not match exactly."""
+    """Raised by ``verified_facts``: the ids that did not match exactly."""
 
     def __init__(self, ids: list[str]):
         super().__init__(", ".join(ids))
@@ -294,7 +294,7 @@ def verified_facts(path: pathlib.Path) -> list[dict]:
     """The ledger facts inside ``verify_quotes.py``'s output: every transcript
     fact must have matched EXACTLY (a partial match is how a fabricated quote
     gets a real timestamp), and the ``verify`` bookkeeping does not belong in
-    the ledger. Everything else on the fact — ``members`` included — survives."""
+    the ledger. Everything else on the fact, ``members`` included, survives."""
     _, facts = store_io.read_ledger(path)
     bad: list[str] = []
     out: list[dict] = []
@@ -320,7 +320,7 @@ def cmd_write(a: argparse.Namespace) -> int:
             facts = verified_facts(pathlib.Path(a.from_facts))
         except Unverified as exc:
             print(f"refusing to write the ledger: {len(exc.ids)} transcript facts did not "
-                  f"match their captions exactly — fix or drop them, then re-run "
+                  f"match their captions exactly, fix or drop them, then re-run "
                   f"verify_quotes.py: {exc}", file=sys.stderr)
             return 2
         profiles.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@ The mechanical half of what the confirmation wave used to do: each
 transcript-provenance candidate fact's quote is located in its video's stored
 captions by ``locate`` below, the one quote matcher. Only an **exact**
 contiguous match auto-accepts; ``partial`` and ``none`` are flagged, never
-accepted — a shared opening with a different tail is how a fabricated quote
+accepted, a shared opening with a different tail is how a fabricated quote
 gets a real timestamp. The judgment half (sensitivity, ambiguous voices,
 superseded facts) stays with the single model pass; this script never judges.
 
@@ -14,22 +14,20 @@ Usage:
         --corpus tl-creator-profiles/.corpus/<id>/corpus.jsonl.gz
 
 Input is read through ``store_io``: one candidate per line, and a ledger's
-meta header (first line, ``schema: tl-creator-meta/*``) is not a candidate —
-it is carried over to the output file unchanged. Candidates with
+meta header (first line, ``schema: tl-creator-meta/*``) is not a candidate, it is carried over to the output file unchanged. Candidates with
 ``provenance: "transcript"`` (or no provenance but a ``video`` field) need
 ``quote`` and ``video`` (the corpus ref, ``<channel_id>:<video_id>``). Other
-provenances pass through unverified — social/web facts are not quotes and
+provenances pass through unverified, social/web facts are not quotes and
 never dress as them.
 
 Output (``--out``, default ``<in>.verified.jsonl``): every input line with a
 ``verify`` object merged in:
 
-* ``{"match": "exact", "start": ..., "url": "...&t=<s>s", "found": true}`` —
-  the authoritative timestamp; it overrides whatever the candidate carried.
+* ``{"match": "exact", "start": ..., "url": "...&t=<s>s", "found": true}``: the authoritative timestamp; it overrides whatever the candidate carried.
 * ``{"match": "partial", "found": false, "matched_prefix", "unmatched_tail",
-  "cue"}`` — fix the quote to the caption text or drop the fact.
-* ``{"match": "none", "found": false}`` — the quote does not publish.
-* ``{"match": "n/a"}`` — non-transcript provenance, passed through.
+  "cue"}``: fix the quote to the caption text or drop the fact.
+* ``{"match": "none", "found": false}``: the quote does not publish.
+* ``{"match": "n/a"}``: non-transcript provenance, passed through.
 
 Exit 0 when every transcript quote matched exactly, 1 otherwise. Summary JSON
 on stdout and one ``FUNNEL`` line on stderr for debugging; the verified
@@ -79,8 +77,8 @@ def locate(cues: list[tuple[float, str]], quote: str,
     """Find the quote in the normalized cue stream; say how much matched.
 
     A quote can occur more than once in a video (a catchphrase, a repeated
-    line on a multi-voice upload). With ``hint_start`` — the candidate's
-    claimed timestamp — the exact match nearest that time wins, so
+    line on a multi-voice upload). With ``hint_start``: the candidate's
+    claimed timestamp, the exact match nearest that time wins, so
     verification never silently relocates a fact to an earlier occurrence
     spoken by someone else. Without a hint, the first occurrence wins.
     """
@@ -102,8 +100,12 @@ def locate(cues: list[tuple[float, str]], quote: str,
     starts = []
     pos = hay.find(needle)
     while pos >= 0:
-        cue = cues[owner[pos]]
-        starts.append((int(cue[0]), cue[1]))
+        # whole words only: "my mom" is not a match inside "my moms camera"
+        before_ok = pos == 0 or hay[pos - 1] == " "
+        after_ok = pos + len(needle) == len(hay) or hay[pos + len(needle)] == " "
+        if before_ok and after_ok:
+            cue = cues[owner[pos]]
+            starts.append((int(cue[0]), cue[1]))
         pos = hay.find(needle, pos + 1)
     if starts:
         if hint_start is not None:
@@ -112,8 +114,7 @@ def locate(cues: list[tuple[float, str]], quote: str,
         return {"match": "exact", "start": start, "cue": cue_text,
                 "occurrences": len(starts)}
 
-    # Longest word-prefix of the quote that IS present, reported as partial —
-    # never as a verification of the whole quote.
+    # Longest word-prefix of the quote that IS present, reported as partial, # never as a verification of the whole quote.
     words = needle.split()
     best = None
     for n in range(len(words) - 1, 3, -1):

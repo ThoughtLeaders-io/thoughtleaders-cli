@@ -63,7 +63,9 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
+from channel_context import spoken_host_name  # noqa: E402  sibling
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 PLAN_OK = ("Intelligence", "Superuser")
@@ -251,9 +253,10 @@ def creator_brief_input(a, channel: dict, brand: dict) -> dict:
         # the brand's brief as pasted, headings and order kept: the creator
         # brief mirrors it and adds the creator's own versions of its points
         "brand_brief": read_text(a.talking_points).strip() or None,
-        # supplied: the brand said what it wants; False means the brief is
-        # built from the connection map alone and its header says so
-        "supplied": bool(points or (a.promoting or "").strip()),
+        # supplied: the brand sent talking points or a brief. A promoting line
+        # alone is not one: that brief is built from the creator's gems, the
+        # promoting line opens The creative ask, and the header says so
+        "supplied": bool(points),
         "written_at": time.strftime("%Y-%m-%d"),
     }
 
@@ -401,24 +404,45 @@ def main(argv: list[str] | None = None) -> int:
             classified = corpus / "classified.jsonl"
             if classified.exists():
                 fetch_args += ["--exclude", str(classified)]
-        rc, stdout = run_script("fetch_cues.py", fetch_args)
-        if rc != 0:
-            print(json.dumps({**out, "exit": 3, "failed": "fetch_cues"}, indent=1))
-            return 3
-        try:
-            out["fetch"] = json.loads(stdout)
-        except ValueError:
-            out["fetch"] = {"stdout": stdout[-2000:]}
-        out["ran"].append("fetch")
+        def fetch_and_stats(args: list[str]) -> str | None:
+            """The fetch, then the context stats over it; the failed stage or None."""
+            rc, stdout = run_script("fetch_cues.py", args)
+            if rc != 0:
+                return "fetch_cues"
+            try:
+                out["fetch"] = json.loads(stdout)
+            except ValueError:
+                out["fetch"] = {"stdout": stdout[-2000:]}
+            rc, _ = run_script(
+                "channel_context.py",
+                ["--channel", str(cid), "--corpus", str(corpus / "corpus.jsonl.gz"),
+                 "--per-video-out", str(corpus / "per-video.jsonl")],
+                stdout_to=context_full)
+            return "context stats" if rc != 0 else None
 
-        rc, _ = run_script(
-            "channel_context.py",
-            ["--channel", str(cid), "--corpus", str(corpus / "corpus.jsonl.gz"),
-             "--per-video-out", str(corpus / "per-video.jsonl")],
-            stdout_to=context_full)
-        if rc != 0:
-            print(json.dumps({**out, "exit": 3, "failed": "context stats"}, indent=1))
+        failed = fetch_and_stats(fetch_args)
+        if failed:
+            print(json.dumps({**out, "exit": 3, "failed": failed}, indent=1))
             return 3
+        out["ran"].append("fetch")
+        # no name in the channel record: the name the host says on camera
+        # ("my name is ...") in two or more uploads labels the snippets, so
+        # the fetch runs once more with it (a build only: a refresh round is
+        # additive and must run once)
+        if not a.host_names.strip() and out["decision"] == "build":
+            try:
+                spoken = spoken_host_name(json.loads(context_full.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                spoken = []
+            if spoken:
+                i = fetch_args.index("--host-names")
+                fetch_args[i + 1] = ",".join(spoken)
+                failed = fetch_and_stats(fetch_args)
+                if failed:
+                    print(json.dumps({**out, "exit": 3, "failed": failed}, indent=1))
+                    return 3
+                out["host_names_from_transcripts"] = spoken
+                out["ran"].append("refetch_with_spoken_name")
         out["ran"].append("context_stats")
         out["next"] = ("call the format from the `FUNNEL stage=context` line "
                        "above, then write the context block and render the "

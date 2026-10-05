@@ -2,33 +2,33 @@
 """The merge pass as a compact decision contract: the agent judges, this script
 materialises the ledger.
 
-The old merge pass asked one agent to compose the whole ledger — ~220 full fact
-records, ~118 KB in a single write — of which roughly three quarters was
+The old merge pass asked one agent to compose the whole ledger, ~220 full fact
+records, ~118 KB in a single write, of which roughly three quarters was
 verbatim copying of fields the clustered file already held, and that copying
 dominated the run's wall clock. Everything mechanical in that output is
 derivable here:
 fact ids, urls, recurrence over distinct videos, the confidence default, the
 sensitivity boolean, the `selected` pick. What is left for a model is the
-judgment a script cannot make — attribution, folds, narrowing an over-reaching
-claim, supersession — and that fits in a few kilobytes of decisions.
+judgment a script cannot make, attribution, folds, narrowing an over-reaching
+claim, supersession, and that fits in a few kilobytes of decisions.
 
 Two subcommands:
 
 ``prepare``
     Numbers the clusters ``c001…`` in file order and writes one compact line
-    per cluster the agent must judge (no window text, no member list), plus —
-    on a refresh — a compact view of the existing ledger to fold into or
+    per cluster the agent must judge (no window text, no member list), plus, on a refresh, a compact view of the existing ledger to fold into or
     supersede. The deterministic half of ``references/evidence-rules.md`` runs
-    here: guest windows never reach the agent, and neither do cohost/unclear
-    windows on a shared-voice format. On a refresh the previous round's
+    here: guest windows never reach the agent, and neither do unclear
+    windows on a shared-voice format (a second host's ``cohost`` line and a
+    ``shared`` "we" line are judged like the host's). On a refresh the previous round's
     ``merge-state.json`` decides which clusters are genuinely new; the rest
     carry their judgment forward untouched.
 
 ``expand``
     Validates the returned decisions like ``assemble_extracts.py`` validates
-    extractor returns — every judged cluster placed exactly once, targets that
+    extractor returns, every judged cluster placed exactly once, targets that
     exist, enums, fold chains that terminate, no number in a narrowed claim
-    that is not in the evidence — and exits 3 with the offending ids so the
+    that is not in the evidence, and exits 3 with the offending ids so the
     orchestrator re-asks for exactly those as a patch decisions file, never
     hand-patches. Then it builds the facts, rewrites ``merge-state.json`` so
     the next round can inherit, and prints the FUNNEL line.
@@ -72,7 +72,7 @@ The optional top-level ``facts`` list is the identity lane's way into the
 ledger: social/web facts carry ``source_url`` and ``seen_date`` instead of a
 quote, a video and a start, are numbered after the clusters, and publish at
 ``unconfirmed`` unless ``corroborates`` names a kept cluster or an existing
-fact — cross-lane corroboration is the top tier in ``evidence-rules.md``, so
+fact, cross-lane corroboration is the top tier in ``evidence-rules.md``, so
 it lifts BOTH facts to ``confirmed``. An optional ``ref`` is what ``selected``
 can name them by.
 
@@ -88,6 +88,7 @@ stdout), 2 on a usage error.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import pathlib
 import re
@@ -96,7 +97,9 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # noqa: E402
+import assemble_extracts as _ax  # noqa: E402  sibling: the claim-to-quote check
 from store_io import read_ledger, write_ledger  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health",
            "habits", "tastes", "beliefs", "relationships", "other"}
@@ -151,7 +154,7 @@ CONFIDENCE_ALIASES = {
 ACTIONS = {"keep", "fold", "drop"}
 # The identity lane. `evidence-rules.md`: lanes never masquerade as each other,
 # so a social/web fact names its source and seen-date and carries no quote,
-# video or start — those belong to the transcript lane alone.
+# video or start, those belong to the transcript lane alone.
 IDENTITY_PROVENANCE = {"social", "web", "bio"}
 IDENTITY_REQUIRED = ("claim", "domain", "sensitivity", "source_url", "seen_date")
 IDENTITY_BANNED = ("quote", "video", "start", "url")
@@ -161,7 +164,7 @@ IDENTITY_BANNED = ("quote", "video", "start", "url")
 # So a bio fact is an identity-lane record with two extra rules of its own:
 # only a TRANSCRIPT fact may corroborate it (a second written bio agreeing
 # with the first is one source, not two), and a bio fact nothing corroborates
-# never reaches a claim or a pitch — it renders in its own labelled block, or,
+# never reaches a claim or a pitch, it renders in its own labelled block, or,
 # at a withheld tier, is dropped from the ledger entirely.
 BIO = "bio"
 FORMATS = {"solo", "interview", "multi_host", "faceless_scripted"}
@@ -171,8 +174,9 @@ FORMATS = {"solo", "interview", "multi_host", "faceless_scripted"}
 SINGLE_VOICE = {"solo", "faceless_scripted"}
 
 # A window's own hint outranks the channel label for that cluster: a solo
-# channel's one interview upload is still an interview.
-_HINT_NON_SOLO = re.compile(r"interview|collab|reaction", re.I)
+# channel's one interview upload is still an interview, and a prank,
+# challenge or stunt upload has other people speaking in it.
+_HINT_NON_SOLO = re.compile(r"interview|collab|reaction|staged", re.I)
 
 # Facts the connections page leads with. The agent proposes, the script owns
 # the final count: never a contract violation. The ledger keeps every
@@ -180,9 +184,13 @@ _HINT_NON_SOLO = re.compile(r"interview|collab|reaction", re.I)
 # fine at 40; a lower cap was a page-length guess that left real gems off the
 # page.
 SELECTED_TARGET = 40
-# Below this many confirmed picks the fill may add `unconfirmed` facts so a
-# thin ledger still introduces the person; above it, unconfirmed never pads.
-SELECTED_MIN = 20
+# A fact is recent when the newest upload saying it is inside this many
+# months of the run date; recent facts rank ahead of older ones.
+RECENT_MONTHS = 24
+# A claim found only inside an upload's opening hook, and in no other video,
+# is `unconfirmed`: hooks are written to pull viewers in.
+HOOK_SECONDS = 60
+RUN_DATE: str = ""        # set by expand; the ledger's date for the recency test
 # Shards for the merge pass when `prepare` is not told: clusters / 40, floor
 # 1, ceiling 6, so around 90 clusters become two agents rather than one slow
 # one (the merge shard is otherwise the longest single agent in a run).
@@ -219,7 +227,7 @@ def write_jsonl(path: pathlib.Path, rows: list[dict]) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# cluster accessors — one place that knows the clustered line's shape
+# cluster accessors, one place that knows the clustered line's shape
 # --------------------------------------------------------------------------- #
 def cid(index: int) -> str:
     return f"c{index + 1:03d}"
@@ -301,17 +309,22 @@ def effective_format(line: dict, fmt: str) -> str:
 
 def compact(line: dict, index: int) -> dict:
     """One line of ``merge-input.jsonl``: everything the judgment needs and
-    nothing else — no window text, no member list."""
+    nothing else, no window text, no member list."""
     w = line.get("window") or {}
     v = line.get("verdict") or {}
     return {
         "c": cid(index),
         "domain": v.get("life_domain"),
         "speaker": v.get("speaker_guess"),
+        "speaker_evidence": v.get("speaker_evidence"),
+        "people": v.get("people") or [],
+        "last_seen": newest_evidence(line, None),
         "tier": v.get("sensitivity"),
         "conf": v.get("confidence"),
         "claim": cluster_claim(line),
         "quote": v.get("quote"),
+        # the caption line after a quote cut at a line break
+        "next_line": v.get("next_line"),
         "title": w.get("title"),
         "published": w.get("published"),
         "videos": len(distinct_videos(line)),
@@ -371,17 +384,16 @@ def staged_only(line: dict, probe_entry: dict | None) -> bool:
 def auto_drop_reason(line: dict, fmt: str) -> str | None:
     """The drops ``evidence-rules.md`` makes without a model.
 
-    ``guest`` is another voice on any format. ``cohost`` names a second voice
-    too, so it never publishes as the host. ``unclear`` is an honest answer on
-    a shared-voice format and drops there; on a single-voice format it (and
-    ``narration``) publishes as the host, capped at ``unconfirmed``.
+    ``guest`` is another person's line on any format and never enters.
+    ``cohost`` (the second named host) and ``shared`` (a "we" line about the
+    hosts' shared life) are judged like the host's. ``unclear`` is an honest
+    answer on a shared-voice format and drops there; on a single-voice format
+    it (and ``narration``) publishes as the host, capped at ``unconfirmed``.
     """
     speaker = str((line.get("verdict") or {}).get("speaker_guess") or "")
     fmt = effective_format(line, fmt)
     if speaker == "guest":
         return "speaker guest"
-    if speaker == "cohost":
-        return "speaker cohost"
     if speaker == "unclear" and fmt not in SINGLE_VOICE:
         return f"speaker unclear on {fmt} format"
     return None
@@ -401,12 +413,11 @@ def plan(clusters: list[dict], fmt: str, state: dict[str, dict],
          existing_ids: set[str]) -> list[dict]:
     """One record per cluster saying who judges it.
 
-    ``judge`` — sent to the agent (new, or re-judged because its members now
+    ``judge``: sent to the agent (new, or re-judged because its members now
     span several existing facts, or because one of them was dropped last
-    round). ``additive`` — every known member belongs to ONE existing fact and
+    round). ``additive``: every known member belongs to ONE existing fact and
     none was dropped, so the judgment carries and only recurrence changes.
-    ``auto_dropped`` — a deterministic evidence-rules drop. ``carry_dropped``
-    — every member was dropped last round and nothing new joined.
+    ``auto_dropped``: a deterministic evidence-rules drop. ``carry_dropped``: every member was dropped last round and nothing new joined.
     """
     out: list[dict] = []
     for i, line in enumerate(clusters):
@@ -444,7 +455,7 @@ def plan(clusters: list[dict], fmt: str, state: dict[str, dict],
             # Either the members now span several facts, or one of them was
             # dropped last round and the rest were kept. Both are a changed
             # picture, and carrying the old judgment forward would silently
-            # resurrect a dropped window or merge two facts — the agent
+            # resurrect a dropped window or merge two facts, the agent
             # decides, with the ids it is deciding between.
             rec["status"] = "judge"
             rec["rejudge"] = True
@@ -710,7 +721,7 @@ def alias_enums(decisions: dict[str, dict], identity: list[dict]) -> list[str]:
     # Only `confidence` is aliased on the decision path, and deliberately not
     # `tier`: the merge agent judges against a rubric that states the five
     # tiers, and its tier vocabulary has never drifted, so a wrong tier there
-    # should still fail loudly. The confidence field is different — it is the
+    # should still fail loudly. The confidence field is different, it is the
     # extractor's own vocabulary arriving one stage late.
     for key, dec in sorted(decisions.items()):
         if not isinstance(dec, dict):
@@ -795,6 +806,8 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         conf = dec.get("confidence")
         if conf is not None and conf not in CONFIDENCE:
             bad(key, f"confidence must be one of {sorted(CONFIDENCE)}, got {conf!r}")
+        if dec.get("ended") is not None and dec.get("ended") is not True:
+            bad(key, f"ended takes only true, got {dec.get('ended')!r}")
 
     # fold targets: a c* target must be a kept cluster, an f* target must exist
     # in the ledger we are refreshing. A fold MAY cross a life domain. The
@@ -837,9 +850,10 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         elif sup not in kept:
             bad(key, f"supersedes target {sup} is not a kept cluster")
 
-    # A narrowed claim may only narrow: non-empty, and every number in it has
-    # to come from the quote or the cluster's own claim. A cheap tripwire, not
-    # a proof — but it is the one that catches an invented figure.
+    # A narrowed claim may only narrow: non-empty, every number and name in it
+    # from the quote or the cluster's own claim, and every family word in the
+    # quote as the creator's own relative (the assembler's check). A cheap
+    # tripwire, not a proof, but it is the one that catches an invented figure.
     fallbacks: list[dict] = []
     for key, dec in kept.items():
         if "claim" not in dec:
@@ -848,16 +862,24 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         line = by_cid[key]
         # Token comparison, never substring: "has 3 dogs" must not pass on a
         # quote that says "13 dogs".
-        evidence = set(numbers_in((line.get("verdict") or {}).get("quote"))) \
-            | set(numbers_in(cluster_claim(line)))
+        quote = str((line.get("verdict") or {}).get("quote") or "")
+        evidence = set(numbers_in(quote)) | set(numbers_in(cluster_claim(line)))
+        # names: the quote's words, the cluster claim's, and any name the
+        # extractor corrected from a caption misspelling, matched by _ax.word_in
+        corrected = " ".join(str(v) for v in
+                             ((line.get("verdict") or {}).get("entity_corrections") or {}).values())
+        names = _ax.bare_words(quote) | _ax.bare_words(cluster_claim(line)) | _ax.bare_words(corrected)
         why = None
         if not claim:
             why = "narrowed claim is empty"
         else:
             new = [n for n in numbers_in(claim) if n not in evidence]
+            new += [n for n in _name_tokens(claim) if not _ax.word_in(n, names)]
+            new += [w for w in _ax.claim_overreach(claim, quote)
+                    if w in _ax.FAMILY_WORDS or w.rstrip("s") in _ax.FAMILY_WORDS]
             if new:
-                why = ("narrowed claim introduces numbers absent from the "
-                       f"quote and the cluster claim: {', '.join(new)}")
+                why = ("narrowed claim introduces names, numbers or relatives absent "
+                       f"from the quote and the cluster claim: {', '.join(new)}")
         if why is None:
             continue
         if fallback:
@@ -866,7 +888,7 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
             bad(key, why)
 
     # The identity lane. A social/web fact names its source instead of quoting
-    # a transcript, so it is checked on entirely different fields — and it may
+    # a transcript, so it is checked on entirely different fields, and it may
     # never carry the transcript lane's, because lanes never masquerade.
     refs: set[str] = set()
     for i, rec in enumerate(identity):
@@ -914,38 +936,73 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
 
 
 def default_confidence(line: dict, fmt: str) -> str:
-    """The format-gated default (revision 5 of the plan).
-
-    Single-voice format: the extractor's own call carries. Shared-voice
-    format, or a window hinting interview/reaction: only a host anchor
-    confirms — recurrence alone never does, because on a multi-host channel
-    both hosts recur.
-    """
+    """The extractor's own call carries on every format: on a shared-voice
+    upload the rubric lets it say ``confirmed`` only on a named sign of the
+    creator's voice (``evidence-rules.md``, Attribution), and the judge sees
+    that sign in ``speaker_evidence`` and can lower it."""
     extractor = str((line.get("verdict") or {}).get("confidence") or "")
-    base = "confirmed" if extractor == "confirmed" else "unconfirmed"
-    if effective_format(line, fmt) in SINGLE_VOICE:
-        return base
-    return "confirmed" if (base == "confirmed" and anchored(line)) else "unconfirmed"
+    return "confirmed" if extractor == "confirmed" else "unconfirmed"
 
 
 def capped_confidence(line: dict, fmt: str, override: str | None) -> str:
-    """Agent override beats the default; the evidence-rules caps beat both.
-
-    An ad-read-only cluster and an unattributed (unclear/narration) window are
-    capped at ``unconfirmed`` by ``evidence-rules.md``, so an override cannot
-    promote them — that cap is the rule the model is not allowed to overrule.
-    """
+    """Agent override beats the default; the evidence-rules cap beats both:
+    an unattributed (unclear/narration) window is ``unconfirmed`` whatever
+    the override says."""
     value = override if override in CONFIDENCE else default_confidence(line, fmt)
     speaker = str((line.get("verdict") or {}).get("speaker_guess") or "")
-    if ad_read_only(line) or speaker in ("unclear", "narration"):
+    if speaker in ("unclear", "narration"):
         return "unconfirmed"
     return value
+
+
+def hook_only(line: dict, videos: list[str]) -> bool:
+    """A staged upload (its title marks a prank, challenge or stunt), every
+    member in the first ``HOOK_SECONDS``, and no other video says it. An
+    ordinary upload's opening is the creator introducing themselves."""
+    members = members_of(line)
+    staged = str((line.get("window") or {}).get("format_hint") or "") == "staged"
+    if not staged or not members or len(videos) > 1:
+        return False
+    return all(float(m.get("start") or 0) < HOOK_SECONDS for m in members)
+
+
+_AGO = re.compile(r"\b(?:about |around |almost |over |nearly |like )?(\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)\s+(?:and a half |or so )?(years?|months?)\s+ago\b", re.I)
+_WORD_NUM = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+             "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+             "fifteen": 15, "twenty": 20}
+_CHANNEL_START = re.compile(r"\b(start|started|launch|launched|began|begin|create|created|made)\b.{0,40}\b(channel|youtube|videos)\b|\b(channel|youtube)\b.{0,30}\b(started|launched|began)\b", re.I)
+
+
+def dated_claim(claim: str, published: str | None, first_upload: str | None) -> tuple[str, str | None]:
+    """"X years ago" becomes a year from the upload date ("about 2020, said
+    in 2025"). A claim about the channel's own start is checked against the
+    channel's first upload; when they disagree by a year or more, the first
+    upload's year is used and the creator's words are kept beside it.
+    Returns the claim and a note (None when nothing changed)."""
+    year_said = str(published or "")[:4]
+    if not year_said.isdigit():
+        return claim, None
+    m = _AGO.search(claim or "")
+    if not m:
+        return claim, None
+    n = int(m.group(1)) if m.group(1).isdigit() else _WORD_NUM.get(m.group(1).lower(), 0)
+    unit = m.group(2).lower()
+    year = int(year_said) - (n if unit.startswith("year") else (1 if n >= 6 else 0))
+    first = str(first_upload or "")[:4]
+    if _CHANNEL_START.search(claim) and first.isdigit() and abs(int(first) - year) >= 1:
+        text = f"in {first} (the channel's first upload; said \"{m.group(0)}\" in {year_said})"
+        note = f"channel start: creator said {m.group(0)} in {year_said}, first upload {first}"
+    else:
+        text = f"in about {year} (said in {year_said})"
+        note = f"{m.group(0)} -> {year}"
+    return claim[:m.start()] + text + claim[m.end():], note
 
 
 def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: str,
                       videos: list[str], keys: list[str],
                       use_original_claim: bool,
-                      probe_entry: dict | None = None) -> dict:
+                      probe_entry: dict | None = None,
+                      first_upload: str | None = None) -> dict:
     v = line.get("verdict") or {}
     w = line.get("window") or {}
     claim = cluster_claim(line)
@@ -962,6 +1019,10 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         # said inside a set-up and found nowhere else: kept, never dropped,
         # never confirmed, never on a brand-facing page
         confidence = "unconfirmed"
+    hook = hook_only(line, videos)
+    if hook:
+        confidence = "unconfirmed"
+    claim, date_note = dated_claim(claim, w.get("published"), first_upload)
     fact = {
         "fact_id": fact_id,
         "claim": claim,
@@ -972,14 +1033,23 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         "start": start,
         "url": f"https://www.youtube.com/watch?v={vid}&t={start}s",
         "published": w.get("published"),
+        "last_seen": newest_evidence(line, probe_entry),
         "recurrence": len(videos),
         "confidence": confidence,
         "sensitivity": tier,
         "sensitive": tier in WITHHELD,
+        "speaker": v.get("speaker_guess") if v.get("speaker_guess") in ("cohost", "shared") else "host",
+        "people": v.get("people") or [],
         "superseded_by": None,
         "selected": False,
         "members": keys,
     }
+    if dec.get("ended") is True:
+        fact["ended"] = True
+    if hook:
+        fact["hook_only"] = True
+    if date_note:
+        fact["dated"] = date_note
     if staged:
         fact["staged"] = True
         fact["staged_only"] = only_staged
@@ -1007,8 +1077,7 @@ def fail(violations: dict[str, list[str]]) -> int:
 
 def identity_fact(rec: dict, fact_id: str) -> dict:
     """A social/web fact: its source and seen-date stand where the transcript
-    lane's quote, video and start would be. Alone it is never `confirmed` —
-    only cross-lane corroboration lifts it, and that is applied once both
+    lane's quote, video and start would be. Alone it is never `confirmed`: only cross-lane corroboration lifts it, and that is applied once both
     sides of the pair exist."""
     tier = rec.get("sensitivity") if rec.get("sensitivity") in SENSITIVITY else "none"
     fact = {
@@ -1048,9 +1117,9 @@ def bio_key(text) -> str:
 def bio_gate(facts: list[dict]) -> tuple[list[dict], list[dict]]:
     """``(kept, dropped)``: what an uncorroborated bio fact is allowed to be.
 
-    Run over EVERY bio fact in the final ledger — including records carried
+    Run over EVERY bio fact in the final ledger, including records carried
     from ``--existing`` on a refresh, which never pass through the corroboration
-    pass again — and only after tier inheritance, so a bio fact that just
+    pass again, and only after tier inheritance, so a bio fact that just
     inherited a withheld tier from a transcript fact naming the same person is
     judged at the tier it ended up with.
 
@@ -1115,7 +1184,7 @@ def selectable(fact: dict) -> bool:
     the other end of the pipeline. That check is the backstop; this is the
     end that owns the rule, so nothing is left to be caught at render time.
     Nothing opts itself in: the fill-to-target loop reads this too."""
-    if fact.get("retired_reason"):
+    if fact.get("retired_reason") or fact.get("ended"):
         return False
     tier = fact.get("sensitivity")
     if tier in ("children", "location"):
@@ -1136,6 +1205,8 @@ def selectable(fact: dict) -> bool:
 def unselectable_reason(fact: dict) -> str:
     if fact.get("retired_reason"):
         return f"retired: {fact['retired_reason']}"
+    if fact.get("ended"):
+        return "ended: the evidence shows it is over"
     tier = fact.get("sensitivity")
     if tier in ("children", "location"):
         return f"withheld tier {tier}"
@@ -1159,16 +1230,104 @@ def _name_tokens(text: str) -> set[str]:
                          "Was", "Married", "Grew", "Launched", "Worked", "Operates")}
 
 
+def is_recent(fact: dict, today: str | None = None) -> bool:
+    """``last_seen`` inside the last ``RECENT_MONTHS`` of the run date. A
+    fact with no date (a social or bio record) is not recent."""
+    seen = str(fact.get("last_seen") or "")[:10]
+    today = (today or RUN_DATE or dt.date.today().isoformat())[:10]
+    if not seen or not today:
+        return False
+    y, m = int(today[:4]), int(today[5:7])
+    m -= RECENT_MONTHS
+    while m <= 0:
+        m += 12
+        y -= 1
+    return seen >= f"{y:04d}-{m:02d}-{today[8:10]}"
+
+
 def rank_key(fact: dict) -> tuple:
-    """Strongest first: confirmed before unconfirmed, then recurrence, then
-    the fact id so the pick never depends on dict order."""
+    """Strongest first: confirmed before unconfirmed, recent before older,
+    then recurrence, then the fact id so the pick never depends on dict order."""
     return (0 if fact.get("confidence") == "confirmed" else 1,
+            0 if is_recent(fact) else 1,
             -int(fact.get("recurrence") or 0),
             str(fact.get("fact_id")))
 
 
+# early uploads (at most this many) followed by a gap of more than a year are
+# hobby videos from before the channel began, not its start
+EARLY_UPLOADS_MAX = 5
+START_GAP_DAYS = 365
+
+
+def channel_start(dates: list[str]) -> str | None:
+    """The first upload of the channel as it runs today: the oldest upload,
+    unless at most ``EARLY_UPLOADS_MAX`` earlier uploads sit before a gap of
+    more than ``START_GAP_DAYS``; then the first upload after that gap."""
+    days = sorted(dt.date.fromisoformat(d[:10]) for d in dates if d and d[:10].count("-") == 2)
+    if not days:
+        return None
+    start = 0
+    for i in range(min(EARLY_UPLOADS_MAX, len(days) - 1)):
+        if (days[i + 1] - days[i]).days > START_GAP_DAYS:
+            start = i + 1
+    return days[start].isoformat()
+
+
+def first_upload_date(channel: str | None) -> str | None:
+    """The channel's start (``channel_start``), one platform query, only when a
+    claim speaks of the channel's own start. None when it cannot be fetched."""
+    if not channel or not str(channel).isdigit():
+        return None
+    try:
+        import tl_data  # noqa: WPS433  the shared CLI wrapper
+        rows = tl_data.db_es({
+            "size": EARLY_UPLOADS_MAX + 1, "_source": ["publication_date"],
+            "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
+                                          {"term": {"channel.id": int(channel)}}]}},
+            "sort": [{"publication_date": "asc"}]})
+        return channel_start([str((r or {}).get("publication_date") or "") for r in rows])
+    except Exception:          # noqa: BLE001  reported in the summary, never raised
+        return None
+
+
+def people_list(facts: list[dict]) -> dict:
+    """One row per exact spelling across the active ledger: the relation
+    words seen, the facts, the videos and the last mention. ``two_names``
+    lists a two-word name whose halves each appear as a single name elsewhere:
+    two people a caption list ran together."""
+    rows: dict[str, dict] = {}
+    for f in facts:
+        if f.get("superseded_by") or f.get("retired_reason"):
+            continue
+        for p in f.get("people") or []:
+            name = str(p.get("name") or "").strip()
+            if not name:
+                continue
+            row = rows.setdefault(name, {"relations": [], "facts": [], "videos": set(),
+                                         "last_mention": None})
+            rel = p.get("relation")
+            if rel and rel not in row["relations"]:
+                row["relations"].append(rel)
+            row["facts"].append(str(f.get("fact_id")))
+            if f.get("video"):
+                row["videos"].add(str(f["video"]))
+            seen = str(f.get("last_seen") or f.get("published") or "")[:10]
+            if seen and (row["last_mention"] is None or seen > row["last_mention"]):
+                row["last_mention"] = seen
+    singles = {n.lower() for n in rows if len(n.split()) == 1}
+    two_names = [n for n in rows if len(n.split()) == 2
+                 and all(w.lower() in singles for w in n.split())]
+    out = {n: {"relations": r["relations"], "facts": r["facts"],
+               "videos": len(r["videos"]), "last_mention": r["last_mention"]}
+           for n, r in sorted(rows.items())}
+    return {"people": out, "two_names": two_names}
+
+
 def cmd_expand(a: argparse.Namespace) -> int:
     t0 = time.monotonic()
+    global RUN_DATE
+    RUN_DATE = dt.date.today().isoformat()
     clusters = read_jsonl(pathlib.Path(a.clustered))
     out_path = pathlib.Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1382,7 +1541,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     # A re-judged cluster inherited several fact ids and kept one of them.
     # The others must not stay active: their evidence pools into the fact that
-    # was kept and they are marked superseded by it — history stays, a stale
+    # was kept and they are marked superseded by it, history stays, a stale
     # duplicate does not. A fact the decisions already fold into or supersede
     # explicitly is left to that decision, and one that another cluster owns
     # this round is not ours to retire.
@@ -1402,6 +1561,12 @@ def cmd_expand(a: argparse.Namespace) -> int:
             reconciled[old] = assigned[key]
 
     # ---- build the facts -------------------------------------------------- #
+    # the channel's first upload is fetched once, only when a kept claim
+    # speaks of the channel's own start in "years ago" terms
+    first_upload = None
+    if any(_CHANNEL_START.search(cluster_claim(clusters[by_c[k]["index"]]) or "")
+           and _AGO.search(cluster_claim(clusters[by_c[k]["index"]]) or "") for k in kept):
+        first_upload = first_upload_date(a.channel)
     facts: list[dict] = []
     fact_index: dict[str, dict] = {}
     for key in kept:
@@ -1410,7 +1575,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
         fact = fact_from_cluster(line, fact_id, decisions[key], a.format,
                                  a.channel, videos_by_fact.get(fact_id, []),
                                  keys_by_fact.get(fact_id, []),
-                                 key in fallback_ids, probes.get(key))
+                                 key in fallback_ids, probes.get(key), first_upload)
         facts.append(fact)
         fact_index[fact_id] = fact
 
@@ -1546,7 +1711,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
             fact_index.pop(fact_id, None)
             bio_expired.append(fact_id)
 
-    # What an uncorroborated bio fact may be — applied here, after tier
+    # What an uncorroborated bio fact may be, applied here, after tier
     # inheritance, and over every bio fact in the ledger including the ones
     # carried from `--existing`, which never pass the corroboration loop again.
     facts, bio_dropped = bio_gate(facts)
@@ -1570,12 +1735,23 @@ def cmd_expand(a: argparse.Namespace) -> int:
 
     facts.sort(key=lambda f: str(f.get("fact_id")))
 
+    # two first names a caption list ran together are two people: the fact
+    # keeps both names apart and drops to `unconfirmed`, off every page
+    people = people_list(facts)
+    for f in facts:
+        for p in list(f.get("people") or []):
+            if str(p.get("name")) in people["two_names"]:
+                f["people"] = [q for q in f["people"] if q is not p] + [
+                    {"name": w, "relation": p.get("relation")} for w in str(p["name"]).split()]
+                f["confidence"] = "unconfirmed"
+                f["two_names"] = str(p["name"])
+    people_path = out_path.parent / "people.json"
+    people_path.write_text(json.dumps(people, ensure_ascii=False, indent=1), encoding="utf-8")
+
     # ---- selected: the agent proposes, the script owns the count ---------- #
     # Quality first: the agent's picks are ranked before they are taken, an
-    # `unconfirmed` pick is refused while confirmed facts would otherwise be
-    # left off the page, and every refusal carries its reason. Otherwise a
-    # shard's picks can put a garbled-caption name on the page ahead of
-    # confirmed, recurring facts.
+    # `unconfirmed` pick is refused with its reason, and nothing unconfirmed
+    # is ever filled in: a thin ledger shows fewer facts, never guesses.
     active = [f for f in facts
               if not f.get("superseded_by") and not f.get("retired_reason")]
     eligible = {str(f["fact_id"]) for f in active if selectable(f)}
@@ -1612,9 +1788,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
     for fact in sorted(proposed, key=rank_key):
         fact_id = str(fact["fact_id"])
         if fact.get("confidence") != "confirmed":
-            # an agent pick never puts an unconfirmed fact on the page; the
-            # fill below may, and only when confirmed facts run short
-            ignored[fact_id] = "unconfirmed: the page leads with confirmed facts"
+            ignored[fact_id] = "unconfirmed: never on the page"
             continue
         if len(picked) >= SELECTED_TARGET:
             ignored[fact_id] = f"over the {SELECTED_TARGET}-fact target"
@@ -1624,8 +1798,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
             continue
         take(fact)
     # fill: confirmed facts seen in two or more videos first, then confirmed
-    # by rank; unconfirmed only up to the floor, so a thin ledger still
-    # introduces the person and a rich one never pads with guesses
+    # by rank (recent before older); never an unconfirmed fact
     for fact in sorted(active, key=rank_key):
         if len(picked) >= SELECTED_TARGET:
             break
@@ -1641,15 +1814,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
         if (fact_id in eligible and fact_id not in picked and fresh(fact)
                 and fact.get("confidence") == "confirmed"):
             take(fact)
-    for fact in sorted(active, key=rank_key):
-        if len(picked) >= SELECTED_MIN:
-            break
-        fact_id = str(fact["fact_id"])
-        if fact_id in eligible and fact_id not in picked and fresh(fact):
-            take(fact)
     chosen = set(picked)
-    # a pick refused as unconfirmed that the floor then filled in anyway is
-    # on the page after all; only a refusal that stuck is worth reporting
     ignored = {k: v for k, v in ignored.items()
                if pick_map.get(k, k) not in chosen}
     for fact in facts:
@@ -1718,6 +1883,14 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "selected_ignored": ignored,
         "staged_facts": sum(1 for f in facts if f.get("staged")),
         "staged_only": [str(f["fact_id"]) for f in facts if f.get("staged_only")],
+        "ended": [str(f["fact_id"]) for f in facts if f.get("ended")],
+        "hook_only": [str(f["fact_id"]) for f in facts if f.get("hook_only")],
+        "dated_claims": {str(f["fact_id"]): f["dated"] for f in facts if f.get("dated")},
+        "first_upload": first_upload,
+        "two_names": people["two_names"],
+        "people_file": str(people_path),
+        "recent_months": RECENT_MONTHS,
+        "run_date": RUN_DATE,
         "tier_inherited": tier_inherited,
         "probe_file": str(probe_path) if probes else None,
         "facts_file": str(out_path),
@@ -1756,8 +1929,8 @@ def main() -> int:
     p.add_argument("--channel", type=int, default=None,
                    help="channel id; when given, authenticate.py probes staged-premise "
                         "and contradicting clusters and writes probe.json")
-    p.add_argument("--max-queries", type=int, default=30,
-                   help="probe budget, one ES query per flagged cluster")
+    p.add_argument("--max-queries", type=int, default=60,
+                   help="probe budget, one ES query per staged or conflicting cluster")
     p.add_argument("--out", required=True, help="directory for merge-input*.jsonl")
     p.set_defaults(fn=cmd_prepare)
 

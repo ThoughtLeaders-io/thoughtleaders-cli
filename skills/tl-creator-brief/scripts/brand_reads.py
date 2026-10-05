@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A brand's past sponsorship reads: what creators have said about it on camera.
 
-Returns sponsored mentions the platform detected across YouTube — whoever
-brokered them — **newest first**: a product changes, and the current
+Returns sponsored mentions the platform detected across YouTube, whoever
+brokered them, **newest first**: a product changes, and the current
 description of it is the one being sold.
 
 Every snippet is re-checked per mention: only ``type == "sponsored"`` AND
@@ -15,6 +15,7 @@ say what the product is, and the output can be forwarded.
 Usage:
     brand_reads.py --brand <id>
     brand_reads.py --brand <id> --brand <old-id> --max 15   # after a rebrand
+    brand_reads.py --brand <id> --channel <id> --max 50     # this creator's past reads
 
 Output (stdout): one JSON object.
 """
@@ -38,24 +39,31 @@ PLACEHOLDER = re.compile(r"^\(?\s*(in|found in)\s+(the\s+)?"
                          r"(transcript|description|title)\s*\)?\.?$", re.I)
 
 
-def mention_videos(brand_ids: list[int], max_videos: int) -> list[dict]:
+def _on_channel(channel: int | None) -> list[dict]:
+    return [{"term": {"channel.id": int(channel)}}] if channel else []
+
+
+def mention_videos(brand_ids: list[int], max_videos: int,
+                   channel: int | None = None) -> list[dict]:
     """Videos carrying a sponsored mention of the brand, newest first."""
     return tl_data.db_es({
         "size": max_videos,
         "query": {"bool": {"should": [
             {"term": {"sponsored_brand_mentions": str(b)}} for b in brand_ids
-        ], "minimum_should_match": 1}},
+        ], "minimum_should_match": 1, "filter": _on_channel(channel)}},
         "_source": ["id", "title", "channel.id", "channel.name",
                     "publication_date"],
         "sort": [{"publication_date": "desc"}],
     })
 
 
-def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
+def mention_snippets(brand_ids: list[int], max_videos: int,
+                     channel: int | None = None) -> dict:
     """The detected ad-read snippet per video, from the nested mention field."""
     rows = tl_data.db_es({
         "size": max_videos,
-        "query": {"nested": {"path": "brand_mentions", "query": {"bool": {
+        "query": {"bool": {"filter": _on_channel(channel), "must": [
+            {"nested": {"path": "brand_mentions", "query": {"bool": {
             "must": [
                 {"terms": {"brand_mentions.id": [str(b) for b in brand_ids]}},
                 {"term": {"brand_mentions.type": "sponsored"}},
@@ -63,7 +71,7 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
                 # paging: otherwise description-only rows can fill the page
                 # and hide older videos whose read has words
                 {"term": {"brand_mentions.field": "transcript"}},
-            ]}}}},
+            ]}}}}]}},
         "_source": ["id", "title", "publication_date", "channel.id",
                     "channel.name", "brand_mentions"],
         "sort": [{"publication_date": "desc"}],
@@ -77,7 +85,7 @@ def mention_snippets(brand_ids: list[int], max_videos: int) -> dict:
         for m in mentions:
             # Re-check every condition per mention: the video-level query
             # matched the DOC, but this list holds ALL of the video's
-            # mentions — organic ones and other brands' included.
+            # mentions, organic ones and other brands' included.
             if str(m.get("id")) not in wanted:
                 continue
             if m.get("type") != "sponsored":
@@ -141,12 +149,14 @@ def main() -> None:
                     help="brand id from `tl brands find`; repeat for a rebrand")
     ap.add_argument("--max", type=int, default=10,
                     help="reads returned, newest descriptive first (default 10)")
+    ap.add_argument("--channel", type=int, default=None,
+                    help="only this channel's reads: the creator's own past reads")
     a = ap.parse_args()
 
-    videos = mention_videos(a.brand, max(a.max * 3, 30))
-    snippets = mention_snippets(a.brand, max(a.max * 3, 30))
+    videos = mention_videos(a.brand, max(a.max * 3, 30), a.channel)
+    snippets = mention_snippets(a.brand, max(a.max * 3, 30), a.channel)
 
-    chan_ids = []
+    chan_ids = [s.get("channel_id") for s in snippets.values() if s.get("channel_id")]
     for v in videos:
         c = v.get("channel") if isinstance(v.get("channel"), dict) else {}
         cid = c.get("id") or v.get("channel.id")
@@ -196,7 +206,8 @@ def main() -> None:
             "title": snip.get("title"),
             "published": snip.get("published"),
             "channel_id": snip.get("channel_id"),
-            "channel_name": snip.get("channel_name"),
+            "channel_name": (snip.get("channel_name")
+                             or (names.get(int(snip["channel_id"])) if snip.get("channel_id") else None)),
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
@@ -212,11 +223,12 @@ def main() -> None:
 
     summary = {
         "brand_ids": a.brand,
+        "channel": a.channel,
         "mention_videos_found": len(videos),
         "reads_returned": len(kept),
         "reads_with_spoken_words": with_words,
         "usage_note": ("read the words to learn what the product is, newest "
-                       "first — an old read can describe a product that no "
+                       "first, an old read can describe a product that no "
                        "longer exists. A read with no words describes nothing. "
                        "If no read has words at all, use the brand's website "
                        "or their own brief instead."),

@@ -2,7 +2,7 @@
 """Layer 1+2 in one query: pull only the transcript passages around
 first-person cue phrases, straight from Elasticsearch highlights.
 
-This is the model layer's only retrieval flow — there is no local
+This is the model layer's only retrieval flow, there is no local
 full-transcript scan any more. One boolean ``should`` of ``match_phrase``
 clauses (references/cue-phrases.txt, each apostrophe phrase spelled both
 ways the index knows) selects the videos; ES ``highlight`` returns the
@@ -31,16 +31,15 @@ stays sharp and the extractor still sees the sentences before the cue.
 
 Usage:
     fetch_cues.py --channel <id> [--host-names "a,b"] [--out <root>]
-                  [--max-windows 500] [--batch-size N] [--reserve N]
+                  [--max-windows 300] [--batch-size N] [--reserve N]
                   [--generic-floor N] [--fragment-size 900] [--round N]
-                  [--read-before 20] [--read-after 10]
-                  [--min-score 2.5] [--min-windows 150]
+                  [--read-before 30] [--read-after 30]
+                  [--min-score 8.0] [--min-windows 150]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
 ``batches/batch-NNN.json`` (the capped model-layer batches, one per extractor
-agent, sized for 20 extractors running at once) and ``corpus.jsonl.gz``
-— the store shape ``verify_quotes.py`` reads, holding the fetched passages as
+agent, sized for 20 extractors running at once) and ``corpus.jsonl.gz``: the store shape ``verify_quotes.py`` reads, holding the fetched passages as
 cues. Once the cap is taken, the kept windows' real ad-read spans are
 looked up (``sponsor_segments`` below) and ``in_sponsor_read`` is decided from them;
 the regex heuristic the windows were built with is the fallback when that
@@ -145,7 +144,6 @@ GENERIC_TERMS = ["i", "my", "myself", "i'm", "i am", "i've", "i'd", "i'll", "i w
 # window, and the phrase list stays the retrieval net.
 DENSITY_WEIGHT = 0.5            # rank points per first-person hit, both passes
 GENERIC_DENSITY_CAP = 20        # hits counted at most; a widened read runs ~120 words
-GENERIC_BOOST = DENSITY_WEIGHT  # the fallback pass's name for the same term
 _FIRST_PERSON_RX = re.compile(
     r"\b(?:" + "|".join(re.escape(t) for t in sorted(GENERIC_TERMS, key=len, reverse=True))
     + r")\b")
@@ -247,7 +245,7 @@ def phrase_weight(phrase: str, weights: dict[str, float] | None) -> float:
 
 # a highlight fragment can start inside a doubly-escaped caption entity
 # ("&amp;#39;s" cut to "amp;#39;s" or ";#39;s"); the entity is unrecoverable
-# by unescaping, so the stub is resolved by hand — #39 is the apostrophe the
+# by unescaping, so the stub is resolved by hand, #39 is the apostrophe the
 # captions actually meant, anything else is dropped
 _PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
 # ... or inside a timed-text tag, leaving `start="138" dur="3.78">`,
@@ -559,7 +557,7 @@ def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     """Spoken sponsored segments per video, batched over the id list.
 
     Every mention is re-checked individually: only ``type == "sponsored"`` AND
-    ``field == "transcript"`` counts. A query failure raises — it is never a
+    ``field == "transcript"`` counts. A query failure raises, it is never a
     silent empty span list.
 
     Id chunks are fetched concurrently, but merged strictly in chunk order and
@@ -588,7 +586,7 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     ad read when ``[start, start + WINDOW_SPAN]`` meets a sponsored span padded
     by ``SPONSOR_PAD`` on both sides.
 
-    The lookup is authoritative when it succeeds — it replaces the heuristic
+    The lookup is authoritative when it succeeds, it replaces the heuristic
     rather than joining it. When it fails, the heuristic stays exactly as it
     was. Returns the source used, which the summary records as
     ``sponsor_source`` so a reader always knows which of the two decided.
@@ -601,9 +599,9 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     except tl_data.IncompleteDataError:
         # A truncated id lookup is not "these videos have no ad reads".
         raise
-    except BaseException as exc:              # noqa: BLE001 — reported, not raised
+    except BaseException as exc:              # noqa: BLE001, reported, not raised
         print(f"sponsor-span lookup failed ({type(exc).__name__}: "
-              f"{str(exc)[:120]}) — keeping the regex heuristic", file=sys.stderr)
+              f"{str(exc)[:120]}), keeping the regex heuristic", file=sys.stderr)
         return "regex_fallback"
     pad = SPONSOR_PAD
     for w in kept:
@@ -735,9 +733,12 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
 # that earned its seat can lose the sentence the disclosure sat in). The
 # added cues join
 # the corpus so a quote cut from the context still verifies to its own second.
+# The read is wide enough to hold the dialogue around the line (a reply to
+# it, the question it answers, the person introduced before it): those are
+# the speaker signals the extractor attributes on.
 # --------------------------------------------------------------------------- #
-READ_BEFORE_S = 20
-READ_AFTER_S = 10
+READ_BEFORE_S = 30
+READ_AFTER_S = 30
 ANCHOR_BEFORE_S = 30
 ANCHOR_AFTER_S = 15
 TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
@@ -1027,7 +1028,7 @@ def main() -> int:
                     "passages already judged (same video, start within 30 s) are skipped, so a "
                     "second round deepens the ledger instead of repeating it")
     ap.add_argument("--since", default="", help="only uploads published after this date "
-                    "(YYYY-MM-DD) — a refresh round passes the ledger's latest_video_date so "
+                    "(YYYY-MM-DD), a refresh round passes the ledger's latest_video_date so "
                     "its cost scales with the new uploads, not the catalogue")
     a = ap.parse_args()
     t0 = time.monotonic()

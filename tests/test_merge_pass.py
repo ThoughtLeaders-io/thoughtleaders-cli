@@ -136,8 +136,9 @@ def test_prepare_line_is_compact_and_leaks_no_text_or_members(tmp_path):
     assert len(rows) == 1 and summary["judged"] == 1
     row = rows[0]
     assert row["c"] == "c001"
-    assert set(row) == {"c", "domain", "speaker", "tier", "conf", "claim",
-                        "quote", "title", "published", "videos", "occ",
+    assert set(row) == {"c", "domain", "speaker", "speaker_evidence", "people",
+                        "last_seen", "tier", "conf", "claim", "quote",
+                        "next_line", "title", "published", "videos", "occ",
                         "ad_read", "anchor", "format_hint", "staged", "lang",
                         "notable"}
     assert row["videos"] == 2 and row["occ"] == 2
@@ -181,10 +182,13 @@ def test_narration_publishes_on_a_single_voice_format(tmp_path):
     assert _prepare(clustered, tmp_path / "s", fmt="solo")["judged"] == 1
 
 
-def test_cohost_never_publishes_as_the_host(tmp_path):
+def test_cohost_is_kept_and_labelled_never_as_the_host(tmp_path):
     clustered = _write_clusters(tmp_path, [_cluster("cohost thing", speaker="cohost")])
     for fmt in ("solo", "interview", "multi_host"):
-        assert _prepare(clustered, tmp_path / fmt, fmt=fmt)["auto_dropped"] == 1
+        assert _prepare(clustered, tmp_path / fmt, fmt=fmt)["auto_dropped"] == 0
+    out = tmp_path / "facts.jsonl"
+    assert _keep_all(clustered, out).returncode == 0
+    assert _facts(out)["f001"]["speaker"] == "cohost"
 
 
 def test_window_format_hint_overrides_the_channel_format(tmp_path):
@@ -450,32 +454,35 @@ def test_solo_keeps_the_extractors_call(tmp_path):
     assert _confidence(tmp_path, _cluster("b", conf="likely"), name="b") == "unconfirmed"
 
 
-def test_interview_without_an_anchor_never_confirms(tmp_path):
+def test_the_extractors_call_carries_on_an_interview(tmp_path):
+    """The extractor confirms a shared-voice line only on a named sign of the
+    creator's voice; its call carries, and a hedged line never confirms."""
     assert _confidence(tmp_path, _cluster("a", conf="confirmed"),
-                       fmt="interview", name="a") == "unconfirmed"
-    assert _confidence(tmp_path, _cluster("b", conf="confirmed", anchor=True),
-                       fmt="interview", name="b") == "confirmed"
+                       fmt="interview", name="a") == "confirmed"
+    assert _confidence(tmp_path, _cluster("b", conf="likely"),
+                       fmt="interview", name="b") == "unconfirmed"
 
 
-def test_multi_host_recurrence_alone_never_confirms(tmp_path):
-    cluster = _cluster("recurring", conf="confirmed",
+def test_recurrence_alone_never_confirms_a_hedged_line(tmp_path):
+    cluster = _cluster("recurring", conf="likely",
                        members=[_member("v1", 1), _member("v2", 2),
                                 _member("v3", 3)])
     assert _confidence(tmp_path, cluster, fmt="multi_host") == "unconfirmed"
 
 
-def test_an_ad_read_only_cluster_caps_at_unconfirmed(tmp_path):
-    capped = _cluster("mentions a trip", conf="confirmed", ad_read=True,
-                      members=[_member("v1", 1, ad_read=True),
-                               _member("v2", 2, ad_read=True)])
-    assert _confidence(tmp_path, capped, name="a") == "unconfirmed"
-    mixed = _cluster("mentions a trip", conf="confirmed",
-                     members=[_member("v1", 1, ad_read=True),
-                              _member("v2", 2, ad_read=False)])
-    assert _confidence(tmp_path, mixed, name="b") == "confirmed"
+def test_an_ad_read_line_is_judged_like_any_other(tmp_path):
+    """The ad-read cap is gone: a personal line inside a read is attributed
+    like any other line, and the extractor's call carries."""
+    in_read = _cluster("mentions a trip", conf="confirmed", ad_read=True,
+                       members=[_member("v1", 1, ad_read=True),
+                                _member("v2", 2, ad_read=True)])
+    assert _confidence(tmp_path, in_read, name="a") == "confirmed"
+    hedged = _cluster("mentions a trip", conf="likely", ad_read=True,
+                      members=[_member("v1", 1, ad_read=True)])
+    assert _confidence(tmp_path, hedged, name="b") == "unconfirmed"
 
 
-def test_an_agent_override_cannot_beat_the_ad_read_cap(tmp_path):
+def test_the_judge_can_lower_an_ad_read_line(tmp_path):
     d = tmp_path / "x"
     d.mkdir()
     clustered = _write_clusters(d, [
@@ -483,7 +490,7 @@ def test_an_agent_override_cannot_beat_the_ad_read_cap(tmp_path):
                  members=[_member("v1", 1, ad_read=True)])])
     out = d / "facts.jsonl"
     _keep_all(clustered, out,
-              decisions={"c001": {"action": "keep", "confidence": "confirmed"}})
+              decisions={"c001": {"action": "keep", "confidence": "unconfirmed"}})
     assert _facts(out)["f001"]["confidence"] == "unconfirmed"
 
 
@@ -582,9 +589,7 @@ def test_selected_stops_at_forty_when_the_ledger_holds_more(tmp_path):
 
 def test_an_unconfirmed_pick_is_refused_while_confirmed_facts_would_be_left_off(tmp_path):
     """The shard nominated an unconfirmed fact over confirmed ones: the
-    refusal is visible, and the page fills with confirmed facts first. Below
-    the floor an unconfirmed fact may still be filled in, and then it is not
-    reported as refused."""
+    refusal is visible, and the page fills with confirmed facts only."""
     clustered = _write_clusters(tmp_path, [
         _cluster("guess", video="v0", conf="likely")]
         + [_cluster(f"sure {i}", video=f"v{i + 1}") for i in range(45)])
@@ -595,11 +600,12 @@ def test_an_unconfirmed_pick_is_refused_while_confirmed_facts_would_be_left_off(
     assert facts["f001"]["confidence"] == "unconfirmed"
     assert facts["f001"]["selected"] is False
     assert json.loads(proc.stdout)["selected_ignored"] == {
-        "f001": "unconfirmed: the page leads with confirmed facts"}
+        "f001": "unconfirmed: never on the page"}
     assert sum(1 for f in facts.values() if f["selected"]) == 40
 
 
-def test_selected_is_trimmed_to_twenty_by_confidence_then_recurrence(tmp_path):
+def test_selected_never_fills_with_unconfirmed_facts(tmp_path):
+    """No top-up: a thin ledger shows fewer facts, never guesses."""
     clusters = []
     for i in range(25):
         clusters.append(_cluster(f"claim {i}", video=f"v{i}",
@@ -612,9 +618,7 @@ def test_selected_is_trimmed_to_twenty_by_confidence_then_recurrence(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     facts = _facts(out)
     chosen = {k for k, f in facts.items() if f["selected"]}
-    assert len(chosen) == 20
-    # the five confirmed facts survive any trim
-    assert {"f001", "f002", "f003", "f004", "f005"} <= chosen
+    assert chosen == {"f001", "f002", "f003", "f004", "f005"}
 
 
 def test_unknown_selected_ids_are_ignored_not_fatal(tmp_path):
@@ -907,7 +911,7 @@ def test_identity_facts_are_numbered_after_the_clusters(tmp_path):
     assert facts["f004"]["provenance"] == "web"
 
 
-def test_an_identity_fact_derives_the_sensitive_boolean_and_is_selectable(tmp_path):
+def test_an_identity_fact_derives_the_sensitive_boolean_and_is_not_picked_unconfirmed(tmp_path):
     clustered = _write_clusters(tmp_path, [_cluster("one")])
     dpath = _envelope(tmp_path, {"c001": {"action": "keep"}},
                       selected=["s1"],
@@ -917,8 +921,10 @@ def test_an_identity_fact_derives_the_sensitive_boolean_and_is_selectable(tmp_pa
     assert proc.returncode == 0, proc.stdout + proc.stderr
     fact = _facts(out)["f002"]
     assert fact["sensitivity"] == "clinical" and fact["sensitive"] is True
-    assert fact["selected"] is True
-    assert json.loads(proc.stdout)["selected_ignored"] == {}
+    # a lane record alone is unconfirmed, and nothing unconfirmed is picked
+    assert fact["selected"] is False
+    assert json.loads(proc.stdout)["selected_ignored"] == {
+        "f002": "unconfirmed: never on the page"}
 
 
 def test_corroboration_lifts_both_lanes_to_confirmed(tmp_path):
@@ -1415,7 +1421,11 @@ def test_two_shards_that_both_number_their_lane_facts_from_s1_keep_both(tmp_path
     assert json.loads(proc.stdout)["identity_facts"] == 2
     lane = {f["claim"]: f for f in _facts(out).values() if f.get("provenance") == "social"}
     assert set(lane) == {"runs a pottery studio", "spent a decade as a drainage engineer"}
-    assert lane["spent a decade as a drainage engineer"]["selected"] is True
+    # the second shard's pick follows the rename to its own fact (and is
+    # refused there, since a lane record alone is unconfirmed)
+    picked = lane["spent a decade as a drainage engineer"]["fact_id"]
+    assert json.loads(proc.stdout)["selected_ignored"] == {
+        picked: "unconfirmed: never on the page"}
 
 
 def test_a_patch_of_the_same_shard_still_overrides_its_ref(tmp_path):

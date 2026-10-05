@@ -3,6 +3,7 @@ connections page. The retrieval and assembly stages have their own files,
 ``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No real network.
 """
 
+import datetime as dt
 import gzip
 import json
 import re
@@ -119,16 +120,19 @@ _META = {"schema": "tl-creator-meta/v2", "channel_id": 42, "channel_name": "Patt
          "format": "solo", "lanes": "transcripts", "latest_video_date": "2026-08-29",
          "rounds": 2}
 
+# a date inside the 24-month recency window whenever the suite runs
+_RECENT = (dt.date.today() - dt.timedelta(days=30)).isoformat()
+
 _FACTS = [
-    {"fact_id": "f1", "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
+    {"fact_id": "f1", "last_seen": _RECENT, "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
      "sensitivity": "none", "sensitive": False, "recurrence": 4, "selected": True,
      "quote": "we finally adopted luna from the shelter last spring and she",
      "url": "https://www.youtube.com/watch?v=abc&t=12s"},
-    {"fact_id": "f2", "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
+    {"fact_id": "f2", "last_seen": _RECENT, "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
      "sensitivity": "lifestyle", "sensitive": False, "recurrence": 2},
-    {"fact_id": "f3", "claim": "was diagnosed with ADHD", "domain": "health",
+    {"fact_id": "f3", "last_seen": _RECENT, "claim": "was diagnosed with ADHD", "domain": "health",
      "confidence": "confirmed", "sensitivity": "clinical", "sensitive": True, "recurrence": 3},
-    {"fact_id": "f4", "claim": "daughter is named Maple", "domain": "family",
+    {"fact_id": "f4", "last_seen": _RECENT, "claim": "daughter is named Maple", "domain": "family",
      "confidence": "confirmed", "sensitivity": "children", "sensitive": True, "recurrence": 5},
     {"fact_id": "f5", "claim": "lives on Elm Street", "domain": "home",
      "confidence": "unconfirmed", "sensitivity": "location", "sensitive": True},
@@ -369,7 +373,7 @@ def test_href_ampersands_escape_exactly_once(tmp_path):
 def test_who_they_are_link_only_http_schemes(tmp_path):
     facts = [{"fact_id": "f1", "claim": "grew up in Ohio", "domain": "origin",
               "quote": "I grew up in Ohio", "url": "javascript:alert(1)",
-              "sensitivity": "none"}]
+              "sensitivity": "none", "confidence": "confirmed"}]
     html = _render_conn(tmp_path, _CONN_MD, facts=facts)
     who = html.split("<h2>Connections</h2>")[0]
     assert 'href="javascript' not in who and "grew up in Ohio" in who
@@ -410,7 +414,7 @@ def test_write_context_builds_the_extractor_block_from_the_saved_full_context(tm
         capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert json.loads(out.read_text()) == {
-        "channel_name": "Ali Abdaal", "host_names": ["Ali Abdaal"],
+        "channel_name": "Ali Abdaal", "host_names": [],   # never the channel name
         "known_facts": ["ex-doctor", "lives in London"],
         "channel_about": None, "channel_ai_profile": None,
         "format_label": "solo", "format_evidence": "fp density 41/1k"}
@@ -704,7 +708,8 @@ def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_
     claims unresolved and off the connection cards, then the renderer put two of
     them back on the page, because recurrence outranked confidence. Confidence
     ranks first now, so a confirmed fact is never displaced by a repeated
-    unconfirmed one while confirmed material is still unrendered."""
+    unconfirmed one. Since the 40-claim review, unconfirmed claims never reach
+    the strip at all."""
     import build_html
     facts = [
         {"fact_id": "f1", "claim": "husband paid for the cruise", "domain": "relationships",
@@ -717,8 +722,7 @@ def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_
          "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
     ]
     order = [f["fact_id"] for f in build_html.pick_who_flat(facts)]
-    assert order[:2] == ["f3", "f4"], order
-    assert order[2:] == ["f1", "f2"], order      # kept, but ranked below
+    assert order == ["f3", "f4"], order            # the unconfirmed pair is left off
 
 
 def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
@@ -736,21 +740,17 @@ def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
     assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2"]
 
 
-def test_an_unconfirmed_fact_on_the_page_is_badged_as_one(tmp_path):
-    """A thin ledger fills the strip with unconfirmed facts legitimately, so
-    they must be visibly unconfirmed: the strip carried a sensitivity badge and
-    nothing about confidence, making an unsettled claim look settled."""
+def test_an_unconfirmed_fact_never_reaches_who_they_are(tmp_path):
+    """Nothing unconfirmed reaches a reader: the strip leaves an unconfirmed
+    claim off rather than showing it with a badge."""
     import build_html
     confirmed = {"fact_id": "f1", "claim": "c", "domain": "habits",
                  "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"}
     unconfirmed = dict(confirmed, fact_id="f2", claim="u", confidence="unconfirmed")
     assert build_html.confidence_badge(confirmed) == ""
-    assert 'badge-unconfirmed">unconfirmed<' in build_html.confidence_badge(unconfirmed)
     who = build_html.who_they_are([confirmed, unconfirmed], _META)
-    assert who.count("badge-unconfirmed") == 1
-    # and it lands on the unconfirmed claim's own row, not loose in the strip
-    row = [li for li in who.split("<li>") if ">u<" in li][0]
-    assert "badge-unconfirmed" in row
+    assert ">c<" in who and ">u<" not in who
+    assert "badge-unconfirmed" not in who
 
 
 def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
@@ -1472,6 +1472,7 @@ _WORDS = ("kayak paddle", "sourdough starter", "vinyl records", "night shift",
 def _moments(n: int) -> list[dict]:
     return [{"fact_id": f"f{10 + i}", "claim": f"talks about the {w}", "domain": d,
              "confidence": "confirmed", "sensitivity": "none", "recurrence": 1,
+             "last_seen": _RECENT,
              "quote": f"i spent years with my {w} and never regretted it",
              "url": f"https://www.youtube.com/watch?v=m{i}&t={i + 1}s"}
             for i, (d, w) in enumerate(zip(("tastes", "habits", "origin", "work", "family",
@@ -1727,7 +1728,7 @@ def test_an_unconfirmed_ledger_fact_is_not_a_personal_moment(tmp_path):
     facts = [dict(f) for f in _FACTS]
     facts[0]["confidence"] = "unconfirmed"
     problems = _problems(tmp_path, _BRIEF_MD, facts=facts)
-    assert any("rests on an unconfirmed fact" in p for p in problems)
+    assert any("quote uses an ineligible fact (unconfirmed)" in p for p in problems)
 
 
 def test_a_first_person_precedent_window_the_map_argued_is_personal(tmp_path):

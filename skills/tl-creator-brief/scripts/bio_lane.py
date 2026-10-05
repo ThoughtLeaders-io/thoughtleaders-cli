@@ -4,20 +4,19 @@
 Bios go first, transcripts verify them. The channel About text (and, when the
 opt-in socials lane is on, the profile bios it read) is the most explicit thing
 a creator ever says about themselves, and until now it was context to search
-from and never a fact. This lane makes it a first-class *candidate* source —
-never a trusted one. Three gates stand between an About box and a brand-facing
+from and never a fact. This lane makes it a first-class *candidate* source, never a trusted one. Three gates stand between an About box and a brand-facing
 page, and nothing here is one of them on its own:
 
-1. ``strip_boilerplate`` — regex, no judgment. YouTube's placeholder copy,
+1. ``strip_boilerplate``: regex, no judgment. YouTube's placeholder copy,
    business-inquiry lines, bare emails/URLs/hashtags/handles and subscribe
    calls never reach a model. A segment with no first-person token is NOT
    dropped (a real bio writes "Doctor. Author. Dad of two."); it is flagged
    ``weak_anchor``, which the rubric already knows how to weigh.
-2. the existing ``gem-classifier`` rubric — the surviving segments become ONE
+2. the existing ``gem-classifier`` rubric, the surviving segments become ONE
    extra batch in the existing window schema, so "the best gaming channel on
    YouTube" and a link list fail the same first-person-with-a-span test every
    transcript window faces.
-3. corroboration — ``terms`` derives 1-3 search terms per bio fact for an
+3. corroboration, ``terms`` derives 1-3 search terms per bio fact for an
    additive ``fetch_cues.py --round N`` pass over the channel's OWN
    transcripts. Only a transcript fact can lift a bio fact to ``confirmed``
    (``merge_pass.py``); uncorroborated non-sensitive facts render in a
@@ -27,7 +26,7 @@ page, and nothing here is one of them on its own:
 A bio window is not a transcript window and must never be able to pretend it
 is: it carries no video and no timestamp, ``assemble_extracts.py`` refuses it
 outright, and its excerpt is cut from the stored bio text by the same
-mechanical span cutter transcripts use — a model never authors the words that
+mechanical span cutter transcripts use, a model never authors the words that
 render as the creator's own.
 
 Usage:
@@ -103,7 +102,8 @@ MIN_WORDS = 3
 # windows per term settles it.
 BIO_ROUND_PER_TERM = 5
 BIO_ROUND_CAP = 60
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+# a title's full stop ("Mrs. Lee") never ends a sentence
+_SENTENCE_SPLIT = re.compile(r"(?<!\bMr\.)(?<!\bMrs\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\bSt\.)(?<=[.!?])\s+")
 
 
 def _residual(text: str) -> str:
@@ -148,7 +148,7 @@ def segments(text: str) -> list[tuple[int, str]]:
     """``(character offset, segment)`` for each atomic piece of a bio.
 
     Lines first, then sentences, because a bio is written as a list as often
-    as it is written as prose — and because the rubric's count contract gives
+    as it is written as prose, and because the rubric's count contract gives
     one window at most one gem, so "I'm a doctor in London with two kids" must
     arrive as its own window or the second and third facts are lost."""
     out: list[tuple[int, str]] = []
@@ -191,7 +191,7 @@ def bio_sources(full: dict, socials_bio: list[dict] | None,
                 *, seen_date: str) -> tuple[list[dict], list[dict]]:
     """``(sources, refused)``. The channel About text always; the socials
     lane's profile bios only when that lane confirmed the profile belongs to
-    this creator — SKILL.md's identity lane owns that question, and a bio from
+    this creator, SKILL.md's identity lane owns that question, and a bio from
     an unmatched profile is another person's self-description.
 
     The ES ``ai.description`` profile is NEVER a source: it describes the
@@ -263,11 +263,6 @@ def build_windows(sources: list[dict], *, channel: int | str,
     return windows, dropped
 
 
-# The refusal that keeps a bio window out of the transcript ledger lives with
-# the assembly it protects, so the two can never drift apart.
-is_bio_window = _ax.is_bio_window
-
-
 def cmd_batch(a: argparse.ArgumentParser) -> int:
     full = json.loads(pathlib.Path(a.from_file).read_text(encoding="utf-8")) if a.from_file else {}
     socials = None
@@ -317,7 +312,7 @@ def cmd_batch(a: argparse.ArgumentParser) -> int:
 # --------------------------------------------------------------------------- #
 def facts_from_returns(windows: list[dict], returns: dict) -> tuple[list[dict], list[dict]]:
     """``(facts, skipped)``. The classifier's gems become identity-lane records
-    the merge pass already knows how to hold — never transcript candidates.
+    the merge pass already knows how to hold, never transcript candidates.
 
     Two things are deliberately NOT taken from the model: the words and the
     tier. The excerpt is cut from the stored bio by ``extract_span``, the same
@@ -475,14 +470,19 @@ MAX_TERMS = 3
 MIN_TERM_LEN = 4
 
 
-def corroboration_terms(claim: str, *, limit: int = MAX_TERMS) -> list[str]:
-    """1 to ``limit`` search terms for one bio fact, derived from its claim.
+def corroboration_terms(claim: str, *, limit: int = MAX_TERMS,
+                        exclude: set[str] | None = None) -> list[str]:
+    """1 to ``limit`` search terms for one bio fact, from the creator's own
+    words (the bio excerpt; the claim when there is none). The host's names
+    (``exclude``) are never a term: they match nearly every upload. Two words
+    pair only when nothing but a space separates them, so a list ("astronomy,
+    Christmas") never becomes one phrase.
 
     What a corroboration query needs is the specific noun the creator would say
     out loud: the place, the job, the diagnosis, the family word, the
     milestone. Proper nouns first (they are the least ambiguous thing in a
-    claim), then adjacent content pairs — "pottery studio" finds the passage
-    "pottery" alone would bury — then the remaining content words, longest
+    claim), then adjacent content pairs, "pottery studio" finds the passage
+    "pottery" alone would bury, then the remaining content words, longest
     first. Pronouns are excluded by construction: on a single channel's
     transcripts they match everything. Personal identifiers are scrubbed before
     any of this, because a query for a creator's email address is a different
@@ -491,9 +491,15 @@ def corroboration_terms(claim: str, *, limit: int = MAX_TERMS) -> list[str]:
     A claim that yields nothing is reported, never guessed at: that fact simply
     cannot be corroborated, so it stays unverified or is dropped."""
     text = IDENTIFIER_RX.sub(" ", claim or "")
-    tokens = _WORD_RX.findall(text)
+    found = list(_WORD_RX.finditer(text))
+    tokens = [m.group(0) for m in found]
+    skip = {w.lower() for name in (exclude or set()) for w in name.split()}
     content = {i for i, t in enumerate(tokens)
-               if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN}
+               if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN
+               and t.lower().strip("'’s") not in skip and t.lower() not in skip}
+
+    def adjacent(i: int) -> bool:
+        return not text[found[i].end():found[i + 1].start()].strip()
 
     def is_proper(i: int) -> bool:
         return tokens[i][:1].isupper() or tokens[i].isupper()
@@ -504,7 +510,7 @@ def corroboration_terms(claim: str, *, limit: int = MAX_TERMS) -> list[str]:
     # always yields the same query.
     cands: list[tuple[int, int, int, str]] = []
     for i in sorted(content):
-        if (i + 1) in content:
+        if (i + 1) in content and adjacent(i):
             pair = f"{tokens[i]} {tokens[i + 1]}"
             cands.append((0 if (is_proper(i) or is_proper(i + 1)) else 2,
                           -len(pair), i, pair))
@@ -530,7 +536,7 @@ def probe_body(channel: int | str, terms: list[str], *, size: int = 5) -> dict:
     """One narrow ES body for a fact's terms, in the shape the retrieval pass
     uses: the same ``doc_type``/``channel.id``/``exists: transcript`` filter and
     the same apostrophe-variant expansion, so a probe that finds nothing means
-    the channel never said it — not that the query was spelled differently.
+    the channel never said it, not that the query was spelled differently.
 
     No year bucketing: a probe answers "is this anywhere in this channel", and
     the round that follows is what actually fetches windows."""
@@ -550,6 +556,10 @@ def probe_body(channel: int | str, terms: list[str], *, size: int = 5) -> dict:
     }
 
 
+def _split_names(raw: str | None) -> list[str]:
+    return [x.strip() for x in (raw or "").split(",") if x.strip()]
+
+
 def cmd_terms(a: argparse.Namespace) -> int:
     data = json.loads(pathlib.Path(a.facts).read_text(encoding="utf-8"))
     records = data.get("facts") if isinstance(data, dict) else data
@@ -557,7 +567,8 @@ def cmd_terms(a: argparse.Namespace) -> int:
     out.mkdir(parents=True, exist_ok=True)
     per_fact, no_terms, all_terms = [], [], []
     for rec in records or []:
-        terms = corroboration_terms(str(rec.get("claim") or ""))
+        terms = corroboration_terms(str(rec.get("source_excerpt") or rec.get("claim") or ""),
+                                    exclude=set(_split_names(a.host_names)))
         entry = {"ref": rec.get("ref"), "claim": rec.get("claim"), "terms": terms,
                  "sensitivity": rec.get("sensitivity")}
         if not terms:
@@ -573,17 +584,21 @@ def cmd_terms(a: argparse.Namespace) -> int:
     # is a shared, hand-weighted file this lane has no business touching.
     phrases_path = out / f"bio-terms-r{a.round}.txt"
     phrases_path.write_text(
-        "# generated by bio_lane.py terms — corroboration round for this channel's\n"
+        "# generated by bio_lane.py terms, corroboration round for this channel's\n"
         "# bio facts. Weight 3 = a specific, durable fact about the person.\n"
         + "".join(f"{t} | 3\n" for t in all_terms), encoding="utf-8")
     corpus = f"{a.out}/{a.channel}"
     window_cap = min(BIO_ROUND_CAP, BIO_ROUND_PER_TERM * max(len(all_terms), 1))
+    hosts = f' --host-names "{a.host_names}"' if a.host_names else ""
+    r = a.round
     recipe = [
-        f"python3 fetch_cues.py --channel {a.channel} --out {a.out} --round {a.round} "
+        f"python3 fetch_cues.py --channel {a.channel} --out {a.out} --round {r}{hosts} "
         f"--phrases {phrases_path} --exclude {corpus}/classified.jsonl --generic-floor 0 "
         f"--max-windows {window_cap} --min-windows 0 --min-score 0",
-        "# then the usual extractor fan-out over batches-r"
-        f"{a.round}/, and:",
+        f"for b in {corpus}/batches-r{r}/batch-*.json; do n=$(basename \"$b\" .json); "
+        f"python3 extractor_prompt.py --batch \"$b\" --context {corpus}/context.json "
+        f"--write-to {corpus}/returns-r{r}/$n.extract.json --out {corpus}/prompts-r{r}/$n.md; done",
+        f"# then one extractor per {corpus}/prompts-r{r}/batch-NNN.md, all in one message, and:",
         f"python3 assemble_extracts.py --batches {corpus}/batches-r{a.round} "
         f"--returns {corpus}/returns-r{a.round} --out {corpus} --append",
         "# --append is REQUIRED: without it the round replaces classified.jsonl "
@@ -594,9 +609,6 @@ def cmd_terms(a: argparse.Namespace) -> int:
                "window_cap": window_cap,
                "terms": all_terms, "per_fact": per_fact,
                "phrases_file": str(phrases_path), "recipe": recipe}
-    probe_path = out / "bio-probe.json"
-    probe_path.write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
-    summary["probe_file"] = str(probe_path)
     print(json.dumps(summary, indent=1, ensure_ascii=False))
     print(f"FUNNEL stage=bio_terms channel={a.channel} round={a.round} "
           f"facts={len(per_fact)} with_terms={summary['with_terms']} "
@@ -632,6 +644,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--channel", required=True)
     t.add_argument("--out", default="tl-creator-profiles/.corpus",
                    help="the same PARENT directory the corpus uses")
+    t.add_argument("--host-names", dest="host_names", default="",
+                   help="the run's host names, passed on to the round's fetch")
     t.add_argument("--round", type=int, default=2,
                    help="the additive fetch_cues round this feeds; never 1, which "
                         "would clear the existing corpus")
