@@ -194,6 +194,12 @@ def claim_overreach(claim: str, quote: str, corrections: dict | None = None,
     for num, key in claim_numbers(claim):
         if key not in in_quote:
             bad.append(num)
+    # the claim is English: a number it spells out ("three children") is a
+    # number too, checked against digits and words alike in the quote
+    for word in (claim or "").split():
+        w = _lc(word)
+        if w in _NUM_WORDS and _NUM_WORDS[w] not in in_quote and _NUM_WORDS[w].rstrip("s") not in in_quote:
+            bad.append(word)
     if not english:
         return bad
     # a family word in the claim must be in the quote, and when the quote

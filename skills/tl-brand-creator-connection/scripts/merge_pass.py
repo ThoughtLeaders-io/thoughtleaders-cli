@@ -1780,6 +1780,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
                     {"name": w, "relation": p.get("relation")} for w in str(p["name"]).split()]
                 f["confidence"] = "unconfirmed"
                 f["two_names"] = str(p["name"])
+    # the rollup lists the people as the facts now name them, split apart
+    people = {**people_list(facts), "two_names": people["two_names"]}
     people_path = out_path.parent / "people.json"
     people_path.write_text(json.dumps(people, ensure_ascii=False, indent=1), encoding="utf-8")
 

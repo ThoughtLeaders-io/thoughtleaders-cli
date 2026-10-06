@@ -306,3 +306,22 @@ def test_apply_caches_a_certain_host_name_once(tmp_path, monkeypatch):
     # no channel id in the context: nothing is written
     rc, cache, calls = _apply_with_context(tmp_path, monkeypatch, {}, "Eric,Eric Decker", sheets)
     assert cache["cached"] == "skipped: no channel id in context" and calls == []
+
+
+def test_host_name_certainty_never_lets_a_first_name_vouch_for_a_different_full_name():
+    c = cast_sheet.host_name_certainty
+    # the sheets say Joe Biden, the run was given Joe Rogan: no agreement, nothing certain
+    r = c(_cast(["Joe Biden"], ["Joe Biden"]), ["Joe", "Joe Rogan", "Rogan"], {})
+    assert (r["confidence"], r["name"], r["sources"]) == ("low", "Joe Biden", ["cast:2"])
+    # a first name alone agrees with either full name
+    r = c(_cast(["Joe"], ["Joe"]), ["Joe Rogan"], {})
+    assert (r["confidence"], r["name"]) == ("high", "Joe Rogan")
+    r = c(_cast(["Joe Biden"], ["Joe Biden"]), ["Joe"], {})
+    assert (r["confidence"], r["name"]) == ("high", "Joe Biden")
+    # the same discipline for the names said on camera and given by descriptions
+    full = {"description_anchors": {"names": [{"name": "Joe Rogan", "videos": 3}]}}
+    assert c(_cast(["Joe Biden"], ["Joe Biden"]), [], full)["sources"] == ["cast:2"]
+    assert c(_cast(["Joe"], ["Joe"]), [], full)["sources"] == ["cast:2", "descriptions"]
+    assert cast_sheet.names_agree("Joe Biden", "Joe Rogan") is False
+    assert cast_sheet.names_agree("Joe", "Joe Rogan") and cast_sheet.names_agree("joe rogan", "Joe Rogan")
+    assert cast_sheet.names_agree("", "Joe") is False

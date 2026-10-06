@@ -284,23 +284,40 @@ def host_name_certainty(cast: dict[str, dict], given: list[str], full: dict) -> 
     if not counts:
         return {"name": None, "confidence": "none", "sources": [], "videos": 0}
     top, n = counts.most_common(1)[0]
-    first = top.split()[0]
     sources = [f"cast:{n}"]
-    agree = {g.strip().lower() for g in given if g.strip()}
-    if top in agree or first in {a.split()[0] for a in agree}:
+    # a given full name that contradicts the sheets' full name vetoes the
+    # given names altogether: a bare "Joe" beside "Joe Rogan" does not vouch
+    # for "Joe Biden"
+    conflict = len(top.split()) > 1 and any(
+        len(g.split()) > 1 and not names_agree(top, g) for g in given if g.strip())
+    agreeing_given = [] if conflict else [g.strip() for g in given if g.strip() and names_agree(top, g)]
+    if agreeing_given:
         sources.append("given")
-    if any(str(r.get("name") or "").lower() == first and r.get("said_outright")
+    if any(r.get("said_outright") and names_agree(top, str(r.get("name") or ""))
            for r in full.get("name_candidates") or []):
         sources.append("on_camera")
-    if any(str(r.get("name") or "").lower().split()[0] == first
+    if any(names_agree(top, str(r.get("name") or ""))
            for r in (full.get("description_anchors") or {}).get("names") or []):
         sources.append("descriptions")
     certain = (n >= HOST_CACHE_VIDEOS_MIN and len(sources) >= 2) or (
         n >= HOST_CACHE_ALONE_MIN and n * 2 >= naming)
-    # the fullest spelling: a given alias that holds the sheets' name, else the sheets' own
-    longest = max((g for g in given if first in g.lower().split()), key=len, default=spelling[top])
+    # the fullest spelling among the names that agree: never a given full
+    # name the sheets contradict
+    longest = max(agreeing_given + [spelling[top]], key=len)
     return {"name": longest if certain else spelling[top], "confidence": "high" if certain else "low",
             "sources": sources, "videos": n}
+
+
+def names_agree(a: str, b: str) -> bool:
+    """Whether two person names are the same person as far as they go: equal
+    when both carry a surname, or the same first name when either is a first
+    name alone. "Joe Biden" and "Joe Rogan" disagree; "Joe" agrees with both."""
+    ta, tb = a.lower().split(), b.lower().split()
+    if not ta or not tb:
+        return False
+    if len(ta) > 1 and len(tb) > 1:
+        return ta == tb
+    return ta[0] == tb[0]
 
 
 def cache_host_name(channel: int, name: str, evidence: str) -> str:

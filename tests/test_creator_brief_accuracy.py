@@ -275,3 +275,11 @@ def test_review_spoken_host_name_prefers_the_channel_name_variant():
 def test_review_host_possessive_is_excluded_from_corroboration_terms():
     terms = bl.corroboration_terms("Sarah's bakery opened in Leeds", exclude={"Sarah"})
     assert not any("Sarah" in t for t in terms)
+
+def test_review_spelled_numbers_in_the_claim_are_checked_too():
+    assert ax.claim_overreach("has three cats", "i have two cats") == ["three"]
+    assert ax.claim_overreach("has three cats", "i have three cats") == []
+    assert ax.claim_overreach("has three cats", "i have 3 cats") == []
+    assert ax.claim_overreach("spent thirty years there", "i spent 30 years there") == []
+    assert ax.claim_overreach("is in her thirties", "i am 34 now") == []
+    assert ax.claim_overreach("has twelve siblings", "i am one of eleven kids") == ["twelve"]

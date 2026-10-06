@@ -1673,3 +1673,25 @@ def test_a_fact_naming_a_sum_of_money_is_never_selected(tmp_path):
     loan = next(f for f in facts.values() if "borrowed" in f["claim"])
     assert loan["selected"] is False
     assert merge_pass.unselectable_reason(loan) == "names a sum of money"
+
+
+def test_people_rollup_lists_the_split_names_not_the_run_together_one(tmp_path):
+    """Two first names a caption ran together are split on the facts; the
+    people rollup written beside them lists the two people, never the pair."""
+    a = _cluster("hiked with a friend", quote="i hiked with juno pell last week", video="v1")
+    a["verdict"]["people"] = [{"name": "Juno Pell", "relation": "friend"}]
+    b = _cluster("cooks with a friend", domain="habits", quote="i cook with juno on sundays", video="v2")
+    b["verdict"]["people"] = [{"name": "Juno", "relation": "friend"}]
+    c = _cluster("plays chess with a friend", domain="tastes", quote="pell and i play chess", video="v3")
+    c["verdict"]["people"] = [{"name": "Pell", "relation": "friend"}]
+    clustered = _write_clusters(tmp_path, [a, b, c])
+    out = tmp_path / "facts.jsonl"
+    proc = _keep_all(clustered, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    people = json.loads((tmp_path / "people.json").read_text())
+    names = {p["name"] if isinstance(p, dict) else p for p in people["people"]}
+    assert people["two_names"] == ["Juno Pell"]
+    assert "Juno Pell" not in names and {"Juno", "Pell"} <= names
+    split = [f for f in _facts(out).values() if f.get("two_names")]
+    assert split and split[0]["confidence"] == "unconfirmed"
+    assert sorted(p["name"] for p in split[0]["people"]) == ["Juno", "Pell"]
