@@ -1712,6 +1712,11 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                         f"but the input file says {supplied}")
 
     if mirror_mode(inp):
+        # the brand's own document is theirs word for word; our For you blocks are not
+        ours = " ".join(_FOR_YOU.findall(body))
+        for other in other_creators or []:
+            if re.search(r"(?<!\w)" + re.escape(other) + r"(?!\w)", ours, re.I):
+                problems.append(f"names another creator: {other!r}")
         return problems + check_mirror(body, facts, map_md, inp, corpus_cues,
                                        brand, past_reads)
 

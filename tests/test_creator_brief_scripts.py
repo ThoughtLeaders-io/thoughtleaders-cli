@@ -1587,6 +1587,18 @@ def test_a_mirrored_brief_keeps_the_brands_words_and_order(tmp_path):
         assert any("not kept word for word" in p for p in problems), problems
 
 
+def test_a_mirrored_brief_refuses_another_creators_name(tmp_path):
+    import build_html
+    lines = [f"Brand line {k}" for k in range(5)]
+    md, inp = _mirror_brief(_moments(4), lines)
+    facts = _FACTS + _moments(6)
+    assert not any("another creator" in p
+                   for p in build_html.check_brief(md, facts, "", inp, other_creators=["Zed Rival"]))
+    named = md.replace("Tell your viewers about", "Like Zed Rival, tell your viewers about", 1)
+    assert any("another creator" in p
+               for p in build_html.check_brief(named, facts, "", inp, other_creators=["Zed Rival"]))
+
+
 def test_a_mirrored_brief_still_needs_its_points_built_on_gems(tmp_path):
     lines = [f"Brand line {k}" for k in range(5)]
     md, inp = _mirror_brief(_moments(2), lines)

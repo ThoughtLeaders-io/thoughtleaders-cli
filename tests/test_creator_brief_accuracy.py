@@ -108,6 +108,11 @@ def test_fix6_unconfirmed_stays_in_the_ledger(tmp_path):
 def test_fix7_years_ago_becomes_a_year():
     claim, note = mp.dated_claim("moved to the coast five years ago", "2025-11-02", None)
     assert claim == "moved to the coast in about 2020 (said in 2025)"
+def test_fix7_months_ago_crosses_the_year_from_the_full_date():
+    claim, _ = mp.dated_claim("moved two months ago", "2025-01-15", None)
+    assert "about 2024" in claim
+    claim, _ = mp.dated_claim("moved six months ago", "2025-12-15", None)
+    assert "about 2025" in claim
 def test_fix7_channel_start_uses_the_first_upload():
     claim, note = mp.dated_claim("started the channel about 5 years ago", "2025-11-02", "2019-07-01")
     assert "2019" in claim and "said" in claim

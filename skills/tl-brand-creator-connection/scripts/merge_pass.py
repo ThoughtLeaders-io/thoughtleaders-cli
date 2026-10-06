@@ -100,6 +100,7 @@ import tier_hint  # noqa: E402
 import assemble_extracts as _ax  # noqa: E402  sibling: the claim-to-quote check
 from store_io import read_ledger, write_ledger  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data  # noqa: E402  the shared CLI wrapper
 
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health",
            "habits", "tastes", "beliefs", "relationships", "other"}
@@ -982,12 +983,17 @@ def dated_claim(claim: str, published: str | None, first_upload: str | None) -> 
     year_said = str(published or "")[:4]
     if not year_said.isdigit():
         return claim, None
+    try:
+        said = dt.date.fromisoformat(str(published)[:10])
+    except ValueError:
+        said = dt.date(int(year_said), 7, 1)
     m = _AGO.search(claim or "")
     if not m:
         return claim, None
     n = int(m.group(1)) if m.group(1).isdigit() else _WORD_NUM.get(m.group(1).lower(), 0)
     unit = m.group(2).lower()
-    year = int(year_said) - (n if unit.startswith("year") else (1 if n >= 6 else 0))
+    months = n * 12 if unit.startswith("year") else n
+    year = (said.year * 12 + said.month - 1 - months) // 12
     first = str(first_upload or "")[:4]
     if _CHANNEL_START.search(claim) and first.isdigit() and abs(int(first) - year) >= 1:
         text = f"in {first} (the channel's first upload; said \"{m.group(0)}\" in {year_said})"
@@ -1280,7 +1286,6 @@ def first_upload_date(channel: str | None) -> str | None:
     if not channel or not str(channel).isdigit():
         return None
     try:
-        import tl_data  # noqa: WPS433  the shared CLI wrapper
         rows = tl_data.db_es({
             "size": EARLY_UPLOADS_MAX + 1, "_source": ["publication_date"],
             "query": {"bool": {"filter": [{"term": {"doc_type": "article"}},
@@ -1486,10 +1491,14 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # and (on a refresh) whatever the existing fact already carried.
     keys_by_fact: dict[str, list[str]] = {}
     videos_by_fact: dict[str, list[str]] = {}
+    newest_by_fact: dict[str, str] = {}
 
     def add_evidence(fact_id: str, line: dict) -> None:
         keys = keys_by_fact.setdefault(fact_id, [])
         vids = videos_by_fact.setdefault(fact_id, [])
+        seen = newest_evidence(line, None)
+        if seen and seen > newest_by_fact.get(fact_id, ""):
+            newest_by_fact[fact_id] = seen
         for m in members_of(line):
             key = member_key(m)
             if key not in keys:
@@ -1589,6 +1598,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
         prior = dict(existing_by_id.get(fact_id) or {})
         prior["recurrence"] = len(videos_by_fact.get(fact_id, []))
         prior["members"] = keys_by_fact.get(fact_id, [])
+        prior["last_seen"] = max(str(prior.get("last_seen") or ""),
+                                 newest_by_fact.get(fact_id, "")) or None
         facts.append(prior)
         fact_index[fact_id] = prior
 
