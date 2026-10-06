@@ -198,7 +198,6 @@ RUN_DATE: str = ""        # set by expand; the ledger's date for the recency tes
 SHARD_DIVISOR = 40
 SHARD_MAX = 6
 
-_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def funnel(**fields) -> None:
@@ -745,10 +744,6 @@ def alias_enums(decisions: dict[str, dict], identity: list[dict]) -> list[str]:
     return notes
 
 
-def numbers_in(text: str) -> list[str]:
-    return _NUMBER.findall(text or "")
-
-
 def resolve_fold(start: str, folds: dict[str, str]) -> tuple[str | None, bool]:
     """Follow a fold chain to its terminal. Returns (terminal, cycle)."""
     seen = {start}
@@ -864,7 +859,9 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         # Token comparison, never substring: "has 3 dogs" must not pass on a
         # quote that says "13 dogs".
         quote = str((line.get("verdict") or {}).get("quote") or "")
-        evidence = set(numbers_in(quote)) | set(numbers_in(cluster_claim(line)))
+        english = _ax.is_english(line.get("window"))
+        evidence = (_ax.number_keys(quote, spelled=english)
+                    | _ax.number_keys(cluster_claim(line), spelled=True))
         # names: the quote's words, the cluster claim's, and any name the
         # extractor corrected from a caption misspelling, matched by _ax.word_in
         corrected = " ".join(str(v) for v in
@@ -874,12 +871,9 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         if not claim:
             why = "narrowed claim is empty"
         else:
-            new = [n for n in numbers_in(claim) if n not in evidence]
-            # the claim's first word is grammar ("Owns two dogs"), never a name
-            new += [n for n in _name_tokens(" ".join(claim.split()[1:]))
-                    if not _ax.word_in(n, names)]
-            new += [w for w in _ax.claim_overreach(claim, quote,
-                                                   english=_ax.is_english(line.get("window")))
+            new = [n for n, key in _ax.claim_numbers(claim) if key not in evidence]
+            new += [n for n in _name_tokens(claim) if not _ax.word_in(n, names)]
+            new += [w for w in _ax.claim_overreach(claim, quote, english=english)
                     if w in _ax.FAMILY_WORDS or w.rstrip("s") in _ax.FAMILY_WORDS]
             if new:
                 why = ("narrowed claim introduces names, numbers or relatives absent "
@@ -1232,11 +1226,22 @@ def unselectable_reason(fact: dict) -> str:
     return "not eligible"
 
 
+# capitalised words that open a claim and are never a name
+_NOT_NAME_WORDS = frozenset("""
+    The She He They Her His Their YouTube Instagram TikTok Currently Real Has Had
+    Is Was Married Grew Launched Worked Works Operates Owns Owned Keeps Kept Lives
+    Lived Loves Loved Likes Liked Plays Played Runs Ran Moved Started Bought Built
+    Uses Used Wants Wanted Hates Makes Made Takes Took Got Gets Does Did Went Goes
+    Studied Studies Learned Says Said Thinks Believes Prefers Collects Drives Cooks
+    Eats Drinks Grows Spent Spends Came Comes Left Lost Won Became Attended
+    Graduated Trained Speaks Spoke Wrote Writes Reads Watches Travels Traveled
+    Travelled Visited Visits Quit Joined Founded Once Never Always Still Used
+    """.split())
+
+
 def _name_tokens(text: str) -> set[str]:
     return {t.lower() for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", text or "")
-            if t not in ("The", "She", "He", "They", "Her", "His", "Their", "YouTube",
-                         "Instagram", "TikTok", "Currently", "Real", "Has", "Is",
-                         "Was", "Married", "Grew", "Launched", "Worked", "Operates")}
+            if t not in _NOT_NAME_WORDS}
 
 
 def is_recent(fact: dict, today: str | None = None) -> bool:
@@ -1629,6 +1634,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
             seed_from_existing(fact_id)
             carried["members"] = keys_by_fact[fact_id]
             carried["recurrence"] = len(videos_by_fact[fact_id])
+            carried["last_seen"] = max(str(carried.get("last_seen") or ""),
+                                       newest_by_fact.get(fact_id, "")) or None
         facts.append(carried)
         fact_index[fact_id] = carried
 

@@ -1148,6 +1148,16 @@ def test_a_fold_into_an_existing_fact_may_cross_its_domain(tmp_path):
     assert _facts(tmp_path / "facts.jsonl")["f001"]["domain"] == "work"
 
 
+def test_a_fold_into_an_existing_fact_refreshes_its_last_seen(tmp_path):
+    existing = _existing(tmp_path, [_fact("f001")])           # published 2020
+    clustered = _write_clusters(tmp_path, [
+        _cluster("said again", video="v6", published="2026-05-01")])
+    dpath = _decisions(tmp_path, {"c001": {"action": "fold", "target": "f001"}})
+    proc = _expand(clustered, dpath, tmp_path / "facts.jsonl", existing=existing)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _facts(tmp_path / "facts.jsonl")["f001"]["last_seen"] == "2026-05-01"
+
+
 def test_a_fold_target_that_does_not_exist_is_still_a_violation(tmp_path):
     """Dropping the domain rule must not drop the target checks with it."""
     existing = _existing(tmp_path, [_fact("f001", domain="work")])

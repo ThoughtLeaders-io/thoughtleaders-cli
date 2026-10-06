@@ -222,6 +222,15 @@ def test_review_ended_false_is_accepted(tmp_path):
     d = _envelope(tmp_path, {"c001": {"action": "keep", "ended": False}})
     proc = _expand(c, d, tmp_path / "facts.jsonl")
     assert proc.returncode == 0, proc.stdout + proc.stderr
+def test_review_a_narrowed_claim_still_cannot_open_with_a_new_name(tmp_path):
+    c = _write_clusters(tmp_path, [_cluster("has a sister who nurses", quote="my sister is a nurse")])
+    d = _envelope(tmp_path, {"c001": {"action": "keep", "claim": "Jessica is his sister, a nurse"}})
+    assert "jessica" in _violations(_expand(c, d, tmp_path / "facts.jsonl"))["c001"][0]
+def test_review_a_narrowed_claim_may_spell_a_number_differently(tmp_path):
+    c = _write_clusters(tmp_path, [_cluster("is a parent of three", quote="my three kids keep me busy")])
+    d = _envelope(tmp_path, {"c001": {"action": "keep", "claim": "Has 3 kids"}})
+    proc = _expand(c, d, tmp_path / "facts.jsonl")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 def test_review_a_narrowed_claim_may_start_with_a_capitalised_verb(tmp_path):
     c = _write_clusters(tmp_path, [_cluster("has two dogs", quote="i have two dogs at home")])
     d = _envelope(tmp_path, {"c001": {"action": "keep", "claim": "Owns two dogs"}})
@@ -232,6 +241,9 @@ def test_review_spelled_and_comma_numbers_match():
     assert ax.claim_overreach("earned 1,000 dollars", "i made 1000 dollars") == []
     assert ax.claim_overreach("is in his 30s", "im in my thirties now") == []
     assert ax.claim_overreach("has 4 kids", "i have three kids") == ["4"]
+    assert ax.claim_overreach("is 30 years old", "im in my thirties now") == ["30"]
+    assert ax.claim_overreach("has 1 kid", "one of my kids is starting school") == ["1"]
+    assert ax.claim_overreach("costs 15 euros", "it costs 1,5 euros") == ["15"]
 def test_review_a_claims_first_word_is_still_checked_as_a_relative():
     assert ax.claim_overreach("Wife works as a nurse", "my sister works as a nurse") == ["wife"]
     assert ax.claim_overreach("Dad was a pilot", "his dad was a pilot") == ["dad"]
@@ -243,6 +255,7 @@ def test_review_a_non_english_quote_skips_the_english_family_words():
 def test_review_people_said_in_the_possessive_are_kept():
     assert ax.people_in_quote([{"name": "Sarah"}], "my wife Sarah's birthday") == [
         {"name": "Sarah", "relation": None}]
+    assert ax.people_in_quote([{"name": "Chris"}], "my friend Christina came") == []
 def test_review_spoken_host_name_prefers_the_channel_name_variant():
     full = {"name_candidates": [
         {"name": "marta", "channel_name_variant": True, "said_outright_videos": 2},

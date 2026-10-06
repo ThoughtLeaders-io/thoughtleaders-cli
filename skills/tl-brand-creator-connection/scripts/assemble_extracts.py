@@ -91,14 +91,17 @@ _OWN = re.compile(r"\b(?:my|our)\s+(\w+)(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\w+))?"
 _OWN_STOP = {"and", "or", "but", "with", "his", "her", "their", "your", "the", "a", "an"}
 _OTHERS = re.compile(r"\b(?:his|her|their|your)\s+(\w+)(?:\s+(\w+))?(?:\s+(\w+))?")
 _CAP = re.compile(r"\b[A-Z][a-zA-Z'’-]{2,}\b")
-_NUM = re.compile(r"\d+(?:[.,]\d+)*")
-# a number the captions spell out: "three kids", "in his thirties"
+_NUM = re.compile(r"(\d+(?:[.,]\d+)*)(s\b)?")     # "30s" is a decade, not 30
+_THOUSANDS = re.compile(r"\d{1,3}(?:,\d{3})+")
+# a number the captions spell out: "three kids", "in his thirties". Never
+# "one", which is as often a pronoun ("no one", "one of my kids").
 _NUM_WORDS = {w: str(n) for n, w in enumerate(
-    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
-    "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
+    "two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty".split(), start=2)}
 _NUM_WORDS.update({w: str(n) for n, w in zip(range(30, 100, 10),
                   "thirty forty fifty sixty seventy eighty ninety".split())})
-_NUM_WORDS.update({w[:-1] + "ies": n for w, n in list(_NUM_WORDS.items()) if w.endswith("ty")})
+_NUM_WORDS.update({w[:-1] + "ies": n + "s" for w, n in list(_NUM_WORDS.items())
+                   if w.endswith("ty")})
 _NOT_NAMES = {"The", "She", "He", "They", "Her", "His", "Their", "YouTube", "Instagram",
               "TikTok", "Facebook", "Twitter", "Christmas", "Sunday", "Monday", "Tuesday",
               "Wednesday", "Thursday", "Friday", "Saturday", "January", "February",
@@ -140,10 +143,23 @@ def is_english(window: dict | None) -> bool:
     return str((window or {}).get("language") or "en").lower().startswith("en")
 
 
-def _numbers(text: str, spelled: bool = False) -> set[str]:
-    """Numbers without their thousands commas ("1,000" is "1000"); with
-    ``spelled``, also the ones written as words."""
-    found = {n.replace(",", "") for n in _NUM.findall(text or "")}
+def claim_numbers(text: str) -> list[tuple[str, str]]:
+    """``(as written, comparison key)`` per number: thousands commas dropped
+    ("1,000" is "1000"), a decade keeps its "s" ("30s")."""
+    out = []
+    for m in _NUM.finditer(text or ""):
+        n = m.group(1)
+        key = n.replace(",", "") if _THOUSANDS.fullmatch(n) else n
+        out.append((n, key + ("s" if m.group(2) else "")))
+    return out
+
+
+def number_keys(text: str, spelled: bool = False) -> set[str]:
+    """The comparison keys of every number in ``text`` ("30s" also counts as
+    30); with ``spelled``, also the ones written as English words."""
+    found = set()
+    for _, key in claim_numbers(text):
+        found |= {key, key.rstrip("s")}
     if spelled:
         found |= {_NUM_WORDS[w] for w in _lc(text).split() if w in _NUM_WORDS}
     return found
@@ -175,9 +191,9 @@ def claim_overreach(claim: str, quote: str, corrections: dict | None = None,
         if any(_lc(tok) in c and all(w in q_words for w in words) for c, words in heard.items()):
             continue
         bad.append(tok)
-    in_quote = _numbers(quote, spelled=english)
-    for num in _NUM.findall(claim or ""):
-        if num.replace(",", "") not in in_quote:
+    in_quote = number_keys(quote, spelled=english)
+    for num, key in claim_numbers(claim):
+        if key not in in_quote:
             bad.append(num)
     if not english:
         return bad
@@ -312,7 +328,7 @@ def people_in_quote(people, quote: str) -> list[dict]:
         if not isinstance(p, dict):
             continue
         name = str(p.get("name") or "").strip()
-        if name and all(word_in(w, q) for w in name.split()):
+        if name and all(_lc(re.sub(r"['’]s$", "", w)) in q for w in name.split()):
             rel = str(p.get("relation") or "").strip().lower() or None
             out.append({"name": name, "relation": rel})
     return out
