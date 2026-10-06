@@ -57,7 +57,7 @@ Do not use for: channel discovery, performance or authenticity analysis, a brand
 
 | Tier | Model | Used by |
 |---|---|---|
-| Extraction | provider's fast mid-tier (Sonnet) | `tl-cli:gem-classifier`, bio lane, identity lane, three brand lanes |
+| Extraction | provider's fast mid-tier (Sonnet) | `tl-cli:cast-sheet`, `tl-cli:gem-classifier`, bio lane, identity lane, three brand lanes |
 | Judgment | provider's strongest (Opus) | `tl-cli:merge-shard` only |
 
 Every generic subagent (bio, identity and brand lanes) is pinned to the extraction model explicitly, never the inherited model. These choices are fixed: never ask the user which agents or models to use. IF an agent name does not resolve, spawn the host's generic subagent pinned to the same tier's model and say so. Never use the cheapest model for extraction. Never downgrade the judgment tier; add shards instead.
@@ -79,8 +79,8 @@ Handle the summary in this order:
 2. **`plan`:** `Intelligence` or `Superuser` → continue. Known lower tier → stop with a message. Unrecognised value → name it and continue. `plan gate: unreachable, continued` → continue.
 3. **`announcement`:** repeat it to the user verbatim. It is empty on a first build (no ledger yet): say "No ledger yet: building from scratch." `decision` is `reuse`, `refresh` or `build`. Never reuse silently. Never refuse `--rebuild`.
 4. **Ask the open choices** (next section) in ONE message, unless already decided or the run is autonomous/fast.
-5. **Host names from `identity`:** take person-name aliases only: first name, full name, unambiguous surname, stated nickname. Never a brand, company, role, employer, product, topic or the bare channel name (these drive speaker attribution and create false second-speaker hints). IF nothing in `identity` names a person, pass `--host-names ""`: on a build, `start_run.py` then takes the name the host says on camera ("my name is …") in two or more uploads, fetches again with it and reports it as `host_names_from_transcripts`; pass those names as `--host-names` to every later command. Never supply a name from memory.
-6. **Second call** with `--host-names`, `--reserve`, `--lanes` and any brief flags. On `build`/`refresh` it runs the fetch and context stats (see `ran`); it adds the refresh round flags itself. On `reuse` it fetches nothing: CONNECT goes to CONNECT step 1, PROFILE reports the ledger as it is.
+5. **Host names from `identity`:** IF `identity.cached_host_name` is set, that is the host's name: pass it (first name and full name) plus `identity.cached_host_aliases` as `--host-names` and skip the rest of this point. Otherwise take person-name aliases only: first name, full name, unambiguous surname, stated nickname, from the About text, the generated profile or `description_anchors.names` (what a recurring line of the channel's own upload descriptions calls the host). Never a brand, company, role, employer, product, topic, handle, promo code or the bare channel name (these drive speaker attribution and create false second-speaker hints). IF nothing names a person, pass `--host-names ""`: on a build, `start_run.py` then takes the name the host says on camera ("my name is …") in two or more uploads, or in one upload when the descriptions' promo codes and vanity links spell the same name, or the name a recurring description line gives the host; it fetches again with it and reports `host_names_found` with `host_names_source`. Pass those names as `--host-names` to every later command. IF still none, step 1b may report `host_names_from_cast` (a name the openings give the host in two or more videos): use it the same way. Never supply a name from memory.
+6. **Second call** with `--host-names`, `--reserve`, `--lanes` and any brief flags. On `build`/`refresh` it runs the fetch and context stats and renders the cast-sheet prompts (see `ran` and `cast.prompts`); it adds the refresh round flags itself. On `reuse` it fetches nothing: CONNECT goes to CONNECT step 1, PROFILE reports the ledger as it is.
 
    `--reserve` = 1 (bio lane) + 3 on a CONNECT build (brand lanes) + 1 if socials ON.
 
@@ -112,12 +112,23 @@ IF `decision` is `refresh`: the steps below run as one incremental round (`trans
 
 **Step 1. Fetch.** Done by the second `start_run.py` call. IF it did not run (check `ran`), run `fetch_cues.py --channel <id> --host-names "…" --reserve <N> --out <profiles>/.corpus` with the round flags from `check` on a refresh (`transcript-mining.md`, "Incremental round").
 - CONNECT build: spawn the three brand lanes (CONNECT step 1) in the same message as the fetch.
-- Report second channels; never mine them unless asked. Never start an entity-expansion round on your own initiative.
+- Report second channels (`identity.second_channel_candidates`; the ones an earlier run cached carry source `cached`); never mine them unless asked. Never start an entity-expansion round on your own initiative.
+
+**Step 1b. Cast sheet.** Who is on each video, from its own opening. In ONE message (the one that reads the second call's result), spawn one `tl-cli:cast-sheet` (extraction tier) per file in `cast.prompts`, each with the two-line prompt of step 3. When every receipt is in:
+
+```bash
+python3 <skill>/scripts/cast_sheet.py apply --sheets <corpus>/cast-sheets.json \
+  --returns <corpus>/returns --batches <corpus>/batches --out <corpus>/cast.json \
+  --host-names "<a>,<b>" --context-full <corpus>/context-full.json > <corpus>/cast-apply.json
+```
+
+On a refresh round N the files are `cast-sheets-rN.json`, `returns-rN` and `batches-rN`. Exit 3: re-spawn the sheets listed in `cast-respawn.json`, re-run apply. IF `cast.prompts` is empty (no openings could be read), skip this step and say so. Read `with_guests`, `formats` and `host_names_from_cast` from the summary: they are evidence for step 2, and `host_names_from_cast` fills empty host names (step 1, point 5). `host_name_cache` says what happened to the host's name on the channel record: a certain name (the sheets and a second source agree) is cached there as `ai_description.host_name` so the next run starts from it; `already set`, `skipped: not certain` and a missing or refused `tl-internal` are reported, never fixed by hand. Say the outcome in one line.
 
 **Step 2. Format call and prompts.**
-Call the format from the `FUNNEL stage=context` line: `solo`, `interview`, `multi_host` or `faceless_scripted`, with one line of evidence. The stats are a hint, not a gate.
+IF `identity.cached_format_label` is set, that is the label and `cached_format_label_evidence` its evidence (prefix the evidence with `cached:`), unless this run's `third_person_host_share` rule below or the cast sheet's majority contradicts it: then call it fresh and say the cache disagreed. Otherwise call the format from the `FUNNEL stage=context` line and the cast sheet's `formats`: `solo`, `interview`, `multi_host` or `faceless_scripted`, with one line of evidence. The stats are a hint, not a gate.
 - IF `staged_share` > 0.1, name it in the evidence ("solo, 22% of titles are staged premises").
 - IF the fetch's `third_person_host_share` > 0.25, the label is `multi_host`.
+- IF most of the cast sheet's judged videos list a guest or a second host, the label is `interview` or `multi_host`, whichever the sheets say more often.
 
 Then, in one chain (drop the `identity_prompt.py` command when socials is OFF):
 
@@ -203,12 +214,15 @@ Then:
 python3 <skill>/scripts/ledger_meta.py write --channel <id> --profiles-dir <profiles> \
   --from <corpus>/facts.jsonl.verified.jsonl --channel-name "…" \
   --format <label> --format-evidence "…" --context <corpus>/context-full.json \
-  [--lanes transcripts+socials]
+  --cast <corpus>/cast.json --host-names "<a>,<b>" [--lanes transcripts+socials]
 ```
 
-PROFILE completion, two lines:
+The write also caches on the channel record what the next run can start from, each with a `.evidence` key: `format_label` (when the cast sheets agree with the call), `host_aliases` (once the host's name is cached) and `sibling_channels`. Its `cache` field says per key `set`, `already set` or `skipped` and why; a cached value is never rewritten by a run, and a missing or refused `tl-internal` only shows there.
+
+PROFILE completion, three lines:
 1. The ledger's absolute path.
 2. Fact count and what the socials lane did: `socials off, N linked platforms listed unread` or `socials on, N websites opened, N sources read, N facts`. Report "on" with 0 facts as such.
+3. What was cached on the channel record this run (host name, format label, host aliases, sibling channels), from `host_name_cache` and `cache`.
 
 **Fast run** (a run shape, not a flag): PROFILE only, primary channel only, socials OFF without asking, default selection, no corroboration round.
 

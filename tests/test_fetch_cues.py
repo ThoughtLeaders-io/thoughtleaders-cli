@@ -398,7 +398,7 @@ def _cli_rows_router(docs_by_year: dict, non_en_docs: list[dict],
 
 def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
         year=2024, langs=None, non_en_docs=(), census_total=None, generic_docs=(),
-        transcripts=None):
+        transcripts=None, summaries=None):
     """Run main() over stubbed ES calls, returning (summary, kept windows).
     ``generic_docs`` is what the fallback pass's query gets back (nothing by
     default). ``transcripts`` is what the read-around's transcript lookup
@@ -412,6 +412,7 @@ def _run(tmp_path, monkeypatch, docs, *, argv=(), phrases=None, spans=None,
     monkeypatch.setattr(fetch_cues, "fetch_transcripts",
                         transcripts if callable(transcripts)
                         else (lambda refs: dict(transcripts or {})))
+    monkeypatch.setattr(fetch_cues, "fetch_summaries", lambda refs: dict(summaries or {}))
     lang_counts = langs if langs is not None else {"en": len(docs) or 1}
     total = census_total if census_total is not None else sum(lang_counts.values())
     monkeypatch.setattr(
@@ -1391,3 +1392,58 @@ def test_the_heaviest_cue_reaches_further_than_the_fragment_edges(tmp_path, monk
                          "--read-before", "20", "--read-after", "10"),
                    transcripts={"7:v1": _TRANSCRIPT_ANCHOR})
     assert kept[0]["read_span"] == [80.0, 112.0]
+
+
+# --------------------------------------------------------------------------- #
+# the cast sheet's input: each kept video's opening and description lines
+# --------------------------------------------------------------------------- #
+def test_intros_are_cut_from_the_read_around_transcripts(tmp_path, monkeypatch):
+    """One row per kept video: the cues of its first 90 seconds and the
+    description lines that name people, written beside the batches."""
+    frag = '<text start="180"><em>i grew up</em> poor and i know it well</text>'
+    transcript = {"7:v1": [(0.0, "hey guys it's Eric and today"), (45.0, "my friends and I"),
+                           (95.0, "are past the opening"), (180.0, "i grew up poor and i know it well")]}
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])],
+                         transcripts=transcript,
+                         summaries={"7:v1": "Thanks for watching\nsecond line\nthird line\n"
+                                            "a plain fourth line\nFOLLOW MY FRIENDS:\n"
+                                            "Gavin: @GroovyGavin\nmore https://x.com/y"})
+    assert summary["intros"] == 1
+    rows = [json.loads(line) for line in pathlib.Path(summary["intros_file"]).read_text().splitlines()]
+    assert rows[0]["video_id"] == "v1" and rows[0]["id"] == "7:v1"
+    assert rows[0]["intro"] == "hey guys it's Eric and today my friends and I"
+    assert rows[0]["description"] == ["Thanks for watching", "second line", "third line",
+                                      "FOLLOW MY FRIENDS:", "Gavin: @GroovyGavin",
+                                      "more https://x.com/y"]
+    assert "intros=1" in _run.last_funnel
+
+
+def test_no_transcript_means_no_intro_row(tmp_path, monkeypatch):
+    frag = '<text start="180"><em>i grew up</em> poor and i know it well</text>'
+    summary, _ = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])])
+    assert summary["intros"] == 0
+    assert pathlib.Path(summary["intros_file"]).read_text() == ""
+
+
+def test_description_excerpt_keeps_the_head_and_the_lines_that_name_people():
+    text = "\n".join(["one", "two", "three", "four", "with Dave today", "plain",
+                      "@handle", "Guest: Ann", "x"] + [f"ft. p{i}" for i in range(20)])
+    lines = fetch_cues.description_excerpt(text)
+    assert lines[:3] == ["one", "two", "three"]
+    assert "four" not in lines and "plain" not in lines
+    assert "with Dave today" in lines and "@handle" in lines and "Guest: Ann" in lines
+    assert len(lines) == fetch_cues.DESCRIPTION_LINES
+    assert fetch_cues.description_excerpt(None) == []
+
+
+def test_turns_counts_the_captions_speaker_change_marks(tmp_path, monkeypatch):
+    """`>>` is the captions' own mark of a change of speaker; the window
+    carries how many it holds, before and after the read-around."""
+    frag = ('<text start="180"><em>i grew up</em> poor &amp;gt;&amp;gt; no way at all</text>'
+            '<text start="183">yes really it is so</text>')
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])])
+    assert ">>" in kept[0]["text"] and kept[0]["turns"] == 1
+    transcript = {"7:v1": [(178.0, ">> so tell me"), (180.0, "i grew up poor >> no way"),
+                           (183.0, "yes really >> ok")]}
+    summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], transcripts=transcript)
+    assert kept[0]["turns"] == 3

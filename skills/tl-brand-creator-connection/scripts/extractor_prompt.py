@@ -42,6 +42,7 @@ EVIDENCE_SECTIONS = ("What counts as self-disclosure", "Attribution")
 # ``rank_score``, ``host_anchor_terms``, ``recurring_phrase``) stay out.
 WINDOW_FIELDS = ("start", "video_id", "title", "published", "language",
                  "format_hint", "cues_fired", "host_anchor", "second_voice_hint",
+                 "turns", "cast", "guest_anchor", "guest_named",
                  "entity_hits", "weak_anchor", "in_sponsor_read", "recurrence_videos",
                  "stage_direction", "boilerplate", "text")
 

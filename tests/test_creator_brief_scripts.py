@@ -1773,3 +1773,148 @@ def test_a_first_person_precedent_window_the_map_argued_is_personal(tmp_path):
                            "--input", str(ip), "--check"], capture_output=True, text=True)
     problems = json.loads(proc.stdout)["problems"]
     assert not any("topic the channel covered" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------- #
+# channel_context.py: what the upload descriptions call the host
+# --------------------------------------------------------------------------- #
+def test_description_anchors_read_codes_vanity_slugs_and_template_names():
+    """A promo code and a vanity slug reused under several sponsors' domains
+    spell the creator's name canonically; a name in a line that recurs across
+    the descriptions is the host's; handles are the other people on the video
+    and stay out; a brand's generic code and a one-domain slug are noise."""
+    import channel_context
+    docs = [
+        {"id": "1", "summary": "Try it: https://a.com/lipsky\nUse code LIPSKY10\n"
+                               "Hosted by Paul Lipsky every week\nFOLLOW MY FRIENDS:\nGavin: @GroovyGavin"},
+        {"id": "2", "summary": "Get it: https://b.com/lipsky\ncode: LIPSKY20\n"
+                               "Hosted by Paul Lipsky every week\n@brentrivera"},
+        {"id": "3", "summary": "https://c.com/pricing\nuse code SAVE20\nHosted by Paul Lipsky every week"},
+        {"id": "4", "summary": "https://c.com/pricing\nI'm Dana and this is a one-off guest line"},
+    ]
+    a = channel_context.description_anchors(docs)
+    assert a["uploads_read"] == 4 and a["template_lines"] == 2
+    assert a["codes"] == [{"token": "lipsky", "videos": 2}]
+    assert a["slugs"] == [{"token": "lipsky", "domains": 2, "videos": 2}]
+    assert [(n["name"], n["videos"]) for n in a["names"]] == [("Paul Lipsky", 3)]
+    assert "handles" not in a
+    assert channel_context.anchor_tokens(a) == {"lipsky", "paul"}
+    assert channel_context.anchor_tokens({}) == set()
+    # a code seen once is a sponsor's campaign word ("DEAD5BLITZ"), never an anchor
+    once = {"codes": [{"token": "dead5blitz", "videos": 1}, {"token": "jmk", "videos": 2}]}
+    assert channel_context.anchor_tokens(once) == {"jmk"}
+
+
+def test_description_anchors_strip_code_digits_and_need_two_domains_for_a_slug():
+    import channel_context
+    docs = [{"id": "1", "summary": "code JMK10 https://shop.com/jmk"},
+            {"id": "2", "summary": "code JMK15 https://shop.com/jmk"}]
+    a = channel_context.description_anchors(docs)
+    assert a["codes"] == [{"token": "jmk", "videos": 2}]
+    assert a["slugs"] == []                       # one domain: the sponsor's page, not a vanity slug
+
+
+def test_a_name_said_once_counts_when_the_descriptions_anchor_it(tmp_path):
+    """"my name is Paul" in one upload is a guest by the old rule; when the
+    descriptions' codes and links spell the same name it is the host."""
+    import channel_context
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:a", "cues": [[10, "my name is Paul and welcome"]]},
+        {"id": "1:b", "cues": [[20, "my name is Sienna and I think I will win"]]},
+    ])
+    rows = channel_context.name_candidates(corpus, "AI Weekly", anchors={"lipsky", "paul"})
+    assert [r["name"] for r in rows] == ["paul"]
+    assert rows[0]["description_anchor"] and not rows[0]["channel_name_variant"]
+    assert channel_context.name_candidates(corpus, "AI Weekly") == []
+
+
+def test_host_name_call_prefers_camera_then_anchored_then_descriptions():
+    import channel_context as cc
+    two = {"name_candidates": [{"name": "dana", "videos": 2, "said_outright": True, "said_outright_videos": 2}],
+           "description_anchors": {"names": [{"name": "Paul Lipsky", "videos": 3}]}}
+    assert cc.host_name_call(two) == (["Dana"], "transcripts")
+    one = {"name_candidates": [{"name": "paul", "videos": 1, "said_outright": True, "said_outright_videos": 1,
+                                "description_anchor": True},
+                               {"name": "sienna", "videos": 1, "said_outright": True, "said_outright_videos": 1}]}
+    assert cc.host_name_call(one) == (["Paul"], "transcripts+descriptions")
+    # a guest's name said in five uploads loses to the host's said in two when the descriptions anchor it
+    guest = {"name_candidates": [{"name": "sienna", "said_outright": True, "said_outright_videos": 5},
+                                 {"name": "paul", "said_outright": True, "said_outright_videos": 2,
+                                  "description_anchor": True}]}
+    assert cc.host_name_call(guest) == (["Paul"], "transcripts")
+    desc = {"description_anchors": {"names": [{"name": "Paul Lipsky", "videos": 3}]}}
+    assert cc.host_name_call(desc) == (["Paul", "Paul Lipsky"], "descriptions")
+    single = {"description_anchors": {"names": [{"name": "Paul", "videos": 2}]}}
+    assert cc.host_name_call(single) == (["Paul"], "descriptions")
+    assert cc.host_name_call({"description_anchors": {"names": [{"name": "Dana", "videos": 1}]}}) == ([], None)
+    assert cc.host_name_call({}) == ([], None)
+    ctx = cc.write_context(desc, format_label="solo", format_evidence="x")
+    assert ctx["host_names"] == ["Paul", "Paul Lipsky"]
+    # a name an earlier run cached on the channel record ends the discovery
+    cached = {"cached_host_name": "Eric Decker", **two}
+    assert cc.host_name_call(cached) == (["Eric", "Eric Decker"], "cached")
+    assert cc.host_name_call({"cached_host_name": "AJ"}) == (["AJ"], "cached")
+
+
+# --------------------------------------------------------------------------- #
+# channel_context.py: what earlier runs cached on the channel record
+# --------------------------------------------------------------------------- #
+def test_cached_attributes_are_read_whether_the_columns_come_parsed_or_as_text():
+    import channel_context as cc
+    row = {"cached_host_name": " Joe Rogan ", "cached_format_label": "interview",
+           "cached_format_label_evidence": "cast sheets: interview in 24 of 39 videos",
+           "cached_host_aliases": '["Joe", "Rogan"]',
+           "cached_sibling_channels": [{"link": "https://youtube.com/@jreclips", "source": "social_links"}, {"x": 1}]}
+    got = cc.cached_attributes(row)
+    assert got == {"cached_host_name": "Joe Rogan", "cached_format_label": "interview",
+                   "cached_format_label_evidence": "cast sheets: interview in 24 of 39 videos",
+                   "cached_host_aliases": ["Joe", "Rogan"],
+                   "cached_sibling_channels": [{"link": "https://youtube.com/@jreclips", "source": "social_links"}]}
+    empty = cc.cached_attributes({"cached_host_aliases": "not json", "cached_sibling_channels": None})
+    assert empty["cached_host_aliases"] == [] and empty["cached_sibling_channels"] == []
+    assert empty["cached_host_name"] is None and empty["cached_format_label"] is None
+
+
+def test_a_cached_host_name_brings_its_cached_aliases():
+    import channel_context as cc
+    full = {"cached_host_name": "Joe Rogan", "cached_host_aliases": ["Rogan", "Joe", "Joey"]}
+    assert cc.host_name_call(full) == (["Joe", "Joe Rogan", "Rogan", "Joey"], "cached")
+
+
+def test_cached_sibling_channels_join_the_candidates_without_duplicates():
+    import channel_context as cc
+    row = {"url": "https://youtube.com/@foo", "external_channel_id": "UC1"}
+    doc = {"social_links": ["https://youtube.com/@fooVlogs"], "description": ""}
+    cached = [{"link": "https://www.youtube.com/@fooVlogs/", "source": "social_links"},
+              {"link": "https://youtube.com/@fooGaming", "source": "about_text"},
+              {"link": "https://youtube.com/@foo", "source": "social_links"}]
+    out = cc.second_channel_candidates(row, doc, cached)
+    assert out == [{"link": "https://youtube.com/@fooVlogs", "source": "social_links"},
+                   {"link": "https://youtube.com/@fooGaming", "source": "cached"}]
+
+
+def test_set_cached_calls_the_internal_cli_and_reports_the_outcome(tmp_path, monkeypatch):
+    import channel_context as cc
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    log = tmp_path / "calls.txt"
+    (fake / "tl-internal").write_text(
+        f"#!/bin/sh\necho \"$@\" >> {log}\nif [ \"$4\" = 42 ]; then exit 0; fi\n"
+        "echo 'Access denied: setting channel ai_description keys is restricted to superusers.' >&2\nexit 1\n")
+    (fake / "tl-internal").chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake))
+    assert cc.set_cached(42, "host_name", "Joe Rogan") == "set"
+    assert cc.set_cached(42, "host_aliases", ["Joe", "Rogan"]) == "set"
+    assert cc.set_cached_with_evidence(42, "format_label", "interview", "cast sheets agree") == "set"
+    assert log.read_text().splitlines() == [
+        "channels ai-description set 42 host_name Joe Rogan",
+        'channels ai-description set 42 host_aliases ["Joe", "Rogan"] --json',
+        "channels ai-description set 42 format_label interview",
+        "channels ai-description set 42 format_label.evidence cast sheets agree"]
+    assert cc.set_cached(7, "host_name", "Joe").startswith("skipped: Access denied")
+    # a refused value writes no evidence
+    log.write_text("")
+    assert cc.set_cached_with_evidence(7, "format_label", "solo", "e").startswith("skipped")
+    assert log.read_text().splitlines() == ["channels ai-description set 7 format_label solo"]
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert cc.set_cached(42, "host_name", "Joe") == "skipped: tl-internal not available"

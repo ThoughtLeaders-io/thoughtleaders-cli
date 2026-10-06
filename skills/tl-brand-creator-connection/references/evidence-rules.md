@@ -41,15 +41,18 @@ in the profile.
 
 ## Attribution
 
-Captions carry no speaker labels. Whose line it is comes from the window
-text and the format; flags are inputs, never verdicts. A first-person line
-is the creator's only when the window shows it. Decide in this order:
+Captions carry no speaker names, at most a `>>` where the speaker changes.
+Whose line it is comes from the window text, the video's cast sheet and the
+format; flags are inputs, never verdicts. A first-person line is the
+creator's only when the window shows it. Decide in this order:
 
 1. **Someone else's**, when any sign holds: another person replies to the
    line as its listener; the line answers the creator's question; the
    speaker names or addresses the creator; the speaker calls the creator a
    friend or speaks of them in the third person (`second_voice_hint` finds
-   this deterministically); someone new is introduced just before the line;
+   this deterministically); the speaker names themselves as one of the
+   video's listed guests (`guest_anchor`); someone new is introduced just
+   before the line;
    the line comes from a stream, a call, or footage of another person; the
    life story does not fit the creator (a surgeon's residency on a
    woodworking channel). `speaker_guess: "guest"`; the line never enters
@@ -57,13 +60,17 @@ is the creator's only when the window shows it. Decide in this order:
 2. **The creator's**, when any sign holds: the creator names themselves
    (`host_anchor`); the creator addresses their own audience or narrates the
    upload to them; the line matches a known fact of the creator's; the line
-   sits inside a sponsor read (`in_sponsor_read`); on an interview channel,
-   the same rare line recurs across uploads (guests change, the host does
-   not). `speaker_guess: "host"`, `confidence: "confirmed"`,
+   sits inside a sponsor read (`in_sponsor_read`); the line addresses the
+   video's only guest by name (`guest_named`, with a `cast` of the host and
+   that one guest); on an interview channel, the same rare line recurs
+   across uploads (guests change, the host does not). `speaker_guess:
+   "host"`, `confidence: "confirmed"`,
    `speaker_evidence` names the sign.
 3. **Shared-voice upload** (format interview or multi_host; `format_hint`
-   interview_or_collab, reaction or staged; or a `second_voice_hint`): with
-   no sign from 1 or 2, `speaker_guess: "unclear"`, and the line is dropped.
+   interview_or_collab, reaction or staged; a `cast` with a guest or a
+   second host; a `second_voice_hint`; or, inside a window, the lines after
+   a `>>` speaker change, `turns`): with no sign from 1 or 2,
+   `speaker_guess: "unclear"`, and the line is dropped.
    On a multi-host channel recurrence alone never confirms: both hosts recur.
 4. **Solo or faceless-scripted upload with no hint**: with no sign from 1,
    the line is the creator's. Say `unclear` only when the text suggests

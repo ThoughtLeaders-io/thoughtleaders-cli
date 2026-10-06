@@ -700,6 +700,8 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 "host_anchor_terms": [[h, "self_named"] for h in self_named],
                 "host_named_third_person": third_person,
                 "second_voice_hint": hint,
+                # `>>` is the captions' own mark of a change of speaker
+                "turns": text.count(">>"),
                 "entity_hits": [], "weak_anchor": False, "stage_direction": False,
                 "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
@@ -742,6 +744,16 @@ READ_AFTER_S = 30
 ANCHOR_BEFORE_S = 30
 ANCHOR_AFTER_S = 15
 TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
+SUMMARY_CHUNK = 100         # descriptions are small
+# The cast sheet reads each kept video's opening and the description lines
+# that name who is on it (cast_sheet.py); the fetch cuts both here because
+# the transcripts are already in hand for the read-around.
+INTRO_S = 90
+INTRO_WORDS = 260
+DESCRIPTION_LINES = 10
+DESCRIPTION_PEOPLE_RX = re.compile(
+    r"(?i)(@\w|https?://|\b(?:guests?|feat\.?|featuring|ft\.?|with|hosts?|hosted|"
+    r"starring|friends?|podcast|interview|collab|cast)\b)")
 
 
 def _transcript_chunk(chunk: list[str]) -> dict[str, list[tuple[float, str]]]:
@@ -766,25 +778,83 @@ def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
     return out
 
 
+def _summary_chunk(chunk: list[str]) -> dict[str, str]:
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "summary"],
+    })
+    return {str(r.get("id")): str(r.get("summary") or "") for r in rows}
+
+
+def fetch_summaries(refs: list[str]) -> dict[str, str]:
+    """The creator-written description per video. A failure raises."""
+    chunks = [refs[i:i + SUMMARY_CHUNK] for i in range(0, len(refs), SUMMARY_CHUNK)]
+    out: dict[str, str] = {}
+    for chunk in chunks:
+        out.update(_summary_chunk(chunk))
+    return out
+
+
+def description_excerpt(summary: str | None) -> list[str]:
+    """The description's first lines plus every later line that names who is
+    on the video (a handle, a link, a cast word), at most DESCRIPTION_LINES."""
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in str(summary or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    picked = lines[:3]
+    for ln in lines[3:]:
+        if len(picked) >= DESCRIPTION_LINES:
+            break
+        if DESCRIPTION_PEOPLE_RX.search(ln):
+            picked.append(ln)
+    return [ln[:160] for ln in picked]
+
+
+def intro_rows(kept: list[dict], cues_by_video: dict[str, list], summaries: dict[str, str],
+               intro_s: float = INTRO_S) -> list[dict]:
+    """One row per kept video with a transcript: its opening (the cues inside
+    the first ``intro_s`` seconds, capped at INTRO_WORDS words) and its
+    description excerpt. The cast sheet's input."""
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for w in kept:
+        vid = w["id"]
+        if vid in seen:
+            continue
+        seen.add(vid)
+        words = " ".join(t for s_, t in (cues_by_video.get(vid) or [])
+                         if float(s_) <= intro_s and t).split()
+        if not words:
+            continue
+        rows.append({"id": vid, "video_id": w["video_id"], "title": w.get("title"),
+                     "published": w.get("published"), "language": w.get("language"),
+                     "format_hint": w.get("format_hint"),
+                     "intro": " ".join(words[:INTRO_WORDS]),
+                     "description": description_excerpt(summaries.get(vid))})
+    return rows
+
+
 def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
                   before: float, after: float, anchor_before: float = ANCHOR_BEFORE_S,
-                  anchor_after: float = ANCHOR_AFTER_S) -> tuple[str, int]:
+                  anchor_after: float = ANCHOR_AFTER_S) -> tuple[str, int, dict]:
     """Replace each kept window's fragment text with the transcript read around
     it, and grow the corpus by the cues that read added. Returns the source
     used (``transcript``, ``fragment_only`` when the lookup failed, ``off``
-    when both margins are 0) and how many windows widened. The lookup is
-    reporting-grade: a failure keeps every fragment exactly as it was."""
+    when both margins are 0), how many windows widened, and the timed cues per
+    video the read used (empty when it did not run), which the intros are cut
+    from. The lookup is reporting-grade: a failure keeps every fragment
+    exactly as it was."""
     if before <= 0 and after <= 0:
-        return "off", 0
+        return "off", 0, {}
     refs = sorted({w["id"] for w in kept})
     if not refs:
-        return "none", 0
+        return "none", 0, {}
     try:
         cues_by_video = fetch_transcripts(refs)
     except BaseException as exc:              # noqa: BLE001 reported, not raised
         print(f"transcript read-around failed ({type(exc).__name__}: "
               f"{str(exc)[:120]}); keeping the highlight fragments", file=sys.stderr)
-        return "fragment_only", 0
+        return "fragment_only", 0, {}
     widened = 0
     for w in kept:
         cues = cues_by_video.get(w["id"]) or []
@@ -812,6 +882,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
         w["host_named_third_person"] = third_person
         w["second_voice_hint"] = hint
         w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
+        w["turns"] = text.count(">>")
         entry = corpus.get(w["id"])
         if entry is not None:
             # The highlighter cuts a fragment mid-cue at its fragment-size boundary,
@@ -831,7 +902,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
                 else:
                     entry["cues"][i][1] = t
         widened += 1
-    return "transcript", widened
+    return "transcript", widened, cues_by_video
 
 
 def _shingles(text: str) -> set[str]:
@@ -1135,7 +1206,8 @@ def main() -> int:
                 "published": (d.get("publication_date") or "")[:10],
                 "start": int(start), "text": text, "cues_fired": [], "host_anchor": False,
                 "host_anchor_terms": [], "host_named_third_person": [],
-                "second_voice_hint": None, "entity_hits": [], "weak_anchor": False,
+                "second_voice_hint": None, "turns": text.count(">>"),
+                "entity_hits": [], "weak_anchor": False,
                 "stage_direction": False, "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
                 "recurrence_videos": 0, "recurring_phrase": None,
@@ -1206,8 +1278,16 @@ def main() -> int:
                           "channel; nothing to extract"}, indent=1))
         return 4
     # the cap is taken on the narrow fragments; what the extractor reads is wider
-    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after,
-                                         a.anchor_before, a.anchor_after)
+    read_source, widened, cues_by_video = widen_windows(
+        kept, corpus, host_lc, a.read_before, a.read_after, a.anchor_before, a.anchor_after)
+    summaries: dict[str, str] = {}
+    if cues_by_video:
+        try:
+            summaries = fetch_summaries(sorted(cues_by_video))
+        except BaseException as exc:          # noqa: BLE001 reported, not raised
+            print(f"description lookup failed ({type(exc).__name__}: {str(exc)[:120]}); "
+                  "the cast sheet reads the openings alone", file=sys.stderr)
+    intros = intro_rows(kept, cues_by_video, summaries)
     for w in windows:
         w.pop("_specific", None)
         w.pop("_recurring", None)
@@ -1228,9 +1308,10 @@ def main() -> int:
     if a.round <= 1:
         # a first round is a fresh build: nothing from an earlier build's
         # later rounds may leak into this one's counts or its passage store
-        for stale in list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz")) + [
+        for stale in (list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz"))
+                      + list(out.glob("intros-r*.jsonl")) + list(out.glob("cast-sheets*.json")) + [
                 out / n for n in ("classified.jsonl", "gems.jsonl", "gems-clustered.jsonl",
-                                  "candidates.jsonl", "respawn.json")]:
+                                  "candidates.jsonl", "respawn.json", "cast.json")]):
             if stale.exists():
                 stale.unlink()
         for d in list(out.glob("batches-r*")) + list(out.glob("returns-r*")):
@@ -1247,6 +1328,9 @@ def main() -> int:
     with gzip.open(out / f"windows{suffix}.jsonl.gz", "wt", encoding="utf-8") as fh:
         for w in windows:
             fh.write(json.dumps(w, ensure_ascii=False) + "\n")
+    intros_path = out / f"intros{suffix}.jsonl"
+    intros_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in intros),
+                           encoding="utf-8")
     corpus_path = out / "corpus.jsonl.gz"
     if corpus_path.exists():               # merge, never replace: earlier rounds must still verify
         with gzip.open(corpus_path, "rt", encoding="utf-8") as fh:
@@ -1310,6 +1394,7 @@ def main() -> int:
         "third_person_host_share": third_person_share,
         "batches": batches, "returns_dir": str(rdir),
         "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
+        "intros": len(intros), "intros_file": str(intros_path),
         "corpus": str(corpus_path), "latest_video_date": latest_video_date,
         "non_english_fetch_failed": non_en_failed,
         "elapsed_s": elapsed,
@@ -1328,7 +1413,7 @@ def main() -> int:
           f"generic_windows={fallback['windows_kept']} "
           f"batches={len(batches)} batch_size={batch_size} "
           f"agent_cap={agent_cap} sponsor_source={sponsor_source} "
-          f"read_span={read_source} widened={widened} "
+          f"read_span={read_source} widened={widened} intros={len(intros)} "
           f"self_named={self_named_windows} third_person_host={third_person_windows} "
           f"third_person_host_share={third_person_share} elapsed_s={elapsed}",
           file=sys.stderr)

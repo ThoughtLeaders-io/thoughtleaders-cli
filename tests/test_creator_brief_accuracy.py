@@ -269,9 +269,9 @@ def test_review_people_said_in_the_possessive_are_kept():
         {"name": "Tom & Jerry", "relation": None}]
 def test_review_spoken_host_name_prefers_the_channel_name_variant():
     full = {"name_candidates": [
-        {"name": "marta", "channel_name_variant": True, "said_outright_videos": 2},
-        {"name": "sienna", "channel_name_variant": False, "said_outright_videos": 5}]}
-    assert cc.spoken_host_name(full) == ["Marta"]
+        {"name": "marta", "channel_name_variant": True, "said_outright": True, "said_outright_videos": 2},
+        {"name": "sienna", "channel_name_variant": False, "said_outright": True, "said_outright_videos": 5}]}
+    assert cc.host_name_call(full) == (["Marta"], "transcripts")
 def test_review_host_possessive_is_excluded_from_corroboration_terms():
     terms = bl.corroboration_terms("Sarah's bakery opened in Leeds", exclude={"Sarah"})
     assert not any("Sarah" in t for t in terms)
