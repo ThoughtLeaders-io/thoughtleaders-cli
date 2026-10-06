@@ -872,7 +872,9 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
             why = "narrowed claim is empty"
         else:
             new = [n for n, key in _ax.claim_numbers(claim) if key not in evidence]
-            new += [n for n in _name_tokens(claim) if not _ax.word_in(n, names)]
+            # a relative ("Dad was a pilot") is checked below, not as a name
+            new += [n for n in _name_tokens(claim) if not _ax.word_in(n, names)
+                     and n not in _ax.FAMILY_WORDS and n.rstrip("s") not in _ax.FAMILY_WORDS]
             new += [w for w in _ax.claim_overreach(claim, quote, english=english)
                     if w in _ax.FAMILY_WORDS or w.rstrip("s") in _ax.FAMILY_WORDS]
             if new:

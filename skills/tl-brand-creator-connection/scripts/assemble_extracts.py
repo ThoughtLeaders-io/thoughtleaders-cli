@@ -91,7 +91,7 @@ _OWN = re.compile(r"\b(?:my|our)\s+(\w+)(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\w+))?"
 _OWN_STOP = {"and", "or", "but", "with", "his", "her", "their", "your", "the", "a", "an"}
 _OTHERS = re.compile(r"\b(?:his|her|their|your)\s+(\w+)(?:\s+(\w+))?(?:\s+(\w+))?")
 _CAP = re.compile(r"\b[A-Z][a-zA-Z'’-]{2,}\b")
-_NUM = re.compile(r"(\d+(?:[.,]\d+)*)(s\b)?")     # "30s" is a decade, not 30
+_NUM = re.compile(r"(\d+(?:[.,]\d+)*)(['’]?s\b)?")     # "30s", "30's": a decade, not 30
 _THOUSANDS = re.compile(r"\d{1,3}(?:,\d{3})+")
 # a number the captions spell out: "three kids", "in his thirties". Never
 # "one", which is as often a pronoun ("no one", "one of my kids").
@@ -150,19 +150,18 @@ def claim_numbers(text: str) -> list[tuple[str, str]]:
     for m in _NUM.finditer(text or ""):
         n = m.group(1)
         key = n.replace(",", "") if _THOUSANDS.fullmatch(n) else n
-        out.append((n, key + ("s" if m.group(2) else "")))
+        out.append((m.group(0), key + ("s" if m.group(2) else "")))
     return out
 
 
 def number_keys(text: str, spelled: bool = False) -> set[str]:
     """The comparison keys of every number in ``text`` ("30s" also counts as
-    30); with ``spelled``, also the ones written as English words."""
-    found = set()
-    for _, key in claim_numbers(text):
-        found |= {key, key.rstrip("s")}
+    30, and 34 as in the 30s); with ``spelled``, also the ones written as
+    English words."""
+    found = {k for _, key in claim_numbers(text) for k in (key, key.rstrip("s"))}
     if spelled:
         found |= {_NUM_WORDS[w] for w in _lc(text).split() if w in _NUM_WORDS}
-    return found
+    return found | {f"{int(k) // 10 * 10}s" for k in found if k.isdigit() and int(k) >= 10}
 
 
 def claim_overreach(claim: str, quote: str, corrections: dict | None = None,
@@ -328,7 +327,8 @@ def people_in_quote(people, quote: str) -> list[dict]:
         if not isinstance(p, dict):
             continue
         name = str(p.get("name") or "").strip()
-        if name and all(_lc(re.sub(r"['’]s$", "", w)) in q for w in name.split()):
+        if name and all(_lc(re.sub(r"['’]s$", "", w)) in q
+                        for w in name.split() if _lc(w)):
             rel = str(p.get("relation") or "").strip().lower() or None
             out.append({"name": name, "relation": rel})
     return out
