@@ -187,6 +187,7 @@ def main() -> None:
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
+            "end": snip.get("end"),
             "url": url,
         })
 
@@ -211,6 +212,7 @@ def main() -> None:
             "read_words": snip.get("snippet") or None,
             "entity_as_heard": snip.get("entity_as_heard"),
             "start": start,
+            "end": snip.get("end"),
             "url": url,
         })
 

@@ -343,7 +343,7 @@ def name_candidates(corpus_path: pathlib.Path, channel_name: str | None,
 
     videos: dict[str, set[str]] = {}
     cue_example: dict[str, str] = {}
-    explicit: set[str] = set()
+    explicit: dict[str, set[str]] = {}
     with open_corpus(corpus_path) as f:
         for line in f:
             line = line.strip()
@@ -358,7 +358,7 @@ def name_candidates(corpus_path: pathlib.Path, channel_name: str | None,
             for m in NAME_EXPLICIT.finditer(text):
                 tok = m.group(1).lower()
                 if tok not in NAME_STOP and len(tok) >= 3:
-                    explicit.add(tok)
+                    explicit.setdefault(tok, set()).add(vid)
             for m in NAME_CUE.finditer(text):
                 lo, hi = max(0, m.start() - span), min(len(text), m.end() + span)
                 window = text[lo:hi]
@@ -378,6 +378,7 @@ def name_candidates(corpus_path: pathlib.Path, channel_name: str | None,
             continue
         rows.append({"name": tok, "videos": len(seen),
                      "channel_name_variant": var, "said_outright": exp,
+                     "said_outright_videos": len(explicit.get(tok, ())),
                      "cue": cue_example[tok]})
     rows.sort(key=lambda r: (not (r["said_outright"] and r["channel_name_variant"]),
                              not r["channel_name_variant"],
@@ -528,8 +529,10 @@ def spoken_host_name(full: dict) -> list[str]:
     candidate said outright ("my name is ...") in the most uploads, two at
     least. Never the channel name, which is often not what the host is called."""
     rows = [r for r in full.get("name_candidates") or []
-            if r.get("said_outright") and int(r.get("videos") or 0) >= 2]
-    rows.sort(key=lambda r: -int(r.get("videos") or 0))
+            if int(r.get("said_outright_videos") or 0) >= 2]
+    # a variant of the channel name is the host's; a guest's name is not
+    rows.sort(key=lambda r: (not r.get("channel_name_variant"),
+                             -int(r.get("said_outright_videos") or 0)))
     return [str(rows[0]["name"]).capitalize()] if rows else []
 
 

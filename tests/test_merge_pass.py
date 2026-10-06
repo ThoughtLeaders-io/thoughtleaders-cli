@@ -725,7 +725,7 @@ def test_state_round_trip_additive_rejudge_dropped_and_new(tmp_path):
     # existing facts (re-judge), c003 is unchanged (stays dropped), c004 is new
     round2 = _write_clusters(tmp_path, [
         _cluster("moved to Austin", video="v1",
-                 members=[_member("v1", 10), _member("v4", 40)]),
+                 members=[_member("v1", 10), _member("v4", 40, "2026-03-01")]),
         _cluster("has a rescue dog", domain="pets", video="v2",
                  members=[_member("v2", 20), _member("v1", 10)]),
         _cluster("something wrong", video="v3", members=[_member("v3", 30)]),
@@ -756,6 +756,8 @@ def test_state_round_trip_additive_rejudge_dropped_and_new(tmp_path):
     facts2 = _facts(out2)
     assert facts2["f001"]["recurrence"] == 2          # additive: v1 + v4
     assert sorted(facts2["f001"]["members"]) == ["v1:10", "v4:40"]
+    assert facts["f001"]["last_seen"] == "2024-01-01"
+    assert facts2["f001"]["last_seen"] == "2026-03-01"  # additive refreshes recency
     assert facts2["f003"]["claim"] == "bought a house"
     assert json.loads(proc2.stdout)["additive"] == 1
     members2 = json.loads(state.read_text())["members"]

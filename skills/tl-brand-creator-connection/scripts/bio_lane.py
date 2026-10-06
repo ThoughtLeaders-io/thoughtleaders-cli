@@ -496,7 +496,7 @@ def corroboration_terms(claim: str, *, limit: int = MAX_TERMS,
     skip = {w.lower() for name in (exclude or set()) for w in name.split()}
     content = {i for i, t in enumerate(tokens)
                if t.lower() not in TERM_STOP and len(t) >= MIN_TERM_LEN
-               and t.lower().strip("'’s") not in skip and t.lower() not in skip}
+               and re.sub(r"['’]s?$", "", t.lower()) not in skip and t.lower() not in skip}
 
     def adjacent(i: int) -> bool:
         return not text[found[i].end():found[i + 1].start()].strip()

@@ -92,6 +92,13 @@ _OWN_STOP = {"and", "or", "but", "with", "his", "her", "their", "your", "the", "
 _OTHERS = re.compile(r"\b(?:his|her|their|your)\s+(\w+)(?:\s+(\w+))?(?:\s+(\w+))?")
 _CAP = re.compile(r"\b[A-Z][a-zA-Z'’-]{2,}\b")
 _NUM = re.compile(r"\d+(?:[.,]\d+)*")
+# a number the captions spell out: "three kids", "in his thirties"
+_NUM_WORDS = {w: str(n) for n, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
+_NUM_WORDS.update({w: str(n) for n, w in zip(range(30, 100, 10),
+                  "thirty forty fifty sixty seventy eighty ninety".split())})
+_NUM_WORDS.update({w[:-1] + "ies": n for w, n in list(_NUM_WORDS.items()) if w.endswith("ty")})
 _NOT_NAMES = {"The", "She", "He", "They", "Her", "His", "Their", "YouTube", "Instagram",
               "TikTok", "Facebook", "Twitter", "Christmas", "Sunday", "Monday", "Tuesday",
               "Wednesday", "Thursday", "Friday", "Saturday", "January", "February",
@@ -128,12 +135,29 @@ def word_in(word: str, words: set[str]) -> bool:
 _RELATIVES_OF = re.compile(r"\b(\w+)(?:['’]s|\s+who\s+has(?:\s+an?)?)\s+(\w+)")
 
 
-def claim_overreach(claim: str, quote: str, corrections: dict | None = None) -> list[str]:
+def is_english(window: dict | None) -> bool:
+    """The window's captions are English (a blank language counts as English)."""
+    return str((window or {}).get("language") or "en").lower().startswith("en")
+
+
+def _numbers(text: str, spelled: bool = False) -> set[str]:
+    """Numbers without their thousands commas ("1,000" is "1000"); with
+    ``spelled``, also the ones written as words."""
+    found = {n.replace(",", "") for n in _NUM.findall(text or "")}
+    if spelled:
+        found |= {_NUM_WORDS[w] for w in _lc(text).split() if w in _NUM_WORDS}
+    return found
+
+
+def claim_overreach(claim: str, quote: str, corrections: dict | None = None,
+                    english: bool = True) -> list[str]:
     """Words of the claim the quote does not carry: a name, a number, or a
     family word the quote does not have as the creator's own relative
     ("my brother"). A name the extractor corrected from a caption misspelling
     (`entity_corrections`, as_heard -> corrected) counts when the as-heard
-    words are in the quote. Empty means the claim says only what the quote says."""
+    words are in the quote. The claim is always English, so a quote in another
+    language is checked for names and numbers only. Empty means the claim says
+    only what the quote says."""
     q = _lc(quote)
     q_words = set(q.split())
     q_bare = bare_words(quote)
@@ -151,9 +175,12 @@ def claim_overreach(claim: str, quote: str, corrections: dict | None = None) -> 
         if any(_lc(tok) in c and all(w in q_words for w in words) for c, words in heard.items()):
             continue
         bad.append(tok)
+    in_quote = _numbers(quote, spelled=english)
     for num in _NUM.findall(claim or ""):
-        if num not in _NUM.findall(quote or ""):
+        if num.replace(",", "") not in in_quote:
             bad.append(num)
+    if not english:
+        return bad
     # a family word in the claim must be in the quote, and when the quote
     # gives it another owner ("his brother", "their mom") and never the
     # creator's own ("my brother"), the relative is someone else's
@@ -166,8 +193,8 @@ def claim_overreach(claim: str, quote: str, corrections: dict | None = None) -> 
     lowered = (claim or "").lower()
     theirs = {_lc(m.group(2)) for m in _RELATIVES_OF.finditer(lowered)
               if _lc(m.group(1)) in FAMILY_WORDS or _lc(m.group(1)).rstrip("s") in FAMILY_WORDS}
-    for raw in (claim or "").split():
-        if raw[:1].isupper():
+    for k, raw in enumerate((claim or "").split()):
+        if k and raw[:1].isupper():
             continue                     # a capitalised family word is part of a name
         word = _lc(raw)
         group = FAMILY_WORDS.get(word) or FAMILY_WORDS.get(word.rstrip("s"))
@@ -279,13 +306,13 @@ def load_cues(out: pathlib.Path) -> dict[str, list]:
 
 def people_in_quote(people, quote: str) -> list[dict]:
     """The extractor's `people`, kept only where the name is in the quote."""
-    q = _lc(quote).split()
+    q = bare_words(quote)
     out: list[dict] = []
     for p in people or []:
         if not isinstance(p, dict):
             continue
         name = str(p.get("name") or "").strip()
-        if name and all(w in q for w in _lc(name).split()):
+        if name and all(word_in(w, q) for w in name.split()):
             rel = str(p.get("relation") or "").strip().lower() or None
             out.append({"name": name, "relation": rel})
     return out
@@ -510,7 +537,8 @@ def main() -> int:
                 v["next_line"] = nl
             # the claim says only what the quote says (names, numbers, the
             # creator's own relatives); a claim that says more is refused
-            over = claim_overreach(str(v.get("claim") or ""), q, v.get("entity_corrections"))
+            over = claim_overreach(str(v.get("claim") or ""), q, v.get("entity_corrections"),
+                                   english=is_english(w))
             if over:
                 overreach.append({"batch": n, "i": i, "claim": v.get("claim"), "not_in_quote": over})
                 rows.append({"window": w, "verdict": {"i": i, "self_disclosure": False,

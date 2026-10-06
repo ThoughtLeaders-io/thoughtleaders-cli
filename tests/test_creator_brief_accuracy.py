@@ -83,7 +83,8 @@ def test_fix5_last_seen_is_the_newest_member():
                         {"video_id": "b", "published": "2025-06-01"}],
             "window": {"published": "2021-03-01"}}
     assert str(mp.newest_evidence(line, None))[:10] == "2025-06-01"
-def test_fix5_rank_puts_recent_before_more_repeated():
+def test_fix5_rank_puts_recent_before_more_repeated(monkeypatch):
+    monkeypatch.setattr(mp, "RUN_DATE", "2026-10-06")
     old = {"fact_id": "f1", "confidence": "confirmed", "last_seen": "2019-01-01", "recurrence": 9}
     new = {"fact_id": "f2", "confidence": "confirmed", "last_seen": "2026-01-01", "recurrence": 1}
     assert sorted([old, new], key=mp.rank_key)[0]["fact_id"] == "f2"
@@ -122,10 +123,11 @@ import channel_context as cc, start_run as sr, bio_lane as bl
 def test_run_host_name_is_the_name_said_on_camera_never_the_channel_name():
     full = {"name": "Skyhook", "name_candidates": [
         {"name": "sky", "videos": 3, "said_outright": False},
-        {"name": "dana", "videos": 4, "said_outright": True}]}
+        {"name": "dana", "videos": 4, "said_outright": True, "said_outright_videos": 2}]}
     assert cc.write_context(full, format_label="solo", format_evidence="x")["host_names"] == ["Dana"]
     assert cc.write_context({"name": "Skyhook"}, format_label="solo", format_evidence="x")["host_names"] == []
-    one = {"name": "Skyhook", "name_candidates": [{"name": "dana", "videos": 1, "said_outright": True}]}
+    one = {"name": "Skyhook", "name_candidates": [
+        {"name": "dana", "videos": 5, "said_outright": True, "said_outright_videos": 1}]}
     assert cc.write_context(one, format_label="solo", format_evidence="x")["host_names"] == []
 def test_run_word_forms_and_possessives_match():
     assert ax.claim_overreach("has Czechoslovak roots", "my czechoslovakia roots") == []
@@ -176,12 +178,15 @@ def test_run_channel_start_skips_early_hobby_uploads():
 # ---- round-2 fixes (2026-10-05) ----
 def test_r2_past_read_positions_refuse_a_moment_inside_the_creators_read(tmp_path):
     (tmp_path / "brand-tl.json").write_text(json.dumps({"this_channel_reads": [
-        {"video_id": "vid1", "start": 300}, {"video_id": "vid2", "start": None}]}))
+        {"video_id": "vid1", "start": 300, "end": 390}, {"video_id": "vid2", "start": None},
+        {"video_id": "vid3", "start": 0, "end": 0}]}))
     spots = bh.past_read_spots(tmp_path / "connections-1.md")
-    assert spots == [("vid1", 300.0)]
+    assert spots == [("vid1", 300.0, 390.0)]
     inside = {"url": "https://www.youtube.com/watch?v=vid1&t=320s"}
+    late_in_read = {"url": "https://www.youtube.com/watch?v=vid1&t=420s"}
     outside = {"url": "https://www.youtube.com/watch?v=vid1&t=900s"}
     assert bh.prior_read_problem(inside, "Brand", None, "pt", spots)
+    assert bh.prior_read_problem(late_in_read, "Brand", None, "pt", spots)
     assert bh.prior_read_problem(outside, "Brand", None, "pt", spots) is None
 def test_r2_corroboration_terms_use_own_words_skip_host_and_never_bridge_a_list():
     terms = bl.corroboration_terms("Dana is a total geek: gaming, astronomy, Christmas and tea",
@@ -198,3 +203,51 @@ def test_r2_old_precedent_window_cannot_carry_a_strong_card():
     probe = {"windows": [{"text": "i cook at night", "published": "2019-01-01"}]}
     probs = bh.check_page(md, [{"fact_id": "f1", "claim": "z", "quote": "unrelated", "confidence": "confirmed"}], {}, probe)
     assert any("strong connection rests on a window from 2019" in p for p in probs)
+
+# ---- review fixes (2026-10-06) ----
+def test_review_a_ledger_without_last_seen_falls_back_to_published():
+    fact = {"published": "2026-05-01"}
+    assert mp.is_recent(fact, "2026-10-06") and bh.is_recent(fact, "2026-10-06")
+    assert not bh.is_recent({"published": "2019-05-01"}, "2026-10-06")
+def test_review_a_fold_carries_its_newer_date_into_the_kept_fact(tmp_path):
+    c = _write_clusters(tmp_path, [_cluster("moved to Austin", video="v1", published="2019-01-01"),
+                                   _cluster("moved to Austin", video="v2", published="2026-05-01")])
+    d = _envelope(tmp_path, {"c001": {"action": "keep"}, "c002": {"action": "fold", "target": "c001"}})
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(c, d, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _facts(out)["f001"]["last_seen"] == "2026-05-01"
+def test_review_ended_false_is_accepted(tmp_path):
+    c = _write_clusters(tmp_path, [_cluster("moved to Austin")])
+    d = _envelope(tmp_path, {"c001": {"action": "keep", "ended": False}})
+    proc = _expand(c, d, tmp_path / "facts.jsonl")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+def test_review_a_narrowed_claim_may_start_with_a_capitalised_verb(tmp_path):
+    c = _write_clusters(tmp_path, [_cluster("has two dogs", quote="i have two dogs at home")])
+    d = _envelope(tmp_path, {"c001": {"action": "keep", "claim": "Owns two dogs"}})
+    proc = _expand(c, d, tmp_path / "facts.jsonl")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+def test_review_spelled_and_comma_numbers_match():
+    assert ax.claim_overreach("has 3 kids", "i have three kids") == []
+    assert ax.claim_overreach("earned 1,000 dollars", "i made 1000 dollars") == []
+    assert ax.claim_overreach("is in his 30s", "im in my thirties now") == []
+    assert ax.claim_overreach("has 4 kids", "i have three kids") == ["4"]
+def test_review_a_claims_first_word_is_still_checked_as_a_relative():
+    assert ax.claim_overreach("Wife works as a nurse", "my sister works as a nurse") == ["wife"]
+    assert ax.claim_overreach("Dad was a pilot", "his dad was a pilot") == ["dad"]
+def test_review_a_non_english_quote_skips_the_english_family_words():
+    q = "tengo un hermano menor en Madrid"
+    assert ax.claim_overreach("has a younger brother in Madrid", q) == ["brother"]
+    assert ax.claim_overreach("has a younger brother in Madrid", q, english=False) == []
+    assert ax.claim_overreach("has a brother in Toledo", q, english=False) == ["Toledo"]
+def test_review_people_said_in_the_possessive_are_kept():
+    assert ax.people_in_quote([{"name": "Sarah"}], "my wife Sarah's birthday") == [
+        {"name": "Sarah", "relation": None}]
+def test_review_spoken_host_name_prefers_the_channel_name_variant():
+    full = {"name_candidates": [
+        {"name": "marta", "channel_name_variant": True, "said_outright_videos": 2},
+        {"name": "sienna", "channel_name_variant": False, "said_outright_videos": 5}]}
+    assert cc.spoken_host_name(full) == ["Marta"]
+def test_review_host_possessive_is_excluded_from_corroboration_terms():
+    terms = bl.corroboration_terms("Sarah's bakery opened in Leeds", exclude={"Sarah"})
+    assert not any("Sarah" in t for t in terms)

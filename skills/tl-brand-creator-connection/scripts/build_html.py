@@ -478,8 +478,9 @@ RECENT_MONTHS = 24
 
 def is_recent(fact: dict, today: str | None = None) -> bool:
     """``last_seen`` inside the last ``RECENT_MONTHS`` of today. A fact with
-    no date is not recent."""
-    seen = str(fact.get("last_seen") or "")[:10]
+    no date is not recent. A fact from a ledger saved before ``last_seen``
+    existed falls back to ``published``, which is never later."""
+    seen = str(fact.get("last_seen") or fact.get("published") or "")[:10]
     today = (today or dt.date.today().isoformat())[:10]
     if not seen:
         return False
@@ -1549,16 +1550,25 @@ def load_corpus_cues(in_path: pathlib.Path | None) -> dict[str, list] | None:
     return out
 
 
-def past_read_spots(map_path: pathlib.Path) -> list[tuple[str, float]]:
-    """``(video id, read start)`` of the creator's own past reads for the
-    brand: ``this_channel_reads`` in ``brand-tl.json`` beside the map."""
+def past_read_spots(map_path: pathlib.Path) -> list[tuple[str, float, float]]:
+    """``(video id, read start, read end)`` of the creator's own past reads
+    for the brand: ``this_channel_reads`` in ``brand-tl.json`` beside the map.
+    A read with no end is its start; a (0, 0) span has no position."""
     try:
         data = json.loads((map_path.parent / "brand-tl.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     rows = data.get("this_channel_reads") if isinstance(data, dict) else None
-    return [(str(r.get("video_id")), float(r["start"])) for r in rows or []
-            if isinstance(r, dict) and r.get("video_id") and isinstance(r.get("start"), (int, float))]
+    spots = []
+    for r in rows or []:
+        if not (isinstance(r, dict) and r.get("video_id")
+                and isinstance(r.get("start"), (int, float))):
+            continue
+        start = float(r["start"])
+        end = float(r["end"]) if isinstance(r.get("end"), (int, float)) else start
+        if start > 0 or end > 0:
+            spots.append((str(r["video_id"]), start, max(start, end)))
+    return spots
 
 
 def prior_read_problem(fact: dict, brand: str, cues_by_video: dict[str, list] | None,
@@ -1569,8 +1579,8 @@ def prior_read_problem(fact: dict, brand: str, cues_by_video: dict[str, list] | 
     past reads for the brand (``past_reads``), or the video is one the brand
     sponsored (its transcript says so) with the brand's name that close."""
     vid, t = _video_and_time(str(fact.get("url") or ""))
-    if vid and t is not None and any(v == vid and abs(t - s) <= PRIOR_READ_SPAN
-                                     for v, s in past_reads or []):
+    if vid and t is not None and any(v == vid and s - PRIOR_READ_SPAN <= t <= e + PRIOR_READ_SPAN
+                                     for v, s, e in past_reads or []):
         return (f"talking point rests on a moment from inside the creator's own {brand} read "
                 f"({vid} at {t // 60}:{t % 60:02d}); a re-book never repeats the last read, "
                 f"build it on a gem from outside it: {name}")

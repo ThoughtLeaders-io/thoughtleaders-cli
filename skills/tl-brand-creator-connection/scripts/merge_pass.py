@@ -807,8 +807,8 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
         conf = dec.get("confidence")
         if conf is not None and conf not in CONFIDENCE:
             bad(key, f"confidence must be one of {sorted(CONFIDENCE)}, got {conf!r}")
-        if dec.get("ended") is not None and dec.get("ended") is not True:
-            bad(key, f"ended takes only true, got {dec.get('ended')!r}")
+        if dec.get("ended") not in (None, True, False):
+            bad(key, f"ended takes only true or false, got {dec.get('ended')!r}")
 
     # fold targets: a c* target must be a kept cluster, an f* target must exist
     # in the ledger we are refreshing. A fold MAY cross a life domain. The
@@ -875,8 +875,11 @@ def validate(records: list[dict], clusters: list[dict], decisions: dict[str, dic
             why = "narrowed claim is empty"
         else:
             new = [n for n in numbers_in(claim) if n not in evidence]
-            new += [n for n in _name_tokens(claim) if not _ax.word_in(n, names)]
-            new += [w for w in _ax.claim_overreach(claim, quote)
+            # the claim's first word is grammar ("Owns two dogs"), never a name
+            new += [n for n in _name_tokens(" ".join(claim.split()[1:]))
+                    if not _ax.word_in(n, names)]
+            new += [w for w in _ax.claim_overreach(claim, quote,
+                                                   english=_ax.is_english(line.get("window")))
                     if w in _ax.FAMILY_WORDS or w.rstrip("s") in _ax.FAMILY_WORDS]
             if new:
                 why = ("narrowed claim introduces names, numbers or relatives absent "
@@ -1238,8 +1241,10 @@ def _name_tokens(text: str) -> set[str]:
 
 def is_recent(fact: dict, today: str | None = None) -> bool:
     """``last_seen`` inside the last ``RECENT_MONTHS`` of the run date. A
-    fact with no date (a social or bio record) is not recent."""
-    seen = str(fact.get("last_seen") or "")[:10]
+    fact with no date (a social or bio record) is not recent. A fact from a
+    ledger saved before ``last_seen`` existed falls back to ``published``,
+    which is never later."""
+    seen = str(fact.get("last_seen") or fact.get("published") or "")[:10]
     today = (today or RUN_DATE or dt.date.today().isoformat())[:10]
     if not seen or not today:
         return False
@@ -1521,6 +1526,9 @@ def cmd_expand(a: argparse.Namespace) -> int:
         vid = str(prior.get("video") or "").split(":")[-1]
         if vid and vid not in vids:
             vids.append(vid)
+        seen = str(prior.get("last_seen") or prior.get("published") or "")[:10]
+        if seen > newest_by_fact.get(target, ""):
+            newest_by_fact[target] = seen
 
     for key, fact_id in assigned.items():
         if fact_id in existing_ids:
@@ -1572,9 +1580,12 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # ---- build the facts -------------------------------------------------- #
     # the channel's first upload is fetched once, only when a kept claim
     # speaks of the channel's own start in "years ago" terms
+    def used_claim(k: str) -> str:
+        narrowed = "" if k in fallback_ids else decisions[k].get("claim")
+        return str(narrowed or cluster_claim(clusters[by_c[k]["index"]]) or "")
+
     first_upload = None
-    if any(_CHANNEL_START.search(cluster_claim(clusters[by_c[k]["index"]]) or "")
-           and _AGO.search(cluster_claim(clusters[by_c[k]["index"]]) or "") for k in kept):
+    if any(_CHANNEL_START.search(used_claim(k)) and _AGO.search(used_claim(k)) for k in kept):
         first_upload = first_upload_date(a.channel)
     facts: list[dict] = []
     fact_index: dict[str, dict] = {}
@@ -1585,6 +1596,10 @@ def cmd_expand(a: argparse.Namespace) -> int:
                                  a.channel, videos_by_fact.get(fact_id, []),
                                  keys_by_fact.get(fact_id, []),
                                  key in fallback_ids, probes.get(key), first_upload)
+        # a fold or an inherited fact can carry newer evidence than the
+        # representative cluster
+        fact["last_seen"] = max(str(fact.get("last_seen") or ""),
+                                newest_by_fact.get(fact_id, "")) or None
         facts.append(fact)
         fact_index[fact_id] = fact
 
