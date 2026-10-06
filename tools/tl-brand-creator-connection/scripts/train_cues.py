@@ -46,12 +46,13 @@ import pathlib
 import re
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import fetch_cues as fc  # sibling: the phrase file parser and the rank formula
+SKILL = pathlib.Path(__file__).resolve().parents[3] / "skills" / "tl-brand-creator-connection"
+sys.path.insert(0, str(SKILL / "scripts"))
+import fetch_cues as fc  # the skill's phrase file parser and rank formula
 
 TAG = re.compile(r"<[^>]+>")
 WS = re.compile(r"\s+")
-DEFAULT_PHRASES = pathlib.Path(__file__).resolve().parent.parent / "references" / "cue-phrases.txt"
+DEFAULT_PHRASES = SKILL / "references" / "cue-phrases.txt"
 
 
 def clean(t: str) -> str:
