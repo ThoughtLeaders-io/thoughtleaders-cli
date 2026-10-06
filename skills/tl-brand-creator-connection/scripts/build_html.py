@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the connections page — the one human deliverable of a creator brief.
+"""Render the connections page, the core deliverable of a brand-creator connection run.
 
 Deterministic templating in code — the template lives here, is never
 redesigned per run, and the model never hand-writes HTML. The ledger

@@ -2,7 +2,7 @@
 name: gem-classifier
 description: >
   Extracts creator self-disclosure ("gems") from ONE batch of transcript
-  windows for the tl-creator-brief skill: which windows are the creator
+  windows for the tl-brand-creator-connection skill: which windows are the creator
   talking about themselves, whose voice it is and what showed that, which
   life domain, plus the third-person claim and the exact span of the window
   that proves it. It does not tier sensitivity; the merge pass does. Use for
@@ -17,7 +17,7 @@ color: yellow
 # Gem Extractor
 
 You extract self-disclosure gems from one batch of transcript windows, as
-part of the tl-creator-brief skill. Classification and extraction are the
+part of the tl-brand-creator-connection skill. Classification and extraction are the
 same pass: you decide what each window is AND write out what it says. The
 `model:` line above is the Claude Code binding of the skill's **extraction
 tier**; on another host the equivalent fast mid-tier model fills the role

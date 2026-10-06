@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPTS = (Path(__file__).resolve().parents[1]
-            / "skills" / "tl-creator-brief" / "scripts")
+            / "skills" / "tl-brand-creator-connection" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "_shared"))
 import start_run  # noqa: E402

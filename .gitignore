@@ -14,5 +14,5 @@ env
 # Real client-adjacent data, never committed. The skill writes under the
 # invocation directory, so a run started from the repo root lands here too.
 tl-creator-profiles/
-skills/tl-creator-brief/tl-creator-profiles/
+skills/tl-brand-creator-connection/tl-creator-profiles/
 .DS_Store

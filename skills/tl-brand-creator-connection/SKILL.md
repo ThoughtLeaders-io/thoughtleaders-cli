@@ -1,14 +1,15 @@
 ---
-name: tl-creator-brief
-tl-blurb: verified creator profile → brand connections → creator-ready brief
+name: tl-brand-creator-connection
+tl-blurb: brand ↔ creator connections from a verified creator profile, plus an optional creator brief
 description: |
-  Turn a YouTube creator's own words into a reusable, evidence-backed profile
-  and, when a brand is named, the honest connections between that creator and
-  the campaign. Invoke whenever the user asks for a "creator profile", "what
-  do we know about [creator]", "find self references", "creator-brand
-  connection", "personal angle for [channel]", "creator brief", "creator
-  talking points", "a brief I can send the creator", "creator-facing brief",
-  "talking points for [channel]", or `/tl-creator-brief`. It mines the
+  Find the honest connections between a brand and a YouTube creator, built
+  on a reusable, evidence-backed profile from the creator's own words, with
+  an optional creator brief the creator can work from. Invoke whenever the
+  user asks for a "brand-creator connection", "creator-brand connection",
+  "personal angle for [channel]", "creator profile", "what do we know about
+  [creator]", "find self references", "creator brief", "creator talking
+  points", "a brief I can send the creator", "creator-facing brief",
+  "talking points for [channel]", or `/tl-brand-creator-connection`. It mines the
   creator's transcripts for first-person disclosures, verifies every retained
   quote against its timestamped source, resolves contradictions and
   sensitivity, and writes a reusable fact ledger. With a brand, it also
@@ -25,7 +26,7 @@ description: |
   queries.
 ---
 
-# tl-creator-brief — creator → verified profile → honest brand connection
+# tl-brand-creator-connection: creator → verified profile → honest brand connection
 
 Turn scattered first-person moments into a **verified creator record** that
 can be reused, then use that record to decide what a brand may honestly build
