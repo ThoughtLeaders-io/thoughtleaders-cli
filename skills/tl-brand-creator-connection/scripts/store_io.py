@@ -115,7 +115,7 @@ def _lines(path: pathlib.Path) -> Iterator[dict]:
 
 
 def read_ledger(path: str | os.PathLike) -> tuple[dict | None, list[dict]]:
-    """``(meta, facts)`` — ``meta`` is None when the file carries no header.
+    """``(meta, facts)``: ``meta`` is None when the file carries no header.
     A meta record anywhere but the first line is an error, not a fact."""
     path = pathlib.Path(path)
     meta: dict | None = None

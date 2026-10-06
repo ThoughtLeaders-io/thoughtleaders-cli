@@ -507,9 +507,14 @@ def test_coverage_is_compared_unrounded(tmp_path):
 # the extractor no longer tiers: the assembler hints, the merge pass owns it
 # --------------------------------------------------------------------------- #
 def test_an_untiered_gem_gets_a_keyword_hint_and_says_so(tmp_path):
-    wins = [_window(0), _window(1), _window(2), _window(3)]
-    gems = [_gem(0, wins[0], claim="was diagnosed with ADHD", notable="ADHD diagnosis"),
-            _gem(1, wins[1], claim="daughter is named Maple", notable="daughter Maple"),
+    # each claim says only what its own quote says (names, family words)
+    wins = [_window(0, "so last spring i was diagnosed with adhd and it explained a lot"),
+            _window(1, "my daughter maple turned four this week and wants a cake"),
+            _window(2), _window(3)]
+    gems = [_gem(0, wins[0], claim="was diagnosed with ADHD", notable="ADHD diagnosis",
+                 quote_span={"first": "i was diagnosed", "last": "with adhd"}),
+            _gem(1, wins[1], claim="daughter is named Maple", notable="daughter Maple",
+                 quote_span={"first": "my daughter maple", "last": "turned four"}),
             _gem(2, wins[2], claim="wears glasses", notable="glasses"),
             _gem(3, wins[3])]                                   # father ran a bakery
     for g in gems:

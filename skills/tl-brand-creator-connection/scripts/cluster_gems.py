@@ -11,7 +11,7 @@ with the repeats kept as evidence rather than thrown away.
 Usage:
     cluster_gems.py --in gems.jsonl [--out gems-clustered.jsonl]
 
-Input: ``gems.jsonl`` from the classification stage — one
+Input: ``gems.jsonl`` from the classification stage, one
 ``{"window": …, "verdict": …}`` object per line.
 
 Output (``--out``, default ``gems-clustered.jsonl`` beside the input): one
@@ -20,12 +20,12 @@ handle exactly ONE format. Each line is the cluster's representative gem (the
 highest-information member: strongest ``rank_score``, then longest window
 text) with two fields merged in:
 
-* ``occurrences`` — how many gems the cluster holds (1 for a singleton, which
+* ``occurrences``: how many gems the cluster holds (1 for a singleton, which
   passes through unchanged apart from these two fields).
-* ``members`` — ``{video_id, start, published, in_sponsor_read, host_anchor}``
+* ``members``: ``{video_id, start, published, in_sponsor_read, host_anchor}``
   for every member, the representative included, so recurrence can be counted
-  over **distinct videos** — and the ad-read and anchor questions answered per
-  member — without going back to the raw gems.
+  over **distinct videos**: and the ad-read and anchor questions answered per
+  member, without going back to the raw gems.
 
 Clustering is deliberately conservative: a false merge silently deletes a
 distinct fact, a missed merge only costs a few tokens. Two gems may merge only
@@ -69,7 +69,7 @@ TEXT_THRESHOLD = 0.55
 # three windows can all repeat "bioshock favorite game" while disclosing the
 # channel's age, its 2011 Skyrim videos and some old Dragon Ball uploads. Word
 # overlap between the two one-line claims is what separates a real repeat from
-# that coincidence — the false pairs sit at 0.0–0.11, genuine ones above 0.25.
+# that coincidence, the false pairs sit at 0.0 to 0.11, genuine ones above 0.25.
 CLAIM_GATE = 0.25
 
 # Near-identical claims are the same fact even when the scan tagged no phrase
@@ -87,8 +87,8 @@ would you your
 
 _WORD = re.compile(r"[a-z0-9']+")
 
-# Polarity and quantity are dropped by content_words() — "no"/"not" are
-# stopwords and digits are folded in with everything else — so "has children"
+# Polarity and quantity are dropped by content_words(), "no"/"not" are
+# stopwords and digits are folded in with everything else, so "has children"
 # and "does not have children", or "has 2 cats" and "has 3 cats", reach the
 # similarity test as the same bag of words. Both would be false merges that
 # delete a distinct fact, so they are refused before any similarity is scored.
@@ -138,7 +138,7 @@ def raw_claim(gem: dict) -> str:
 
 
 def negated(text: str) -> bool:
-    """Whether the claim is a denial — word-bounded markers, contractions too."""
+    """Whether the claim is a denial, word-bounded markers, contractions too."""
     return bool(_NEGATION.search((text or "").lower()))
 
 
@@ -175,7 +175,7 @@ def block_key(gem: dict) -> tuple:
 def similar(a: dict, b: dict) -> bool:
     """True only when two gems confidently carry the same claim."""
     if not compatible(a, b):
-        # contradictory polarity or different numbers — the same words do not
+        # contradictory polarity or different numbers, the same words do not
         # make the same fact
         return False
     a_claim = content_words(raw_claim(a))
@@ -185,7 +185,7 @@ def similar(a: dict, b: dict) -> bool:
         if claim >= CLAIM_THRESHOLD:
             return True
         if claim < CLAIM_GATE:
-            # the words disagree about what was disclosed — never merge, no
+            # the words disagree about what was disclosed, never merge, no
             # matter how alike the surrounding transcript looks
             return False
 
@@ -240,7 +240,7 @@ def cluster(gems: list[dict]) -> list[list[dict]]:
             order.append(key)
         bucket = blocks[key]
         for group in bucket:
-            # every member must match — a near-miss cannot chain two claims
+            # every member must match, a near-miss cannot chain two claims
             if all(similar(gem, member) for member in group):
                 group.append(gem)
                 break
@@ -348,7 +348,7 @@ def main() -> None:
         "clustered_file": str(out_path),
         "slim_file": str(slim_path),
         "note": ("one line per claim; `occurrences` and `members` carry the "
-                 "recurrence evidence — count distinct videos, not members"),
+                 "recurrence evidence, count distinct videos, not members"),
     }, indent=1))
     funnel(stage="cluster", gems=len(gems), clusters=len(lines),
            merged=merged, elapsed_s=elapsed)

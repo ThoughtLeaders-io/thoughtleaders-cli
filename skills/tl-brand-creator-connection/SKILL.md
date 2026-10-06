@@ -28,739 +28,265 @@ description: |
 
 # tl-brand-creator-connection: creator → verified profile → honest brand connection
 
-Turn scattered first-person moments into a **verified creator record** that
-can be reused, then use that record to decide what a brand may honestly build
-on. The value is not merely finding personal-sounding transcript fragments:
-it is proving who spoke, preserving the exact words and timestamp, reconciling
-repetition and contradiction, applying sensitivity rules, and refusing to
-turn a weak or unsafe connection into a pitch.
+## Scope
 
-## When to invoke / skip
+Use for: creator self-disclosure research, a reusable creator profile, an internal creator × brand fit assessment, talking points for a booked or proposed creator campaign.
+Do not use for: channel discovery, performance or authenticity analysis, a brand brief with no creator, keyword research. Route those to the matching TL skill.
 
-Invoke for creator self-disclosure research, a reusable creator profile, an
-internal creator × brand fit assessment, or talking points/brief copy tailored
-to a booked or proposed creator campaign.
+**Help requests** ("help", "how does this work", "what are the options"): run nothing, spend no credits. Explain PROFILE vs CONNECT, the socials option, the creator-brief option, the evidence and sensitivity rules, and the output files. Offer to start.
 
-Skip when the user only wants channel discovery, performance or authenticity
-analysis, a generic brand brief with no creator, or keyword/topic research.
-Use the corresponding TL skill instead. A channel name alone is not permission
-to add social/web research or a creator-facing deliverable; those remain the
-user's choices below.
+## Modes and outputs
 
-## Help mode — explain without running
+| Mode | Input | Output |
+|---|---|---|
+| PROFILE | channel | `<profiles>/<channel_id>-facts.jsonl` (line 1 meta, then one verified fact per line) |
+| CONNECT | channel + brand | ledger (reused or built) + `<profiles>/<channel_id>-<brand_id>-connections.html`. Thin fit and no fit are valid results. |
+| CONNECT + brief (opt-in) | + brand talking points | also `<profiles>/<brand>-creator-brief-<creator>.html` |
 
-For "help", "how does this work?", "what are the options?" or "describe this
-skill", run no scripts and spend no credits. Explain PROFILE vs CONNECT, the
-optional socials lane, the optional creator-facing brief, the evidence and
-sensitivity rules, and what files each path produces. Then offer to start.
+## Conventions
 
-## Choosing the mode and deliverables
+- `<skill>` = this skill's directory. Run every script as `python3 <skill>/scripts/<name>.py`. Never `cd`.
+- `<profiles>` = `tl-creator-profiles/` in the invocation directory, never inside the skill. IF the user names another folder, `<profiles>` = `<folder>/tl-creator-profiles`. Pass `--profiles-dir <profiles>` to `start_run.py` and `ledger_meta.py`, and write every path and link as an absolute path. At run start, print `<profiles>` as an absolute path once. IF it is inside a git checkout, say once that outputs must not be committed.
+- `<corpus>` = `<profiles>/.corpus/<channel_id>/`.
+- Resolve channel and brand names only with `tl channels find` / `tl brands find`. Never match a name inside a query.
+- Every script prints one JSON summary on stdout and a `FUNNEL` line on stderr. Read results from that output, not from the files written. Chain scripts with `&&` in one command.
+- IF a script exits 3 because an agent return failed validation: re-ask the agent for exactly the listed items. Never edit a return, decision or rejected-quote file by hand.
+- References, open when the step names them: `transcript-mining.md` (script flags, extractor and merge contracts, incremental and corroboration rounds), `profile-spec.md` (ledger format, reuse thresholds, connection-map sections, page), `evidence-rules.md` (attribution, staged premises, sensitivity), `creator-brief-template.md` (creator brief layout).
 
-Two modes, one contract:
+**Model tiers.**
 
-- **PROFILE** (channel only): build the ledger
-  `tl-creator-profiles/<channel_id>-facts.jsonl`: line 1 the meta record
-  (when, over which videos, what it found), then one verified fact per line.
-  Other skills and CONNECT consume it. No human page: PROFILE ends with two
-  lines in chat, the ledger's absolute path and its fact count.
-- **CONNECT** (channel + brand): reuse or build the ledger, read the brand
-  lightly, and render the one human page,
-  `tl-creator-profiles/<channel_id>-<brand_id>-connections.html`. A no-fit
-  verdict is a valid output, and so is a thin fit. **Opt-in, a second file:**
-  when the user wants a version they can send to the creator, CONNECT also
-  writes the creator brief,
-  `tl-creator-profiles/<brand>-creator-brief-<creator>.html`, from the brand's
-  own talking points (`references/creator-brief-template.md`).
+| Tier | Model | Used by |
+|---|---|---|
+| Extraction | provider's fast mid-tier (Sonnet) | `tl-cli:cast-sheet`, `tl-cli:gem-classifier`, bio lane, identity lane, three brand lanes |
+| Judgment | provider's strongest (Opus) | `tl-cli:merge-shard` only |
 
-`<skill>` is this skill's own directory (the installed plugin's copy); every
-command is `python3 <skill>/scripts/…`. Outputs land under the **invocation
-directory**, never inside the skill. At the start of the run, print that
-directory's absolute path once; if it sits inside a git checkout, say so once (the
-outputs are client-adjacent data and must not be committed). `<corpus>` is
-`tl-creator-profiles/.corpus/<channel_id>/`, the working directory.
+Every generic subagent (bio, identity and brand lanes) is pinned to the extraction model explicitly, never the inherited model. These choices are fixed: never ask the user which agents or models to use. IF an agent name does not resolve, spawn the host's generic subagent pinned to the same tier's model and say so. Never use the cheapest model for extraction. Never downgrade the judgment tier; add shards instead.
 
-Detail lives in four references; open the one you need:
-`references/transcript-mining.md` (script flags, the extractor and merge
-contracts, the authentication probe, the incremental round),
-`references/profile-spec.md` (ledger and meta formats, the reuse thresholds,
-the connection map's sections, strength tags, the page),
-`references/evidence-rules.md` (what counts, attribution, staged premises,
-sensitivity), `references/identity-lane.md` (the socials lane's brief, rendered
-into its prompt by a script).
-
-Standing rules: scripts reach the platform only through
-`skills/_shared/tl_data.py`; names resolve via `tl channels find` /
-`tl brands find`, never a name match in a query; no `cd`; per-channel paths.
-Agent names below are written `<plugin>:gem-classifier` and
-`<plugin>:merge-shard`, where `<plugin>` is the installed plugin's namespace
-(`tl-cli`).
-
-**Model roles.** This skill uses two model tiers. The **extraction tier** is
-the provider's fast mid-tier model (Sonnet on Claude Code): the
-gem-classifier, the bio and identity lanes, and the three brand-read lanes.
-The **judgment tier** is the smartest model the provider offers (Opus on
-Claude Code): the merge-shard agent only. On a host where those agents or
-model names are not available, spawn the host's generic subagent with the
-equivalent model pinned explicitly, the fast mid-tier one for extraction
-and the smartest one for judgment, and say so. Never fall back to the
-cheapest model for extraction (a smaller model truncated its output at this
-batch size), and never downgrade the judgment tier; shard it instead.
-
-## Start the run
-
-Resolve, plan gate, channel context and the reuse check are one command:
+## 1. Open the run
 
 ```bash
 python3 <skill>/scripts/start_run.py --channel <ref> [--brand <ref>] \
-  [--host-names "<first name>,<full name>"] [--reserve <N>] \
-  [--lanes transcripts+socials] [--rebuild] [--no-refresh] \
-  [--creator-brief | --no-creator-brief] [--talking-points <path or text>] \
-  [--promoting "<line>"]
+  [--host-names "<a>,<b>"] [--reserve <N>] [--lanes transcripts+socials] \
+  [--rebuild] [--no-refresh] [--creator-brief | --no-creator-brief] \
+  [--talking-points <path or text>] [--promoting "<line>"] --profiles-dir <profiles>
 ```
 
-`<ref>` is a URL, @handle, YouTube ID, numeric TL id or a name. One JSON
-summary on stdout, every stage's own `FUNNEL` line on stderr.
+`<ref>` = URL, @handle, YouTube ID, TL id or name. First call: channel, brand, and only the flags the request already decides.
 
-- **Exit 4: a name did not resolve to one record, and nothing else ran.**
-  The candidates are on stdout under `ask` and `candidates`: show the top 3
-  or 4, ask once, call again with the id. A channel that already resolved is
-  handed back with them, so the re-ask does not pay for it twice. Resolution
-  itself belongs to `tl channels find` / `tl brands find`, which auto-pick a
-  dominant candidate; never match a name in a query. A rebrand, or a name
-  that resolves to more than one record (an apostrophe variant, a stub next
-  to an enriched record), returns several brand IDs: carry them all into
-  every brand lane.
-- **`plan` and `plan_ok` are on the summary, and the rule is still yours**:
-  `Intelligence` or `Superuser` proceeds, a known lower tier stops with a
-  message, an unrecognised value is named and continues. The gate is bounded
-  at 20 s with one retry inside the script (macOS has no `timeout`); when it
-  cannot be reached, `plan_note` is `plan gate: unreachable, continued` and
-  the run goes on.
-- **`announcement` is the ledger's own line**: repeat it to the user
-  verbatim. `decision` is `reuse`, `refresh` or `build`, and it is never
-  silent. See "Reuse" below for what each one means.
-- **Host names are the one judgment in the opening, so they are not
-  guessed.** With no `--host-names` the command stops after the reuse check
-  and hands back `identity`: the channel name, the About text, the generated
-  profile, the websites, the social links and the second-channel candidates.
-  Take only person-name aliases from it: first name, full name, surname when
-  it is unambiguous, and a stated nickname. **Never pass a brand, company,
-  role, employer, product or topic**: these values drive speaker attribution,
-  so `Etsy` or `online business coach` would turn an ordinary subject mention
-  into a false second-speaker hint. The channel name alone is not host names.
-  **When nothing in `identity` names a person** (an org channel, a faceless
-  one, an About text with no name), pass no host names at all: a name from
-  your own memory of the channel is a guess, and the rule is no guesses.
-- **`--host-names` given, the opening is one turn**: the command runs the
-  bounded fetch and the context stats too, and `ran` says which stages went.
-  Pass it only when the request already names the person.
+Handle the summary in this order:
 
-- **The creator brief's inputs go in here, verbatim, CONNECT only.**
-  `--talking-points` and `--promoting` imply `--creator-brief`; with any of
-  them the command writes `<corpus>/creator-brief-input-<brand_id>.json`
-  (the brand's lines exactly as given, bullets stripped, nothing reworded)
-  and the summary says `creator_brief: on` and `talking_points: N`. With
-  none of the flags on a CONNECT run the summary says `creator_brief: ask`,
-  and the question is yours to ask (below). These flags never reach the
-  ledger build: the profile is brand-blind.
+1. **Exit 4 (ambiguous name):** show the top 3-4 of `candidates`, ask once, re-run with the chosen id. IF a brand resolves to several ids (rebrand, duplicate record), pass all of them to every brand lane.
+2. **`plan`:** `Intelligence` or `Superuser` → continue. Known lower tier → stop with a message. Unrecognised value → name it and continue. `plan gate: unreachable, continued` → continue.
+3. **`announcement`:** repeat it to the user verbatim. It is empty on a first build (no ledger yet): say "No ledger yet: building from scratch." `decision` is `reuse`, `refresh` or `build`. Never reuse silently. Never refuse `--rebuild`.
+4. **Ask the open choices** (next section) in ONE message, unless already decided or the run is autonomous/fast.
+5. **Host names from `identity`:** IF `identity.cached_host_name` is set, that is the host's name: pass it (first name and full name) plus `identity.cached_host_aliases` as `--host-names` and skip the rest of this point. Otherwise take person-name aliases only: first name, full name, unambiguous surname, stated nickname, from the About text, the generated profile or `description_anchors.names` (what a recurring line of the channel's own upload descriptions calls the host). Never a brand, company, role, employer, product, topic, handle, promo code or the bare channel name (these drive speaker attribution and create false second-speaker hints). IF nothing names a person, pass `--host-names ""`: on a build, `start_run.py` then takes the name the host says on camera ("my name is …") in two or more uploads, or in one upload when the descriptions' promo codes and vanity links spell the same name, or the name a recurring description line gives the host; it fetches again with it and reports `host_names_found` with `host_names_source`. Pass those names as `--host-names` to every later command. IF still none, step 1b may report `host_names_from_cast` (a name the openings give the host in two or more videos): use it the same way. Never supply a name from memory.
+6. **Second call** with `--host-names`, `--reserve`, `--lanes` and any brief flags. On `build`/`refresh` it runs the fetch and context stats and renders the cast-sheet prompts (see `ran` and `cast.prompts`); it adds the refresh round flags itself. On `reuse` it fetches nothing: CONNECT goes to CONNECT step 1, PROFILE reports the ledger as it is.
 
-The full context is written to `<corpus>/context-full.json` either way, so
-anything `identity` leaves out is one Read away.
+   `--reserve` = 1 (bio lane) + 3 on a CONNECT build (brand lanes) + 1 if socials ON.
 
-## Socials lane (opt-in)
+   IF the second call exits 3 with `failed: fetch_cues` and the fetch reported `videos_with_transcript=0`: report a corpus gap (not a failure) and stop. Do not build a socials-only ledger.
 
-The question is what the fan-out searches, not whether a separate stage runs.
-Finding the creator's links is part of channel context either way (step 0);
-what this gates is whether the fan-out that reads the transcripts also opens
-those links and searches the web. It runs only when asked for:
+`--talking-points` / `--promoting` imply `--creator-brief` and write `<corpus>/creator-brief-input-<brand_id>.json` verbatim. They never influence the ledger. `<corpus>/context-full.json` holds the full channel context if `identity` lacks something.
 
-- `--socials`, "include socials", "add web": ON, no question.
-- `--no-socials`, "transcripts only": OFF, no question.
-- Nothing said and the run is interactive: ask once, before any fetch, the
-  default first:
+## 2. Open choices
 
+Ask at most once, before any fetch, both questions in one message.
+
+**Socials** (all modes, build or refresh only):
+- `--socials`, "include socials", "add web" → ON. `--no-socials`, "transcripts only" → OFF. Autonomous/fast → OFF.
+- Otherwise ask:
   > **What should the fan-out read?**
-  > - **Transcripts only** (default): the creator's own videos are the only
-  >   source. Faster, and every fact carries a timestamped quote.
-  > - **Transcripts, socials and web**: the same fan-out also opens the links
-  >   on the channel page and searches the creator's names, for facts the
-  >   videos never state and for cross-lane confirmation.
-
-- Autonomous, unattended, or a fast run: OFF, nothing asked.
-
-This is the only turn in the run that waits on a person, and it comes before
-any fetch so the answer can size `--reserve`. The completion lines say whether
-the socials half ran. *(socials ON)* below means only when it is on.
-
-**On a CONNECT run the same turn carries a second question**, when the
-summary said `creator_brief: ask` (no flag decided it). Ask both in one
-message; on a reuse run this question stands alone:
-
-> **Do you want a version you can send to the creator, with talking points
-> for the ad?**
-> - **No** (default): still deciding on this channel. You get the internal
->   connections page only.
-> - **Yes**: you also get a creator-friendly brief.
-
-On **Yes**, one follow-up, and that is the whole interview: paste the
-brand's brief or its talking points (or a file path) and what the brand is
-promoting; "we have none" is an answer too. Then re-run `start_run.py` with the answers as `--talking-points`
-and `--promoting` before anything else, so the input file exists before the
-connection pass. With a brief pasted, the creator brief mirrors it; with
-only the promoting line or nothing, it takes the template's six sections and
-their defaults. Requirements, don'ts and the approval process are never
-asked for separately. A flag skips the question; nothing
-answers it silently. Autonomous, unattended or fast runs: no brief, nothing
-asked, and the completion line says so.
-
-## Reuse: every run starts here
-
-`start_run.py` runs the check (`ledger_meta.py check --channel <id>
-[--lanes …] [--rebuild] [--no-refresh]`, if you ever need it on its own).
-A found ledger gives one announcement line, which you repeat to the user
-verbatim, and a `decision` (the thresholds behind it live in
-`profile-spec.md`, "Reuse"):
-
-- `reuse`: CONNECT goes straight to the brand read; PROFILE reports the
-  ledger as it is.
-- `refresh`: run one incremental round (`transcript-mining.md`, "Incremental
-  round"), then continue.
-- `build`: run the PROFILE pipeline.
-
-Never reuse silently; never refuse `--rebuild`.
-
-## PROFILE pipeline
-
-Every stage prints a `FUNNEL` line to stderr; they are for debugging, not a
-deliverable. The stages are `identity` and `context` (both
-`channel_context.py`), `fetch_cues`, `assemble`, `cluster`, `merge-prepare`,
-`merge`, `authenticate`, `verify`, and on the CONNECT side `brand_read`
-(`brand_reads.py`) and `render` or `check` (`build_html.py`). Read them off
-the command you just ran rather than opening the file it wrote. Scripts that
-take under a second are chained with `&&` in one command.
-
-0. **Channel context first.** `start_run.py` has already done this
-   (`channel_context.py --channel <id> > <corpus>/context-full.json`, if you
-   ever need it on its own) and handed back the `identity` block. Read that
-   block, not the file, unless it leaves out something you need.
-
-   This is the platform's own record of the channel: name, About text, the
-   AI profile, sibling-channel candidates, language, and the creator's own
-   links. Read it and take only the host's person-name aliases from it. Brands,
-   companies, roles, employers, products and topics are identity context, not
-   speaker names, and never go into `--host-names`.
-
-   **Identity discovery happens here, not in a lane of its own.** The links
-   come from both stores at once: `websites` is the labelled header links the
-   creator wrote on their own channel page (a personal site, a company), and
-   `social_links` unions the platform keys from Postgres with the index's flat
-   list, deduped. The sites are where the identity lane starts, because the
-   site says who the person is and links the socials worth reading. Emails are
-   dropped; a contact address is not a fact about a person.
-
-   Both stores come back empty on plenty of channels, and an empty pair is a
-   real answer, not a failure. Say so once and carry on: the identity lane
-   then has the channel name, the About text and the AI profile and nothing
-   else, and it must be told that, or it will read the AI profile as the whole
-   truth about the person and rule out the correct creator for not matching it.
-
-1. **Fetch the cue passages**, and spawn the lanes that need only the ids.
-   *(Already run if you passed `--host-names` to `start_run.py`: check `ran`
-   on its summary and go to step 2.)*
-
-   ```bash
-   python3 <skill>/scripts/fetch_cues.py --channel <id> \
-     --host-names "<first name>,<full name>" --reserve <N>
-   ```
-
-   On a `refresh` decision, add the round flags from the start summary's
-   `check`: `--round <next_round> --since <latest_video_date> --exclude
-   <corpus>/classified.jsonl` (`transcript-mining.md`, "Incremental round").
-
-   Writes `<corpus>/windows.jsonl.gz`, `<corpus>/batches/batch-NNN.json` (one
-   file per extractor agent, sized to fill one wave of the host's agent cap)
-   and `<corpus>/corpus.jsonl.gz`. `--out` names the parent, not the channel
-   directory. `--reserve` is one slot per agent that will be running during
-   the extraction fan-out: **3 for the brand lanes on a CONNECT build**, plus
-   1 when the socials lane is on, 0 on a plain PROFILE run.
-   - A channel with no transcripts indexed (`videos_with_transcript=0` and
-     no windows) exits 4 here and writes no batches: there is nothing to
-     extract, and no later stage can make a page. Report it as a corpus gap,
-     not a run failure, and do not build a socials-only ledger for it.
-   - On an English-language channel, non-English transcript tracks are
-     YouTube auto-dubs, not the creator's words: the fetch excludes them and
-     reports `dubbed_excluded`. A non-English channel keeps its own-language
-     sampling.
-   - **CONNECT build: spawn the three brand lanes in this same message**
-     (their brief is under "CONNECT pipeline", step 1). They need only the
-     channel and brand ids, they run while the fetch and the extraction run,
-     and they are in before the merge decisions are.
-   - Second channels are reported, never mined, unless the user asks. A
-     deeper round (`--exclude <corpus>/classified.jsonl`, `transcript-mining.md`
-     "Entity expansion") is never taken on the skill's own initiative.
-
-2. **Context stats, format call, prompts.** First the stats over the fetched
-   passages:
-
-   ```bash
-   python3 <skill>/scripts/channel_context.py --channel <id> \
-     --corpus <corpus>/corpus.jsonl.gz --per-video-out <corpus>/per-video.jsonl \
-     > <corpus>/context-full.json
-   ```
-
-   This pass also writes `name_candidates`: the other names the creator calls
-   themselves, harvested from the passages just fetched. Each row carries the
-   distinct-video count, whether the name was said outright ("my name is …",
-   "call me …") and whether it is a short relative of the channel name. **The
-   variants are the identity lane's search terms**, because the name on the
-   channel is often not the name the audience, the press or their own profiles
-   use. A row
-   that is not a variant is somebody else the creator named on camera, useful
-   for confirming an identity and never for searching one. These are search
-   terms only; a name reaches the ledger solely as a transcript fact with its
-   own quote.
-
-   **Call the format from that command's own `FUNNEL stage=context` line**,
-   not from a Read of the file it just wrote: the line carries every number
-   the call is made from (`videos`, `fp_density_median`,
-   `interview_marker_videos`, `question_density`, `title_hint_videos`,
-   `staged_share`, `likely_faceless`). Open `context-full.json` only when the
-   line is genuinely ambiguous.
-
-   Call the format (`solo`, `interview`, `multi_host`, `faceless_scripted`)
-   with one line of evidence that also names `staged_share` when it is above
-   0.1 ("solo, 22% of titles are staged premises"); the stats are a hint,
-   never a gate. Read `third_person_host_share` off the fetch's own FUNNEL
-   line too: above about 0.25 the kept windows are largely other people
-   speaking of the host (a crew channel), and the label is `multi_host`
-   however solo the thumbnails look ("multi_host: 41% of kept windows name
-   the host in the third person"). Then write the context block and render every
-   batch's message in one chain, *(socials ON)* the identity lane's message
-   with them:
-
-   ```bash
-   python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
-     --format-label <label> --format-evidence "<evidence>" \
-     [--host-names "<a>,<b>"] [--known-facts "<x>;<y>"] \
-     --write-context <corpus>/context.json && \
-   for b in <corpus>/batches/batch-*.json; do n=$(basename "$b" .json); \
-     python3 <skill>/scripts/extractor_prompt.py --batch "$b" \
-       --context <corpus>/context.json \
-       --write-to <corpus>/returns/$n.extract.json --out <corpus>/prompts/$n.md; \
-   done && \
-   python3 <skill>/scripts/identity_prompt.py render --from <corpus>/context-full.json \
-     --context <corpus>/context.json \
-     --write-to <corpus>/returns/identity.json --out <corpus>/prompts/identity.md
-   ```
-
-   Drop the last command on a socials-OFF run.
-
-3. **One fan-out: transcripts and identity in the SAME message.** One
-   `<plugin>:gem-classifier` agent per `<corpus>/prompts/batch-NNN.md`, plus
-   *(socials ON)* the identity lane, all spawned in a single assistant message
-   with nothing else in flight. This is the run's only extraction fan-out.
-
-   The extractor prompt is two lines: read that one file and follow it
-   exactly; one Write, then the one-line receipt. Never paste the message in,
-   never two batches per agent, never one at a time, never poll or sleep. If
-   the agent name does not resolve, use the host's generic subagent pinned
-   to the extraction tier ("Model roles") and say so. The batches are sized
-   for 20 extractors at once, the standard on every host, and `--reserve`
-   has already been taken out of that number.
-
-   - *(socials ON)* **The identity lane**: one generic subagent on the
-     **extraction tier**, briefed exactly like an extractor: read
-     `<corpus>/prompts/identity.md` and follow it; one Write, then the one-line
-     receipt. The rendered file carries the lane's brief
-     (`references/identity-lane.md`, its one home), the provenance and
-     sensitivity rules, the links, the About text and AI profile labelled for
-     what they are worth, every `name_candidates` variant, the host names, the
-     format call and the record format the merge pass accepts. Nothing about
-     the lane is typed by hand. It writes `<corpus>/returns/identity.json`:
-     the identity it accepted or rejected and why, its `social`/`web` fact
-     records, the confirmed profile bios, and every link it read or left
-     unread. What it has written when the extractors finish is what the merge
-     pass gets; the rest is reported "linked but unread".
-
-   - **The bio lane (always on).** In the same wave, one more `gem-classifier`
-     over the creator's own written self-description:
-
-     ```bash
-     python3 <skill>/scripts/bio_lane.py batch --from <corpus>/context-full.json \
-       --channel <id> --out <corpus-parent>          # filters, writes bio/batch-000.json
-     python3 <skill>/scripts/extractor_prompt.py --batch <corpus>/<id>/bio/batch-000.json \
-       --context <corpus>/<id>/context.json --lane bio \
-       --write-to <corpus>/<id>/bio/batch-000.extract.json --out <prompt path>
-     python3 <skill>/scripts/bio_lane.py facts --batch … --returns … --out bio-facts.json
-     ```
-
-     `batch` strips boilerplate (YouTube placeholder copy, business-inquiry
-     lines, bare emails/URLs/hashtags/handles, subscribe calls) and reports
-     every dropped line with its reason; what survives is judged by the SAME
-     rubric, which is what rejects "the best gaming channel on YouTube".
-     `--socials-bio <corpus>/socials-bio.json` exists for a REFRESH: that
-     file is written by `identity_prompt.py slice` in step 4, after this
-     wave has already run, so on a build the first bio batch never has it.
-     The records it mints are `provenance: "bio"` identity-lane facts: they go
-     in the merge agent's `facts` list, and `evidence-rules.md` owns what they
-     are worth. **Never feed a bio batch to `assemble_extracts.py`**: it
-     refuses them, because that path stamps every row as a transcript quote
-     with a video and a timestamp.
-   - **Corroboration runs AFTER step 4's assemble, not here.** The
-     corroboration round is an `--exclude <corpus>/classified.jsonl` pass, and
-     `classified.jsonl` exists only once the first round is assembled. So:
-     `bio_lane.py facts` (step 4, with `--prepare`, below) mints the records,
-     `bio_lane.py terms` derives 1-3 search terms per bio fact and writes a
-     generated phrases file plus the exact round recipe, and that recipe runs
-     as an additive `fetch_cues.py --round N` pass between step 4 and step 5
-     (see `references/transcript-mining.md`). The recipe carries its own
-     window budget (`--max-windows`, five per term, at most 60) so a long
-     About text never crowds the gem hunt out of the extractor cap. A bio fact
-     no upload corroborates is never a claim and never an angle: non-sensitive
-     ones render in their own "In their own words (unverified)" block,
-     sensitive ones are dropped, and on a refresh an unverified one survives
-     only while the About text still says it (`expand` reports `bio_expired`).
-
-4. **Assemble, cluster, prepare, authenticate: one command.** As soon as the
-   receipts are in:
-
-   ```bash
-   python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/batches \
-     --returns <corpus>/returns --out <corpus> > <corpus>/assemble.json && \
-   python3 <skill>/scripts/cluster_gems.py --in <corpus>/gems.jsonl > <corpus>/cluster.json && \
-   python3 <skill>/scripts/merge_pass.py prepare --clustered <corpus>/gems-clustered.jsonl \
-     --format <label> --channel <id> --out <corpus> > <corpus>/prepare.json
-   ```
-
-   Assemble cuts every quote out of the window text (verbatim by
-   construction) and exits 0 while coverage is at least 0.95. Exit 3 stops
-   the chain: re-judge exactly the windows in `respawn.json` with
-   `extractor_prompt.py --indexes … --write-to <corpus>/returns/batch-NNN.extract.r2.json`,
-   one agent per batch, then re-run. Never edit a return file by hand.
-   `prepare` sizes the shards itself (clusters / 40, floor 1, ceiling 6;
-   shards hold whole life domains) and, with `--channel`, runs
-   `authenticate.py`: every staged-premise claim in a durable domain and
-   every pair of contradicting clusters gets one channel-scoped query, and
-   the evidence lands on the merge-input line (`staged`, `conflicts_with`,
-   `probe`). `prepare.json` lists the shard files and sizes.
-
-   **Then route the bio facts to the shards** (every build; this is what
-   used to be done by hand):
-
-   ```bash
-   python3 <skill>/scripts/bio_lane.py facts --batch <corpus>/bio/batch-000.json \
-     --returns <corpus>/bio/batch-000.extract.json --out <corpus>/bio-facts.json \
-     --prepare <corpus>/prepare.json
-   ```
-
-   With `--prepare` it also writes `<corpus>/bio-facts-sN.json` per shard,
-   each holding the records whose life domain that shard judges (a record no
-   shard holds goes to the first), and reports the files under
-   `shard_files`. Each merge agent's message names its file, next to the
-   socials lane's `identity-facts-sN.json` when there is one.
-
-   *(socials ON)* Put one more command on the end of that chain:
-
-   ```bash
-   python3 <skill>/scripts/identity_prompt.py slice --returns <corpus>/returns/identity.json \
-     --prepare <corpus>/prepare.json --out <corpus>
-   ```
-
-   It checks every lane record against the merge pass's own enums (exit 3
-   lists the refs to re-ask the lane for; never hand-patch the file), writes
-   `<corpus>/identity-facts-sN.json` per shard with the records whose life
-   domains that shard holds, `<corpus>/socials-bio.json` for the bio lane, and
-   prints `social_read` / `social_unread` for step 6. Spawn the merge agents in
-   the same message that reads this result.
-
-5. **Merge pass: sharded agents decide, the script builds the ledger.**
-   One `<plugin>:merge-shard` agent per file in `prepare.json` (`merge-input-N.jsonl`,
-   or `merge-input.jsonl` when there is one), all in one message. The agent
-   pins the **judgment tier, deliberately** ("Model roles"); shard it rather
-   than downgrade it. If the agent name does not resolve, use the host's
-   generic subagent pinned to the judgment tier's model, say so, and expect
-   the two enum failures its brief exists to prevent: an
-   invented `action` value, and a narrowed claim dated from the line's
-   `published` field. Each reads its compact cluster lines, never the
-   windows, and returns one JSON object of decisions (`keep` / `fold` /
-   `drop`, `selected` picks, *(socials ON)* the lane's facts; contract in
-   `transcript-mining.md`, Layer 4). Save each as
-   `<corpus>/merge-decisions-r1-sN.json`. **Nothing is dropped for being
-   uncertain**: a staged or contradicted claim is kept and judged on the
-   probe's evidence, per `evidence-rules.md`.
-
-   Each shard's message names its `<corpus>/bio-facts-sN.json` (step 4)
-   and, *(socials ON)*, its `<corpus>/identity-facts-sN.json`: the lane
-   records whose domains sit beside the clusters it can see, so
-   `corroborates` can reach them. `expand` unions the shards' `facts` by
-   `ref`, so a shard whose file is empty returns `"facts": []` and costs
-   nothing. On a two-host channel the compact lines carry `speaker: cohost`
-   for the second host: those are the second creator's facts, judged and
-   kept like the host's, never folded into one person. Then:
-
-   ```bash
-   python3 <skill>/scripts/merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl \
-     --decisions <corpus>/merge-decisions-r1-s1.json [--decisions …] \
-     --format <label> --channel <id> --out <corpus>/facts.jsonl \
-     > <corpus>/expand.json 2> <corpus>/expand.err && \
-   python3 <skill>/scripts/verify_quotes.py --in <corpus>/facts.jsonl \
-     --corpus <corpus>/corpus.jsonl.gz --channel-language <language from context-full.json> \
-     --drop-unverified > <corpus>/verify.json 2> <corpus>/verify.err
-   ```
-
-   **Socials OFF: put step 6's ledger write on the end of this same chain**
-   and the whole tail is one turn. With `--drop-unverified`, verify writes
-   only the facts that may publish (exact matches and the lane records) to
-   `facts.jsonl.verified.jsonl`, the rejects to `facts.jsonl.rejected.jsonl`,
-   re-fills `selected` from the remaining confirmed facts so the page keeps
-   its count, and exits 0; `ledger_meta.py write --from` then has nothing to
-   refuse. Report the `dropped` count and the rejected file in the run
-   report; never rewrite a rejected quote by hand. Without the flag every
-   candidate is written, rejects included, verify exits 1 and the write
-   refuses (exit 2), which is the mode for inspecting the rejects. Socials
-   ON keeps step 6 separate, because `--set-socials` has to record the
-   lane's answer before the write.
-
-   Expand exits 3 listing offending ids: re-ask for exactly those once as
-   another `--decisions` file; on a second failure add `--fallback-original`.
-   A supersession that points against the dated evidence (the superseded
-   cluster's newest upload, or a lane record corroborating it, is newer than
-   the superseder's) is one of those refusals, and the message carries the
-   dates: hand it back to the shard as written. Never hand-patch a decision.
-   Verify re-locates every quote; only exact matches publish, partial or
-   none get fixed to the caption text or dropped, and a quote not in the
-   channel's language (`dubbed`) never publishes.
-
-6. **Write the ledger.** *(socials OFF: this is the command you already
-   chained onto step 5, and this step is done.)*
-
-   *(socials ON)* First record which linked platforms the lane actually
-   opened, since only the lane knows and the honesty strip reports it:
-
-   ```bash
-   python3 <skill>/scripts/channel_context.py --set-socials <corpus>/context-full.json \
-     --social-read "<social_read from the slice summary>" \
-     --social-unread "<social_unread from the slice summary>"
-   ```
-
-   Skip it on a socials-OFF run. Without it the page cannot tell one link
-   from another and reports every linked platform as read whenever the lane
-   ran at all, including pages it never opened.
-
-   ```bash
-   python3 <skill>/scripts/ledger_meta.py write --channel <id> \
-     --from <corpus>/facts.jsonl.verified.jsonl --channel-name "…" \
-     --format <label> --format-evidence "…" --context <corpus>/context-full.json \
-     [--lanes transcripts+socials]
-   ```
-
-   Refuses (exit 2, nothing written) any transcript fact whose verification
-   is not `exact`. PROFILE ends here, with two lines: the ledger's absolute
-   path and its fact count.
-
-   The second line reports the socials half by what it actually did, never
-   just on or off: `off, N linked platforms listed unread`, or `on, N websites
-   opened, N sources read, N facts`. "On" with zero facts is a result the
-   reader has to see: the lane can run, reject the identity and return nothing.
-
-## Fast run
-
-A run shape, not a flag: PROFILE only, the primary channel only, socials OFF
-without asking, the default selection (every window above the 8.0 score
-floor, at least 150, at most 300), one extraction round.
-
-## CONNECT pipeline
-
-Run the reuse check first. Then:
-
-1. **Brand read: three agents in ONE message, as soon as the brand resolves.**
-   On a build that is the fetch message (PROFILE step 1), so the lanes run
-   under the extraction and are in before the merge; on a reuse it is
-   immediately. All three are generic subagents pinned explicitly to the
-   **extraction tier**, never the inherited model, need only the channel and
-   brand ids, and are quick and light by design: gathering brand information
-   is background, not research. Each writes one file under `<corpus>/` and
-   returns one line.
-   - **TL data** (target under 60 s), writes `<corpus>/brand-tl.json`. Exactly
-     these, nothing improvised: `tl brands show <id> --json` for every brand
-     id (`description`, `audience`, `type`, `sponsored_topics`; `tl brands
-     find` returns only id and name, and there is no `category` field, `type`
-     is the nearest). Treat `sponsored_topics` as a hint to check against the
-     sponsored reads, never as a fact;
-     `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` for
-     the newest sponsored reads (those reads ARE the sponsorship patterns:
-     what creators already say about the product on camera and the moments
-     they tie it to their own lives); and for the eras, one `tl db es`
-     aggregation, a `date_histogram` on `publication_date` by year over
-     `sponsored_brand_mentions` for the brand ids (a `term` filter, the id as
-     a STRING: `{"term": {"sponsored_brand_mentions": "50485"}}`; there is no
-     `brand.id` field) with a `terms` sub-aggregation on `channel.id` (size
-     20; `channel.name` is not a field on article docs and returns empty
-     buckets silently), then resolve the ids to names. `tl brands history` is
-     deprecated; do not use it. No web lookups.
-   - **Brand site** (target under 90 s), writes `<corpus>/brand-site.json`
-     with `status: read | fallback | unreachable`. The brand's own website
-     (`website` from `tl brands show <id> --json`) and ONLY the social accounts linked
-     directly from that site: positioning, product lines, stated audience,
-     founder story or cause, current campaign themes, how it uses creators.
-     **One WebFetch per URL, and stop at the first failure per host**: no
-     retries, no waiting out a timeout three times. If the site is
-     unreachable, fall back in order: the platform's brand record (already in
-     the TL-data lane's input), then ONE WebFetch of
-     `https://en.wikipedia.org/wiki/<brand>` labelled `[web: wikipedia]`.
-     Never search the web for the brand's socials, news or coverage.
-   - **Category precedent probe** (target under 90 s), writes
-     `<corpus>/category-probe.json`: a channel-scoped transcript search for
-     moments the creator already does what the product enables, without
-     naming the brand (for a hydration drink: the creator's own words on
-     hangovers, workouts, travel dehydration). It picks its own terms, returns
-     term counts plus the strongest windows with `&t=` links, and is
-     confirm-only. **A window inside one of the creator's own sponsored
-     reads is never a precedent**: on a re-book, half the probe's hits can be
-     the creator reading this very brand's script in an earlier video. Drop a
-     window that names the brand or a competitor, a discount code or a link,
-     and any window whose `brand_mentions` span of type `sponsored` covers
-     it. Budget: at most 3 ES queries, `size` 10 or less each, one pass, no
-     deepening, and **the file is written as soon as the third query
-     returns**, whatever it holds, gaps in `coverage.note`. Every query in the
-     foreground, never a background job. `build_html.py --check` reads this
-     file when it sits beside the map and refuses a precedent card whose
-     quote is not one of its windows.
-
-2. **Connection pass.** Start when the merge decisions are saved and the
-   TL-data lane is in. The site lane and the probe join if present; a lane
-   still missing is named in the page's caveat section, never waited for.
-   Follow-up queries are confirm-only. Write
-   `<corpus>/connections-<brand_id>.md` with the frontmatter and sections in
-   `profile-spec.md`, "CONNECT" (About creator, Thesis, About brand, one
-   section per connection strongest first, Where this could go wrong last,
-   written from the whole ledger including the withheld tiers, as kinds of
-   fact, never details).
-   - **The connection is the fact, not the format.** Every card quotes a
-     ledger fact, and the quoted fact itself must name the thing the brand
-     offers for the card to be **strong**; a link that runs through the
-     channel's premise ("her format is unboxing, the brand ships drops") or a
-     generic trait ("she talks about value") is **thin**. **The stance
-     counts before the strength does**: a fact the creator tells to argue
-     AGAINST what the brand sells (a car-repair bill told as the reason not
-     to own a car, for a repair-cover brand) is never a card, whatever it
-     names. It goes to "Where this could go wrong", and a ledger whose only
-     product-naming facts are of that kind is a no-fit map. Each heading
-     carries type and strength: `## … — **adjacent** · **thin**`. At most two
-     thin cards; when no card is strong, the Thesis says **thin fit** in so
-     many words, names the one or two honest angles and what to confirm
-     first, and the page carries the verdict above the cards. No angle is
-     padded to make a thin fit look full.
-   - Each quote is a `>` block with its `&t=` link on a `>` continuation
-     line, or `--check` fails it; a quote that matches no ledger fact, or a
-     superseded or staged-only one, fails it too.
-
-   Then:
-
-   ```bash
-   python3 <skill>/scripts/build_html.py --check --in <corpus>/connections-<brand_id>.md \
-     --facts tl-creator-profiles/<id>-facts.jsonl && \
-   python3 <skill>/scripts/build_html.py --in <corpus>/connections-<brand_id>.md \
-     --facts tl-creator-profiles/<id>-facts.jsonl
-   ```
-
-   `--check` exits 3 listing what the map lacks and writes nothing. The
-   render writes `tl-creator-profiles/<id>-<brand_id>-connections.html` and
-   its body-only twin `…-connections.fragment.html`, and prints both
-   **absolute** paths. Where the host has an Artifact tool, publish the
-   fragment (the full page nests a document inside the tool's own shell and
-   cannot be published); otherwise open the page (`open <absolute path>` on
-   macOS). Give the user the absolute path of the page in either case.
-   Without a creator brief, CONNECT ends there, with the path, the artifact
-   link if any, and one line naming any brand lane that fell back or was
-   unreachable.
-
-3. **Creator brief** (only when `creator_brief` is on). Runs after the page
-   renders, on a fit or thin fit; on a no fit, one line says the brief was
-   skipped and why. Read `<corpus>/creator-brief-input-<brand_id>.json`, the
-   connections map, the whole ledger for every point (the cards are where to
-   start, not the limit), and in `<corpus>/brand-tl.json` any read this
-   creator already ran for the brand, so a re-book does not repeat it (the
-   check refuses a moment said inside one of those reads).
-   Start from the creator's gems, not the brand's list: search the finished
-   ledger (never a new retrieval round; the ledger stays as built) and for
-   each gem that fits the brand (a story with its people and details, a
-   turning point, a thing they built, a habit kept for years, how they
-   describe themselves), ask
-   what it lets this creator say about the product that no other creator
-   could, and write that as the talking point. Then place each brand line
-   under the point whose gem backs it best; a gem that leads to the product
-   but to none of the brand's lines becomes a creative talking point under
-   the brand's promoting line. Write `<corpus>/creator-brief-<brand_id>.md`
-   to `references/creator-brief-template.md`, in the layout the input file
-   picks. **The brand sent a brief** (`brand_brief` set): the page is their
-   document, word for word in their order, with a For you block, written
-   for this creator from a gem of theirs, under each talking point a gem
-   backs, and at most two creative blocks after their last point. **Only a
-   promoting line, or nothing** (no `brand_brief`): the six sections, every
-   point built from a gem; with no brief at all, the product facts come
-   from the page's About brand section and the rest follows the template's
-   "When the brand sent no brief". Either way the brand's brief says what
-   must be covered and the gems say what only this creator can say about
-   it. Every quote
-   with its `&t=` link, second person, and none of the vocabulary written
-   for the AM's eyes. Then one command:
-
-   ```bash
-   python3 <skill>/scripts/build_html.py --brief --check \
-     --in <corpus>/creator-brief-<brand_id>.md \
-     --facts tl-creator-profiles/<id>-facts.jsonl \
-     --connections <corpus>/connections-<brand_id>.md \
-     --input <corpus>/creator-brief-input-<brand_id>.json && \
-   python3 <skill>/scripts/build_html.py --brief \
-     --in <corpus>/creator-brief-<brand_id>.md \
-     --facts tl-creator-profiles/<id>-facts.jsonl \
-     --connections <corpus>/connections-<brand_id>.md \
-     --input <corpus>/creator-brief-input-<brand_id>.json
-   ```
-
-   `--check` exits 3 listing what the brief lacks and writes nothing; fix
-   the markdown, never the checker. The render writes
-   `tl-creator-profiles/<brand>-creator-brief-<creator>.html` and its
-   fragment, named by names because it is an attachment. Publish the
-   fragment where the host can. CONNECT then ends with **two** absolute
-   paths, the artifact links if any, and the brand-lane line.
+  > - **Transcripts only** (default): the creator's own videos only. Faster; every fact has a timestamped quote.
+  > - **Transcripts, socials and web**: also opens the channel page's links and searches the creator's names.
+
+**Creator brief** (CONNECT, only when the summary says `creator_brief: ask`; on `reuse` it is the only question):
+  > **Do you want a version you can send to the creator, with talking points for the ad?**
+  > - **No** (default): internal connections page only.
+  > - **Yes**: also a creator-friendly brief.
+
+IF Yes: one follow-up only: "Paste the brand's brief or talking points (or a file path), and what the brand is promoting. 'We have none' is fine." Pass the answers as `--talking-points` / `--promoting` on the second call. IF the user has no brief or talking points, omit `--talking-points`. Never ask separately for requirements, don'ts or approval process. Autonomous/fast → no brief; the completion line says so.
+
+## 3. PROFILE pipeline (build or refresh)
+
+IF `decision` is `refresh`: the steps below run as one incremental round (`transcript-mining.md`, "Incremental round"). Render and spawn only `<corpus>/batches-rN` into `returns-rN`/`prompts-rN`; pass `--append` to `assemble_extracts.py`; pass `--existing <profiles>/<id>-facts.jsonl --state <corpus>/merge-state.json` to `merge_pass.py prepare` and `expand`; pass `--rounds N` to `ledger_meta.py write`. Never run the build commands as written on a refresh: they rebuild the ledger from the new uploads alone.
+
+**Step 1. Fetch.** Done by the second `start_run.py` call. IF it did not run (check `ran`), run `fetch_cues.py --channel <id> --host-names "…" --reserve <N> --out <profiles>/.corpus` with the round flags from `check` on a refresh (`transcript-mining.md`, "Incremental round").
+- CONNECT build: spawn the three brand lanes (CONNECT step 1) in the same message as the fetch.
+- Report second channels (`identity.second_channel_candidates`; the ones an earlier run cached carry source `cached`); never mine them unless asked. Never start an entity-expansion round on your own initiative.
+
+**Step 1b. Cast sheet.** Who is on each video, from its own opening. In ONE message (the one that reads the second call's result), spawn one `tl-cli:cast-sheet` (extraction tier) per file in `cast.prompts`, each with the two-line prompt of step 3. When every receipt is in:
+
+```bash
+python3 <skill>/scripts/cast_sheet.py apply --sheets <corpus>/cast-sheets.json \
+  --returns <corpus>/returns --batches <corpus>/batches --out <corpus>/cast.json \
+  --host-names "<a>,<b>" --context-full <corpus>/context-full.json > <corpus>/cast-apply.json
+```
+
+On a refresh round N the files are `cast-sheets-rN.json`, `returns-rN` and `batches-rN`. Exit 3: re-spawn the sheets listed in `cast-respawn.json`, re-run apply. IF `cast.prompts` is empty (no openings could be read), skip this step and say so. Read `with_guests`, `formats` and `host_names_from_cast` from the summary: they are evidence for step 2, and `host_names_from_cast` fills empty host names (step 1, point 5). `host_name_cache` says what happened to the host's name on the channel record: a certain name (the sheets and a second source agree) is cached there as `ai_description.host_name` so the next run starts from it; `already set`, `skipped: not certain` and a missing or refused `tl-internal` are reported, never fixed by hand. Say the outcome in one line.
+
+**Step 2. Format call and prompts.**
+IF `identity.cached_format_label` is set, that is the label and `cached_format_label_evidence` its evidence (prefix the evidence with `cached:`), unless this run's `third_person_host_share` rule below or the cast sheet's majority contradicts it: then call it fresh and say the cache disagreed. Otherwise call the format from the `FUNNEL stage=context` line and the cast sheet's `formats`: `solo`, `interview`, `multi_host` or `faceless_scripted`, with one line of evidence. The stats are a hint, not a gate.
+- IF `staged_share` > 0.1, name it in the evidence ("solo, 22% of titles are staged premises").
+- IF the fetch's `third_person_host_share` > 0.25, the label is `multi_host`.
+- IF most of the cast sheet's judged videos list a guest or a second host, the label is `interview` or `multi_host`, whichever the sheets say more often.
+
+Then, in one chain (drop the `identity_prompt.py` command when socials is OFF):
+
+```bash
+python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
+  --format-label <label> --format-evidence "<evidence>" \
+  [--host-names "<a>,<b>"] [--known-facts "<x>;<y>"] \
+  --write-context <corpus>/context.json && \
+for b in <corpus>/batches/batch-*.json; do n=$(basename "$b" .json); \
+  python3 <skill>/scripts/extractor_prompt.py --batch "$b" --context <corpus>/context.json \
+    --write-to <corpus>/returns/$n.extract.json --out <corpus>/prompts/$n.md; done && \
+python3 <skill>/scripts/identity_prompt.py render --from <corpus>/context-full.json \
+  --context <corpus>/context.json \
+  --write-to <corpus>/returns/identity.json --out <corpus>/prompts/identity.md
+```
+
+Bio lane, after the chain above returns (it reads `context.json`):
+
+```bash
+python3 <skill>/scripts/bio_lane.py batch --from <corpus>/context-full.json \
+  --channel <id> --out <profiles>/.corpus && \
+python3 <skill>/scripts/extractor_prompt.py --batch <corpus>/bio/batch-000.json \
+  --context <corpus>/context.json --lane bio \
+  --write-to <corpus>/bio/batch-000.extract.json --out <corpus>/prompts/bio.md
+```
+
+IF refresh AND `<corpus>/socials-bio.json` exists, add `--socials-bio <corpus>/socials-bio.json` to `bio_lane.py batch`. IF `bio_lane.py batch` reports `batches: []`, the second command fails harmlessly: skip the bio agent (step 3), `bio_lane.py facts` (step 4) and the corroboration round.
+
+**Step 3. Fan-out.** In ONE message, spawn at extraction tier:
+- one `tl-cli:gem-classifier` per `<corpus>/prompts/batch-NNN.md`;
+- one `tl-cli:gem-classifier` for `<corpus>/prompts/bio.md`;
+- IF socials ON: one generic subagent for `<corpus>/prompts/identity.md`.
+
+Each agent's prompt is exactly: read `<file>` and follow it; one Write; reply with the one-line receipt. Never paste the file content, never two files per agent, never spawn one at a time, never poll or sleep. The merge uses whatever the identity lane has written when the extractors finish; the rest is reported "linked but unread".
+
+**Step 4. Assemble, cluster, prepare.**
+
+```bash
+python3 <skill>/scripts/assemble_extracts.py --batches <corpus>/batches \
+  --returns <corpus>/returns --out <corpus> > <corpus>/assemble.json && \
+python3 <skill>/scripts/cluster_gems.py --in <corpus>/gems.jsonl > <corpus>/cluster.json && \
+python3 <skill>/scripts/merge_pass.py prepare --clustered <corpus>/gems-clustered.jsonl \
+  --format <label> --channel <id> --out <corpus> > <corpus>/prepare.json && \
+python3 <skill>/scripts/bio_lane.py facts --batch <corpus>/bio/batch-000.json \
+  --returns <corpus>/bio/batch-000.extract.json --out <corpus>/bio-facts.json \
+  --prepare <corpus>/prepare.json
+```
+
+IF socials ON, append: `&& python3 <skill>/scripts/identity_prompt.py slice --returns <corpus>/returns/identity.json --prepare <corpus>/prepare.json --out <corpus>`
+
+- Assemble exit 0 with `unjudged_windows` above 0: continue and report the count.
+- Assemble exit 3: for each batch in `respawn.json`, re-run `extractor_prompt.py --indexes … --write-to <corpus>/returns/batch-NNN.extract.r2.json`, one agent per batch, then re-run the chain.
+- Slice exit 3: re-ask the identity lane for the listed refs.
+
+**Corroboration round** (build only; skip on fast runs and when the bio lane had no batches, and say which): run `python3 <skill>/scripts/bio_lane.py terms --facts <corpus>/bio-facts.json --channel <id> --out <profiles>/.corpus --round 2 --host-names "<host_names from <corpus>/context.json>"`, then every line of the `recipe` it prints, prefixing each script with `<skill>/scripts/`. `--append` is required. Then re-run `cluster_gems.py`, `merge_pass.py prepare` and `bio_lane.py facts --prepare` before step 5.
+
+**Step 5. Merge.** In ONE message (the same one that reads the step 4 result), spawn one `tl-cli:merge-shard` (judgment tier) per shard file listed in `prepare.json`. Each message names its `<corpus>/bio-facts-sN.json` (omitted when the bio lane had no batches) and, IF socials ON, its `<corpus>/identity-facts-sN.json`. A line with `speaker: cohost` is the second host's fact and `shared` is both hosts'; they are judged like the host's, never folded into one person. Write each shard's reply, unchanged, to `<corpus>/merge-decisions-r1-sN.json` with one Write.
+
+```bash
+python3 <skill>/scripts/merge_pass.py expand --clustered <corpus>/gems-clustered.jsonl \
+  --decisions <corpus>/merge-decisions-r1-s1.json [--decisions …] \
+  --format <label> --channel <id> --out <corpus>/facts.jsonl \
+  > <corpus>/expand.json 2> <corpus>/expand.err && \
+python3 <skill>/scripts/verify_quotes.py --in <corpus>/facts.jsonl \
+  --corpus <corpus>/corpus.jsonl.gz --channel-language <language> \
+  --drop-unverified > <corpus>/verify.json 2> <corpus>/verify.err
+```
+
+IF socials OFF, append the step 6 ledger write to this chain.
+
+- Expand exit 3: send the shard that judged them (SendMessage to the same agent) exactly the listed ids, including supersession date refusals; write its reply, unchanged, to `<corpus>/merge-decisions-r2-sN.json` and add it as another `--decisions`. A later run can list new ids, because the date check runs after the decision check: treat each new id the same way (`-r3-sN.json`). IF an id is listed a second time, add `--fallback-original`.
+- Expand also writes `<corpus>/people.json` (one row per person the quotes name) and reports `ended`, `hook_only`, `dated_claims` and `two_names`.
+- Report verify's `dropped` count and the path of `facts.jsonl.rejected.jsonl`. To inspect rejects instead, omit `--drop-unverified` (the ledger write will then refuse).
+
+**Step 6. Write the ledger.**
+IF socials ON, first:
+```bash
+python3 <skill>/scripts/channel_context.py --set-socials <corpus>/context-full.json \
+  --social-read "<social_read from slice>" --social-unread "<social_unread from slice>"
+```
+Then:
+```bash
+python3 <skill>/scripts/ledger_meta.py write --channel <id> --profiles-dir <profiles> \
+  --from <corpus>/facts.jsonl.verified.jsonl --channel-name "…" \
+  --format <label> --format-evidence "…" --context <corpus>/context-full.json \
+  --cast <corpus>/cast.json --host-names "<a>,<b>" [--lanes transcripts+socials]
+```
+
+The write also caches on the channel record what the next run can start from, each with a `.evidence` key: `format_label` (when the cast sheets agree with the call), `host_aliases` (once the host's name is cached) and `sibling_channels`. Its `cache` field says per key `set`, `already set` or `skipped` and why; a cached value is never rewritten by a run, and a missing or refused `tl-internal` only shows there.
+
+PROFILE completion, three lines:
+1. The ledger's absolute path.
+2. Fact count and what the socials lane did: `socials off, N linked platforms listed unread` or `socials on, N websites opened, N sources read, N facts`. Report "on" with 0 facts as such.
+3. What was cached on the channel record this run (host name, format label, host aliases, sibling channels), from `host_name_cache` and `cache`.
+
+**Fast run** (a run shape, not a flag): PROFILE only, primary channel only, socials OFF without asking, default selection, no corroboration round.
+
+## 4. CONNECT pipeline
+
+**Step 1. Brand lanes.** Spawn three generic subagents in ONE message, pinned to the extraction tier. Build: in the fetch message. Reuse: immediately. Each writes one file under `<corpus>/` and returns one line. Pass every brand id.
+
+- **TL data** → `brand-tl.json` (target < 60 s). Run exactly:
+  - `tl brands show <id> --json` per id. Use `company_description`, `what_it_does`, `offer`, `ideal_customers`, `type`, `website`, `sponsored_topics` (`sponsored_topics` is a hint to check against the reads, not a fact).
+  - `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` (the brand's newest sponsored reads) and `python3 <skill>/scripts/brand_reads.py --brand <id> --channel <channel_id> --max 50` (this creator's own past reads).
+  - One `tl db es` aggregation with `"size": 0` over the brand's sponsored mentions: bucket by publication year, then by channel (top 20). Take the field names and the aggregation shape from `<plugin>/skills/tl/references/elasticsearch-schema.md` (the sponsored-mention query patterns and the aggregation example), never from memory. Resolve the channel ids to names with one lookup written from `<plugin>/skills/tl/references/postgres-schema.md` (the channel table), via `tl db pg`.
+  - Never `tl brands history`. No web lookups.
+  - Write `{"brand": {<the show fields>}, "reads": [<rows of the first brand_reads.py call, unchanged>], "this_channel_reads": [<rows of the second, unchanged>], "by_year": {"<year>": <n>}, "top_channels": [{"id", "name", "count"}], "notes": "…"}`. `--check` refuses the other channels' names in the creator brief, and any talking point inside a `this_channel_reads` read or within 45 seconds of it.
+- **Brand site** → `brand-site.json`, `{"status": "read | fallback | unreachable", "urls_read": […], "positioning", "product_lines": […], "stated_audience", "cause", "campaign_themes": […], "creator_use", "notes"}` (target < 90 s). Read the `website` from `tl brands show` and only socials linked from that site: positioning, product lines, stated audience, founder story or cause, campaign themes, creator use. One WebFetch per URL; stop at the first failure per host. IF unreachable: use the platform brand record, then ONE WebFetch of `https://en.wikipedia.org/wiki/<brand>` labelled `[web: wikipedia]`. Never search the web for the brand.
+- **Category precedent** → `category-probe.json` (target < 90 s). Channel-scoped transcript search for moments the creator already does what the product enables, without naming the brand. Return term counts and the strongest windows with `&t=` links. The `transcript` field is timed-text XML (`<text start="…">`, HTML entities escaped twice); a window is consecutive cues' text, `start` the first cue's seconds. Drop windows that name the brand, a discount code or a link, windows within 60 seconds of any `sponsored` `brand_mentions` span on that video (any brand), and videos whose description names the brand. Max 3 ES queries, `size` ≤ 10, foreground only, no deepening. Write the file when the third query returns: `{"terms": {"<term>": <n>}, "windows": [{"video_id", "start", "published", "url", "text"}], "coverage": {"note": "…"}}`. `text` is the window's words; `--check` matches each precedent card quote against it and applies the card recency rule to `published`. A precedent quote that becomes a talking point contains a first-person word (I, my, we, our).
+
+**Step 2. Connection map.** Start when the merge decisions are saved and `brand-tl.json` exists. Do not wait for the other lanes; name a missing lane in the caveat section. Follow-up queries may only confirm. Write `<corpus>/connections-<brand_id>.md` per `profile-spec.md`, "CONNECT", using the whole ledger, withheld tiers included.
+
+Card rules:
+- Every card quotes a ledger fact, or for a category-precedent card a probe window, verbatim: the quote alone on `>` lines, then one `>` line holding only `[<creator>, <YYYY-MM-DD>](<url>&t=<N>s)`, where the date is the quoted video's publish date. Nothing else inside the block.
+- A category-precedent card follows the strength and recency rules below, with the window's `published` in place of `last_seen`.
+- Write the map, then run `--check`. Each problem it prints is one line naming the rule broken: fix the markdown from that line. Never read the scripts to learn the rules.
+- **strong** = the quoted fact itself names what the brand offers. **thin** = the link runs through the channel's format or a generic trait. Heading: `## <title> · **<type>** · **<strength>**`.
+- A fact told to argue against what the brand sells is never a card; it goes in "Where this could go wrong". IF the only product-naming facts are of that kind → no fit.
+- A strong card rests on a fact with `last_seen` inside the last 24 months. An older fact carries a thin card only with its year stated. The Thesis and "Where this could go wrong" use every fact at any age. An `unconfirmed` or `ended` fact is never quoted on the page; `--check` refuses it.
+- Max two thin cards. IF no card is strong: the Thesis says **thin fit**, names the one or two honest angles and what to confirm first, and the verdict sits above the cards. Never pad.
+
+```bash
+python3 <skill>/scripts/build_html.py --check --in <corpus>/connections-<brand_id>.md \
+  --facts <profiles>/<id>-facts.jsonl && \
+python3 <skill>/scripts/build_html.py --in <corpus>/connections-<brand_id>.md \
+  --facts <profiles>/<id>-facts.jsonl
+```
+
+`--check` exit 3: fix the markdown, never the checker. IF an Artifact tool exists, publish the `.fragment.html`; otherwise `open` the page. Without a brief, CONNECT completion: the page's absolute path, the artifact link if any, and one line naming any brand lane that fell back or was unreachable.
+
+**Step 3. Creator brief** (only if `creator_brief: on`). IF the verdict is no fit, skip and say why. Otherwise read `<corpus>/creator-brief-input-<brand_id>.json`, the connection map, the whole ledger, and the creator's past reads for this brand in `brand-tl.json` `this_channel_reads` (never build a point on a moment from one).
+
+1. Search the finished ledger only (no new retrieval). For each confirmed gem with `last_seen` inside the last 24 months that fits the brand (a story with people and details, a turning point, something they built, a long-kept habit, how they describe themselves), write the talking point only this creator could make about the product. An older or `ended` gem is background only, with its year, never a talking point.
+2. Place each brand line under the point whose gem backs it best. A gem that leads to the product but to no brand line becomes a creative point under the promoting line.
+3. Write `<corpus>/creator-brief-<brand_id>.md` per `creator-brief-template.md`:
+   - IF `brand_brief` is set: the brand's document word for word, in their order, with a "For you" block (from one of this creator's gems) under each point a gem backs, and at most two creative blocks after their last point.
+   - ELSE: the template's six sections, every point built from a gem. With no brief at all, product facts come from the map's About brand section and the rest follows "When the brand sent no brief".
+4. Second person, every quote with its `&t=` link, none of the map's internal vocabulary.
+
+```bash
+python3 <skill>/scripts/build_html.py --brief --check --in <corpus>/creator-brief-<brand_id>.md \
+  --facts <profiles>/<id>-facts.jsonl --connections <corpus>/connections-<brand_id>.md \
+  --input <corpus>/creator-brief-input-<brand_id>.json && \
+python3 <skill>/scripts/build_html.py --brief --in <corpus>/creator-brief-<brand_id>.md \
+  --facts <profiles>/<id>-facts.jsonl --connections <corpus>/connections-<brand_id>.md \
+  --input <corpus>/creator-brief-input-<brand_id>.json
+```
+
+Publish the fragment where possible. Completion: both absolute paths, artifact links if any, the brand-lane line.
 
 ## Guardrails
 
-- **Read-only.** Nothing is sent to anyone; output comes back for review.
-- **No prices, costs, rate cards or deal terms in any output**, ever.
-- **One labelled sample read per connection at most.** No scripts, full
-  reads, CTA wording or alternate versions. In the creator brief the "you
-  could" line is that one allowance.
-- **Nothing written for the brand's or the AM's eyes reaches the creator.**
-  The connections page, its strength tags, provenance labels, thesis hedges
-  and "Where this could go wrong" stay internal; the creator brief carries
-  the brand's own lines and the creator's own quotes, and `--brief --check`
-  refuses the rest. The brief builds the brand up and never sets it against
-  another product. It is still never sent by the skill.
-- **Sensitivity is a tier** (`evidence-rules.md`): `clinical`, `children`
-  and `location` stay out of connection angles by default, and they MUST be
-  read for "Where this could go wrong", as the kind of fact, never the
-  detail: knowing what not to say is half the brief. The extractor never
-  tiers; a script hints and the merge pass decides. A lane record naming a
-  person a withheld-tier transcript fact already names inherits that tier.
-  Beliefs are not sensitive. No protected-trait inference, ever.
-- **Withheld from angles is not hidden from risk assessment.** The connection
-  writer reads every verified tier when deciding fit and "Where this could go
-  wrong": for example, public discussion of sobriety can rule out an alcohol
-  campaign. State only the minimum category-level warning, never the private
-  detail, and never turn the warning into a talking point.
-- **Nothing is dropped, demoted or superseded for being uncertain.** A
-  staged-premise claim or a contradiction is checked against the whole
-  channel (`authenticate.py`) and judged on dated evidence; what cannot be
-  settled stays in the ledger at `unconfirmed`.
-- **Verbatim or not at all**; the complete displayed quotation must be
-  contained in its verified ledger source. Matching a prefix never licenses
-  an invented ending. A partial quote match never publishes, and a dubbed
-  track is not the creator's words.
-- **Incomplete data never looks complete.** A successful response marked
-  quota-truncated stops the run before rows are cached, watermarks advance or
-  a deliverable publishes. Surface the retry information and resume later.
-- **An empty answer is a real answer**: "no evidence found", with the
-  coverage numbers that bound it.
+- Read-only. Nothing is sent to anyone, including the creator brief.
+- No prices, costs, rate cards or deal terms in any output.
+- At most one labelled sample read per connection ("you could" in the brief). No scripts, full reads, CTA wording or alternates.
+- Internal material never reaches the creator brief: strength tags, provenance labels, thesis hedges, "Where this could go wrong". The brief never sets the brand against another product.
+- Sensitivity tiers (`evidence-rules.md`): `clinical`, `children`, `location` are never connection angles, but MUST inform fit and "Where this could go wrong" as a category-level warning, never the detail, never a talking point. A lane record naming a person that a withheld-tier fact names inherits that tier. Beliefs are not sensitive. Never infer a protected trait.
+- Never drop, demote or supersede a fact for being uncertain; unsettled claims stay `unconfirmed` in the ledger and off every page. A line the window shows is someone else's is not uncertain: it never enters.
+- Quotes are verbatim: the full displayed quote must be contained in its verified source. No partial matches, no dubbed tracks.
+- IF a response is marked quota-truncated: stop before caching rows, advancing watermarks or publishing. Report the retry information.
+- An empty result is reported as "no evidence found" with the coverage numbers.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the connections page, the core deliverable of a brand-creator connection run.
 
-Deterministic templating in code — the template lives here, is never
+Deterministic templating in code, the template lives here, is never
 redesigned per run, and the model never hand-writes HTML. The ledger
 (``<channel_id>-facts.jsonl``, header + one fact per line) and the connection
 map's markdown stay canonical; HTML is the view.
@@ -20,24 +20,24 @@ read only when the ledger carries no header.
 
 The page, in order:
 
-- the header — creator × brand, with the brand-read and ledger-build dates;
-- **Who they are** — the markdown's ``## About <creator>`` prose, then the
+- the header: creator × brand, with the brand-read and ledger-build dates;
+- **Who they are**: the markdown's ``## About <creator>`` prose, then the
   ledger's ``selected`` facts as a short readable run, picked here at render
   time (tier ``children`` / ``location`` never enter; ``clinical`` carries
   its badge);
-- **Thesis** — the markdown's ``## Thesis``, the page's lead block, above
+- **Thesis**: the markdown's ``## Thesis``, the page's lead block, above
   the brand;
-- **About <brand>** — the markdown's ``## About <brand>``, rendered as prose
+- **About <brand>**: the markdown's ``## About <brand>``, rendered as prose
   (context, not a connection, so never numbered as one);
-- **Connections** — one numbered card per connection ``## `` section, in the
+- **Connections**: one numbered card per connection ``## `` section, in the
   markdown's order, which IS the ranking: the quote with its ``&t=`` link,
   what the brand offers and from which lane, the use case, the optional
   labelled sample read, the Do / Do not pair. Provenance labels (``[web]``,
   ``[social: …]``) are kept. A no-fit verdict has no sections and stays
   prose;
-- **Where this could go wrong** — its own block after the cards, never
+- **Where this could go wrong**: its own block after the cards, never
   numbered among them;
-- **About this ledger** — the honesty footer ``references/evidence-rules.md``
+- **About this ledger**: the honesty footer ``references/evidence-rules.md``
   requires: confidence and sensitivity tallies with the count withheld from
   angles, the coverage ratio and "absence is not evidence", the build facts,
   and the linked platforms / sibling channels the run did not mine.
@@ -72,6 +72,7 @@ the same offline; nothing else is fetched and there is no script.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import gzip
 import html
 import json
@@ -93,13 +94,15 @@ BADGES = {
     "category-precedent": "precedent",
     # strength: `strong` when the quoted fact itself names what the brand
     # offers; `thin` when the link runs through the channel's premise or a
-    # generic trait. The heading carries both: `— **adjacent** · **thin**`.
+    # generic trait. The heading carries both: `,  **adjacent** · **thin**`.
     "strong": "strong",
     "thin": "thin",
     "thin fit": "thinfit",
     "thin-fit": "thinfit",
     "confirmed": "confirmed",
     "unconfirmed": "unconfirmed",
+    "co-host": "confirmed",
+    "shared": "confirmed",
     "lifestyle": "lifestyle",
     "clinical": "clinical",
     "children": "withheld",
@@ -131,202 +134,8 @@ FONTS = ("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500
          "&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500"
          "&display=swap")
 
-CSS = """
-:root {
-  --bg: #f2f4f6; --surface: #ffffff; --ink: #172029; --ink-2: #4b5866;
-  --ink-3: #79858f; --line: #d6dde4; --accent: #0b6f8f; --accent-soft: #dbeef4;
-  --quote: #33404c;
-  --badge-direct: #0b6f8f; --badge-adjacent: #6a4fc4; --badge-precedent: #8a6a12;
-  --badge-confirmed: #1f7a5a; --badge-unconfirmed: #8c6a12;
-  --badge-lifestyle: #1f7a5a; --badge-clinical: #a35a12; --badge-withheld: #9b2f2f;
-  --badge-nofit: #5b6472;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #10161c; --surface: #171f28; --ink: #e4e9ed; --ink-2: #adb8c2;
-    --ink-3: #7b8792; --line: #283442; --accent: #58bcd8; --accent-soft: #143241;
-    --quote: #c2ccd6;
-    --badge-direct: #3d9fbe; --badge-adjacent: #9a84e0; --badge-precedent: #c9a43a;
-    --badge-confirmed: #45a37f; --badge-unconfirmed: #c9a43a;
-    --badge-lifestyle: #45a37f; --badge-clinical: #d08a45; --badge-withheld: #d76b6b;
-    --badge-nofit: #8b95a3;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #10161c; --surface: #171f28; --ink: #e4e9ed; --ink-2: #adb8c2;
-  --ink-3: #7b8792; --line: #283442; --accent: #58bcd8; --accent-soft: #143241;
-  --quote: #c2ccd6;
-  --badge-direct: #3d9fbe; --badge-adjacent: #9a84e0; --badge-precedent: #c9a43a;
-  --badge-confirmed: #45a37f; --badge-unconfirmed: #c9a43a;
-  --badge-lifestyle: #45a37f; --badge-clinical: #d08a45; --badge-withheld: #d76b6b;
-  --badge-nofit: #8b95a3;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font: 17px/1.6 "Source Sans 3", "Source Sans Pro", -apple-system,
-        BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-}
-main { max-width: 860px; margin: 0 auto; padding: 2.75rem 1.25rem 5rem; }
-h1, h2, h3 {
-  font-family: Fraunces, "Iowan Old Style", Georgia, "Times New Roman", serif;
-  font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0;
-}
-h1 { font-size: 2.3rem; letter-spacing: -.01em; }
-h2 { font-size: 1.45rem; margin: 2.8rem 0 1rem; }
-h3 { font-size: 1.15rem; margin: 0; }
-p { margin: .5rem 0; max-width: 68ch; }
-a { color: var(--accent); text-decoration: none; }
-a:hover, a:focus-visible { text-decoration: underline; }
-a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-ul, ol { margin: .5rem 0; padding-left: 1.3rem; }
-li { margin: .3rem 0; }
-hr { border: none; border-top: 1px solid var(--line); margin: 1.8rem 0; }
-code {
-  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
-  font-size: .85em; background: var(--accent-soft); border-radius: 3px;
-  padding: .05rem .3rem;
-}
-blockquote {
-  margin: .7rem 0; padding: .55rem 1rem; color: var(--quote);
-  border-left: 3px solid var(--accent); font-style: italic;
-  font-family: Fraunces, "Iowan Old Style", Georgia, serif; font-size: 1.05rem;
-}
-blockquote p { margin: .2rem 0; max-width: none; }
-.eyebrow {
-  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-  font-size: .72rem; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--ink-3); margin: 0 0 .6rem;
-}
-header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
-.meta {
-  display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin: .9rem 0 0;
-  padding: 0; list-style: none; font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .76rem; color: var(--ink-2); font-variant-numeric: tabular-nums;
-}
-.meta li { margin: 0; }
-.meta li::before { content: "·"; color: var(--ink-3); margin-right: .55rem; }
-.meta li:first-child::before { content: none; margin: 0; }
-.about {
-  margin: 0; padding: .9rem 1.1rem; background: var(--surface);
-  border: 1px solid var(--line); border-left: 3px solid var(--accent);
-  border-radius: 6px; color: var(--ink-2);
-}
-.about h3 { font-size: 1.05rem; color: var(--ink); margin: 0 0 .3rem; }
-.about p { margin: .35rem 0; }
-.ledger {
-  margin: .6rem 0 0; padding: .75rem 1rem; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 6px; font-size: .9rem;
-  color: var(--ink-2);
-}
-.ledger h3 {
-  font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500;
-  font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-3); margin: .8rem 0 .35rem;
-}
-.tally { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .2rem 0 0; padding: 0; list-style: none; }
-.tally li { margin: 0; font-variant-numeric: tabular-nums; }
-.who {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem 1.6rem; margin: 0;
-}
-.who .domain { border-top: 2px solid var(--accent); padding-top: .5rem; }
-.who .domain h3 {
-  font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500;
-  font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-3); margin: 0 0 .35rem;
-}
-.who ul { list-style: none; margin: 0; padding: 0; }
-.who li { margin: 0 0 .55rem; }
-.who .claim { font-weight: 600; }
-.who .q {
-  display: block; color: var(--ink-2); font-size: .92rem; font-style: italic;
-  font-family: Fraunces, "Iowan Old Style", Georgia, serif;
-}
-.who .q a { color: var(--ink-3); font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: .72rem; }
-.who-run { list-style: none; margin: 0; padding: 0; }
-.who-run li {
-  margin: 0 0 .6rem; padding-left: .9rem; border-left: 2px solid var(--accent);
-}
-.who-run .claim { font-weight: 600; }
-.who-run .q {
-  display: block; font-style: italic; color: var(--ink-2); margin-top: .15rem;
-}
-.who-run .q a {
-  color: var(--ink-3); font-style: normal;
-  font-family: "IBM Plex Mono", monospace; font-size: .72rem;
-}
-/* the creator's own written words, corroborated by nothing: deliberately
-   quieter than the run above it, and never dressed as a quote with a link */
-.own-words { list-style: none; margin: 0; padding: 0; }
-.own-words li {
-  margin: 0 0 .6rem; padding-left: .9rem;
-  border-left: 2px dashed var(--ink-3, #999);
-}
-.own-words .claim { font-weight: 600; }
-.own-words .said { display: block; font-style: italic; color: var(--ink-2); }
-.own-words .src {
-  display: block; color: var(--ink-3);
-  font-family: "IBM Plex Mono", monospace; font-size: .72rem;
-}
-.caveat { color: var(--ink-2); font-size: .92em; margin: .2rem 0 .8rem; }
-.thesis {
-  border-left: 3px solid var(--accent); padding: .1rem 0 .1rem 1rem;
-  margin: 0 0 1.4rem;
-}
-.thesis p { font-size: 1.08rem; line-height: 1.6; max-width: 68ch; }
-.caveat {
-  border: 1px solid var(--line); border-left: 3px solid var(--ink-3);
-  padding: .8rem 1rem; margin: 1rem 0 1.6rem; background: var(--surface);
-}
-.caveat p { margin: .35rem 0; max-width: 70ch; }
-.conn { list-style: none; margin: 0; padding: 0; counter-reset: rank; }
-.conn > li {
-  display: grid; grid-template-columns: 3rem 1fr; gap: 0 1rem; margin: 0 0 1.1rem;
-  padding: 1rem 1.1rem 1.1rem .9rem; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 6px;
-}
-.conn > li::before {
-  counter-increment: rank; content: counter(rank, decimal-leading-zero);
-  font-family: Fraunces, Georgia, serif; font-size: 1.9rem; line-height: 1;
-  color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: .1rem;
-}
-.conn .body { min-width: 0; }
-.conn h3 { margin: 0 0 .4rem; }
-.conn h3 .badge { margin-left: .5rem; vertical-align: .2em; }
-.conn p { max-width: 70ch; }
-.prose { margin-top: 1rem; }
-.badge {
-  display: inline-block; padding: .08rem .5rem; border-radius: 3px;
-  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .66rem;
-  font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
-  font-style: normal; color: var(--surface); vertical-align: middle;
-}
-.badge-direct { background: var(--badge-direct); }
-.badge-adjacent { background: var(--badge-adjacent); }
-.badge-precedent { background: var(--badge-precedent); }
-.badge-confirmed { background: var(--badge-confirmed); }
-.badge-unconfirmed { background: var(--badge-unconfirmed); }
-.badge-lifestyle { background: var(--badge-lifestyle); }
-.badge-clinical { background: var(--badge-clinical); }
-.badge-withheld { background: var(--badge-withheld); }
-.platform { margin: 0.35rem 0; color: var(--muted, #555); font-size: 0.95em; }
-.platform .k { font-weight: 600; color: inherit; }
-.platform .k::after { content: ":"; }
-.badge-nofit { background: var(--badge-nofit); }
-.badge-strong { background: var(--badge-confirmed); }
-.badge-thin { background: var(--badge-nofit); }
-.badge-thinfit { background: var(--badge-unconfirmed); }
-.thinfit {
-  border: 1px solid var(--line); border-left: 3px solid var(--badge-unconfirmed);
-  padding: .6rem 1rem; margin: 0 0 1rem; background: var(--surface); font-size: .95rem;
-}
-.empty { color: var(--ink-2); font-style: italic; }
-.links { list-style: none; padding: 0; margin: 0; font-size: .92rem; color: var(--ink-2); }
-.links li { margin: .3rem 0; word-break: break-word; }
-.scroll { overflow-x: auto; }
-@media (prefers-reduced-motion: no-preference) { a { transition: color .15s; } }
-"""
+# the page stylesheet, read once at import
+CSS = pathlib.Path(__file__).with_name("page.css").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -357,7 +166,7 @@ def inline(text: str) -> str:
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     # the surrounding escape pass already entity-escaped the URL once
     # (quote=False, so quotes survived): decode back to the raw URL, then
-    # escape once for attribute context — a quote in a crafted link target
+    # escape once for attribute context, a quote in a crafted link target
     # must not break out of href, and a & must not double-escape to &amp;amp;
     text = re.sub(
         r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
@@ -452,7 +261,7 @@ def render_markdown(md: str) -> str:
 
 
 def split_sections(body_html: str) -> tuple[str, list[tuple[str, str]]]:
-    """``(intro, [(title, rest), …])`` — whatever precedes the first ``## ``
+    """``(intro, [(title, rest), …])``: whatever precedes the first ``## ``
     section stays prose (the header lines, or a no-fit verdict); each section
     is one (title, body) pair in the markdown's order."""
     parts = re.split(r"(?=<h2>)", body_html)
@@ -471,19 +280,19 @@ def plain(title_html: str) -> str:
 
 
 def is_about(title_html: str) -> bool:
-    """``## About <name>`` — a context strip, never a numbered card. Covers
+    """``## About <name>``: a context strip, never a numbered card. Covers
     both the creator and the brand introductions."""
     return plain(title_html).lower().startswith("about ")
 
 
 def is_thesis(title_html: str) -> bool:
-    """``## Thesis`` — the page's lead argument, rendered above the brand."""
+    """``## Thesis``: the page's lead argument, rendered above the brand."""
     return plain(title_html).lower().rstrip(":").strip() in (
         "thesis", "core thesis", "the thesis")
 
 
 def is_caveat(title_html: str) -> bool:
-    """``## Where this could go wrong`` — the honest mismatch. It is a ``## ``
+    """``## Where this could go wrong``: the honest mismatch. It is a ``## ``
     section like any other in the markdown, but it must NEVER render as a
     numbered connection: a caveat sitting in the ranked list reads as an
     angle, which is exactly the "bunch of random connections" complaint."""
@@ -520,7 +329,7 @@ def thesis_block(sections: list[tuple[str, str]]) -> str:
 def caveat_block(sections: list[tuple[str, str]]) -> str:
     """"Where this could go wrong", after the cards and outside the ranking.
     An honest mismatch beats overfitting to a perfect match, so this is kept
-    rather than trimmed away — just never numbered among the angles."""
+    rather than trimmed away, just never numbered among the angles."""
     if not sections:
         return ""
     bodies = "".join(rest for _, rest in sections)
@@ -563,7 +372,7 @@ def connection_cards(sections: list[tuple[str, str]], intro: str = "") -> str:
 # --------------------------------------------------------------------------- #
 def load_ledger(facts_path: pathlib.Path | None,
                 meta_path: pathlib.Path | None) -> tuple[list[dict] | None, dict]:
-    """``(facts, meta)`` from the ledger — its first line is the meta record.
+    """``(facts, meta)`` from the ledger, its first line is the meta record.
     ``--meta`` is only read when the ledger predates the header (legacy)."""
     if facts_path is None:
         return None, (json.loads(pathlib.Path(meta_path).read_text(encoding="utf-8"))
@@ -588,8 +397,7 @@ def bio_corroborated(fact: dict, index: dict[str, dict]) -> bool:
     read off ``confidence``.
 
     The merge pass confirms a bio fact when a transcript fact says the same
-    thing, but quote verification runs afterwards and can reject that quote —
-    and a later run can drop the transcript fact entirely. So the page asks the
+    thing, but quote verification runs afterwards and can reject that quote, and a later run can drop the transcript fact entirely. So the page asks the
     question again from the evidence link: is the named fact still in the
     ledger, is it a transcript fact, and did its quote survive verification."""
     target = index.get(str(fact.get("corroborated_by") or ""))
@@ -620,6 +428,10 @@ def angle_ineligible_reason(fact: dict, index: dict[str, dict] | None = None) ->
         return "retired after its evidence was rejected"
     if fact.get("superseded_by"):
         return f"superseded by {fact.get('superseded_by')}"
+    if fact.get("ended"):
+        return "ended: the evidence shows it is over"
+    if str(fact.get("confidence")) != "confirmed":
+        return "unconfirmed"
     if fact.get("staged_only"):
         return "said only inside a staged premise"
     tier = tier_of(fact)
@@ -650,16 +462,86 @@ def tier_badge(fact: dict) -> str:
 
 
 def confidence_badge(fact: dict) -> str:
-    """``unconfirmed`` on a fact that is not confirmed, nothing otherwise.
-
-    Confirmed is the expected case and goes unmarked, so the badge stays a
-    signal rather than furniture. A thin ledger legitimately fills "who they
-    are" with unconfirmed facts (fewer confirmed facts survive the per-domain
-    cap than the render cap allows), and without the badge the reader could
-    not tell one from the other: the strip carried a sensitivity badge and
-    nothing about confidence.
-    """
+    """``unconfirmed`` on a fact that is not confirmed. The page gate keeps
+    such facts off the page, so this is a backstop for an older ledger."""
     return "" if fact.get("confidence") == "confirmed" else (badge("unconfirmed") or "")
+
+
+def speaker_badge(fact: dict) -> str:
+    """Who said it on a multi-host channel: the second host or both."""
+    who = str(fact.get("speaker") or "host")
+    return "" if who == "host" else (badge("co-host" if who == "cohost" else "shared") or "")
+
+
+RECENT_MONTHS = 24
+
+
+def is_recent(fact: dict, today: str | None = None) -> bool:
+    """``last_seen`` inside the last ``RECENT_MONTHS`` of today. A fact with
+    no date is not recent. A fact from a ledger saved before ``last_seen``
+    existed falls back to ``published``, which is never later."""
+    seen = str(fact.get("last_seen") or fact.get("published") or "")[:10]
+    today = (today or dt.date.today().isoformat())[:10]
+    if not seen:
+        return False
+    y, m = int(today[:4]), int(today[5:7])
+    m -= RECENT_MONTHS
+    while m <= 0:
+        m += 12
+        y -= 1
+    return seen >= f"{y:04d}-{m:02d}-{today[8:10]}"
+
+
+def people_section(facts: list[dict] | None, index: dict[str, dict]) -> str:
+    """The people the creator's quotes name, from facts the page may use:
+    one row per exact spelling, the relation words, how many videos, the
+    last mention."""
+    rows: dict[str, dict] = {}
+    for f in facts or []:
+        if angle_ineligible_reason(f, index) is not None:
+            continue
+        for p in f.get("people") or []:
+            name = str(p.get("name") or "").strip()
+            if not name:
+                continue
+            row = rows.setdefault(name, {"rel": [], "videos": set(), "last": ""})
+            if p.get("relation") and p["relation"] not in row["rel"]:
+                row["rel"].append(str(p["relation"]))
+            if f.get("video"):
+                row["videos"].add(str(f["video"]))
+            seen = str(f.get("last_seen") or f.get("published") or "")[:10]
+            row["last"] = max(row["last"], seen)
+    if not rows:
+        return ""
+    trs = "".join(
+        f'<tr><td>{html.escape(n)}</td><td>{html.escape(", ".join(r["rel"]))}</td>'
+        f'<td>{len(r["videos"])}</td><td>{html.escape(r["last"][:7])}</td></tr>'
+        for n, r in sorted(rows.items(), key=lambda kv: (-len(kv[1]["videos"]), kv[0])))
+    return ('<h2>People they mention</h2><table class="people"><thead><tr><th>Name</th>'
+            '<th>As said</th><th>Videos</th><th>Last mention</th></tr></thead>'
+            f'<tbody>{trs}</tbody></table>')
+
+
+def timeline_section(facts: list[dict] | None, index: dict[str, dict]) -> str:
+    """Facts by the year they were first said, with the last year they were
+    said when it differs, from facts the page may use."""
+    by_year: dict[str, list[str]] = {}
+    for f in facts or []:
+        if angle_ineligible_reason(f, index) is not None or not f.get("published"):
+            continue
+        first = str(f["published"])[:4]
+        last = str(f.get("last_seen") or "")[:4]
+        claim = html.escape(str(f.get("claim") or ""))
+        if last and last != first:
+            claim += f' <span class="k">to {html.escape(last)}</span>'
+        by_year.setdefault(first, []).append(claim)
+    if not by_year:
+        return ""
+    blocks = "".join(
+        f'<li><span class="k">{html.escape(y)}</span><ul>'
+        + "".join(f"<li>{c}</li>" for c in by_year[y]) + "</ul></li>"
+        for y in sorted(by_year, reverse=True))
+    return f'<h2>Timeline</h2><ul class="timeline">{blocks}</ul>'
 
 
 def tallies(facts: list[dict]) -> list[str]:
@@ -679,7 +561,7 @@ def tallies(facts: list[dict]) -> list[str]:
     if tiers["withheld"]:
         tier_parts.append(f"{tiers['withheld']} withheld (untiered)")
     # withheld from angles: children, location, untiered-but-flagged, and
-    # clinical unless the creator made it public themselves — discussed in 3+
+    # clinical unless the creator made it public themselves, discussed in 3+
     # videos (evidence-rules.md); a story framing is a judgment the merge pass
     # records as recurrence, the renderer only counts
     withheld = (sum(tiers[t] for t in WITHHELD) + tiers["withheld"]
@@ -727,7 +609,7 @@ def build_line(meta: dict) -> str:
 
 def context_section(meta: dict) -> str:
     """Linked platforms and sibling channels from the ledger header's channel
-    context — what the run could have read and did not. Each platform says
+    context, what the run could have read and did not. Each platform says
     whether the socials lane read it; each sibling channel says "not mined"."""
     ctx = meta.get("context") or {}
     links = ctx.get("social_links") or []
@@ -769,7 +651,7 @@ def context_section(meta: dict) -> str:
 
 
 def ledger_footer(facts: list[dict] | None, meta: dict) -> str:
-    """"About this ledger" — the honesty surface the connections page carries
+    """"About this ledger", the honesty surface the connections page carries
     for the ledger behind it. Superseded and withheld facts are counted here
     even though they never appear above."""
     if facts is None and not meta:
@@ -823,7 +705,7 @@ def pick_who(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
         total += 1
         if total >= max_facts:
             break
-    # domains ordered by how much of the ledger they hold — what the creator
+    # domains ordered by how much of the ledger they hold, what the creator
     # talks about most comes first
     weight = Counter(str(f.get("domain") or "other") for f in usable)
     return sorted(by_domain.items(), key=lambda kv: -weight[kv[0]])
@@ -850,9 +732,6 @@ def pick_who_flat(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
                             f.get("confidence") == "confirmed",
                             int(f.get("recurrence") or 0)), reverse=True)
     return out[:max_facts]
-
-
-_MONEY = re.compile(r"[$€£]\s?\d|\d\s?(?:USD|EUR|GBP)\b")
 
 
 def no_money_sentences(text: str) -> str:
@@ -884,7 +763,7 @@ def bio_lane_ran(facts: list[dict] | None, meta: dict) -> bool:
     """Whether the creator's written bio went through the lane on this build.
 
     Either mark counts: the ledger holding a bio fact, or the run recording the
-    lane in its context. The second matters on its own — a bio whose every
+    lane in its context. The second matters on its own, a bio whose every
     claim was dropped as uncorroborated and sensitive leaves NO bio fact
     behind, and that is precisely the run whose raw About box must not be
     reprinted."""
@@ -894,14 +773,14 @@ def bio_lane_ran(facts: list[dict] | None, meta: dict) -> bool:
 
 
 def own_words_section(facts: list[dict] | None) -> str:
-    """"In their own words (unverified)" — what the creator says about
+    """"In their own words (unverified)", what the creator says about
     themselves that no upload corroborates.
 
     It is a separate block, under its own honest heading, because it is a
     different kind of evidence: written by the subject, about the subject,
     checked by nobody. It carries no quote marks around a timestamp and no
     watch link, only the excerpt, the page it came from and the date it was
-    read. Withheld tiers never appear here — an uncorroborated sensitive claim
+    read. Withheld tiers never appear here, an uncorroborated sensitive claim
     is dropped from the ledger upstream, and this filter is the backstop for a
     ledger written before that rule existed."""
     if not facts:
@@ -984,7 +863,7 @@ def who_they_are(facts: list[dict], meta: dict, intro_html: str = "") -> str:
                 q += f' <a href="{html.escape(url, quote=True)}">watch</a>'
             q = f'<span class="q">“{q}”</span>' if q else ""
         lis.append(f'<li><span class="claim">{claim}</span>'
-                   f'{tier_badge(f)}{confidence_badge(f)}{q}</li>')
+                   f'{speaker_badge(f)}{tier_badge(f)}{confidence_badge(f)}{q}</li>')
     return head + f'<ul class="who-run">{"".join(lis)}</ul>'
 
 
@@ -1105,8 +984,11 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
         thin_banner = ('<div class="thinfit"><strong>Thin fit.</strong> The ledger '
                        'connects to this brand weakly: the angles below are the '
                        'honest ones, and each names what to confirm first.</div>')
+    index = {str(f.get("fact_id")): f for f in (facts or [])}
     body_out = (thesis_block(thesis)
                 + who
+                + people_section(facts, index)
+                + timeline_section(facts, index)
                 + own_words_section(facts)
                 + about_block(brand_about)
                 + ("<h2>Connections</h2>" if conns or intro else "")
@@ -1242,7 +1124,7 @@ def ineligible_on_page(page_text: str, facts: list[dict] | None,
 # --------------------------------------------------------------------------- #
 # A second agent re-reading the first agent's page is slow and catches only
 # things a script can check. These are those things. What a script
-# cannot check — whether the thesis is any good — stays the connection pass's
+# cannot check, whether the thesis is any good, stays the connection pass's
 # job and is not re-litigated by another model.
 _MONEY = re.compile(r"(?<![\w-])(?:[$€£]\s?\d|\d+\s?(?:usd|eur|gbp)\b"
                     r"|\bcpm\b|\brate card\b|\bflat fee\b"
@@ -1338,12 +1220,29 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
             if fact is None:
                 if not is_precedent:
                     problems.append(f"connection quote matches no ledger fact: {name}")
-                elif windows:
+                elif probe is None:
+                    pass                # no probe file: the caveat names the missing lane
+                elif not windows:
+                    problems.append(f"category-probe.json has no window text; the "
+                                    f"precedent quote cannot be checked: {name}")
+                else:
                     q = _norm_words(re.sub(r"<[^>]+>", " ",
                                            re.sub(r"<a\b[^>]*>.*?</a>", " ", quote, flags=re.S)))
-                    if not any(q and q in w for w in windows):
+                    hit = next((pw for pw in (probe or {}).get("windows") or []
+                                if isinstance(pw, dict) and q
+                                and q in _norm_words(str(pw.get("text") or ""))), None)
+                    if hit is None:
                         problems.append(f"precedent quote is not a window the category "
                                         f"probe returned (category-probe.json): {name}")
+                    elif not is_recent({"last_seen": hit.get("published")}):
+                        year = str(hit.get("published") or "")[:4]
+                        if strength_of(title) == "strong":
+                            problems.append(f"strong connection rests on a window from "
+                                            f"{year or 'an unknown date'}, outside the last "
+                                            f"{RECENT_MONTHS} months: {name}")
+                        elif not year or year not in plain(rest):
+                            problems.append(f"connection uses a window from {year or 'an unknown date'} "
+                                            f"without stating the year: {name}")
                 continue
             reason = angle_ineligible_reason(fact, index)
             if reason:
@@ -1355,6 +1254,15 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
             if cite:
                 problems.append(f"connection quote's link does not point at "
                                 f"{fact.get('fact_id')} ({cite}): {name}")
+            if not is_recent(fact):
+                year = str(fact.get("last_seen") or fact.get("published") or "")[:4]
+                if strength_of(title) == "strong":
+                    problems.append(f"strong connection rests on a fact last said "
+                                    f"{year or 'at an unknown date'}, outside the last "
+                                    f"{RECENT_MONTHS} months ({fact.get('fact_id')}): {name}")
+                elif year and year not in plain(rest):
+                    problems.append(f"connection uses a fact last said {year} without "
+                                    f"stating the year ({fact.get('fact_id')}): {name}")
         strength = strength_of(title)
         if strength is None:
             problems.append(f"connection heading has no strength tag "
@@ -1542,7 +1450,7 @@ def for_you_parts(block: str) -> tuple[str, str]:
 
 def check_mirror(body: str, facts: list[dict] | None, map_md: str, inp: dict,
                  corpus_cues: dict[str, list] | None = None,
-                 brand: str = "") -> list[str]:
+                 brand: str = "", past_reads: list | None = None) -> list[str]:
     """Contract problems with a creator brief that mirrors the brand's own:
     their document word for word in its order, and a For you block, built on
     a gem of the creator's, under the talking points a gem backs."""
@@ -1584,7 +1492,7 @@ def check_mirror(body: str, facts: list[dict] | None, map_md: str, inp: dict,
         problems += pp
         if carried is not None:
             personal.append(carried)
-            pr = prior_read_problem(carried, brand, corpus_cues, name)
+            pr = prior_read_problem(carried, brand, corpus_cues, name, past_reads)
             if pr:
                 problems.append(pr)
         ours_all += "\n" + ours
@@ -1642,15 +1550,42 @@ def load_corpus_cues(in_path: pathlib.Path | None) -> dict[str, list] | None:
     return out
 
 
+def past_read_spots(map_path: pathlib.Path) -> list[tuple[str, float, float]]:
+    """``(video id, read start, read end)`` of the creator's own past reads
+    for the brand: ``this_channel_reads`` in ``brand-tl.json`` beside the map.
+    A read with no end is its start; a (0, 0) span has no position."""
+    try:
+        data = json.loads((map_path.parent / "brand-tl.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    rows = data.get("this_channel_reads") if isinstance(data, dict) else None
+    spots = []
+    for r in rows or []:
+        if not (isinstance(r, dict) and r.get("video_id")
+                and isinstance(r.get("start"), (int, float))):
+            continue
+        start = float(r["start"])
+        end = float(r["end"]) if isinstance(r.get("end"), (int, float)) else start
+        if start > 0 or end > 0:
+            spots.append((str(r["video_id"]), start, max(start, end)))
+    return spots
+
+
 def prior_read_problem(fact: dict, brand: str, cues_by_video: dict[str, list] | None,
-                       name: str) -> str | None:
+                       name: str, past_reads: list | None = None) -> str | None:
     """A re-book never repeats the last read: a moment said inside the
     creator's own earlier read for this brand is the ad talking, not a gem.
-    The video is one the brand sponsored (its transcript says so) and the
-    brand's name sits within PRIOR_READ_SPAN seconds of the moment."""
+    The moment sits within PRIOR_READ_SPAN seconds of one of the creator's
+    past reads for the brand (``past_reads``), or the video is one the brand
+    sponsored (its transcript says so) with the brand's name that close."""
+    vid, t = _video_and_time(str(fact.get("url") or ""))
+    if vid and t is not None and any(v == vid and s - PRIOR_READ_SPAN <= t <= e + PRIOR_READ_SPAN
+                                     for v, s, e in past_reads or []):
+        return (f"talking point rests on a moment from inside the creator's own {brand} read "
+                f"({vid} at {t // 60}:{t % 60:02d}); a re-book never repeats the last read, "
+                f"build it on a gem from outside it: {name}")
     if not cues_by_video or not brand:
         return None
-    vid, t = _video_and_time(str(fact.get("url") or ""))
     cues = cues_by_video.get(vid or "")
     if not cues or t is None:
         return None
@@ -1695,13 +1630,14 @@ def point_problems(sub: str, ours: str, name: str, facts: list[dict] | None,
             reason = angle_ineligible_reason(fact, index)
             if reason:
                 flagged.add(str(fact.get("fact_id")))
-                label = ("withheld-tier fact" if reason.startswith("withheld tier")
-                         else "ineligible fact")
-                problems.append(f"quote uses a {label} ({reason}): {name}")
-            elif str(fact.get("confidence")) != "confirmed":
-                # the ledger holds it, nothing pins it to the host: not a
-                # moment to hand the creator as their own
-                problems.append(f"talking point rests on an unconfirmed fact "
+                label = ("a withheld-tier fact" if reason.startswith("withheld tier")
+                         else "an ineligible fact")
+                problems.append(f"quote uses {label} ({reason}): {name}")
+            elif not is_recent(fact):
+                year = str(fact.get("last_seen") or fact.get("published") or "")[:4]
+                when = year or "at an unknown date"
+                problems.append(f"talking point rests on a fact last said {when}, "
+                                f"outside the last {RECENT_MONTHS} months "
                                 f"({fact.get('fact_id')}): {name}")
             cite = citation_problem(q, links, str(fact.get("quote") or ""),
                                     str(fact.get("url") or ""))
@@ -1741,9 +1677,28 @@ def point_problems(sub: str, ours: str, name: str, facts: list[dict] | None,
     return problems, carried
 
 
+def other_creator_names(map_path: pathlib.Path, creator: str | None) -> list[str]:
+    """Channel names in ``brand-tl.json`` beside the map, the creator's own
+    excepted: the brief never names another creator."""
+    try:
+        data = json.loads((map_path.parent / "brand-tl.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    names = set()
+    for key in ("reads", "top_channels"):
+        for row in data.get(key) or [] if isinstance(data, dict) else []:
+            if isinstance(row, dict):
+                n = str(row.get("channel_name") or row.get("name") or "").strip()
+                if len(n) >= 4 and n.lower() != str(creator or "").lower():
+                    names.add(n)
+    return sorted(names)
+
+
 def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                 inp: dict | None,
-                corpus_cues: dict[str, list] | None = None) -> list[str]:
+                corpus_cues: dict[str, list] | None = None,
+                other_creators: list[str] | None = None,
+                past_reads: list | None = None) -> list[str]:
     """Contract problems with the creator brief, one line each. Empty means
     it can be sent."""
     problems: list[str] = []
@@ -1767,8 +1722,13 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                         f"but the input file says {supplied}")
 
     if mirror_mode(inp):
+        # the brand's own document is theirs word for word; our For you blocks are not
+        ours = " ".join(_FOR_YOU.findall(body))
+        for other in other_creators or []:
+            if re.search(r"(?<!\w)" + re.escape(other) + r"(?!\w)", ours, re.I):
+                problems.append(f"names another creator: {other!r}")
         return problems + check_mirror(body, facts, map_md, inp, corpus_cues,
-                                       brand)
+                                       brand, past_reads)
 
     intro, found, order, unknown = brief_sections(body)
     expected = [k for k, _l, _m in BRIEF_SECTIONS]
@@ -1832,7 +1792,7 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         problems += pp
         if carried is not None:
             personal.append(carried)
-            pr = prior_read_problem(carried, brand, corpus_cues, name)
+            pr = prior_read_problem(carried, brand, corpus_cues, name, past_reads)
             if pr:
                 problems.append(pr)
     problems += personal_coverage(points_subs, personal, facts)
@@ -1870,6 +1830,9 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
         m = re.search(pat, body, re.I)
         if m:
             problems.append(f"brand-side material on the creator page: {m.group(0)!r}")
+    for other in other_creators or []:
+        if re.search(r"(?<!\w)" + re.escape(other) + r"(?!\w)", no_links, re.I):
+            problems.append(f"names another creator: {other!r}")
     m = _FACT_ID.search(no_links)
     if m:
         problems.append(f"a fact id on the page: {m.group(0)}")
@@ -1907,9 +1870,6 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
                  else "quote of an ineligible fact")
         problems.append(f"{label} on the page ({reason}): {str(f.get('claim'))[:50]}")
     return problems
-
-
-_KIDS = re.compile(r"\b(child|children|kids?|daughters?|sons?|baby|babies|pregnan\w*)\b", re.I)
 
 
 def usable_moments(facts: list[dict] | None) -> list[dict]:
@@ -2037,7 +1997,7 @@ def main() -> None:
                     help="the connection map's markdown, e.g. "
                          ".corpus/<channel_id>/connections-<brand_id>.md")
     ap.add_argument("--facts", default=None,
-                    help="<channel_id>-facts.jsonl — the ledger, header first")
+                    help="<channel_id>-facts.jsonl, the ledger, header first")
     ap.add_argument("--meta", default=None,
                     help="legacy <channel_id>-meta.json; read only when the "
                          "ledger carries no meta header")
@@ -2074,7 +2034,10 @@ def main() -> None:
         inp = (json.loads(pathlib.Path(a.brief_input).read_text(encoding="utf-8"))
                if a.brief_input else None)
         problems = check_brief(text, facts, map_md, inp,
-                               load_corpus_cues(pathlib.Path(a.connections)))
+                               load_corpus_cues(pathlib.Path(a.connections)),
+                               other_creator_names(pathlib.Path(a.connections),
+                                                   parse_frontmatter(text)[0].get("channel_name")),
+                               past_read_spots(pathlib.Path(a.connections)))
         if facts is None:
             problems.append("no ledger given: the quotes cannot be verified")
         if a.check:

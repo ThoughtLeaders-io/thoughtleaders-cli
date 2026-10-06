@@ -2,7 +2,7 @@
 """Layer 1+2 in one query: pull only the transcript passages around
 first-person cue phrases, straight from Elasticsearch highlights.
 
-This is the model layer's only retrieval flow — there is no local
+This is the model layer's only retrieval flow, there is no local
 full-transcript scan any more. One boolean ``should`` of ``match_phrase``
 clauses (references/cue-phrases.txt, each apostrophe phrase spelled both
 ways the index knows) selects the videos; ES ``highlight`` returns the
@@ -31,16 +31,15 @@ stays sharp and the extractor still sees the sentences before the cue.
 
 Usage:
     fetch_cues.py --channel <id> [--host-names "a,b"] [--out <root>]
-                  [--max-windows 500] [--batch-size N] [--reserve N]
+                  [--max-windows 300] [--batch-size N] [--reserve N]
                   [--generic-floor N] [--fragment-size 900] [--round N]
-                  [--read-before 20] [--read-after 10]
-                  [--min-score 2.5] [--min-windows 150]
+                  [--read-before 30] [--read-after 30]
+                  [--min-score 8.0] [--min-windows 150]
                   [--exclude <classified.jsonl>] [--since <YYYY-MM-DD>]
 
 Writes ``<out>/<channel_id>/``: ``windows.jsonl.gz`` (every passage, ranked),
 ``batches/batch-NNN.json`` (the capped model-layer batches, one per extractor
-agent, sized for 20 extractors running at once) and ``corpus.jsonl.gz``
-— the store shape ``verify_quotes.py`` reads, holding the fetched passages as
+agent, sized for 20 extractors running at once) and ``corpus.jsonl.gz``: the store shape ``verify_quotes.py`` reads, holding the fetched passages as
 cues. Once the cap is taken, the kept windows' real ad-read spans are
 looked up (``sponsor_segments`` below) and ``in_sponsor_read`` is decided from them;
 the regex heuristic the windows were built with is the fallback when that
@@ -145,7 +144,6 @@ GENERIC_TERMS = ["i", "my", "myself", "i'm", "i am", "i've", "i'd", "i'll", "i w
 # window, and the phrase list stays the retrieval net.
 DENSITY_WEIGHT = 0.5            # rank points per first-person hit, both passes
 GENERIC_DENSITY_CAP = 20        # hits counted at most; a widened read runs ~120 words
-GENERIC_BOOST = DENSITY_WEIGHT  # the fallback pass's name for the same term
 _FIRST_PERSON_RX = re.compile(
     r"\b(?:" + "|".join(re.escape(t) for t in sorted(GENERIC_TERMS, key=len, reverse=True))
     + r")\b")
@@ -247,7 +245,7 @@ def phrase_weight(phrase: str, weights: dict[str, float] | None) -> float:
 
 # a highlight fragment can start inside a doubly-escaped caption entity
 # ("&amp;#39;s" cut to "amp;#39;s" or ";#39;s"); the entity is unrecoverable
-# by unescaping, so the stub is resolved by hand — #39 is the apostrophe the
+# by unescaping, so the stub is resolved by hand, #39 is the apostrophe the
 # captions actually meant, anything else is dropped
 _PARTIAL_ENTITY_RX = re.compile(r"^\s*(?:&?amp;)?;?#(\d+);")
 # ... or inside a timed-text tag, leaving `start="138" dur="3.78">`,
@@ -559,7 +557,7 @@ def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     """Spoken sponsored segments per video, batched over the id list.
 
     Every mention is re-checked individually: only ``type == "sponsored"`` AND
-    ``field == "transcript"`` counts. A query failure raises — it is never a
+    ``field == "transcript"`` counts. A query failure raises, it is never a
     silent empty span list.
 
     Id chunks are fetched concurrently, but merged strictly in chunk order and
@@ -588,7 +586,7 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     ad read when ``[start, start + WINDOW_SPAN]`` meets a sponsored span padded
     by ``SPONSOR_PAD`` on both sides.
 
-    The lookup is authoritative when it succeeds — it replaces the heuristic
+    The lookup is authoritative when it succeeds, it replaces the heuristic
     rather than joining it. When it fails, the heuristic stays exactly as it
     was. Returns the source used, which the summary records as
     ``sponsor_source`` so a reader always knows which of the two decided.
@@ -601,9 +599,9 @@ def apply_sponsor_spans(kept: list[dict]) -> str:
     except tl_data.IncompleteDataError:
         # A truncated id lookup is not "these videos have no ad reads".
         raise
-    except BaseException as exc:              # noqa: BLE001 — reported, not raised
+    except BaseException as exc:              # noqa: BLE001, reported, not raised
         print(f"sponsor-span lookup failed ({type(exc).__name__}: "
-              f"{str(exc)[:120]}) — keeping the regex heuristic", file=sys.stderr)
+              f"{str(exc)[:120]}), keeping the regex heuristic", file=sys.stderr)
         return "regex_fallback"
     pad = SPONSOR_PAD
     for w in kept:
@@ -702,6 +700,8 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
                 "host_anchor_terms": [[h, "self_named"] for h in self_named],
                 "host_named_third_person": third_person,
                 "second_voice_hint": hint,
+                # `>>` is the captions' own mark of a change of speaker
+                "turns": text.count(">>"),
                 "entity_hits": [], "weak_anchor": False, "stage_direction": False,
                 "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
@@ -735,12 +735,25 @@ def build_windows(docs: list[dict], *, corpus: dict[str, dict], done: dict[str, 
 # that earned its seat can lose the sentence the disclosure sat in). The
 # added cues join
 # the corpus so a quote cut from the context still verifies to its own second.
+# The read is wide enough to hold the dialogue around the line (a reply to
+# it, the question it answers, the person introduced before it): those are
+# the speaker signals the extractor attributes on.
 # --------------------------------------------------------------------------- #
-READ_BEFORE_S = 20
-READ_AFTER_S = 10
+READ_BEFORE_S = 30
+READ_AFTER_S = 30
 ANCHOR_BEFORE_S = 30
 ANCHOR_AFTER_S = 15
 TRANSCRIPT_CHUNK = 25       # transcripts are big; small id chunks keep each reply bounded
+SUMMARY_CHUNK = 100         # descriptions are small
+# The cast sheet reads each kept video's opening and the description lines
+# that name who is on it (cast_sheet.py); the fetch cuts both here because
+# the transcripts are already in hand for the read-around.
+INTRO_S = 90
+INTRO_WORDS = 260
+DESCRIPTION_LINES = 10
+DESCRIPTION_PEOPLE_RX = re.compile(
+    r"(?i)(@\w|https?://|\b(?:guests?|feat\.?|featuring|ft\.?|with|hosts?|hosted|"
+    r"starring|friends?|podcast|interview|collab|cast)\b)")
 
 
 def _transcript_chunk(chunk: list[str]) -> dict[str, list[tuple[float, str]]]:
@@ -765,25 +778,83 @@ def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
     return out
 
 
+def _summary_chunk(chunk: list[str]) -> dict[str, str]:
+    rows = tl_data.db_es({
+        "size": len(chunk),
+        "query": {"ids": {"values": chunk}},
+        "_source": ["id", "summary"],
+    })
+    return {str(r.get("id")): str(r.get("summary") or "") for r in rows}
+
+
+def fetch_summaries(refs: list[str]) -> dict[str, str]:
+    """The creator-written description per video. A failure raises."""
+    chunks = [refs[i:i + SUMMARY_CHUNK] for i in range(0, len(refs), SUMMARY_CHUNK)]
+    out: dict[str, str] = {}
+    for chunk in chunks:
+        out.update(_summary_chunk(chunk))
+    return out
+
+
+def description_excerpt(summary: str | None) -> list[str]:
+    """The description's first lines plus every later line that names who is
+    on the video (a handle, a link, a cast word), at most DESCRIPTION_LINES."""
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in str(summary or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    picked = lines[:3]
+    for ln in lines[3:]:
+        if len(picked) >= DESCRIPTION_LINES:
+            break
+        if DESCRIPTION_PEOPLE_RX.search(ln):
+            picked.append(ln)
+    return [ln[:160] for ln in picked]
+
+
+def intro_rows(kept: list[dict], cues_by_video: dict[str, list], summaries: dict[str, str],
+               intro_s: float = INTRO_S) -> list[dict]:
+    """One row per kept video with a transcript: its opening (the cues inside
+    the first ``intro_s`` seconds, capped at INTRO_WORDS words) and its
+    description excerpt. The cast sheet's input."""
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for w in kept:
+        vid = w["id"]
+        if vid in seen:
+            continue
+        seen.add(vid)
+        words = " ".join(t for s_, t in (cues_by_video.get(vid) or [])
+                         if float(s_) <= intro_s and t).split()
+        if not words:
+            continue
+        rows.append({"id": vid, "video_id": w["video_id"], "title": w.get("title"),
+                     "published": w.get("published"), "language": w.get("language"),
+                     "format_hint": w.get("format_hint"),
+                     "intro": " ".join(words[:INTRO_WORDS]),
+                     "description": description_excerpt(summaries.get(vid))})
+    return rows
+
+
 def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
                   before: float, after: float, anchor_before: float = ANCHOR_BEFORE_S,
-                  anchor_after: float = ANCHOR_AFTER_S) -> tuple[str, int]:
+                  anchor_after: float = ANCHOR_AFTER_S) -> tuple[str, int, dict]:
     """Replace each kept window's fragment text with the transcript read around
     it, and grow the corpus by the cues that read added. Returns the source
     used (``transcript``, ``fragment_only`` when the lookup failed, ``off``
-    when both margins are 0) and how many windows widened. The lookup is
-    reporting-grade: a failure keeps every fragment exactly as it was."""
+    when both margins are 0), how many windows widened, and the timed cues per
+    video the read used (empty when it did not run), which the intros are cut
+    from. The lookup is reporting-grade: a failure keeps every fragment
+    exactly as it was."""
     if before <= 0 and after <= 0:
-        return "off", 0
+        return "off", 0, {}
     refs = sorted({w["id"] for w in kept})
     if not refs:
-        return "none", 0
+        return "none", 0, {}
     try:
         cues_by_video = fetch_transcripts(refs)
     except BaseException as exc:              # noqa: BLE001 reported, not raised
         print(f"transcript read-around failed ({type(exc).__name__}: "
               f"{str(exc)[:120]}); keeping the highlight fragments", file=sys.stderr)
-        return "fragment_only", 0
+        return "fragment_only", 0, {}
     widened = 0
     for w in kept:
         cues = cues_by_video.get(w["id"]) or []
@@ -811,6 +882,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
         w["host_named_third_person"] = third_person
         w["second_voice_hint"] = hint
         w["in_sponsor_read"] = bool(SPONSOR_RX.search(text))
+        w["turns"] = text.count(">>")
         entry = corpus.get(w["id"])
         if entry is not None:
             # The highlighter cuts a fragment mid-cue at its fragment-size boundary,
@@ -830,7 +902,7 @@ def widen_windows(kept: list[dict], corpus: dict[str, dict], host_lc: set[str],
                 else:
                     entry["cues"][i][1] = t
         widened += 1
-    return "transcript", widened
+    return "transcript", widened, cues_by_video
 
 
 def _shingles(text: str) -> set[str]:
@@ -1027,7 +1099,7 @@ def main() -> int:
                     "passages already judged (same video, start within 30 s) are skipped, so a "
                     "second round deepens the ledger instead of repeating it")
     ap.add_argument("--since", default="", help="only uploads published after this date "
-                    "(YYYY-MM-DD) — a refresh round passes the ledger's latest_video_date so "
+                    "(YYYY-MM-DD), a refresh round passes the ledger's latest_video_date so "
                     "its cost scales with the new uploads, not the catalogue")
     a = ap.parse_args()
     t0 = time.monotonic()
@@ -1134,7 +1206,8 @@ def main() -> int:
                 "published": (d.get("publication_date") or "")[:10],
                 "start": int(start), "text": text, "cues_fired": [], "host_anchor": False,
                 "host_anchor_terms": [], "host_named_third_person": [],
-                "second_voice_hint": None, "entity_hits": [], "weak_anchor": False,
+                "second_voice_hint": None, "turns": text.count(">>"),
+                "entity_hits": [], "weak_anchor": False,
                 "stage_direction": False, "boilerplate": False,
                 "in_sponsor_read": bool(SPONSOR_RX.search(text)),
                 "recurrence_videos": 0, "recurring_phrase": None,
@@ -1205,8 +1278,16 @@ def main() -> int:
                           "channel; nothing to extract"}, indent=1))
         return 4
     # the cap is taken on the narrow fragments; what the extractor reads is wider
-    read_source, widened = widen_windows(kept, corpus, host_lc, a.read_before, a.read_after,
-                                         a.anchor_before, a.anchor_after)
+    read_source, widened, cues_by_video = widen_windows(
+        kept, corpus, host_lc, a.read_before, a.read_after, a.anchor_before, a.anchor_after)
+    summaries: dict[str, str] = {}
+    if cues_by_video:
+        try:
+            summaries = fetch_summaries(sorted(cues_by_video))
+        except BaseException as exc:          # noqa: BLE001 reported, not raised
+            print(f"description lookup failed ({type(exc).__name__}: {str(exc)[:120]}); "
+                  "the cast sheet reads the openings alone", file=sys.stderr)
+    intros = intro_rows(kept, cues_by_video, summaries)
     for w in windows:
         w.pop("_specific", None)
         w.pop("_recurring", None)
@@ -1227,9 +1308,10 @@ def main() -> int:
     if a.round <= 1:
         # a first round is a fresh build: nothing from an earlier build's
         # later rounds may leak into this one's counts or its passage store
-        for stale in list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz")) + [
+        for stale in (list(out.glob("fetch-r*.json")) + list(out.glob("windows-r*.jsonl.gz"))
+                      + list(out.glob("intros-r*.jsonl")) + list(out.glob("cast-sheets*.json")) + [
                 out / n for n in ("classified.jsonl", "gems.jsonl", "gems-clustered.jsonl",
-                                  "candidates.jsonl", "respawn.json")]:
+                                  "candidates.jsonl", "respawn.json", "cast.json")]):
             if stale.exists():
                 stale.unlink()
         for d in list(out.glob("batches-r*")) + list(out.glob("returns-r*")):
@@ -1246,6 +1328,9 @@ def main() -> int:
     with gzip.open(out / f"windows{suffix}.jsonl.gz", "wt", encoding="utf-8") as fh:
         for w in windows:
             fh.write(json.dumps(w, ensure_ascii=False) + "\n")
+    intros_path = out / f"intros{suffix}.jsonl"
+    intros_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in intros),
+                           encoding="utf-8")
     corpus_path = out / "corpus.jsonl.gz"
     if corpus_path.exists():               # merge, never replace: earlier rounds must still verify
         with gzip.open(corpus_path, "rt", encoding="utf-8") as fh:
@@ -1309,6 +1394,7 @@ def main() -> int:
         "third_person_host_share": third_person_share,
         "batches": batches, "returns_dir": str(rdir),
         "windows_file": str(out / f"windows{suffix}.jsonl.gz"),
+        "intros": len(intros), "intros_file": str(intros_path),
         "corpus": str(corpus_path), "latest_video_date": latest_video_date,
         "non_english_fetch_failed": non_en_failed,
         "elapsed_s": elapsed,
@@ -1327,7 +1413,7 @@ def main() -> int:
           f"generic_windows={fallback['windows_kept']} "
           f"batches={len(batches)} batch_size={batch_size} "
           f"agent_cap={agent_cap} sponsor_source={sponsor_source} "
-          f"read_span={read_source} widened={widened} "
+          f"read_span={read_source} widened={widened} intros={len(intros)} "
           f"self_named={self_named_windows} third_person_host={third_person_windows} "
           f"third_person_host_share={third_person_share} elapsed_s={elapsed}",
           file=sys.stderr)

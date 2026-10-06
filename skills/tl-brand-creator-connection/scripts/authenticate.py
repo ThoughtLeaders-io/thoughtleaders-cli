@@ -70,9 +70,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data  # noqa: E402
 from channel_context import TITLE_HINTS  # noqa: E402
 
-# Domains where a claim is durable enough that a staged premise or a
-# contradiction matters. A taste stated in a prank is still a taste.
-DURABLE_DOMAINS = {"home", "relationships", "family", "work", "origin", "health"}
 # Words that make a relationships/family claim a status, not an anecdote.
 PARTNER_NOUNS = {"husband", "wife", "boyfriend", "girlfriend", "fiance", "fiancé",
                  "fiancee", "fiancée", "partner", "spouse", "ex", "married",
@@ -152,11 +149,10 @@ def is_staged(line: dict) -> bool:
 
 
 def wants_probe(line: dict) -> bool:
-    """A staged window in a durable domain, or a line already marked as
+    """Every staged window (a claim said inside a premise is checked against
+    the non-staged uploads whatever its domain), or a line already marked as
     conflicting (set by ``find_conflicts`` before this runs)."""
-    if line.get("conflicts_with"):
-        return True
-    return is_staged(line) and str(line.get("domain") or "") in DURABLE_DOMAINS
+    return bool(line.get("conflicts_with")) or is_staged(line)
 
 
 def find_conflicts(lines: list[dict]) -> int:

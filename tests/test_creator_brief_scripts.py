@@ -3,6 +3,7 @@ connections page. The retrieval and assembly stages have their own files,
 ``test_fetch_cues.py`` and ``test_assemble_extracts.py``. No real network.
 """
 
+import datetime as dt
 import gzip
 import json
 import re
@@ -119,16 +120,19 @@ _META = {"schema": "tl-creator-meta/v2", "channel_id": 42, "channel_name": "Patt
          "format": "solo", "lanes": "transcripts", "latest_video_date": "2026-08-29",
          "rounds": 2}
 
+# a date inside the 24-month recency window whenever the suite runs
+_RECENT = (dt.date.today() - dt.timedelta(days=30)).isoformat()
+
 _FACTS = [
-    {"fact_id": "f1", "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
+    {"fact_id": "f1", "last_seen": _RECENT, "claim": "has a dog", "domain": "pets", "confidence": "confirmed",
      "sensitivity": "none", "sensitive": False, "recurrence": 4, "selected": True,
      "quote": "we finally adopted luna from the shelter last spring and she",
      "url": "https://www.youtube.com/watch?v=abc&t=12s"},
-    {"fact_id": "f2", "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
+    {"fact_id": "f2", "last_seen": _RECENT, "claim": "wears glasses", "domain": "health", "confidence": "confirmed",
      "sensitivity": "lifestyle", "sensitive": False, "recurrence": 2},
-    {"fact_id": "f3", "claim": "was diagnosed with ADHD", "domain": "health",
+    {"fact_id": "f3", "last_seen": _RECENT, "claim": "was diagnosed with ADHD", "domain": "health",
      "confidence": "confirmed", "sensitivity": "clinical", "sensitive": True, "recurrence": 3},
-    {"fact_id": "f4", "claim": "daughter is named Maple", "domain": "family",
+    {"fact_id": "f4", "last_seen": _RECENT, "claim": "daughter is named Maple", "domain": "family",
      "confidence": "confirmed", "sensitivity": "children", "sensitive": True, "recurrence": 5},
     {"fact_id": "f5", "claim": "lives on Elm Street", "domain": "home",
      "confidence": "unconfirmed", "sensitivity": "location", "sensitive": True},
@@ -369,7 +373,7 @@ def test_href_ampersands_escape_exactly_once(tmp_path):
 def test_who_they_are_link_only_http_schemes(tmp_path):
     facts = [{"fact_id": "f1", "claim": "grew up in Ohio", "domain": "origin",
               "quote": "I grew up in Ohio", "url": "javascript:alert(1)",
-              "sensitivity": "none"}]
+              "sensitivity": "none", "confidence": "confirmed"}]
     html = _render_conn(tmp_path, _CONN_MD, facts=facts)
     who = html.split("<h2>Connections</h2>")[0]
     assert 'href="javascript' not in who and "grew up in Ohio" in who
@@ -410,7 +414,7 @@ def test_write_context_builds_the_extractor_block_from_the_saved_full_context(tm
         capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert json.loads(out.read_text()) == {
-        "channel_name": "Ali Abdaal", "host_names": ["Ali Abdaal"],
+        "channel_name": "Ali Abdaal", "host_names": [],   # never the channel name
         "known_facts": ["ex-doctor", "lives in London"],
         "channel_about": None, "channel_ai_profile": None,
         "format_label": "solo", "format_evidence": "fp density 41/1k"}
@@ -704,7 +708,8 @@ def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_
     claims unresolved and off the connection cards, then the renderer put two of
     them back on the page, because recurrence outranked confidence. Confidence
     ranks first now, so a confirmed fact is never displaced by a repeated
-    unconfirmed one while confirmed material is still unrendered."""
+    unconfirmed one. Since the 40-claim review, unconfirmed claims never reach
+    the strip at all."""
     import build_html
     facts = [
         {"fact_id": "f1", "claim": "husband paid for the cruise", "domain": "relationships",
@@ -717,8 +722,7 @@ def test_who_they_are_ranks_confirmed_above_a_well_repeated_unsettled_claim(tmp_
          "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"},
     ]
     order = [f["fact_id"] for f in build_html.pick_who_flat(facts)]
-    assert order[:2] == ["f3", "f4"], order
-    assert order[2:] == ["f1", "f2"], order      # kept, but ranked below
+    assert order == ["f3", "f4"], order            # the unconfirmed pair is left off
 
 
 def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
@@ -736,21 +740,17 @@ def test_who_they_are_never_renders_a_staged_only_fact(tmp_path):
     assert [f["fact_id"] for f in build_html.pick_who_flat(facts)] == ["f2"]
 
 
-def test_an_unconfirmed_fact_on_the_page_is_badged_as_one(tmp_path):
-    """A thin ledger fills the strip with unconfirmed facts legitimately, so
-    they must be visibly unconfirmed: the strip carried a sensitivity badge and
-    nothing about confidence, making an unsettled claim look settled."""
+def test_an_unconfirmed_fact_never_reaches_who_they_are(tmp_path):
+    """Nothing unconfirmed reaches a reader: the strip leaves an unconfirmed
+    claim off rather than showing it with a badge."""
     import build_html
     confirmed = {"fact_id": "f1", "claim": "c", "domain": "habits",
                  "confidence": "confirmed", "recurrence": 1, "sensitivity": "none"}
     unconfirmed = dict(confirmed, fact_id="f2", claim="u", confidence="unconfirmed")
     assert build_html.confidence_badge(confirmed) == ""
-    assert 'badge-unconfirmed">unconfirmed<' in build_html.confidence_badge(unconfirmed)
     who = build_html.who_they_are([confirmed, unconfirmed], _META)
-    assert who.count("badge-unconfirmed") == 1
-    # and it lands on the unconfirmed claim's own row, not loose in the strip
-    row = [li for li in who.split("<li>") if ">u<" in li][0]
-    assert "badge-unconfirmed" in row
+    assert ">c<" in who and ">u<" not in who
+    assert "badge-unconfirmed" not in who
 
 
 def test_who_they_are_leads_with_what_the_platform_already_says(tmp_path):
@@ -1472,6 +1472,7 @@ _WORDS = ("kayak paddle", "sourdough starter", "vinyl records", "night shift",
 def _moments(n: int) -> list[dict]:
     return [{"fact_id": f"f{10 + i}", "claim": f"talks about the {w}", "domain": d,
              "confidence": "confirmed", "sensitivity": "none", "recurrence": 1,
+             "last_seen": _RECENT,
              "quote": f"i spent years with my {w} and never regretted it",
              "url": f"https://www.youtube.com/watch?v=m{i}&t={i + 1}s"}
             for i, (d, w) in enumerate(zip(("tastes", "habits", "origin", "work", "family",
@@ -1584,6 +1585,18 @@ def test_a_mirrored_brief_keeps_the_brands_words_and_order(tmp_path):
                    md.replace("## Campaign overview", "## Who is Acme\n\nAcme makes dog food.")):
         problems = _problems(tmp_path, broken, inp, _FACTS + _moments(6))
         assert any("not kept word for word" in p for p in problems), problems
+
+
+def test_a_mirrored_brief_refuses_another_creators_name(tmp_path):
+    import build_html
+    lines = [f"Brand line {k}" for k in range(5)]
+    md, inp = _mirror_brief(_moments(4), lines)
+    facts = _FACTS + _moments(6)
+    assert not any("another creator" in p
+                   for p in build_html.check_brief(md, facts, "", inp, other_creators=["Zed Rival"]))
+    named = md.replace("Tell your viewers about", "Like Zed Rival, tell your viewers about", 1)
+    assert any("another creator" in p
+               for p in build_html.check_brief(named, facts, "", inp, other_creators=["Zed Rival"]))
 
 
 def test_a_mirrored_brief_still_needs_its_points_built_on_gems(tmp_path):
@@ -1727,7 +1740,7 @@ def test_an_unconfirmed_ledger_fact_is_not_a_personal_moment(tmp_path):
     facts = [dict(f) for f in _FACTS]
     facts[0]["confidence"] = "unconfirmed"
     problems = _problems(tmp_path, _BRIEF_MD, facts=facts)
-    assert any("rests on an unconfirmed fact" in p for p in problems)
+    assert any("quote uses an ineligible fact (unconfirmed)" in p for p in problems)
 
 
 def test_a_first_person_precedent_window_the_map_argued_is_personal(tmp_path):
@@ -1760,3 +1773,154 @@ def test_a_first_person_precedent_window_the_map_argued_is_personal(tmp_path):
                            "--input", str(ip), "--check"], capture_output=True, text=True)
     problems = json.loads(proc.stdout)["problems"]
     assert not any("topic the channel covered" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------- #
+# channel_context.py: what the upload descriptions call the host
+# --------------------------------------------------------------------------- #
+def test_description_anchors_read_codes_vanity_slugs_and_template_names():
+    """A promo code and a vanity slug reused under several sponsors' domains
+    spell the creator's name canonically; a name in a line that recurs across
+    the descriptions is the host's; handles are the other people on the video
+    and stay out; a brand's generic code and a one-domain slug are noise."""
+    import channel_context
+    docs = [
+        {"id": "1", "summary": "Try it: https://a.com/lipsky\nUse code LIPSKY10\n"
+                               "Hosted by Paul Lipsky every week\nFOLLOW MY FRIENDS:\nGavin: @GroovyGavin"},
+        {"id": "2", "summary": "Get it: https://b.com/lipsky\ncode: LIPSKY20\n"
+                               "Hosted by Paul Lipsky every week\n@brentrivera"},
+        {"id": "3", "summary": "https://c.com/pricing\nuse code SAVE20\nHosted by Paul Lipsky every week"},
+        {"id": "4", "summary": "https://c.com/pricing\nI'm Dana and this is a one-off guest line"},
+    ]
+    a = channel_context.description_anchors(docs)
+    assert a["uploads_read"] == 4 and a["template_lines"] == 2
+    assert a["codes"] == [{"token": "lipsky", "videos": 2}]
+    assert a["slugs"] == [{"token": "lipsky", "domains": 2, "videos": 2}]
+    assert [(n["name"], n["videos"]) for n in a["names"]] == [("Paul Lipsky", 3)]
+    assert "handles" not in a
+    assert channel_context.anchor_tokens(a) == {"lipsky", "paul"}
+    assert channel_context.anchor_tokens({}) == set()
+    # a code seen once is a sponsor's campaign word ("DEAD5BLITZ"), never an anchor
+    once = {"codes": [{"token": "dead5blitz", "videos": 1}, {"token": "jmk", "videos": 2}]}
+    assert channel_context.anchor_tokens(once) == {"jmk"}
+
+
+def test_description_anchors_strip_code_digits_and_need_two_domains_for_a_slug():
+    import channel_context
+    docs = [{"id": "1", "summary": "code JMK10 https://shop.com/jmk"},
+            {"id": "2", "summary": "code JMK15 https://shop.com/jmk"}]
+    a = channel_context.description_anchors(docs)
+    assert a["codes"] == [{"token": "jmk", "videos": 2}]
+    assert a["slugs"] == []                       # one domain: the sponsor's page, not a vanity slug
+
+
+def test_a_name_said_once_counts_when_the_descriptions_anchor_it(tmp_path):
+    """"my name is Paul" in one upload is a guest by the old rule; when the
+    descriptions' codes and links spell the same name it is the host."""
+    import channel_context
+    corpus = _write_jsonl(tmp_path / "corpus.jsonl", [
+        {"id": "1:a", "cues": [[10, "my name is Paul and welcome"]]},
+        {"id": "1:b", "cues": [[20, "my name is Sienna and I think I will win"]]},
+    ])
+    rows = channel_context.name_candidates(corpus, "AI Weekly", anchors={"lipsky", "paul"})
+    assert [r["name"] for r in rows] == ["paul"]
+    assert rows[0]["description_anchor"] and not rows[0]["channel_name_variant"]
+    assert channel_context.name_candidates(corpus, "AI Weekly") == []
+
+
+def test_host_name_call_prefers_camera_then_anchored_then_descriptions():
+    import channel_context as cc
+    two = {"name_candidates": [{"name": "dana", "videos": 2, "said_outright": True, "said_outright_videos": 2}],
+           "description_anchors": {"names": [{"name": "Paul Lipsky", "videos": 3}]}}
+    assert cc.host_name_call(two) == (["Dana"], "transcripts")
+    one = {"name_candidates": [{"name": "paul", "videos": 1, "said_outright": True, "said_outright_videos": 1,
+                                "description_anchor": True},
+                               {"name": "sienna", "videos": 1, "said_outright": True, "said_outright_videos": 1}]}
+    assert cc.host_name_call(one) == (["Paul"], "transcripts+descriptions")
+    # a guest's name said in five uploads loses to the host's said in two when the descriptions anchor it
+    guest = {"name_candidates": [{"name": "sienna", "said_outright": True, "said_outright_videos": 5},
+                                 {"name": "paul", "said_outright": True, "said_outright_videos": 2,
+                                  "description_anchor": True}]}
+    assert cc.host_name_call(guest) == (["Paul"], "transcripts")
+    desc = {"description_anchors": {"names": [{"name": "Paul Lipsky", "videos": 3}]}}
+    assert cc.host_name_call(desc) == (["Paul", "Paul Lipsky"], "descriptions")
+    single = {"description_anchors": {"names": [{"name": "Paul", "videos": 2}]}}
+    assert cc.host_name_call(single) == (["Paul"], "descriptions")
+    assert cc.host_name_call({"description_anchors": {"names": [{"name": "Dana", "videos": 1}]}}) == ([], None)
+    assert cc.host_name_call({}) == ([], None)
+    ctx = cc.write_context(desc, format_label="solo", format_evidence="x")
+    assert ctx["host_names"] == ["Paul", "Paul Lipsky"]
+    # a name an earlier run cached on the channel record ends the discovery
+    cached = {"cached_host_name": "Eric Decker", **two}
+    assert cc.host_name_call(cached) == (["Eric", "Eric Decker"], "cached")
+    assert cc.host_name_call({"cached_host_name": "AJ"}) == (["AJ"], "cached")
+
+
+# --------------------------------------------------------------------------- #
+# channel_context.py: what earlier runs cached on the channel record
+# --------------------------------------------------------------------------- #
+def test_cached_attributes_are_read_whether_the_columns_come_parsed_or_as_text():
+    import channel_context as cc
+    row = {"cached_host_name": " Joe Rogan ", "cached_format_label": "interview",
+           "cached_format_label_evidence": "cast sheets: interview in 24 of 39 videos",
+           "cached_host_aliases": '["Joe", "Rogan"]',
+           "cached_sibling_channels": [{"link": "https://youtube.com/@jreclips", "source": "social_links"}, {"x": 1}]}
+    got = cc.cached_attributes(row)
+    assert got == {"cached_host_name": "Joe Rogan", "cached_format_label": "interview",
+                   "cached_format_label_evidence": "cast sheets: interview in 24 of 39 videos",
+                   "cached_host_aliases": ["Joe", "Rogan"],
+                   "cached_sibling_channels": [{"link": "https://youtube.com/@jreclips", "source": "social_links"}]}
+    empty = cc.cached_attributes({"cached_host_aliases": "not json", "cached_sibling_channels": None})
+    assert empty["cached_host_aliases"] == [] and empty["cached_sibling_channels"] == []
+    assert empty["cached_host_name"] is None and empty["cached_format_label"] is None
+
+
+def test_a_cached_host_name_brings_its_cached_aliases():
+    import channel_context as cc
+    full = {"cached_host_name": "Joe Rogan", "cached_host_aliases": ["Rogan", "Joe", "Joey"]}
+    assert cc.host_name_call(full) == (["Joe", "Joe Rogan", "Rogan", "Joey"], "cached")
+
+
+def test_cached_sibling_channels_join_the_candidates_without_duplicates():
+    import channel_context as cc
+    row = {"url": "https://youtube.com/@foo", "external_channel_id": "UC1"}
+    doc = {"social_links": ["https://youtube.com/@fooVlogs"], "description": ""}
+    cached = [{"link": "https://www.youtube.com/@fooVlogs/", "source": "social_links"},
+              {"link": "https://youtube.com/@fooGaming", "source": "about_text"},
+              {"link": "https://youtube.com/@foo", "source": "social_links"}]
+    out = cc.second_channel_candidates(row, doc, cached)
+    assert out == [{"link": "https://youtube.com/@fooVlogs", "source": "social_links"},
+                   {"link": "https://youtube.com/@fooGaming", "source": "cached"}]
+
+
+def test_set_cached_calls_the_internal_cli_and_reports_the_outcome(tmp_path, monkeypatch):
+    import channel_context as cc
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    log = tmp_path / "calls.txt"
+    (fake / "tl-internal").write_text(
+        f"#!/bin/sh\necho \"$@\" >> {log}\nif [ \"$4\" = 42 ]; then exit 0; fi\n"
+        "echo 'Access denied: setting channel ai_description keys is restricted to superusers.' >&2\nexit 1\n")
+    (fake / "tl-internal").chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake))
+    assert cc.set_cached(42, "host_name", "Joe Rogan") == "set"
+    assert cc.set_cached(42, "host_aliases", ["Joe", "Rogan"]) == "set"
+    assert cc.set_cached_with_evidence(42, "format_label", "interview", "cast sheets agree") == "set"
+    assert log.read_text().splitlines() == [
+        "channels ai-description set 42 host_name Joe Rogan",
+        'channels ai-description set 42 host_aliases ["Joe", "Rogan"] --json',
+        "channels ai-description set 42 format_label interview",
+        "channels ai-description set 42 format_label.evidence cast sheets agree"]
+    assert cc.set_cached(7, "host_name", "Joe").startswith("skipped: Access denied")
+    # a refused value writes no evidence
+    log.write_text("")
+    assert cc.set_cached_with_evidence(7, "format_label", "solo", "e").startswith("skipped")
+    assert log.read_text().splitlines() == ["channels ai-description set 7 format_label solo"]
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert cc.set_cached(42, "host_name", "Joe") == "skipped: tl-internal not available"
+    # a refusal drawn as a terminal panel reports its words, not its border
+    monkeypatch.setenv("PATH", str(fake))
+    (fake / "tl-internal").write_text(
+        "#!/bin/sh\nprintf '%s\\n' 'Usage: tl-internal channels [OPTIONS]' '╭─ Error ───╮' "
+        "'│ No such command ai-description.  │' '╰───────────╯' >&2\nexit 2\n")
+    assert cc.set_cached(42, "host_name", "Joe") == "skipped: No such command ai-description."

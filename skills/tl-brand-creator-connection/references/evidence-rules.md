@@ -3,160 +3,158 @@
 The profile is written to be consumed by other skills and forwarded to real
 people. Every rule here exists to stop a wrong quote, or an invented one,
 leaving this session. This file is the single home of the attribution
-doctrine — nothing else restates it.
+doctrine, nothing else restates it.
 
 ## What counts as self-disclosure
 
 A gem is one lasting fact about the creator as a person, in the creator's
-own voice. A first-person search is not the test. A window is a gem only if
-all three hold:
+own voice. A window is a gem only if all three hold:
 
-1. **About the person, not the content.** The fact is about the creator's
-   life: where they are from, family, home, pets, work history, money,
-   health, beliefs, standing habits and tastes, relationships. A verdict on
-   the thing this video is about is not a gem: the dish, the workout, the
-   game, the product, the news story. A standing trait is, even when it is
-   obvious from the channel: a cooking host saying they have loved cooking
-   since childhood is a gem. Obvious is not a reason to skip; a profile that
-   never mentions cooking on a cooking channel is wrong. Judge the fact, not
-   the window: a girlfriend named in a show intro, a childhood memory inside
-   a list of games, a dog and a backyard mentioned while building something
-   are gems even though the window is mostly content. "Not about their life"
-   is a verdict on every sentence in the window, never on its topic.
-2. **True off camera and next year.** Skip anything that exists only because
-   the video exists, and anything true only today: production notes, what
-   they did this morning, how they feel about this take, a reaction to this
-   one dish. A habit or taste counts when it is stated as recurring or
-   long-standing. "I've never liked cilantro" is a gem. "This dish is S tier"
-   is not.
-3. **The creator's own voice, settled.** The creator speaking about their
-   own life, including when a guest or co-host interviews them on their own
-   channel. Never a guest, co-host, crew member, street interviewee, read-out
-   comment, quoted speech, sarcasm, hypothetical, or a role played in a skit.
-   Settle the voice before anything else, in this order:
-   - A question followed by an answer: the answer belongs to whoever is
-     being interviewed. When the channel's own host asks ("what does your
-     family think of your career?"), the life story in the answer is the
-     guest's. Only when the host is the one being asked is it the host's.
-   - A life story that does not fit the host: a surgeon's residency on a
-     woodworking channel, a child-actor career on a minimalism channel, a
-     pregnancy told by the owner of the restaurant being visited. It
-     is someone else's, whatever the flags say.
-   - `format_hint: "interview_or_collab"` or a `second_voice_hint` means a
-     second person is speaking in this upload. Credit the host only when
-     the window itself shows the host speaking (a self-naming, the host's
-     known facts, the host addressing their own audience). Two unattributed
-     first-person voices in one window, or a first-person line you cannot
-     place, is not a gem.
-   The host's own narration about other people ("I flew to Mexico to meet
-   my friend Dani", "I'm buying my friends' tickets") is the host's voice
-   and the host's life: the friend is the subject of the sentence, the
-   host is the subject of the fact. A missed gem costs less than a wrong
-   one.
+1. **About the person, not the content.** Where they are from, family, home,
+   pets, work history, money, health, beliefs, standing habits and tastes,
+   relationships. A verdict on the video's subject (the dish, the workout,
+   the game, the product, the news story) is not a gem. A standing trait is
+   a gem even when the channel makes it obvious: a cooking host who has
+   loved cooking since childhood. Judge every sentence, not the window's
+   topic: a girlfriend named in a show intro, a childhood memory inside a
+   list of games, a dog mentioned while building something are gems inside
+   a content window.
+2. **True off camera and next year.** Not a gem: production notes, day-of
+   states ("hasn't showered yet today", "cut my hair yesterday", "dad texted
+   me today"), how they feel about this take, a reaction to this one dish. A
+   habit or taste is a gem when stated as recurring or long-standing: "I've
+   never liked cilantro" is; "this dish is S tier" is not. The channel as a
+   job counts only when biographical: when they started, what they quit to
+   do it, how it changed their money or health, who works with them.
+3. **The creator's own voice, settled by the Attribution rule below.** Never
+   a guest, crew member, street interviewee, read-out comment, quoted
+   speech, sarcasm, hypothetical, or a role played in a skit. The host's own
+   narration about other people ("I flew to Mexico to meet my friend Dani")
+   is the host's fact: the friend is the subject of the sentence, the host
+   is the subject of the fact. A missed gem costs less than a wrong one.
 
-The channel as a job counts only when the fact is biographical: when they
-started, what they quit to do it, how it changed their money or health, who
-works with them. The feeling of making this week's episode does not.
-
-Political and social opinions the creator states as their own are gems in
-every channel type. Opinions on the video's subject are not.
-
-Cast wide across domains and narrow on lasting. A trivial standing taste is
-a gem. A momentary reaction, however personal it sounds, is not. Material
-with no bearing on any brand belongs in the profile; the unrelated detail is
-where the good connections come from, and CONNECT narrows later with its
-own inputs.
+Political and social opinions the creator states as their own are gems on
+every channel type; opinions on the video's subject are not. Cast wide
+across domains and narrow on lasting: a trivial standing taste is a gem, a
+momentary reaction is not, and material with no bearing on any brand belongs
+in the profile.
 
 ## Attribution
 
-Captions carry no speaker labels, so whose mouth a line came out of is a
-judgement the classifier makes from the format and the deterministic features
-— which are inputs, never verdicts.
+Captions carry no speaker names, at most a `>>` where the speaker changes.
+Whose line it is comes from the window text, the video's cast sheet and the
+format; flags are inputs, never verdicts. A first-person line is the
+creator's only when the window shows it. Decide in this order:
 
-- **Solo format**: one voice holds the transcript. A window that passes the
-  three-part test is the host's; no feature is required, and demanding one is
-  what turns a solo channel into an empty profile. A classifier verdict of
-  `speaker_guess: "unclear"` on a declared-solo channel therefore publishes
-  as the host — with confidence capped at `unconfirmed` — unless the window
-  text itself names or implies another voice (a guest, a quoted person, a
-  clip), in which case it is dropped as unattributable. A window carrying a
-  `second_voice_hint` (the host named in the third person or spoken to, next
-  to the first-person line) IS that case, found deterministically: on a solo
-  label it takes the shared-voice rules below, never the solo rule.
-- **Interview / multi-host / reaction**: most self-disclosure in the
-  transcript belongs to the other voice. `host_anchor` (the host naming
-  themselves in the window: "it's Sam", "my name is") and `in_sponsor_read`
-  argue host. A `second_voice_hint` argues the other way. Guest-ambiguous
-  windows drop; `speaker_guess: "unclear"` is an honest answer, and unclear
-  windows never publish as the host's.
-- **A crew channel is multi-host, whatever the label says.** When a large
-  share of the kept windows name the host in the third person
-  (`third_person_host_share` in the fetch summary, above about a quarter),
-  other people hold the microphone for much of the transcript, and the solo
-  rule would hand their lives to the host. The format call says `multi_host`
+1. **Someone else's**, when any sign holds: another person replies to the
+   line as its listener; the line answers the creator's question; the
+   speaker names or addresses the creator; the speaker calls the creator a
+   friend or speaks of them in the third person (`second_voice_hint` finds
+   this deterministically); the speaker names themselves as one of the
+   video's listed guests (`guest_anchor`); someone new is introduced just
+   before the line;
+   the line comes from a stream, a call, or footage of another person; the
+   life story does not fit the creator (a surgeon's residency on a
+   woodworking channel). `speaker_guess: "guest"`; the line never enters
+   the ledger.
+2. **The creator's**, when any sign holds: the creator names themselves
+   (`host_anchor`); the creator addresses their own audience or narrates the
+   upload to them; the line matches a known fact of the creator's; the line
+   sits inside a sponsor read (`in_sponsor_read`); the line addresses the
+   video's only guest by name (`guest_named`, with a `cast` of the host and
+   that one guest); on an interview channel, the same rare line recurs
+   across uploads (guests change, the host does not). `speaker_guess:
+   "host"`, `confidence: "confirmed"`,
+   `speaker_evidence` names the sign.
+3. **Shared-voice upload** (format interview or multi_host; `format_hint`
+   interview_or_collab, reaction or staged; a `cast` with a guest or a
+   second host; a `second_voice_hint`; or, inside a window, the lines after
+   a `>>` speaker change, `turns`): with no sign from 1 or 2,
+   `speaker_guess: "unclear"`, and the line is dropped.
+   On a multi-host channel recurrence alone never confirms: both hosts recur.
+4. **Solo or faceless-scripted upload with no hint**: with no sign from 1,
+   the line is the creator's. Say `unclear` only when the text suggests
+   another voice you cannot place; an unclear line here publishes as the
+   creator's at `unconfirmed`.
+
+On a multi-host channel the second named host is `cohost`, with the name in
+`speaker_evidence` when the window shows it (a self-naming, the other host
+addressing them by name); a "we" line about the hosts' shared life is
+`shared`. Shared facts exist only between named hosts: a guest's "we" is the
+guest's.
+
+**Staged upload** (`format_hint: staged`: a prank, challenge, stunt, fake or
+pretend scenario, dating show or skit, from the title): a shared-voice
+upload. A line said to win a game, set up a prank, play a character or get a
+laugh is not disclosure unless the creator confirms it outside the bit. A
+durable claim stated inside the premise (a spouse, a pregnancy, a move, a
+new job, a death) may be the premise: report it at `likely` with
+`speaker_evidence` naming the staged hint; never withhold it and never mark
+it `hypothetical` on the title alone. Durable tastes, family names and
+childhood stories told inside a challenge are still the person's. A later
+stage searches the channel's non-staged uploads for the same claim and
+decides with that evidence.
+
+**Ad reads.** A sponsored span is spoken by the host, never by a guest or
+reacted material. The sponsored-product claims inside it are scripted and
+never a gem; a personal aside inside it (a trip, a family visit, a childhood
+story, a merch line) is the host's at `confirmed`; a sponsor that is the
+host's own company makes the read work disclosure.
+
+## After extraction
+
+Rules the scripts and the merge shard apply to what the extractor returned.
+
+- **A crew channel is multi-host, whatever the label says.** When more than
+  about a quarter of the kept windows name the host in the third person
+  (`third_person_host_share` in the fetch summary), other people hold the
+  microphone for much of the transcript: the format call says `multi_host`
   and the shared-voice rules apply.
-- **Recurrence** (the same rare phrase across several uploads) argues host on
-  an interview channel — guests change between uploads, the host does not.
-  **On a multi-host channel recurrence alone must never confirm**: both hosts
-  recur, so a recurring passage still needs another signal or an in-window
-  naming before it counts as one host's.
-- **Ad reads are dual-use.** A sponsored span is spoken by the host, never by
-  a guest or reacted material — the strongest single-voice signal there is.
-  Simultaneously, the *sponsored-product claims* inside a read are scripted
-  and are banned as a gem source. A personal aside inside a read (a trip, a
-  family visit, a childhood story, a merch line) stays eligible at confidence
-  `likely`, and when the sponsor is the host's own company the read is work
-  disclosure, not an exclusion. `confirmed` still needs the fact outside reads.
-
+- **A staged premise is checked, never guessed.** `authenticate.py`
+  searches the channel for the claim in non-staged uploads before the merge;
+  the merge shard decides with that evidence. Found elsewhere: the fact is
+  the person's. Found only inside staged uploads: kept in the ledger at
+  `unconfirmed`, marked `staged_only`, never on a brand-facing page. A claim
+  found only in a staged upload's first 60 seconds, and in no other video, is
+  the opening hook: `unconfirmed`.
+- **Contradictions are settled on dated evidence, not on the two lines in
+  view.** Two facts in one domain that cannot both be current (two homes, a
+  husband and a boyfriend) are probed the same way, and the newest dated
+  evidence wins: `last_seen` on each side (the newest upload saying it),
+  then the identity lane's `seen_date` when the creator's own profile
+  corroborates one side. The older fact stays as history. When neither side
+  is newer, or both recur into the present, both stay at `unconfirmed` and
+  neither supersedes.
+- **Merging quotes into one fact requires one speaker.** Two windows from
+  the same interview video are not the same voice by default: a host's
+  origin story at minute 6 and a guest's at minute 90 sit in one transcript.
+  Merge only quotes that each independently attribute to the host; a window
+  that merely continues the video of an attributed one proves nothing.
 - **Detector output is evidence about detection, not about the video.** A
-  detected mention with a `(0,0)` span has no position — never pad it into a
+  detected mention with a `(0,0)` span has no position: never pad it into a
   claim about the video's opening. A `summary`-field hit (the creator-written
-  upload description) is the affiliate link, not speech. And an affiliate read that only drops a link describes
-  nothing; one that describes the product is still a scripted read, so the
-  ad-read rule above applies.
+  upload description) is the affiliate link, not speech. An affiliate read
+  that only drops a link describes nothing; one that describes the product
+  is a scripted read, so the ad-read rule applies.
 - **Identity reads come from the generated profile.** A channel's raw
   `description` is usually subscribe-boilerplate; the platform's generated
   profile (`ai.description`) is the identity field worth reading.
   `channel_context.py` returns both, labelled.
-
-- **A staged premise is a format hint, not a verdict.** A prank, challenge,
-  stunt or skit upload (`format_hint: staged`, from the title) is still one
-  voice, so attribution is unchanged. But a durable claim stated inside it
-  (a spouse, a pregnancy, a move, a new job) may be the premise. The
-  extractor reports it at `likely`; `authenticate.py` searches the channel
-  for the same claim in non-staged uploads before the merge; the merge shard
-  decides with that evidence. Found elsewhere: the fact is the person's.
-  Found only inside staged uploads: kept in the ledger at `unconfirmed`,
-  marked `staged_only`, never on a brand-facing page. **Nothing is dropped
-  for being uncertain.**
-- **Contradictions are settled on dated evidence, not on the two lines in
-  view.** Two facts in one domain that cannot both be current (two homes, a
-  husband and a boyfriend) are probed the same way, and the newest dated
-  evidence wins: the newest upload saying each, then the identity lane's
-  `seen_date` when the creator's own profile corroborates one side. The
-  older fact stays as history. When neither side is newer, or both recur
-  into the present, both stay at `unconfirmed` and neither supersedes.
-- **Merging quotes into one fact requires one speaker.** Two windows from
-  the same interview video are not the same voice by default — a host's
-  origin story at minute 6 and a guest's at minute 90 sit in one transcript.
-  Merge only quotes that each independently attribute to the host; a window
-  that merely *continues the video* of an attributed one proves nothing.
 
 Every fact carries a confidence bucket, and the bucket travels into the
 output:
 
 | Bucket | What puts it here |
 |---|---|
-| **Confirmed** | Solo-format pass, a host-anchored window, or a fact corroborated across lanes (a transcript mention AND the creator's own social profile or written bio) — cross-lane corroboration is the top tier. |
-| **Unconfirmed** | The classifier believes it is the host but no rule above settles it (e.g. weak-anchor material on an interview channel). Kept, and labelled. Never silently dropped, never silently promoted. |
-| **Dropped** | Speaker unclear on a shared-voice format, or ad-read-only. Counted in the profile's caveats, never shown as a fact. |
+| **Confirmed** | A line the Attribution rule gives the creator (a sign from step 2, or a solo upload with no sign of another voice), or a fact corroborated across lanes (a transcript mention AND the creator's own social profile or written bio). |
+| **Unconfirmed** | The extractor's own doubt with a named reason (a staged premise found in no non-staged upload, a line that contradicts the channel's description, doubt about the voice); an unclear line on a solo upload; a claim found only in an opening hook; two facts that contradict with neither newer; a written bio or social record no video confirms; two first names a caption ran together. Kept in the ledger and labelled, never on a brand-facing page. |
+| **Dropped** | Someone else's line, or unclear on a shared-voice upload. Counted in the profile's caveats, never shown as a fact. |
 
-## The bio lane — the creator's own written words
+## The bio lane: the creator's own written words
 
 The channel About box (and, when the socials lane is on, the profile bios it
 read and confirmed) is a **provenance of its own: `bio`**. It is the most
-explicit thing a creator ever says about themselves and the least verified —
-people write untrue, stale and aspirational things about themselves, and
+explicit thing a creator ever says about themselves and the least verified, people write untrue, stale and aspirational things about themselves, and
 nobody edits an About box. So the lane treats it as a lead with a source, not
 as a fact:
 
@@ -164,7 +162,7 @@ as a fact:
 |---|---|---|
 | corroborated by a transcript fact | `none`, `lifestyle` | **`confirmed`**, both sides, and usable like any confirmed fact |
 | corroborated by a transcript fact | `clinical` | `confirmed`; the transcript side still answers to the repetition rule below, and the bio side is never `selected` |
-| corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual — the tier decides the page, not the confidence |
+| corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual, the tier decides the page, not the confidence |
 | **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)"; on a refresh it expires unless the About text still says it |
 | **uncorroborated** | `clinical`, `children`, `location` | **dropped from the ledger entirely** |
 
@@ -173,8 +171,8 @@ as a fact:
   premise does not count either: that is a cap the transcript lane already
   applied, and corroboration may not lift it from outside.
 - **A written-source excerpt is not a quote.** A `bio` fact carries
-  `source_excerpt` — the creator's own words, cut mechanically from the stored
-  bio text, never written by a model — plus `source_url` and `seen_date` where
+  `source_excerpt`: the creator's own words, cut mechanically from the stored
+  bio text, never written by a model, plus `source_url` and `seen_date` where
   a transcript fact carries `quote`, `video` and `start`. It publishes without
   quote marks around a timestamp and without a watch link, because there is no
   video behind it. The ban on `quote`/`video`/`start`/`url` on a non-transcript
@@ -197,24 +195,23 @@ as a fact:
   quote from anywhere else goes through `scripts/verify_quotes.py`.
 - **A partial match is never a verification.** `verify_quotes.py` reports
   `match: "exact" | "partial" | "none"`; only `exact` publishes. On
-  `partial`, fix the quote to what the captions actually hold or drop it —
-  never publish the original words against a partial match, because a shared
+  `partial`, fix the quote to what the captions actually hold or drop it, never publish the original words against a partial match, because a shared
   opening with a different tail is how a fabricated quote gets a real
   timestamp.
 - `match: "none"`: retry with a spelling or phonetic variant; still none,
   the quote does not publish. `cues: 0` means the video has no stored
-  transcript — a coverage gap, not evidence.
+  transcript, a coverage gap, not evidence.
 
 ## Provenance
 
 Every fact names its lane, and lanes never masquerade as each other:
 
-- `transcript` — verbatim quote, `&t=` link, video date.
-- `social` — profile URL and seen-date. A fact read off Instagram is not a
+- `transcript`: verbatim quote, `&t=` link, video date.
+- `social`: profile URL and seen-date. A fact read off Instagram is not a
   quote and is never dressed as one.
-- `web` — source URL. Same rule.
+- `web`: source URL. Same rule.
 
-## Sensitivity — a tier, not a flag
+## Sensitivity: a tier, not a flag
 
 Every fact carries a `sensitivity` tier. The binary "sensitive" flag it
 replaces threw away the difference between "wears contacts" and "was
@@ -229,8 +226,7 @@ diagnosed with X", and that difference is the whole judgment:
 | `location` | street, neighbourhood, building | no, by default |
 
 - **Beliefs are NOT sensitive.** Political and social opinions the creator
-  states in their own voice are ordinary self-disclosure at tier `none` —
-  on a commentary channel they are the profile's core. What they are not is
+  states in their own voice are ordinary self-disclosure at tier `none`: on a commentary channel they are the profile's core. What they are not is
   an inference: record the stated opinion, never a conclusion about who the
   person is.
 - **Only `clinical`, `children` and `location` are withheld from connection
@@ -269,17 +265,32 @@ whole cluster in view.
 
 Latest wins, with dates: "moved to Austin" (2024) supersedes "live in LA"
 (2021), and the superseded fact stays visible as history. Recurrence counts
-**distinct videos or sources, never snippet count** — one video windowed
+**distinct videos or sources, never snippet count**: one video windowed
 thrice is one occurrence.
+
+Every transcript fact carries `last_seen`, the newest upload date among its
+evidence, computed by the script. A claim stated as current that the
+evidence shows is over (a marathon since run, a relationship since ended, a
+job since left) is marked `ended` by the merge shard; past history ("used
+to", "as a kid") never is. An `ended` fact stays in the ledger as
+history, is never selected and is never quoted on a brand-facing page. A talking point or a strong
+connection rests on a fact with `last_seen` inside the last 24 months of the
+run date; an older fact supports a thin connection only with its year
+stated; the Thesis and "Where this could go wrong" use every fact at any
+age. A claim never repeats "X years ago": the script converts it to a year
+from the upload date ("in about 2020, said in 2025"), and a claim about the
+channel's own start takes the channel's start date when they disagree by a
+year or more (the first upload, skipping at most five early uploads that a gap
+of over a year separates from the rest).
 
 ## Honesty rules
 
-- Transcript coverage is partial (~50–70% of uploads is normal). The profile
+- Transcript coverage is partial (50 to 70% of uploads is normal). The profile
   header prints the ratio and the line "absence is not evidence".
 - No diarization exists; interview-format confidence is capped and the
   profile says so.
-- An empty result is a real answer. "No evidence found" — with the coverage
-  numbers that bound the claim — is correct and forwardable. A profile
+- An empty result is a real answer. "No evidence found", with the coverage
+  numbers that bound the claim, is correct and forwardable. A profile
   assembled from unattributable guesses is worse than nothing.
 - If the profile holds nothing that honestly connects to a brand, CONNECT says
   exactly that, shows what was searched, and stops. A no-fit verdict is a

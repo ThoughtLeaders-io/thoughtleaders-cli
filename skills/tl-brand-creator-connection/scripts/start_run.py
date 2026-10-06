@@ -63,7 +63,9 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tl_data
+from channel_context import host_name_call  # noqa: E402  sibling
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 PLAN_OK = ("Intelligence", "Superuser")
@@ -198,6 +200,10 @@ def identity_block(context_full: pathlib.Path) -> dict:
     return {
         "name": full.get("name"),
         "url": full.get("url"),
+        "cached_host_name": full.get("cached_host_name"),
+        "cached_host_aliases": full.get("cached_host_aliases") or [],
+        "cached_format_label": full.get("cached_format_label"),
+        "cached_format_label_evidence": full.get("cached_format_label_evidence"),
         "language": full.get("language"),
         "num_uploads": full.get("num_uploads"),
         "about_text": full.get("about_text"),
@@ -205,6 +211,9 @@ def identity_block(context_full: pathlib.Path) -> dict:
         "websites": [w.get("url") for w in (full.get("websites") or [])],
         "social_links": full.get("social_links") or [],
         "second_channel_candidates": full.get("second_channel_candidates") or [],
+        # what the upload descriptions call the host: promo-code stems, vanity
+        # slugs reused across sponsors, and the names a recurring line gives
+        "description_anchors": full.get("description_anchors") or {},
     }
 
 
@@ -251,9 +260,10 @@ def creator_brief_input(a, channel: dict, brand: dict) -> dict:
         # the brand's brief as pasted, headings and order kept: the creator
         # brief mirrors it and adds the creator's own versions of its points
         "brand_brief": read_text(a.talking_points).strip() or None,
-        # supplied: the brand said what it wants; False means the brief is
-        # built from the connection map alone and its header says so
-        "supplied": bool(points or (a.promoting or "").strip()),
+        # supplied: the brand sent talking points or a brief. A promoting line
+        # alone is not one: that brief is built from the creator's gems, the
+        # promoting line opens The creative ask, and the header says so
+        "supplied": bool(points),
         "written_at": time.strftime("%Y-%m-%d"),
     }
 
@@ -401,28 +411,74 @@ def main(argv: list[str] | None = None) -> int:
             classified = corpus / "classified.jsonl"
             if classified.exists():
                 fetch_args += ["--exclude", str(classified)]
-        rc, stdout = run_script("fetch_cues.py", fetch_args)
-        if rc != 0:
-            print(json.dumps({**out, "exit": 3, "failed": "fetch_cues"}, indent=1))
-            return 3
-        try:
-            out["fetch"] = json.loads(stdout)
-        except ValueError:
-            out["fetch"] = {"stdout": stdout[-2000:]}
-        out["ran"].append("fetch")
+        def fetch_and_stats(args: list[str]) -> str | None:
+            """The fetch, then the context stats over it; the failed stage or None."""
+            rc, stdout = run_script("fetch_cues.py", args)
+            if rc != 0:
+                return "fetch_cues"
+            try:
+                out["fetch"] = json.loads(stdout)
+            except ValueError:
+                out["fetch"] = {"stdout": stdout[-2000:]}
+            rc, _ = run_script(
+                "channel_context.py",
+                ["--channel", str(cid), "--corpus", str(corpus / "corpus.jsonl.gz"),
+                 "--per-video-out", str(corpus / "per-video.jsonl")],
+                stdout_to=context_full)
+            return "context stats" if rc != 0 else None
 
-        rc, _ = run_script(
-            "channel_context.py",
-            ["--channel", str(cid), "--corpus", str(corpus / "corpus.jsonl.gz"),
-             "--per-video-out", str(corpus / "per-video.jsonl")],
-            stdout_to=context_full)
-        if rc != 0:
-            print(json.dumps({**out, "exit": 3, "failed": "context stats"}, indent=1))
+        failed = fetch_and_stats(fetch_args)
+        if failed:
+            print(json.dumps({**out, "exit": 3, "failed": failed}, indent=1))
             return 3
+        out["ran"].append("fetch")
+        # no name in the channel record: the name the host says on camera
+        # ("my name is ...") in two or more uploads, or the name the upload
+        # descriptions give the host, labels the snippets, so the fetch runs
+        # once more with it (a build only: a refresh round is additive and
+        # must run once)
+        host_names = a.host_names.strip()
+        if not host_names and out["decision"] == "build":
+            try:
+                found, source = host_name_call(json.loads(context_full.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                found, source = [], None
+            if found:
+                host_names = ",".join(found)
+                i = fetch_args.index("--host-names")
+                fetch_args[i + 1] = host_names
+                failed = fetch_and_stats(fetch_args)
+                if failed:
+                    print(json.dumps({**out, "exit": 3, "failed": failed}, indent=1))
+                    return 3
+                out["host_names_found"] = found
+                out["host_names_source"] = source
+                out["ran"].append("refetch_with_found_name")
         out["ran"].append("context_stats")
-        out["next"] = ("call the format from the `FUNNEL stage=context` line "
-                       "above, then write the context block and render the "
-                       "batch prompts in one chain (PROFILE step 2).")
+        # the cast sheet's prompts, one per 25 kept videos, so the next
+        # message can spawn the sheet agents without a render turn of its own
+        fetch = out.get("fetch") if isinstance(out.get("fetch"), dict) else {}
+        intros_file = fetch.get("intros_file")
+        out["cast"] = {"videos": 0, "sheets": 0, "prompts": []}
+        if intros_file and int(fetch.get("intros") or 0) > 0:
+            rnd = int(fetch.get("round") or 1)
+            suffix = "" if rnd <= 1 else f"-r{rnd}"
+            rc, stdout = run_script("cast_sheet.py", [
+                "render", "--intros", str(intros_file), "--context-full", str(context_full),
+                "--host-names", host_names,
+                "--out-dir", str(corpus / f"prompts{suffix}"),
+                "--returns-dir", str(fetch.get("returns_dir") or corpus / f"returns{suffix}")])
+            try:
+                out["cast"] = json.loads(stdout) if rc == 0 else {"error": f"cast_sheet.py render exit {rc}"}
+            except ValueError:
+                out["cast"] = {"error": "cast_sheet.py render: unreadable output"}
+            if rc == 0:
+                out["ran"].append("cast_prompts")
+        out["next"] = ("spawn one cast-sheet agent per file in `cast.prompts` and "
+                       "run `cast_sheet.py apply` (PROFILE step 1b); then call the "
+                       "format from the `FUNNEL stage=context` line above and the "
+                       "cast summary, write the context block and render the batch "
+                       "prompts in one chain (PROFILE step 2).")
 
     out["exit"] = 0
     print(json.dumps(out, indent=1, default=str))
