@@ -255,13 +255,11 @@ def test_cache_host_name_reports_set_refused_and_missing_tool(tmp_path, monkeypa
         "echo 'Access denied: setting channel ai_description keys is restricted to superusers.' >&2\nexit 1\n")
     (fake / "tl-internal").chmod(0o755)
     monkeypatch.setenv("PATH", str(fake))
-    assert cast_sheet.cache_host_name(42, "Joe Rogan", "cast sheets: 24 of 39 videos") == "set"
-    assert log.read_text().splitlines() == [
-        "channels ai-description set 42 host_name Joe Rogan",
-        "channels ai-description set 42 host_name.evidence cast sheets: 24 of 39 videos"]
-    assert cast_sheet.cache_host_name(7, "Joe Rogan", "e").startswith("skipped: Access denied")
+    assert cast_sheet.cache_host_name(42, "Joe Rogan") == "set"
+    assert log.read_text().splitlines() == ["channels ai-description set 42 host_name Joe Rogan"]
+    assert cast_sheet.cache_host_name(7, "Joe Rogan").startswith("skipped: Access denied")
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    assert cast_sheet.cache_host_name(42, "Joe Rogan", "e") == "skipped: tl-internal not available"
+    assert cast_sheet.cache_host_name(42, "Joe Rogan") == "skipped: tl-internal not available"
 
 
 def _apply_with_context(tmp_path, monkeypatch, context: dict, host_names: str, cast_returns: dict):
@@ -275,7 +273,7 @@ def _apply_with_context(tmp_path, monkeypatch, context: dict, host_names: str, c
     ctx.write_text(json.dumps(context))
     calls = []
     monkeypatch.setattr(cast_sheet, "cache_host_name",
-                        lambda cid, name, evidence: calls.append((cid, name, evidence)) or "set")
+                        lambda cid, name: calls.append((cid, name)) or "set")
     monkeypatch.setattr(sys, "argv", [
         "cast_sheet.py", "apply", "--sheets", str(tmp_path / "cast-sheets.json"),
         "--returns", str(rdir), "--batches", str(tmp_path / "batches"), "--out", str(tmp_path / "cast.json"),
@@ -293,7 +291,7 @@ def test_apply_caches_a_certain_host_name_once(tmp_path, monkeypatch):
     sheets = {"000": _SHEET0, "001": _SHEET1}        # Eric hosts v0 and v1
     rc, cache, calls = _apply_with_context(tmp_path, monkeypatch, {"channel_id": 42}, "Eric,Eric Decker", sheets)
     assert rc == 0 and cache["confidence"] == "high" and cache["cached"] == "set"
-    assert calls == [(42, "Eric Decker", "cast sheets name the host in 2 of 3 videos; sources: cast:2, given")]
+    assert calls == [(42, "Eric Decker")]
     # the context now says the host is settled, for the ledger write that follows
     assert _apply_with_context.context_after["cached_host_name"] == "Eric Decker"
     # already cached on the record: nothing is written, whatever the sheets say
@@ -325,3 +323,34 @@ def test_host_name_certainty_never_lets_a_first_name_vouch_for_a_different_full_
     assert cast_sheet.names_agree("Joe Biden", "Joe Rogan") is False
     assert cast_sheet.names_agree("Joe", "Joe Rogan") and cast_sheet.names_agree("joe rogan", "Joe Rogan")
     assert cast_sheet.names_agree("", "Joe") is False
+
+
+def test_a_two_word_channel_title_completes_a_first_name_host_only_when_the_surname_is_corroborated():
+    c = cast_sheet.host_name_certainty
+    cast = _cast(["Joe"], ["Joe"], ["Joe"])
+    # the host says the surname outright on camera ("people call me Scott")
+    said = {"name": "Joe Scott", "name_candidates": [{"name": "scott", "videos": 2, "said_outright": True,
+                                                       "said_outright_videos": 2}]}
+    r = c(cast, ["Joe"], said)
+    assert (r["confidence"], r["name"]) == ("high", "Joe Scott") and "channel_title" in r["sources"]
+    # the About text names the full title as a person
+    about = {"name": "Sabine Hossenfelder", "about_text": "Sabine Hossenfelder has a PhD in physics."}
+    assert c(_cast(["Sabine"], ["Sabine"]), ["Sabine"], about)["name"] == "Sabine Hossenfelder"
+    # the upload descriptions give the full title
+    anchors = {"name": "Eric Decker", "description_anchors": {"names": [{"name": "Eric Decker", "videos": 3}]}}
+    assert c(_cast(["Eric"], ["Eric"]), ["Eric"], anchors)["name"] == "Eric Decker"
+    # no corroboration: the first name stays, so a brand-like title is never taken for a person
+    assert c(_cast(["Nick"], ["Nick"]), ["Nick"], {"name": "Nick Digital"})["name"] == "Nick"
+    # the first word is not the host's name
+    assert c(_cast(["Nick"], ["Nick"]), ["Nick"], {**about, "name": "Tech Nick"})["name"] == "Nick"
+    # not exactly two words, or not words at all
+    assert c(cast, ["Joe"], {**said, "name": "Answers With Joe"})["name"] == "Joe"
+    assert c(cast, ["Joe"], {**said, "name": "Joe"})["name"] == "Joe"
+    assert c(cast, ["Joe"], {**said, "name": "Joe 2000"})["name"] == "Joe"
+    # a full name already known is never replaced, and an uncertain name is never extended
+    assert c(_cast(["Joe Biden"], ["Joe Biden"]), ["Joe Biden"], said)["name"] == "Joe Biden"
+    r = c(_cast(["Joe"], ["host"]), [], said)
+    assert (r["confidence"], r["name"]) == ("low", "Joe")
+    # an accented surname counts
+    assert c(_cast(["José"], ["José"]), ["José"], {"name": "José García",
+            "about_text": "José García es un youtuber."})["name"] == "José García"

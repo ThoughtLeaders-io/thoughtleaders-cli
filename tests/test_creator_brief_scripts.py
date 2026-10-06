@@ -1905,17 +1905,12 @@ def test_set_cached_calls_the_internal_cli_and_reports_the_outcome(tmp_path, mon
     monkeypatch.setenv("PATH", str(fake))
     assert cc.set_cached(42, "host_name", "Joe Rogan") == "set"
     assert cc.set_cached(42, "host_aliases", ["Joe", "Rogan"]) == "set"
-    assert cc.set_cached_with_evidence(42, "format_label", "interview", "cast sheets agree") == "set"
+    assert cc.set_cached(42, "format_label", "interview") == "set"
     assert log.read_text().splitlines() == [
         "channels ai-description set 42 host_name Joe Rogan",
         'channels ai-description set 42 host_aliases ["Joe", "Rogan"] --json',
-        "channels ai-description set 42 format_label interview",
-        "channels ai-description set 42 format_label.evidence cast sheets agree"]
+        "channels ai-description set 42 format_label interview"]
     assert cc.set_cached(7, "host_name", "Joe").startswith("skipped: Access denied")
-    # a refused value writes no evidence
-    log.write_text("")
-    assert cc.set_cached_with_evidence(7, "format_label", "solo", "e").startswith("skipped")
-    assert log.read_text().splitlines() == ["channels ai-description set 7 format_label solo"]
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     assert cc.set_cached(42, "host_name", "Joe") == "skipped: tl-internal not available"
     # a refusal drawn as a terminal panel reports its words, not its border

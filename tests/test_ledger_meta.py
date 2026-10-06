@@ -70,8 +70,8 @@ def _no_real_cache_writes(monkeypatch):
     """The ledger write caches attributes on the channel record through the
     internal CLI; a test must never reach it. Every write is recorded here."""
     calls = []
-    monkeypatch.setattr(ledger_meta, "set_cached_with_evidence",
-                        lambda channel, key, value, evidence: calls.append((channel, key, value, evidence)) or "set")
+    monkeypatch.setattr(ledger_meta, "set_cached",
+                        lambda channel, key, value: calls.append((channel, key, value)) or "set")
     return calls
 
 
@@ -408,50 +408,53 @@ def _cast(n_interview=0, n_solo=0, n_collab=0, host="Joe"):
 def test_format_label_is_cached_only_when_the_cast_sheets_agree(_no_real_cache_writes):
     calls = _no_real_cache_writes
     ctx = {"channel_id": 42}
-    out = ledger_meta.cache_run_attributes(42, ctx, fmt="interview", evidence="question density 8",
+    out = ledger_meta.cache_run_attributes(42, ctx, fmt="interview",
                                            cast=_cast(n_interview=9, n_collab=3), host_names=[])
     assert out["format_label"] == "set"
-    assert calls[0][:3] == (42, "format_label", "interview")
-    assert calls[0][3] == "question density 8; cast sheets: interview in 9 of 12 videos"
+    assert calls[0] == (42, "format_label", "interview")
     # too few sheets, a disagreement, no label, already cached: nothing written
     assert "fewer than 10" in ledger_meta.cache_run_attributes(
-        42, ctx, fmt="interview", evidence="e", cast=_cast(n_interview=5), host_names=[])["format_label"]
+        42, ctx, fmt="interview", cast=_cast(n_interview=5), host_names=[])["format_label"]
     assert ledger_meta.cache_run_attributes(
-        42, ctx, fmt="solo", evidence="e", cast=_cast(n_interview=12), host_names=[])["format_label"] \
+        42, ctx, fmt="solo", cast=_cast(n_interview=12), host_names=[])["format_label"] \
         == "skipped: cast sheets say interview in 12 of 12 videos, the run says solo"
-    assert ledger_meta.cache_run_attributes(42, ctx, fmt=None, evidence=None, cast=_cast(n_solo=12),
+    assert ledger_meta.cache_run_attributes(42, ctx, fmt=None, cast=_cast(n_solo=12),
                                             host_names=[])["format_label"] == "skipped: no format label"
-    assert ledger_meta.cache_run_attributes(42, {"cached_format_label": "solo"}, fmt="interview", evidence="e",
+    assert ledger_meta.cache_run_attributes(42, {"cached_format_label": "solo"}, fmt="interview",
                                             cast=_cast(n_interview=12), host_names=[])["format_label"] \
         == "already set: solo"
     # staged sheets confirm a solo call; faceless confirms faceless_scripted
     assert ledger_meta.cache_run_attributes(
-        42, ctx, fmt="solo", evidence="e",
+        42, ctx, fmt="solo",
         cast={f"v{i}": {"format": "staged", "hosts": []} for i in range(10)}, host_names=[])["format_label"] == "set"
     assert len(calls) == 2
 
 
-def test_host_aliases_need_a_cached_host_name_and_evidence_per_alias(_no_real_cache_writes):
+def test_host_aliases_need_a_cached_host_name_and_never_repeat_a_part_of_it(_no_real_cache_writes):
     calls = _no_real_cache_writes
     cast = _cast(n_interview=12, host="Joe")
-    out = ledger_meta.cache_run_attributes(42, {"channel_id": 42}, fmt="interview", evidence="e", cast=cast,
+    out = ledger_meta.cache_run_attributes(42, {"channel_id": 42}, fmt="interview", cast=cast,
                                            host_names=["Joe", "Joe Rogan", "Rogan"])
     assert out["host_aliases"] == "skipped: host name not cached"
     ctx = {"channel_id": 42, "cached_host_name": "Joe Rogan",
            "name_candidates": [{"name": "joey", "videos": 3, "said_outright": True, "said_outright_videos": 3},
                                {"name": "once", "videos": 1, "said_outright": True, "said_outright_videos": 1}]}
-    out = ledger_meta.cache_run_attributes(42, ctx, fmt="interview", evidence="e", cast=cast,
+    out = ledger_meta.cache_run_attributes(42, ctx, fmt="interview", cast=cast,
                                            host_names=["Joe", "Joe Rogan", "Rogan"])
     assert out["host_aliases"] == "set"
     call = [c for c in calls if c[1] == "host_aliases"][0]
-    # the cached name and its first name are not aliases of themselves; the rest carry their reason
-    assert call[2] == ["Rogan", "Joey"]
-    assert call[3] == "Rogan: given to the run; Joey: said outright in 3 uploads"
-    assert ledger_meta.cache_run_attributes(42, {**ctx, "cached_host_aliases": ["Rogan"]}, fmt="interview",
-                                            evidence="e", cast=cast, host_names=[])["host_aliases"] \
+    # no part of the cached name is an alias of it, surname included
+    assert call[2] == ["Joey"]
+    assert ledger_meta.cache_run_attributes(42, {**ctx, "cached_host_aliases": ["Rogan"]}, fmt="interview", cast=cast, host_names=[])["host_aliases"] \
         == "already set: Rogan"
     assert ledger_meta.cache_run_attributes(42, {"channel_id": 42, "cached_host_name": "Joe"}, fmt=None,
-                                            evidence=None, cast={}, host_names=["Joe"])["host_aliases"] \
+                                            cast={}, host_names=["Joe"])["host_aliases"] \
+        == "skipped: no alias with evidence"
+    # a surname said outright on camera is the host's name, not a nickname
+    scott = {"channel_id": 42, "cached_host_name": "Joe Scott",
+             "name_candidates": [{"name": "scott", "videos": 2, "said_outright": True, "said_outright_videos": 2}]}
+    assert ledger_meta.cache_run_attributes(42, scott, fmt=None, cast=_cast(n_solo=12),
+                                            host_names=["Joe", "Joe Scott"])["host_aliases"] \
         == "skipped: no alias with evidence"
 
 
@@ -462,16 +465,14 @@ def test_sibling_channels_are_cached_from_the_records_own_pointers(_no_real_cach
         {"link": "https://youtube.com/@fooGaming", "source": "about_text"},
         {"link": "https://youtube.com/@old", "source": "cached"},
         {"link": None, "source": "about_text_phrase", "phrases": ["my second channel"]}]}
-    out = ledger_meta.cache_run_attributes(42, ctx, fmt=None, evidence=None, cast=None, host_names=[])
+    out = ledger_meta.cache_run_attributes(42, ctx, fmt=None, cast=None, host_names=[])
     assert out["sibling_channels"] == "set"
     call = [c for c in calls if c[1] == "sibling_channels"][0]
     assert call[2] == [{"link": "https://youtube.com/@fooVlogs", "source": "social_links"},
                        {"link": "https://youtube.com/@fooGaming", "source": "about_text"}]
-    assert call[3] == "2 candidates from the channel's own pointers: about_text (1), social_links (1)"
-    assert ledger_meta.cache_run_attributes(42, {**ctx, "cached_sibling_channels": [{"link": "x"}]}, fmt=None,
-                                            evidence=None, cast=None, host_names=[])["sibling_channels"] \
+    assert ledger_meta.cache_run_attributes(42, {**ctx, "cached_sibling_channels": [{"link": "x"}]}, fmt=None, cast=None, host_names=[])["sibling_channels"] \
         == "already set: 1 channels"
-    assert ledger_meta.cache_run_attributes(42, {}, fmt=None, evidence=None, cast=None,
+    assert ledger_meta.cache_run_attributes(42, {}, fmt=None, cast=None,
                                             host_names=[])["sibling_channels"] == "skipped: no sibling candidates"
 
 

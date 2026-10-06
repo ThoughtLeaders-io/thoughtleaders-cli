@@ -416,8 +416,7 @@ def description_anchors(docs: list[dict]) -> dict:
 
 # --------------------------------------------------------------------------- #
 # Per-channel attributes a run caches on the channel record (ai_description),
-# each with a `.evidence` companion key, so the next run reads them instead
-# of rediscovering them. Written through the internal CLI; a missing or
+# so the next run reads them instead of rediscovering them. Written through the internal CLI; a missing or
 # refused tool is reported, never fatal. A cached value is never rewritten.
 # --------------------------------------------------------------------------- #
 CACHE_KEYS = ("host_name", "format_label", "host_aliases", "sibling_channels")
@@ -477,14 +476,6 @@ def _error_line(text: str) -> str:
         if clean and any(ch.isalpha() for ch in clean):
             return clean[:160]
     return ""
-
-
-def set_cached_with_evidence(channel_id: int, key: str, value, evidence: str) -> str:
-    """The value, then its ``<key>.evidence``; the outcome of the value's write."""
-    outcome = set_cached(channel_id, key, value)
-    if outcome == "set":
-        set_cached(channel_id, f"{key}.evidence", evidence)
-    return outcome
 
 
 def anchor_tokens(anchors: dict | None) -> set[str]:

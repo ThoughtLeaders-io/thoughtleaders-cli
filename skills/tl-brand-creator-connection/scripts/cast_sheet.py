@@ -51,7 +51,7 @@ import time
 from collections import Counter
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from channel_context import NAME_STOP, set_cached_with_evidence  # noqa: E402  sibling: names, the cache writer
+from channel_context import NAME_STOP, set_cached  # noqa: E402  sibling: names, the cache writer
 from fetch_cues import host_naming  # noqa: E402  sibling: the self-naming / third-person reader
 
 REFS = pathlib.Path(__file__).resolve().parents[1] / "references"
@@ -304,8 +304,35 @@ def host_name_certainty(cast: dict[str, dict], given: list[str], full: dict) -> 
     # the fullest spelling among the names that agree: never a given full
     # name the sheets contradict
     longest = max(agreeing_given + [spelling[top]], key=len)
-    return {"name": longest if certain else spelling[top], "confidence": "high" if certain else "low",
-            "sources": sources, "videos": n}
+    name = longest if certain else spelling[top]
+    if certain:
+        titled = full_name_from_title(longest, full)
+        if titled != longest:
+            name = titled
+            sources.append("channel_title")
+    return {"name": name, "confidence": "high" if certain else "low", "sources": sources, "videos": n}
+
+
+def full_name_from_title(host: str, full: dict) -> str:
+    """The channel title as the host's full name, for a host known by a first
+    name alone. Only when the title is exactly two name words, the first is
+    the host's first name, and the second is corroborated: the About text
+    names the full title, the host says that word outright, or the upload
+    descriptions give the full title. Otherwise ``host`` unchanged."""
+    title = " ".join(str(full.get("name") or "").split())
+    words = title.split()
+    if len(host.split()) != 1 or len(words) != 2 or not all(
+            re.fullmatch(r"[^\W\d_](?:[^\W\d_]|['\-])+", w) for w in words):
+        return host
+    if not names_agree(host, title):
+        return host
+    surname = words[1].lower()
+    in_about = re.search(rf"\b{re.escape(title)}\b", str(full.get("about_text") or ""), re.I)
+    said = any(str(r.get("name") or "").lower() == surname and int(r.get("said_outright_videos") or 0) >= 1
+               for r in full.get("name_candidates") or [])
+    in_descriptions = any(len(str(r.get("name") or "").split()) == 2 and names_agree(str(r["name"]), title)
+                          for r in (full.get("description_anchors") or {}).get("names") or [])
+    return title if in_about or said or in_descriptions else host
 
 
 def names_agree(a: str, b: str) -> bool:
@@ -320,10 +347,10 @@ def names_agree(a: str, b: str) -> bool:
     return ta[0] == tb[0]
 
 
-def cache_host_name(channel: int, name: str, evidence: str) -> str:
-    """Set ``ai_description.host_name`` and its ``.evidence`` on the channel
-    record. Returns ``set``, or ``skipped: <why>``; never raises."""
-    return set_cached_with_evidence(channel, HOST_NAME_KEY, name, evidence)
+def cache_host_name(channel: int, name: str) -> str:
+    """Set ``ai_description.host_name`` on the channel record. Returns
+    ``set``, or ``skipped: <why>``; never raises."""
+    return set_cached(channel, HOST_NAME_KEY, name)
 
 
 def stamp_window(w: dict, verdict: dict, host_lc: set[str], stamp_hosts: bool) -> dict:
@@ -414,7 +441,7 @@ def apply(a) -> int:
         evidence = (f"cast sheets name the host in {certainty['videos']} of {len(cast)} videos; "
                     f"sources: {', '.join(certainty['sources'])}")
         certainty["evidence"] = evidence
-        certainty["cached"] = cache_host_name(int(channel), certainty["name"], evidence)
+        certainty["cached"] = cache_host_name(int(channel), certainty["name"])
         if certainty["cached"] == "set":
             # the context is the run's record of the cache, so the ledger
             # write that follows knows the host is settled

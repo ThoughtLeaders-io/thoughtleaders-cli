@@ -125,7 +125,7 @@ python3 <skill>/scripts/cast_sheet.py apply --sheets <corpus>/cast-sheets.json \
 On a refresh round N the files are `cast-sheets-rN.json`, `returns-rN` and `batches-rN`. Exit 3: re-spawn the sheets listed in `cast-respawn.json`, re-run apply. IF `cast.prompts` is empty (no openings could be read), skip this step and say so. Read `with_guests`, `formats` and `host_names_from_cast` from the summary: they are evidence for step 2, and `host_names_from_cast` fills empty host names (step 1, point 5). `host_name_cache` says what happened to the host's name on the channel record: a certain name (the sheets and a second source agree) is cached there as `ai_description.host_name` so the next run starts from it; `already set`, `skipped: not certain` and a missing or refused `tl-internal` are reported, never fixed by hand. Say the outcome in one line.
 
 **Step 2. Format call and prompts.**
-IF `identity.cached_format_label` is set, that is the label and `cached_format_label_evidence` its evidence (prefix the evidence with `cached:`), unless this run's `third_person_host_share` rule below or the cast sheet's majority contradicts it: then call it fresh and say the cache disagreed. Otherwise call the format from the `FUNNEL stage=context` line and the cast sheet's `formats`: `solo`, `interview`, `multi_host` or `faceless_scripted`, with one line of evidence. The stats are a hint, not a gate.
+IF `identity.cached_format_label` is set, that is the label and `cached_format_label_evidence`, when present, its evidence (prefix the evidence with `cached:`; with none, the evidence is `cached:` alone), unless this run's `third_person_host_share` rule below or the cast sheet's majority contradicts it: then call it fresh and say the cache disagreed. Otherwise call the format from the `FUNNEL stage=context` line and the cast sheet's `formats`: `solo`, `interview`, `multi_host` or `faceless_scripted`, with one line of evidence. The stats are a hint, not a gate.
 - IF `staged_share` > 0.1, name it in the evidence ("solo, 22% of titles are staged premises").
 - IF the fetch's `third_person_host_share` > 0.25, the label is `multi_host`.
 - IF most of the cast sheet's judged videos list a guest or a second host, the label is `interview` or `multi_host`, whichever the sheets say more often.
@@ -217,7 +217,7 @@ python3 <skill>/scripts/ledger_meta.py write --channel <id> --profiles-dir <prof
   --cast <corpus>/cast.json --host-names "<a>,<b>" [--lanes transcripts+socials]
 ```
 
-The write also caches on the channel record what the next run can start from, each with a `.evidence` key: `format_label` (when the cast sheets agree with the call), `host_aliases` (once the host's name is cached) and `sibling_channels`. Its `cache` field says per key `set`, `already set` or `skipped` and why; a cached value is never rewritten by a run, and a missing or refused `tl-internal` only shows there.
+The write also caches on the channel record what the next run can start from: `format_label` (when the cast sheets agree with the call), `host_aliases` (once the host's name is cached) and `sibling_channels`. Its `cache` field says per key `set`, `already set` or `skipped` and why; a cached value is never rewritten by a run, and a missing or refused `tl-internal` only shows there.
 
 PROFILE completion, three lines:
 1. The ledger's absolute path.

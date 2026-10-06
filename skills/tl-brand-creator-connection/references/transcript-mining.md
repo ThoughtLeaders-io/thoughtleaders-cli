@@ -98,8 +98,12 @@ set`) when it is certain: the sheets name the same host in two or more
 videos and a second source agrees (the names the fetch used, a name said
 outright on camera, a name the descriptions give), or the sheets alone name
 it in five or more videos and in at least half of the videos that name any
-host. The fullest spelling is stored (`Joe Rogan` over `Joe`). A name
-already cached is never rewritten; a missing or refused `tl-internal` is
+host. The fullest spelling is stored (`Joe Rogan` over `Joe`). A host known
+by a first name alone is stored under the channel title when the title is
+exactly two name words, the first is that first name, and the second is
+corroborated (the About text names the full title, the host says it outright
+on camera, or the upload descriptions give it); a title that fails any test
+leaves the first name. A name already cached is never rewritten; a missing or refused `tl-internal` is
 reported as `skipped`. `host_name_cache` in the summary carries the name,
 `confidence`, `sources` and the outcome. Exit 3 lists the sheets with no
 return in `cast-respawn.json`. The summary and the `FUNNEL stage=cast` line
@@ -226,14 +230,15 @@ fact. The orchestrating context never reads a transcript: it reads the
 summaries, the receipts and the page.
 
 With `--context`, the write caches three attributes on the channel record
-(`ai_description`, through `tl-internal channels ai-description set`), each
-with a `<key>.evidence` companion: `format_label`, when the cast sheets
+(`ai_description`, through `tl-internal channels ai-description set`):
+`format_label`, when the cast sheets
 judged ten or more videos and their most frequent format agrees with the
 label (`interview` with interview or collab sheets, `multi_host` with
 multi-host or collab, `solo` with solo or staged, `faceless_scripted` with
 faceless); `host_aliases`, once `host_name` is cached, as the names the run
 used, the spellings the sheets give the host in two or more videos and the
-names said outright in two or more uploads, each with its reason; and
+names said outright in two or more uploads, never a part of `host_name`
+itself (a surname is not an alias); and
 `sibling_channels`, the record's own candidates as `{link, source}`. A key
 already cached is never rewritten; `cache` in the summary says `set`,
 `already set` or `skipped` and why per key.
@@ -305,8 +310,9 @@ python3 <skill>/scripts/channel_context.py --from <corpus>/context-full.json \
 profile, language, sibling candidates including the cached ones with source
 `cached`), what earlier runs cached on the channel record
 (`cached_host_name` and `cached_host_aliases`, which end the host-name
-discovery when set; `cached_format_label` with
-`cached_format_label_evidence`; `cached_sibling_channels`), the creator's
+discovery when set; `cached_format_label`, with
+`cached_format_label_evidence` when the record has one;
+`cached_sibling_channels`), the creator's
 `websites` and
 `social_links` (emails dropped), `description_anchors` (what the newest 60
 upload descriptions call the host: promo-code stems, vanity-link slugs
