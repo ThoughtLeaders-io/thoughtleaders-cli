@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPTS = (Path(__file__).resolve().parents[1]
-            / "skills" / "tl-creator-brief" / "scripts")
+            / "skills" / "tl-brand-creator-connection" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 import fetch_cues  # noqa: E402
 

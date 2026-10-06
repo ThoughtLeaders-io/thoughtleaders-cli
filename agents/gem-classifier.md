@@ -2,7 +2,7 @@
 name: gem-classifier
 description: >
   Extracts creator self-disclosure ("gems") from ONE batch of transcript
-  windows for the tl-creator-brief skill: which windows are the creator
+  windows for the tl-brand-creator-connection skill: which windows are the creator
   talking about themselves, whose voice it is and what showed that, which
   life domain, plus the third-person claim and the exact span of the window
   that proves it. It does not tier sensitivity; the merge pass does. Use for

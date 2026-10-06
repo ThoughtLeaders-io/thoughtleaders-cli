@@ -1,4 +1,4 @@
-"""Tests for skills/tl-creator-brief/scripts/extractor_prompt.py."""
+"""Tests for skills/tl-brand-creator-connection/scripts/extractor_prompt.py."""
 
 import json
 import subprocess
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPTS = (Path(__file__).resolve().parent.parent
-            / "skills" / "tl-creator-brief" / "scripts")
+            / "skills" / "tl-brand-creator-connection" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 import extractor_prompt as ep  # noqa: E402
 

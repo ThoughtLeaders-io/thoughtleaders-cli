@@ -1,7 +1,7 @@
-"""tl-creator-brief accuracy checks: one or more invented cases per check added after the 40-claim review (names, claim-to-quote, hooks, recency, ended, dates, host names, past reads). Invented data only."""
+"""tl-brand-creator-connection accuracy checks: one or more invented cases per check added after the 40-claim review (names, claim-to-quote, hooks, recency, ended, dates, host names, past reads). Invented data only."""
 import json, sys
 from pathlib import Path
-S = Path(__file__).resolve().parents[1] / "skills" / "tl-creator-brief" / "scripts"
+S = Path(__file__).resolve().parents[1] / "skills" / "tl-brand-creator-connection" / "scripts"
 sys.path.insert(0, str(S)); sys.path.insert(0, str(Path(__file__).parent))
 import assemble_extracts as ax, merge_pass as mp, build_html as bh, authenticate as au
 import verify_quotes as vq

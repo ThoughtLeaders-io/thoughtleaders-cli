@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPTS = (Path(__file__).resolve().parents[1]
-            / "skills" / "tl-creator-brief" / "scripts")
+            / "skills" / "tl-brand-creator-connection" / "scripts")
 sys.path.insert(0, str(_SCRIPTS))
 import assemble_extracts  # noqa: E402
 import bio_lane  # noqa: E402

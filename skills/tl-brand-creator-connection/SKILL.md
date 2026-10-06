@@ -1,20 +1,21 @@
 ---
-name: tl-creator-brief
-tl-blurb: verified creator profile → brand connections → creator-ready brief
+name: tl-brand-creator-connection
+tl-blurb: brand ↔ creator connections from a verified creator profile, plus an optional creator brief
 description: |
-  Build an evidence-backed profile of a YouTube creator from their own
-  transcripts and, when a brand is named, an honest creator-brand connection
-  map and an optional creator-ready brief. Invoke for "creator profile",
-  "what do we know about [creator]", "find self references", "creator-brand
-  connection", "personal angle for [channel]", "creator brief", "creator
-  talking points", "a brief I can send the creator", "creator-facing brief",
-  "talking points for [channel]", `/tl-creator-brief`, and help questions
-  about this skill. Socials/web research and the creator-facing brief are
-  opt-in: ask once if unstated; autonomous or fast runs use transcripts only
-  and skip the brief.
+  Find the honest connections between a brand and a YouTube creator, built
+  on an evidence-backed profile from the creator's own transcripts, with an
+  optional creator brief the creator can work from. Invoke for
+  "brand-creator connection", "creator-brand connection", "personal angle
+  for [channel]", "creator profile", "what do we know about [creator]",
+  "find self references", "creator brief", "creator talking points", "a
+  brief I can send the creator", "creator-facing brief", "talking points
+  for [channel]", `/tl-brand-creator-connection`, and help questions about
+  this skill. Socials/web research and the creator-facing brief are opt-in:
+  ask once if unstated; autonomous or fast runs use transcripts only and
+  skip the brief.
 ---
 
-# tl-creator-brief
+# tl-brand-creator-connection
 
 ## Scope
 
