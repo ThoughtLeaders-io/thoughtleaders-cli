@@ -49,25 +49,34 @@ sys.exit({exit_code})
 """
 
 
+_CAST_RENDER = {"videos": 12, "sheets": 1, "prompts": ["/x/prompts/cast-000.md"],
+                "manifest": "/x/cast-sheets.json"}
+
+
 def _script_stubs(tmp_path: Path, *, decision: dict, announcement: str = "",
-                  fetch_exit: int = 0) -> tuple[Path, Path]:
-    """A SCRIPTS dir of fakes. Returns (scripts_dir, call log)."""
+                  fetch_exit: int = 0, fetch: dict | None = None,
+                  context: dict | None = None) -> tuple[Path, Path]:
+    """A SCRIPTS dir of fakes. Returns (scripts_dir, call log). ``fetch`` is
+    what the fetch prints; ``context`` is merged into the channel record."""
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     log = tmp_path / "calls.jsonl"
     check_out = (f"{announcement}\n" if announcement else "") + json.dumps(decision)
+    record = {
+        "channel_id": 42, "name": "Airrack", "url": "https://y/@airrack",
+        "language": "en", "num_uploads": 283,
+        "about_text": "Eric Decker. Stunts.",
+        "generated_profile": "large-scale stunt videos",
+        "websites": [{"url": "https://airrack.com", "label": "site"}],
+        "social_links": ["https://instagram.com/airrack"],
+        "second_channel_candidates": [{"url": "https://y/@airrackplus"}],
+        **(context or {}),
+    }
     for name, stdout, code in (
-        ("channel_context.py", json.dumps({
-            "channel_id": 42, "name": "Airrack", "url": "https://y/@airrack",
-            "language": "en", "num_uploads": 283,
-            "about_text": "Eric Decker. Stunts.",
-            "generated_profile": "large-scale stunt videos",
-            "websites": [{"url": "https://airrack.com", "label": "site"}],
-            "social_links": ["https://instagram.com/airrack"],
-            "second_channel_candidates": [{"url": "https://y/@airrackplus"}],
-        }), 0),
+        ("channel_context.py", json.dumps(record), 0),
         ("ledger_meta.py", check_out, 0),
-        ("fetch_cues.py", json.dumps({"windows": 500, "batch_size": 25}), fetch_exit),
+        ("fetch_cues.py", json.dumps(fetch or {"windows": 500, "batch_size": 25}), fetch_exit),
+        ("cast_sheet.py", json.dumps(_CAST_RENDER), 0),
     ):
         (scripts / name).write_text(_FAKE.format(
             log=str(log), name=name, stdout=stdout, exit_code=code))
@@ -87,12 +96,14 @@ def _of(log: Path, name: str) -> list[list[str]]:
 @pytest.fixture
 def env(tmp_path, monkeypatch, capsys):
     """A run harness: stubs wired in, returns a callable that runs main()."""
-    def _run(argv, *, decision=None, announcement="", tl=None, fetch_exit=0):
+    def _run(argv, *, decision=None, announcement="", tl=None, fetch_exit=0,
+             fetch=None, context=None):
         scripts, log = _script_stubs(
             tmp_path,
             decision=decision or {"decision": "build", "reason": "no ledger",
                                   "next_round": 1},
-            announcement=announcement, fetch_exit=fetch_exit)
+            announcement=announcement, fetch_exit=fetch_exit, fetch=fetch,
+            context=context)
         monkeypatch.setattr(start_run, "SCRIPTS", scripts)
         monkeypatch.setattr(tl_data, "TL_BIN", str(_tl_stub(tmp_path, tl or {
             "whoami": {"stdout": json.dumps(
@@ -339,3 +350,66 @@ def test_creator_brief_on_with_no_points_writes_an_unsupplied_record(env):
 def test_a_profile_run_carries_no_creator_brief_field(env):
     rc, out, _ = env(["--channel", "42"])
     assert rc == 0 and out["creator_brief"] is None
+
+
+# --------------------------------------------------------------------------- #
+# the cast sheet's prompts and the host name the descriptions give
+# --------------------------------------------------------------------------- #
+_FETCH_WITH_INTROS = {"windows": 500, "batch_size": 25, "round": 1, "intros": 12,
+                      "intros_file": "/x/intros.jsonl", "returns_dir": "/x/returns"}
+
+
+def test_the_cast_prompts_are_rendered_when_the_fetch_read_openings(env, tmp_path):
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"], fetch=_FETCH_WITH_INTROS)
+    assert rc == 0 and out["ran"][-2:] == ["context_stats", "cast_prompts"]
+    corpus = tmp_path / "profiles" / ".corpus" / "42"
+    assert _of(log, "cast_sheet.py") == [[
+        "render", "--intros", "/x/intros.jsonl", "--context-full", str(corpus / "context-full.json"),
+        "--host-names", "Eric", "--out-dir", str(corpus / "prompts"), "--returns-dir", "/x/returns"]]
+    assert out["cast"] == _CAST_RENDER
+    assert "cast_sheet.py apply" in out["next"]
+
+
+def test_no_openings_means_no_cast_prompts(env):
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"])
+    assert rc == 0 and "cast_prompts" not in out["ran"]
+    assert out["cast"] == {"videos": 0, "sheets": 0, "prompts": []}
+    assert _of(log, "cast_sheet.py") == []
+
+
+def test_a_refresh_round_renders_its_sheets_beside_its_own_batches(env, tmp_path):
+    rc, out, log = env(["--channel", "42", "--host-names", "Eric"],
+                       decision={"decision": "refresh", "reason": "new uploads", "next_round": 2,
+                                 "latest_video_date": "2026-08-01"},
+                       fetch={**_FETCH_WITH_INTROS, "round": 2, "intros_file": "/x/intros-r2.jsonl",
+                              "returns_dir": "/x/returns-r2"})
+    assert rc == 0
+    render = _of(log, "cast_sheet.py")[0]
+    assert render[render.index("--out-dir") + 1].endswith("/prompts-r2")
+    assert render[render.index("--intros") + 1] == "/x/intros-r2.jsonl"
+
+
+def test_an_empty_host_name_is_filled_from_the_descriptions_and_the_fetch_runs_again(env):
+    anchors = {"uploads_read": 60, "template_lines": 4, "codes": [{"token": "airrack", "videos": 10}],
+               "slugs": [], "names": [{"name": "Eric Decker", "videos": 5, "cue": "Hosted by Eric Decker"}]}
+    rc, out, log = env(["--channel", "42", "--host-names", ""],
+                       fetch=_FETCH_WITH_INTROS, context={"description_anchors": anchors})
+    assert rc == 0
+    assert out["identity"]["description_anchors"] == anchors
+    assert "cached_host_name" in out["identity"] and "cached_format_label" in out["identity"]
+    fetches = _of(log, "fetch_cues.py")
+    assert len(fetches) == 2 and fetches[0][2:4] == ["--host-names", ""]
+    assert fetches[1][2:4] == ["--host-names", "Eric,Eric Decker"]
+    assert out["host_names_found"] == ["Eric", "Eric Decker"]
+    assert out["host_names_source"] == "descriptions"
+    assert "refetch_with_found_name" in out["ran"]
+    render = _of(log, "cast_sheet.py")[0]
+    assert render[render.index("--host-names") + 1] == "Eric,Eric Decker"
+
+
+def test_with_no_name_anywhere_the_fetch_runs_once_and_the_sheets_get_no_name(env):
+    rc, out, log = env(["--channel", "42", "--host-names", ""], fetch=_FETCH_WITH_INTROS)
+    assert rc == 0 and len(_of(log, "fetch_cues.py")) == 1
+    assert "host_names_found" not in out
+    render = _of(log, "cast_sheet.py")[0]
+    assert render[render.index("--host-names") + 1] == ""

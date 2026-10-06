@@ -57,14 +57,15 @@ import datetime as dt
 import glob
 import gzip
 import json
-import re
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import store_io  # sibling module  # noqa: E402
 import tl_data  # noqa: E402
+from channel_context import set_cached_with_evidence  # noqa: E402  sibling: the cache writer
 
 SCHEMA = "tl-creator-meta/v2"
 DEFAULT_MAX_NEW_VIDEOS = 5
@@ -310,6 +311,108 @@ def verified_facts(path: pathlib.Path) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# What a finished run caches on the channel record, beside the host name the
+# cast sheet cached earlier: the format label when the cast sheets agree with
+# it, the host's aliases once the host's name is settled, and the sibling
+# channels the record points at. Each value has a `.evidence` key; a value
+# already cached is never rewritten.
+# --------------------------------------------------------------------------- #
+FORMAT_AGREES = {"interview": {"interview", "collab"}, "multi_host": {"multi_host", "collab"},
+                 "solo": {"solo", "staged"}, "faceless_scripted": {"faceless"}}
+FORMAT_CACHE_VIDEOS_MIN = 10
+ALIAS_VIDEOS_MIN = 2
+
+
+def _cast_counts(cast: dict) -> tuple[dict[str, int], dict[str, int], dict[str, str]]:
+    """``(videos per format, videos per lowercase host name, the spelling used most)``."""
+    formats: dict[str, int] = {}
+    hosts: dict[str, int] = {}
+    spelling: dict[str, dict[str, int]] = {}
+    for v in cast.values():
+        if not isinstance(v, dict):
+            continue
+        fmt = str(v.get("format") or "")
+        formats[fmt] = formats.get(fmt, 0) + 1
+        for h in {str(h).strip() for h in v.get("hosts") or []}:
+            if h and h.lower() != "host":
+                hosts[h.lower()] = hosts.get(h.lower(), 0) + 1
+                spelling.setdefault(h.lower(), {})[h] = spelling.get(h.lower(), {}).get(h, 0) + 1
+    best = {k: max(c, key=c.get) for k, c in spelling.items()}
+    return formats, hosts, best
+
+
+def cache_run_attributes(channel: int, context: dict, *, fmt: str | None, evidence: str | None,
+                         cast: dict | None, host_names: list[str], writer=None) -> dict:
+    """Cache ``format_label``, ``host_aliases`` and ``sibling_channels`` on the
+    channel record; returns the outcome per key (``set``, ``already set: …``
+    or ``skipped: <why>``)."""
+    writer = writer or set_cached_with_evidence
+    out: dict[str, str] = {}
+    formats, hosts, spelling = _cast_counts(cast or {})
+    judged = sum(formats.values())
+
+    # format label: the model's call, confirmed by the measured cast formats
+    cached = context.get("cached_format_label")
+    if cached:
+        out["format_label"] = f"already set: {cached}"
+    elif not fmt:
+        out["format_label"] = "skipped: no format label"
+    elif judged < FORMAT_CACHE_VIDEOS_MIN:
+        out["format_label"] = f"skipped: cast sheets judged {judged} videos, fewer than {FORMAT_CACHE_VIDEOS_MIN}"
+    else:
+        top = max(formats, key=formats.get)
+        if top in FORMAT_AGREES.get(fmt, set()):
+            out["format_label"] = writer(channel, "format_label", fmt,
+                                         f"{evidence or 'format call'}; cast sheets: {top} in "
+                                         f"{formats[top]} of {judged} videos")
+        else:
+            out["format_label"] = f"skipped: cast sheets say {top} in {formats[top]} of {judged} videos, the run says {fmt}"
+
+    # host aliases: only once the host's name is settled on the record
+    host = context.get("cached_host_name")
+    if context.get("cached_host_aliases"):
+        out["host_aliases"] = f"already set: {', '.join(context['cached_host_aliases'])}"
+    elif not host:
+        out["host_aliases"] = "skipped: host name not cached"
+    else:
+        why: dict[str, list[str]] = {}
+        for name in host_names:
+            why.setdefault(name.strip(), []).append("given to the run")
+        for low, n in hosts.items():
+            if n >= ALIAS_VIDEOS_MIN:
+                why.setdefault(spelling[low], []).append(f"cast sheets name the host in {n} videos")
+        for r in context.get("name_candidates") or []:
+            if int(r.get("said_outright_videos") or 0) >= ALIAS_VIDEOS_MIN:
+                why.setdefault(str(r["name"]).capitalize(), []).append(
+                    f"said outright in {r['said_outright_videos']} uploads")
+        aliases = [a for a in why if a and a.lower() not in {host.lower(), host.split()[0].lower()}]
+        if not aliases:
+            out["host_aliases"] = "skipped: no alias with evidence"
+        else:
+            out["host_aliases"] = writer(channel, "host_aliases", aliases,
+                                         "; ".join(f"{a}: {', '.join(why[a])}" for a in aliases))
+
+    # sibling channels: the record's own pointers
+    cached_sib = context.get("cached_sibling_channels") or []
+    siblings = [{"link": c["link"], "source": c.get("source")}
+                for c in context.get("second_channel_candidates") or []
+                if isinstance(c, dict) and c.get("link") and c.get("source") != "cached"]
+    if cached_sib:
+        out["sibling_channels"] = f"already set: {len(cached_sib)} channels"
+    elif not siblings:
+        out["sibling_channels"] = "skipped: no sibling candidates"
+    else:
+        by_source: dict[str, int] = {}
+        for c in siblings:
+            by_source[str(c["source"])] = by_source.get(str(c["source"]), 0) + 1
+        out["sibling_channels"] = writer(
+            channel, "sibling_channels", siblings,
+            f"{len(siblings)} candidates from the channel's own pointers: "
+            + ", ".join(f"{k} ({n})" for k, n in sorted(by_source.items())))
+    return out
+
+
 def cmd_write(a: argparse.Namespace) -> int:
     profiles = pathlib.Path(a.profiles_dir)
     corpus_dir = profiles / ".corpus" / str(a.channel)
@@ -332,7 +435,22 @@ def cmd_write(a: argparse.Namespace) -> int:
                       lanes=a.lanes,
                       context=load_context(a.context), previous=previous)
     store_io.write_ledger(path, meta, facts)
-    print(json.dumps({"ledger": str(path), **meta}, ensure_ascii=False))
+    cache = None
+    if a.context:
+        try:
+            full = json.loads(pathlib.Path(a.context).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            full = {}
+        cast = None
+        if a.cast and pathlib.Path(a.cast).exists():
+            try:
+                cast = json.loads(pathlib.Path(a.cast).read_text(encoding="utf-8"))
+            except ValueError:
+                cast = None
+        cache = cache_run_attributes(a.channel, full, fmt=a.format, evidence=a.format_evidence,
+                                     cast=cast, host_names=[x.strip() for x in (a.host_names or "").split(",")
+                                                            if x.strip()])
+    print(json.dumps({"ledger": str(path), **meta, "cache": cache}, ensure_ascii=False))
     return 0
 
 
@@ -391,7 +509,14 @@ def main(argv: list[str] | None = None) -> int:
                         "or the existing record's value on a refresh")
     w.add_argument("--context", default=None,
                    help="channel_context.py output JSON: linked platforms and sibling "
-                        "channels are kept in the header for the connections page")
+                        "channels are kept in the header for the connections page, and "
+                        "the format label, host aliases and sibling channels are cached "
+                        "on the channel record from it")
+    w.add_argument("--cast", default=None,
+                   help="cast.json from cast_sheet.py apply: the measured per-video formats "
+                        "and host names that confirm the format label and the aliases")
+    w.add_argument("--host-names", dest="host_names", default=None,
+                   help="the host aliases the run used, comma-separated")
     w.set_defaults(fn=cmd_write)
     c = sub.add_parser("check", help="reuse decision for an existing ledger")
     c.add_argument("--channel", type=int, required=True)

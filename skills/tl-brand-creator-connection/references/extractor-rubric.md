@@ -28,8 +28,11 @@ The one message you read holds, in order:
    around the cue: the sentences before and after the cue are in the window
    and may hold the fact or show who is speaking), `start`, `video_id`,
    `title`, `published`, `language`, `format_hint` (`interview_or_collab`,
-   `reaction`, `staged`, or null) and the flags `cues_fired`, `host_anchor`,
-   `second_voice_hint`, `entity_hits`, `weak_anchor`, `in_sponsor_read`,
+   `reaction`, `staged`, or null), `cast` (who the video's own opening,
+   title and description say is on it: `hosts`, `guests`, `format`; null
+   when no sheet covered the video) and the flags `cues_fired`,
+   `host_anchor`, `second_voice_hint`, `turns`, `guest_anchor`,
+   `guest_named`, `entity_hits`, `weak_anchor`, `in_sponsor_read`,
    `recurrence_videos`, `stage_direction`, `boilerplate`.
 5. The output instructions.
 
@@ -50,6 +53,19 @@ Flags and hints are inputs, never verdicts.
   host speaking of themselves in the third person (a self-introduction, a
   title card read aloud). A crew member's "I moved across the country to make
   videos with Sam" is the crew member's fact, never Sam's.
+- `cast` is read from the video itself by a separate pass. A video whose
+  cast lists a guest or a second host takes the shared-voice rules. A name
+  in `cast.guests` is someone the host brought on: `guest_anchor` lists the
+  guests naming themselves in the window ("I'm Dave"), so the speaker is
+  that guest, never the host; `guest_named` lists the guests named or
+  addressed in the window ("Dave, tell me", "Dave said"), so the speaker is
+  not that guest, and on a video whose cast is the host and that one guest a
+  first-person line that addresses the guest is the host's. Name the guest
+  in `speaker_evidence`.
+- `turns` counts the captions' own marks of a change of speaker (`>>`) in
+  the window. One or more means more than one voice: the speaker of a line
+  is whoever has spoken since the last `>>` before it, so decide on the
+  stretch between the marks, not on the window.
 - `in_sponsor_read` proves host voice and bars only claims about the
   sponsored product or offer. A personal aside inside the read is a gem at
   `confirmed`. A window that is nothing but the pitch is `not_gems` with
