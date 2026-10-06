@@ -465,9 +465,18 @@ def set_cached(channel_id: int, key: str, value) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         return f"skipped: {type(exc).__name__}"
     if proc.returncode != 0:
-        lines = (proc.stderr.strip() or proc.stdout.strip()).splitlines()
-        return f"skipped: {lines[-1][:160] if lines else f'exit {proc.returncode}'}"
+        return f"skipped: {_error_line(proc.stderr) or _error_line(proc.stdout) or f'exit {proc.returncode}'}"
     return "set"
+
+
+def _error_line(text: str) -> str:
+    """The last line of a CLI error that says something, with the panel
+    borders the terminal rendering draws around it stripped."""
+    for line in reversed(str(text or "").splitlines()):
+        clean = line.strip(" \t│╭╰╮╯─╴╶")
+        if clean and any(ch.isalpha() for ch in clean):
+            return clean[:160]
+    return ""
 
 
 def set_cached_with_evidence(channel_id: int, key: str, value, evidence: str) -> str:

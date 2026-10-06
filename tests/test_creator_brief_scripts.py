@@ -1918,3 +1918,9 @@ def test_set_cached_calls_the_internal_cli_and_reports_the_outcome(tmp_path, mon
     assert log.read_text().splitlines() == ["channels ai-description set 7 format_label solo"]
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     assert cc.set_cached(42, "host_name", "Joe") == "skipped: tl-internal not available"
+    # a refusal drawn as a terminal panel reports its words, not its border
+    monkeypatch.setenv("PATH", str(fake))
+    (fake / "tl-internal").write_text(
+        "#!/bin/sh\nprintf '%s\\n' 'Usage: tl-internal channels [OPTIONS]' '╭─ Error ───╮' "
+        "'│ No such command ai-description.  │' '╰───────────╯' >&2\nexit 2\n")
+    assert cc.set_cached(42, "host_name", "Joe") == "skipped: No such command ai-description."
