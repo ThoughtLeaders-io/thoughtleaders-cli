@@ -3,19 +3,30 @@ name: tl-brand-creator-connection
 tl-blurb: brand ↔ creator connections from a verified creator profile, plus an optional creator brief
 description: |
   Find the honest connections between a brand and a YouTube creator, built
-  on an evidence-backed profile from the creator's own transcripts, with an
-  optional creator brief the creator can work from. Invoke for
-  "brand-creator connection", "creator-brand connection", "personal angle
-  for [channel]", "creator profile", "what do we know about [creator]",
-  "find self references", "creator brief", "creator talking points", "a
-  brief I can send the creator", "creator-facing brief", "talking points
-  for [channel]", `/tl-brand-creator-connection`, and help questions about
-  this skill. Socials/web research and the creator-facing brief are opt-in:
-  ask once if unstated; autonomous or fast runs use transcripts only and
-  skip the brief.
+  on a reusable, evidence-backed profile from the creator's own words, with
+  an optional creator brief the creator can work from. Invoke whenever the
+  user asks for a "brand-creator connection", "creator-brand connection",
+  "personal angle for [channel]", "creator profile", "what do we know about
+  [creator]", "find self references", "creator brief", "creator talking
+  points", "a brief I can send the creator", "creator-facing brief",
+  "talking points for [channel]", or `/tl-brand-creator-connection`. It mines the
+  creator's transcripts for first-person disclosures, verifies every retained
+  quote against its timestamped source, resolves contradictions and
+  sensitivity, and writes a reusable fact ledger. With a brand, it also
+  researches the brand, produces an internal connection map (including an
+  honest thin-fit or no-fit verdict), and can produce a creator-ready brief
+  whose talking points are built from the creator's own gems and lead to the
+  brand: the brand's own brief mirrored when it sent one, a six-section
+  fallback when it did not. Social and web identity research is OPT-IN;
+  the creator-facing brief is OPT-IN and asks once for the brand's brief
+  and what it is promoting. With neither choice stated, ask once
+  for the missing choices before paid research; autonomous/fast runs use
+  transcripts only and skip the creator-facing brief. Also invoke for HELP
+  asks about this skill; explain the modes and choices without running
+  queries.
 ---
 
-# tl-brand-creator-connection
+# tl-brand-creator-connection: creator → verified profile → honest brand connection
 
 ## Scope
 
