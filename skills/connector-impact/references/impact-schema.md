@@ -49,9 +49,12 @@ Filters: `ActionDateStart` / `ActionDateEnd` (on `EventDate`; use these for wind
 | `PromoCode` | string | Checkout code |
 | `SharedId` | string | Value passed on the winning click's link |
 | `Oid` | string | Brand's order id |
-| `CustomerId`, `CustomerStatus` | string | Non-PII id; `NEW` / `EXISTING` if configured |
+| `CustomerId`, `CustomerStatus` | string | Brand's customer identifier and status (`NEW` / `EXISTING`), passed through by Impact when configured |
 | `CustomerCountry`, `CustomerRegion`, `CustomerCity` | string | If passed |
 | `Note` | string | Free text |
+
+`Oid`, `CustomerId`, `CustomerStatus`, `CustomerCountry`, `CustomerRegion`, `CustomerCity` and
+`Note` are per-customer; this skill's output is per-partner/per-deal. Never copy into output.
 
 `ActionUpdate` records each change: `ActionId`, `State`, `StateDetail`, `DeltaPayout`,
 `DeltaAmount`, `ContractId`, `UpdateDate`.
@@ -105,7 +108,9 @@ from the report's `MetaDataUri`; read it before trusting a column name.
 | Performance by Day | One row per day | Grouped numbers |
 | Advanced Action Listing | One row per action | The only report with each action's status |
 
-Grouped report columns (checked on Brand and Partner accounts, September 2026):
+Grouped report columns: Partner-account names were checked against TL's own Partner account
+(September 2026); Brand-account names are unverified against a live Brand account, from Impact's
+documentation:
 
 | Column | Meaning |
 |---|---|
@@ -124,8 +129,9 @@ figures can arrive already converted by Impact.
 
 ## Field names by route
 
-Map every column to its row here before any math. Brand and Partner report names were checked on
-live accounts in September 2026; API names come from Impact's documentation.
+Map every column to its row here before any math. Partner report names were checked against
+TL's own Partner account (September 2026); Brand report and API names are unverified against a
+live Brand account, from Impact's documentation.
 
 | Field | Brand API (Action) | Brand report (Advanced Action Listing) | Partner report |
 |---|---|---|---|

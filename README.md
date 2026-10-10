@@ -279,6 +279,7 @@ The plugin ships several focused skills (installed by all the `tl setup *` comma
 - **`tl-channel-authenticity`** — vets a YouTube channel for non-organic views and bot/spam comments before booking (or after delivering) a sponsorship.
 - **`tl-views-guarantee`** — sizes a multi-video sponsorship buy for a channel, returning the video bundle size, views guarantee, and likelihood to hit.
 - **`tl-top-partnerships`** — brand-user performance report. Ranks a brand's sold sponsorships by live eCPM vs the sold-date projection, aggregates per channel, and delivers a two-tab Google Sheet ("By Deal" / "By Channel") via `gws`. Uses only public CLI commands (`tl whoami`, `tl sponsorships list`).
+- **`connector-impact`** — joins a brand's Impact (impact.com) performance data to its TL sponsorships: each Impact partner matched to a TL channel, and performance read against the creator's go-live dates, views and price. Brand-user facing.
 
 ## Distributed skills
 

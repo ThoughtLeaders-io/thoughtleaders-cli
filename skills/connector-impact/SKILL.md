@@ -6,9 +6,10 @@ description: |
   TL channel and, where Impact can tell videos apart, to the exact TL sponsorship; otherwise a
   go-live timeline of the creator's TL videos against Impact results. TL views, price and CPM sit
   beside Impact clicks, actions, sales revenue and commission. Also covers creators the brand
-  never booked through TL, and brands with no TL bookings. Invoke when the user wants Impact
-  numbers read against TL data: "how did our sponsorships convert in Impact", "Impact performance
-  for [creator/brand]", "which TL creators drove the most actions", "actions per 1,000 views",
+  never booked through TL, and brands with no TL bookings. Brand side only: a media-buyer `tl`
+  login and a brand (advertiser) Impact account. Invoke when the user wants Impact numbers read
+  against TL data: "how did our sponsorships convert in Impact", "Impact performance for
+  [creator/brand]", "which TL creators drove the most actions", "actions per 1,000 views",
   "cost per action on our sponsorships", "is [creator] declining", "match Impact partners to our
   channels", "what does [Impact term] mean in TL", or any question mixing Impact terms (Partner,
   Action, Action Cost, Total Cost, Program, PromoCode, SharedId) with TL data. The user supplies
@@ -37,7 +38,8 @@ including for a brand with no TL bookings.
 Do not use:
 - Impact-only question with no TL angle: tell the user Impact's MCP answers it directly.
 - TL-only question: use the `tl` skill.
-- Renew / don't-renew verdict: build the join here, then hand the deal scorecard to the renewal skill.
+- Renew / don't-renew verdict: build the join here, then apply the renewal rule in the `tl`
+  skill's `references/business-glossary.md` (*Performance Grade*). This skill sets no grade.
 
 ## Help mode
 
@@ -73,59 +75,142 @@ unmatched partner, dropped row and currency mismatch when it is found.
 Aggregate at the source: `GROUP BY` in TL SQL, grouped `query_performance` in Impact. Compute
 every sum and ratio with a calculation (SQL or a quick code step), never by hand.
 
+**Quote the cost before charging it.** Before the first charged read, tell the user what will be
+read and what it is estimated to cost in credits, next to the balance from `tl balance`: the deal
+pull is 0.3 credits a row over the row count `total` reports, and `tl db pg --pricing` /
+`tl db es --pricing` return a per-row rate and an upper-bound cost without running the query
+(1 credit each). IF the estimate is above the user's stated ceiling, or above a tenth of the
+balance, stop and ask before reading. Keep a running ledger from each response's
+`usage.credits_charged`, **failed reads included** — a read that errors is charged like any other
+— and report the total with the results. Write "credits"; never "cr".
+
+**Page every read to the end.** Every `tl db pg` call carries both `LIMIT` and `OFFSET`, every
+`tl db es` body both `size` and `from`, and every page walks the envelope's `next_offset` until
+`has_more` is false. `tl sponsorships list` serves at most 500 rows a page whatever `--limit`
+asks for, so page it the same way.
+
+**Refuse loudly on truncation.** IF any read comes back short of its `total` — a page cap, a
+rejected offset, an error mid-walk — stop the run, name the read and how many rows are missing,
+and ask before going on. Never answer short: a creator silently dropped from the deal set is
+classified "not booked through TL", and the report then quotes what the brand paid through
+Impact as the source of truth — a confidently wrong cost figure with no error anywhere.
+
+**Personal data stays out.** Never copy a partner's `Contacts[]` into output, and never carry an
+action's customer-level fields — `CustomerId`, `CustomerStatus`, `CustomerCountry`,
+`CustomerRegion`, `CustomerCity`, `Oid`, `Note` — into a table, a note or a calculation. The
+deliverable is per partner and per deal; nothing below that grain leaves Impact.
+
 ### 0. Setup
 
-1. Run `tl whoami` to confirm the TL login works.
-2. Confirm the user's Impact route (schema: *Access routes*). IF none: list the four routes and stop.
-3. Never ask for, accept or repeat an Impact token or password. IF the user pastes one, tell them
+1. Run `tl whoami --json` to confirm the TL login works and read the caller's side from
+   `profile.persona` and `profile.flags`.
+2. **Seller-side login: stop here.** IF the caller is a publisher / media seller — persona
+   creator or creator service, or `publisher` in `flags` without `advertiser` — refuse the run
+   and say why: this skill reads a brand's affiliate program against the deals that brand bought,
+   and a seller-side login returns the creator's own deals instead. The run would finish and
+   produce a complete, plausible report of the wrong org's spend with no error anywhere. A
+   media-buyer login is required.
+3. Confirm the user's Impact route (schema: *Access routes*). IF none: list the four routes and stop.
+4. Never ask for, accept or repeat an Impact token or password. IF the user pastes one, tell them
    to revoke it.
-4. Identify the account type from the API base or the web app address (mapping 5). IF it differs
-   from the account the user described, stop and tell the user.
-5. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
-6. Record the currency the Impact figures are in and the TL deals' `price_currency`. On a
+5. **The supported direction is brand → partners.** Identify the account from the API base or the
+   web app address (mapping 5). A Brand account (`/Advertisers/`, `/secure/advertiser/`) is the
+   only connection this skill runs. IF it is a Partner account, stop and say so: mapping 5's
+   Partner column is reference for reading a partner's own figures, not a flow. IF the account
+   type differs from the one the user described, stop and tell the user.
+6. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
+7. IF creators are named, resolve them to TL channel ids now (stage 1), before any deal read.
+8. Record the currency the Impact figures are in and the TL deals' `price_currency`. On a
    report, the figures' currency is its display-currency setting; do not change it. IF the two
    differ, tell the user now and apply mapping 2.3.
-7. State the scope back: brand, window, view, states (approved headline, pending separate),
-   currencies.
+9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
+   states (approved headline, pending separate), currencies.
 
 ### 1. TL side
 
-Pull sold deals live up to the window end. No start-date filter: videos that went live before the
-window still drive sales inside it (mapping 4.2).
-
-```sql
-SELECT al.id, al.publish_date, al.price, al.price_currency, asp.ad_format,
-       al.projected_views_at_purchase_date, al.tracking_url, al.cta_text,
-       al.media_url, al.article_id, al.conversions, al.revenue, al.revenue_currency,
-       asp.channel_id, ch.channel_name, ch.url, ch.common_name
-FROM thoughtleaders_adlink al
-JOIN thoughtleaders_profile_brands pb ON pb.profile_id = al.advertiser_profile_id
-JOIN thoughtleaders_adspot asp ON asp.id = al.ad_spot_id
-JOIN thoughtleaders_channel ch ON ch.id = asp.channel_id
-WHERE pb.brand_id = <brand_id> AND al.publish_status = 3
-  AND al.publish_date IS NOT NULL AND al.publish_date <= '<window_end>'
-ORDER BY asp.channel_id, al.publish_date
-LIMIT 1000
-```
-
-- IF creators are named: add `AND asp.channel_id IN (...)` with every TL record of those
-  creators. Find records by exact match (the `tl` skill's bulk lookup) on the channel name, the
-  handle, and every handle in the channel's `social_links` and `url`, against other records'
-  `common_name` and `url`. IF more than one record matches, list them with their URLs and ask
-  which to include; "all" means one creator across platforms.
-- Each deal's platform comes from its ad spot's `ad_format` (mapping 1.4).
-- IF no rows: continue. Every partner goes to "not booked through TL" or "not a TL creator"
-  (mapping 4.4).
-- Run the coverage count (mapping 3.5) and tell the user which join keys this brand's deals have.
-
-Get views from TL's video index in one call. A YouTube deal's video id is its `article_id`, or
-else the id in its `media_url` (the video link; `urls` holds destination links). A deal with
-neither, or on another platform, has no TL views (mapping 4.2):
+Pull the brand's sold deals with `tl sponsorships list`. No date filter: videos that went live
+before the window still drive sales inside it (mapping 4.2), and sold deals with no
+`publish_date` belong in the report too (4.2).
 
 ```bash
-tl db es '{"size": <number of videos>, "query": {"terms": {"id": ["<article_id>", "..."]}},
+tl sponsorships list status:sold brand:"<brand name>" --limit 500 --offset 0 --json
+```
+
+- IF creators are named: resolve each to its TL channel ids first, then run one paged pull per
+  id with `channel:<channel_id>` added. Never pull the brand's whole book and filter in memory.
+  Resolve by exact match, `UPPER()` on both sides — the bulk form in the `tl` skill's
+  `references/postgres-schema.md`, under *For bulk handle/name lookups in SQL* — on the channel
+  name, the handle, the handle in `url`, and the creator's named platform handles, against other
+  records' `common_name` and `url`. IF more than one record matches, list them with their URLs
+  and ask which to include; "all" means one creator across platforms.
+- Project **named platform keys only** out of a channel's `social_links` (`youtube`, `tiktok`,
+  `instagram`, …), never the whole object and never its `_emails` array, which holds creators'
+  personal e-mail addresses. That array is never selected, never printed and never passed into a
+  calculation. The Elasticsearch mirror of the field is sanitised and is the safer source.
+- The rows carry `id`, `publish_date`, `price`, `projected_views_at_purchase_date`, `article_id`,
+  `channel_id`, `channel`, `common_name`, `brand_id`, `status`, `cpm` and `views`. TL views come
+  from here; the video index is only the fallback below.
+- `brand:` is a partial name match. Check every row's `brand_id` against the id resolved in
+  setup; name any row that does not match and leave it out.
+- Partition the pull: deals live on or before the window end feed the scorecard or timeline;
+  sold deals with no `publish_date` are not live and are listed under the table (mapping 4.2);
+  deals live after the window end are outside it — report their count.
+- IF no rows: continue. Every partner goes to "not booked through TL" or "not a TL creator"
+  (mapping 4.4).
+
+Then one adlink-only read for the Impact join keys and currency columns the list does not carry,
+keyed on the deal ids already pulled:
+
+```sql
+SELECT al.id, al.tracking_url, al.media_url, al.price_currency,
+       al.conversions, al.revenue, al.revenue_currency
+FROM thoughtleaders_adlink al
+WHERE al.id IN (<deal ids>)
+LIMIT 500 OFFSET 0
+```
+
+Join the two result sets on deal id.
+
+- Send at most 500 ids a call and reconcile the ids returned against the ids sent. An id with no
+  row back is a truncated read, not a deal without join keys.
+- No join to `thoughtleaders_profile_brands`, `thoughtleaders_adspot` or
+  `thoughtleaders_channel`: the deal rows are already brand- and org-scoped, and every table a
+  query touches is charged on every row it returns.
+- Select from `thoughtleaders_adlink` only, and only the columns above. A caller's raw-DB access
+  runs against a restricted schema holding fewer columns than `tl schema pg` reports, so a column
+  confirmed there still fails at execution with `column does not exist`. Do not widen the select
+  to find a field; if the join needs one that is not here, say so and stop.
+- TL stores no promo code, so a code is never a deal key: per-video evidence comes from the
+  tracking link, a `SharedId` or SubId carrying a TL deal id, or an Ad that names one video
+  (mapping 3.3). Impact's own codes still reach the creator (3.2 key 5) and drive 3.4.
+- A TL deal carries no platform in scope. Lanes come from Impact's own platform split
+  (mapping 4.5); a deal with no TL views is listed as such whatever format it ran in (1.4).
+- `publish_date` is a timestamp. In SQL bound a window end with `< <the day after the window
+  end>`, never `<= <window end>`, which resolves to midnight and drops the final day.
+  `tl sponsorships list`'s `publish-date-end` is inclusive by date and needs no adjustment.
+- Run the coverage count (mapping 3.5) and tell the user which deal keys this brand's deals
+  have. It is brand-wide even when creators are named: label it so. Quote its cost with the rest
+  of the run. IF the keys are thin, the result is a go-live timeline (4.2).
+
+The `views` on a deal row is the video-index value (mapping 1.4). Deals the list returns no
+`views` for are looked up in the index once, by video id, before any of them is called "no TL
+views":
+
+> A deal's video id is its `article_id`. IF `article_id` is empty, build it as
+> `<channel_id>:<youtube_id>`, where `<youtube_id>` is the `v=` value in `media_url` (the video
+> link; `urls` holds destination links). The bare `v=` value alone never matches. IF `media_url`
+> carries no `v=` value — it can hold a link that is not a YouTube video — the deal has no video
+> id and therefore no TL views. Never guess an id from the rest of the link.
+
+```bash
+tl db es '{"size": <number of ids>, "from": 0, "query": {"terms": {"id": ["<video id>", "..."]}},
   "_source": ["id", "views", "projected_views", "publication_date"]}' --json
 ```
+
+> A deal has TL views if and only if its video id resolved to a video-index document carrying a
+> `views` value. A deal whose id does not resolve, or whose document carries no `views` field, is
+> listed as "no TL views" and left out of views, CPM and per-1,000-view figures; its price still
+> counts in Paid to TL.
 
 ### 2. Impact side
 
@@ -153,8 +238,8 @@ Walk each partner in scope down the creator ladder (mapping 3.2), then look for 
 evidence (mapping 3.3). Record `partner_id, channel_id(s), key, confidence` and the partner's
 group (mapping 4.4).
 
-- Match aliases exactly, `UPPER()` on both sides, with the `tl` skill's bulk lookup. This lookup
-  adds nothing to TL. Never `ILIKE` on names.
+- Match aliases exactly, `UPPER()` on both sides, with the bulk handle/name form named in stage
+  1. This lookup adds nothing to TL. Never `ILIKE` on names.
 - A partner that matches no alias: group "not a TL creator".
 - IF a creator named in scope has no matching partner: stop and ask the user for the creator's
   partner name or promo code in Impact.
@@ -191,16 +276,23 @@ show both, labelled; never overwrite or average.
 ### 6. Deliver
 
 In this order:
-1. Scope line: brand, window, states, currencies and conversion rates used, Impact route.
+1. Scope line: brand, window, states, currencies and conversion rates used, Impact route, and
+   the credits this run charged.
 2. The chosen views as tables, each followed by its breakdown table and its "All-in cost to
    date" block (mapping 2.2).
    Label every figure TL or Impact, and every money column with its currency.
 3. Join table: partner → channel → deal, key, confidence.
 4. Creators not booked through TL, then partners that are not TL creators, then TL deals with no
-   partner.
+   partner, then sold deals not yet live.
 5. Caveats that change the reading: pending share, rates used, shared links (periods, not
-   videos), deals that are or may be social posts (mapping 4.2), the creator's codes credited to
-   other partners, agencies, low-confidence matches.
+   videos), deals with no TL views (mapping 1.4), the creator's codes credited to other partners,
+   agencies, low-confidence matches.
+
+**Last-click caveat.** Every cost per action, return on sponsorship and all-in return carries,
+beside it or directly under the block it sits in, the note that these come from last-click credit
+in the brand's own affiliate account: they count only the sales that closed through the partner's
+link or code, and miss every sale the video caused that did not route through it. Naming the
+attribution model in the scope line does not cover the figures; the caveat travels with them.
 
 Use business terms from the `tl` glossary, not table names. IF the user asks for a chart, render
 it as SVG.
@@ -213,11 +305,22 @@ channel added from a link the user gave. IF the user wants results saved, offer 
 1. No Impact credential passed through chat.
 2. The view came from the request or the user's answer (all three under autonomous mode). Scope
    was stated back.
-3. The coverage count was reported.
-4. Every partner in scope has a key, a confidence and a group. No name `ILIKE`, no tracking link
+3. The caller is a media buyer and the Impact account is a Brand account; a seller-side login or
+   a Partner account stopped the run at setup.
+4. The cost was quoted in credits before the first charged read, and the ledger reported with the
+   results counts every read, failed ones included.
+5. Every read was paged to the end against its `total`. A truncated read stopped the run and was
+   named; nothing was answered short.
+6. No creator e-mail address was read or printed, no `Contacts[]`, no customer-level action field.
+7. The coverage count was reported, with the scope it covers named.
+8. Every partner in scope has a key, a confidence and a group. No name `ILIKE`, no tracking link
    opened, no `tl channels find` on an unknown name, agencies split or asked.
-5. Performance is tied to one deal only where per-video evidence exists. Otherwise it is a
-   go-live timeline with the period sentence above it (mapping 4.2).
-6. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
-   figures only in the to-date block; every money column names its currency; converted columns
-   use a shown ECB rate; the TL price is never converted.
+9. Every deal's TL views came from a resolved video-index document carrying a `views` value; the
+   rest are listed as "no TL views" with their prices still in Paid to TL.
+10. Performance is tied to one deal only where per-video evidence exists. Otherwise it is a
+    go-live timeline with the period sentence above it (mapping 4.2).
+11. Every cost per action, return on sponsorship and all-in return carries the last-click caveat
+    beside the figure.
+12. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
+    figures only in the to-date block; every money column names its currency; converted columns
+    use a shown ECB rate; the TL price is never converted.
