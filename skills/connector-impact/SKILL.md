@@ -75,6 +75,11 @@ unmatched partner, dropped row and currency mismatch when it is found.
 Aggregate at the source: `GROUP BY` in TL SQL, grouped `query_performance` in Impact. Compute
 every sum and ratio with a calculation (SQL or a quick code step), never by hand.
 
+**Say what the run will cost before making any call at all** — including the free ones. Resolving
+the brand and the creators costs nothing, but a user who sees tool calls start before hearing a
+number has no moment to stop the run. So open with the plan: what will be read, that resolution is
+free, and that a credit estimate follows once the brand is known and the row count can be counted.
+
 **Quote the cost before charging it.** Before the first charged read, tell the user what will be
 read and what it is estimated to cost in credits, next to the balance from `tl balance`: the deal
 pull is 0.3 credits a row over the row count `total` reports, and `tl db pg --pricing` /
@@ -294,6 +299,13 @@ in the brand's own affiliate account: they count only the sales that closed thro
 link or code, and miss every sale the video caused that did not route through it. Naming the
 attribution model in the scope line does not cover the figures; the caveat travels with them.
 
+This covers **every** such figure, not only the one in the main table: a headline or summary
+figure stated above the table, an alternative or second-basis figure stated below it, and a figure
+repeated in a narrative sentence each need the caveat with them. A caveat under a later table does
+not reach a number quoted earlier — the reader meets the figure first. Where the same caveat would
+repeat several times in one section, mark each figure and carry one note for the section, placed
+where a reader meets the first of them.
+
 Use business terms from the `tl` glossary, not table names. IF the user asks for a chart, render
 it as SVG.
 
@@ -307,8 +319,9 @@ channel added from a link the user gave. IF the user wants results saved, offer 
    was stated back.
 3. The caller is a media buyer and the Impact account is a Brand account; a seller-side login or
    a Partner account stopped the run at setup.
-4. The cost was quoted in credits before the first charged read, and the ledger reported with the
-   results counts every read, failed ones included.
+4. The plan was stated before any call, free ones included; the cost was quoted in credits before
+   the first charged read; and the ledger reported with the results counts every read, failed ones
+   included.
 5. Every read was paged to the end against its `total`. A truncated read stopped the run and was
    named; nothing was answered short.
 6. No creator e-mail address was read or printed, no `Contacts[]`, no customer-level action field.
@@ -320,7 +333,11 @@ channel added from a link the user gave. IF the user wants results saved, offer 
 10. Performance is tied to one deal only where per-video evidence exists. Otherwise it is a
     go-live timeline with the period sentence above it (mapping 4.2).
 11. Every cost per action, return on sponsorship and all-in return carries the last-click caveat
-    beside the figure.
-12. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
-    figures only in the to-date block; every money column names its currency; converted columns
-    use a shown ECB rate; the TL price is never converted.
+    beside the figure — summary figures above the table and alternative figures below it included,
+    not only the one in the main table.
+12. Every money cell names its currency, including a cell reading 0 and a cell in a row that is
+    otherwise empty: a bare `0` does not say which currency it is zero of. A currency named once
+    in the table's title covers the table.
+13. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
+    figures only in the to-date block; converted columns use a shown ECB rate; the TL price is
+    never converted.

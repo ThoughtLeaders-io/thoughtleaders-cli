@@ -190,8 +190,11 @@ it does not satisfy this.
 ### 2.3 Currency
 
 Every money heading names its currency, in every case, e.g. "Paid to TL (USD)", "Sales revenue,
-Impact (EUR)". Record the currency of the Impact figures from the report or export; reports have a
-display-currency setting, so say so when Impact has already converted them.
+Impact (EUR)". A currency named once in the table's title covers that table. A money cell reading
+0 is still a money cell: "0" alone does not say which currency it is zero of, and a row that is
+otherwise empty — no commission before the first TL video, no sales in the period — is exactly
+where the heading is easiest to lose. Record the currency of the Impact figures from the report or
+export; reports have a display-currency setting, so say so when Impact has already converted them.
 
 - IF the Impact figures are in the TL `price_currency`: no conversion.
 - ELSE, when money is compared with money (everything in the all-in block): add a converted column
