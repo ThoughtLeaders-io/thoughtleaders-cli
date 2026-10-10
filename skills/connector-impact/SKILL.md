@@ -75,19 +75,27 @@ unmatched partner, dropped row and currency mismatch when it is found.
 Aggregate at the source: `GROUP BY` in TL SQL, grouped `query_performance` in Impact. Compute
 every sum and ratio with a calculation (SQL or a quick code step), never by hand.
 
-**Say what the run will cost before making any call at all** — including the free ones. Resolving
-the brand and the creators costs nothing, but a user who sees tool calls start before hearing a
-number has no moment to stop the run. So open with the plan: what will be read, that resolution is
-free, and that a credit estimate follows once the brand is known and the row count can be counted.
+**Open with a number, before any call at all.** The exact cost needs the row count, and the row
+count needs a read — so do not wait for it. State the **ceiling** first: the balance from
+`tl balance`, the rate (0.3 credits a sponsorship row), and the worst case this run could reach
+against the user's ceiling if they gave one. A user who sees tool calls begin before hearing any
+number has no moment to stop the run.
 
-**Quote the cost before charging it.** Before the first charged read, tell the user what will be
-read and what it is estimated to cost in credits, next to the balance from `tl balance`: the deal
-pull is 0.3 credits a row over the row count `total` reports, and `tl db pg --pricing` /
-`tl db es --pricing` return a per-row rate and an upper-bound cost without running the query
-(1 credit each). IF the estimate is above the user's stated ceiling, or above a tenth of the
-balance, stop and ask before reading. Keep a running ledger from each response's
-`usage.credits_charged`, **failed reads included** — a read that errors is charged like any other
-— and report the total with the results. Write "credits"; never "cr".
+**One probe, named in advance, is the only charged call allowed before the exact quote.** The row
+count comes from a single bounded read — `tl sponsorships list` scoped to the brand with
+`--limit 1`, which returns `total` for 0.3 credits. Name that call and its cost in the opening
+line, make it, then give the exact estimate before the real pull begins. Nothing else may be
+charged before that estimate: no full first page, no raw SQL to resolve a creator, no
+`--pricing` preview. Creator resolution happens inside the scoped pull, after the quote, not
+before it.
+
+**Then quote, then read.** Give the estimate in credits beside the balance. IF it is above the
+user's stated ceiling, or above a tenth of the balance, stop and ask before reading. `tl db pg
+--pricing` / `tl db es --pricing` return a per-row rate and an upper-bound cost without running
+the query (1 credit each) — use them to price a raw read, after the estimate, never as a
+substitute for it. Keep a running ledger from each response's `usage.credits_charged`, **failed
+reads included** — a read that errors is charged like any other — and report the total with the
+results. Write "credits"; never "cr".
 
 **Page every read to the end.** Every `tl db pg` call carries both `LIMIT` and `OFFSET`, every
 `tl db es` body both `size` and `from`, and every page walks the envelope's `next_offset` until
@@ -319,9 +327,9 @@ channel added from a link the user gave. IF the user wants results saved, offer 
    was stated back.
 3. The caller is a media buyer and the Impact account is a Brand account; a seller-side login or
    a Partner account stopped the run at setup.
-4. The plan was stated before any call, free ones included; the cost was quoted in credits before
-   the first charged read; and the ledger reported with the results counts every read, failed ones
-   included.
+4. A ceiling in credits was stated before any call; the only charge before the exact estimate was
+   the single named row-count probe; the estimate came before the pull; and the ledger reported
+   with the results counts every read, failed ones included.
 5. Every read was paged to the end against its `total`. A truncated read stopped the run and was
    named; nothing was answered short.
 6. No creator e-mail address was read or printed, no `Contacts[]`, no customer-level action field.

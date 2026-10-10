@@ -305,6 +305,13 @@ beside per-deal windows and the whole-creator timeline.
   dates only, and from the actions not already attributed to a per-video key.
 - The output names which deals are per-video and which are periods, in the table and in the
   caveats.
+- **Count the table, then write the sentence.** Any opening, summary or narrative line describing
+  the split states the two counts taken from the rows actually built — "two of the four bookings
+  are scored individually; the other two share a link and are reported as periods" — and names the
+  deals in each group. Never describe the split from an impression of the data before the rows
+  exist, and never write that Impact can tell every video apart when any row is a period: a
+  summary that disagrees with its own table is read first and believed, and it is the one
+  statement in the report a buyer repeats to someone else.
 - Never attribute a shared-link deal's performance to a single video, and never collapse the
   creator into one timeline because some of their deals share a link.
 
