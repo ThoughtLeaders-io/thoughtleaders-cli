@@ -9,7 +9,7 @@ The user brings one route. This skill never holds a login.
 
 | Route | Setup | Best for |
 |---|---|---|
-| Impact MCP | Custom connector `https://mcp.impact.com/mcp`, signed in with the user's Impact login | Most questions; aggregates on Impact's side |
+| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login | Most questions; aggregates on Impact's side |
 | Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API) | Action-level detail, long ranges |
 | CSV export | Reports: Performance by Partner, Performance by Day, Advanced Action Listing | No setup |
 | Impact web app | The user's own browser, already signed in. Read report pages only: no downloads, no settings, no answers to pop-ups | When none of the above is set up. Slowest route; same report data |
@@ -42,7 +42,7 @@ Filters: `ActionDateStart` / `ActionDateEnd` (on `EventDate`; use these for wind
 | `AdId` | integer | Ad or link behind the winning click |
 | `Amount`, `DeltaAmount`, `IntendedAmount` | number | Sale value: current, last change, original |
 | `Payout`, `DeltaPayout`, `IntendedPayout` | number | Partner commission: current, last change, original |
-| `ClientCost` | number | Payout plus fees |
+| `ClientCost` | number | Cost for this action: payout plus fees. Not the grouped report's Total Cost; never sum it as a substitute for all action, click and fixed payments |
 | `Currency` | string | ISO 4217, for all money on the row |
 | `EventDate`, `ReferringDate`, `CreationDate`, `LockingDate`, `ClearedDate` | date-time | See mapping 1.2 |
 | `ReferringType`, `ReferringDomain` | string | Attribution method, click site |
@@ -119,8 +119,9 @@ documentation:
 | `Sales`, `Leads`, `Calls`, `Mobile_Installs` | Actions split by type |
 | `Sale_Amount` | Sale value ("Revenue" on the Brand dashboard) |
 | `Action_Cost` | Commission on actions |
-| `Other_Cost` | Fixed payments made through Impact (e.g. a flat fee), which can be spread as equal daily amounts across the payment period |
-| `Total_Cost` | Includes `Action_Cost`, bonuses and `Other_Cost` |
+| `Other_Cost` | Bonuses, make-good and fixed payments made through Impact (e.g. a flat fee), which can be spread as equal daily amounts across the payment period |
+| `Click_Cost` | Pay-per-click payments |
+| `Total_Cost` | `Action_Cost` + `Click_Cost` + `Other_Cost`. Holds no Impact platform fee |
 | `CR`, `EPC`, `AOV`, `RR` | Conversion rate, earnings per click, average order value, reversal rate |
 
 On a Partner account the labels say "Earnings" instead of "Cost" (Action Earnings, Total
