@@ -17,7 +17,8 @@ the right tool for you.
 - Your TL login (the `tl` CLI).
 - One way into Impact:
   - Impact's connector for Claude (recommended): add a custom connector with the URL
-    `https://mcp.impact.com/mcp` and sign in with your Impact login.
+    `https://mcp.impact.com/mcp`, enter `mcp-impact-claude` as the OAuth client ID under
+    Advanced settings, and sign in with your Impact login.
   - The Impact API, with a read-only token you create in Impact (Settings → Technical → API).
   - A CSV export from Impact's Reports (Performance by Partner or by Day), dropped into the chat.
   - The Impact website, open and signed in in your browser. Slowest, but no setup.
@@ -93,7 +94,7 @@ floor on what a sponsorship did, not the full picture.
 | Action | A conversion: sale, sign-up or install |
 | Revenue | Your sales, not TL revenue |
 | Action Cost | Commission paid to the creator through Impact, not the TL price |
-| Total Cost | That commission plus Impact's fees |
+| Total Cost | That commission plus any per-click and fixed payments made through Impact. No Impact platform fee |
 | Ad | A tracking link or creative, not a TL ad spot |
 | Contract | Commission terms, not a TL IO |
 

@@ -65,7 +65,9 @@ questions from `help.md` or the mapping file, then continue the run.
 - ELSE ask ONE question covering every unstated item (view, brand, window), one line per view on
   what it shows. Never default silently.
 - IF `autonomous`, `--auto` or "don't stop to ask": all three views, default window, no questions.
-- IF the user says "include pending": count pending actions in the headline numbers.
+- IF the user says "include pending" anywhere in the request: count pending actions in the
+  headline numbers, label both states, and do not ask. This holds even beside a standing line
+  such as "keep pending separate unless I ask"; the explicit request wins.
 
 ## Workflow
 
@@ -272,6 +274,9 @@ group (mapping 4.4).
   platforms); ELSE list it as unresolved without asking.
 - List actions that used the creator's promo codes but are credited to another partner (mapping
   3.4).
+- Use only promo codes that appear on Impact actions. Never build a code from a creator's name to
+  search for, and never call a code the creator's unless it is on their own actions. IF their
+  actions carry no code, say so.
 - List TL deals with no Impact partner, with the likely reason.
 
 ### 4. Dates
@@ -313,6 +318,9 @@ repeated in a narrative sentence each need the caveat with them. A caveat under 
 not reach a number quoted earlier — the reader meets the figure first. Where the same caveat would
 repeat several times in one section, mark each figure and carry one note for the section, placed
 where a reader meets the first of them.
+
+Deliver final figures only. IF a figure changes while you write, replace it: no old figure,
+arrow or "correction" note stays in the report.
 
 Use business terms from the `tl` glossary, not table names. IF the user asks for a chart, render
 it as SVG.

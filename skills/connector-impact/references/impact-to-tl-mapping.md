@@ -85,7 +85,7 @@ counts in Paid to TL.
 | Actions | count of Actions, by state | `conversions` | Use Impact's; the TL value is hand-entered on few deals. |
 | Action Cost | sum of `Payout` | none | Affiliate commission paid to the creator through Impact. Never the TL price (2.1). |
 | Revenue | sum of `Amount` | `revenue` + `revenue_currency` | The brand's sales. In TL, "revenue" means sold deal price. Write "sales revenue (Impact)". |
-| Total Cost | sum of `ClientCost` | none | Commission plus Impact fees and bonuses; not the creator's cost. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
+| Total Cost | sum of `ClientCost` | none | Action Cost plus Click Cost plus Other Cost, with no Impact platform fee; not the creator's cost. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
 | Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. Suppressed per displayed ratio when the code-tracked share passes half (below); actions per 1,000 views is then the rate to read. |
 | none | | Views: `views` on the video-index document (1.4), `projected_views_at_purchase_date` | TL only. Impact has no views. |
 | none | | Paid to TL: `price` + `price_currency` | TL only. |
