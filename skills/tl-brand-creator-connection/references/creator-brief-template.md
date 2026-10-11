@@ -107,8 +107,8 @@ CTA); channel or brand ids, fact ids, filenames, the words ledger, probe,
 strong, thin, precedent, sponsorship pattern, ad-read sample, or any
 provenance label; other creators' names, reads or channels; anything from a
 withheld tier (`children`, `location`, `clinical` below three videos);
-anything written for the account manager (thesis hedges, "Where this could
-go wrong", the honesty strip).
+anything written for the brand's side of the map (verdict hedges, "Creative
+guardrails", "Good to know when booking").
 
 ## When the brand sent no brief
 

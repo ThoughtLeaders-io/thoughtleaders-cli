@@ -163,7 +163,7 @@ as a fact:
 | corroborated by a transcript fact | `none`, `lifestyle` | **`confirmed`**, both sides, and usable like any confirmed fact |
 | corroborated by a transcript fact | `clinical` | `confirmed`; the transcript side still answers to the repetition rule below, and the bio side is never `selected` |
 | corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual, the tier decides the page, not the confidence |
-| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)"; on a refresh it expires unless the About text still says it |
+| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed` in the ledger as a lead to check, never a claim and never a connection angle; on a refresh it expires unless the About text still says it |
 | **uncorroborated** | `clinical`, `children`, `location` | **dropped from the ledger entirely** |
 
 - **Only a transcript fact corroborates a bio fact.** A second written source
@@ -273,11 +273,12 @@ evidence, computed by the script. A claim stated as current that the
 evidence shows is over (a marathon since run, a relationship since ended, a
 job since left) is marked `ended` by the merge shard; past history ("used
 to", "as a kid") never is. An `ended` fact stays in the ledger as
-history, is never selected and is never quoted on a brand-facing page. A talking point or a strong
-connection rests on a fact with `last_seen` inside the last 24 months of the
-run date; an older fact supports a thin connection only with its year
-stated; the Thesis and "Where this could go wrong" use every fact at any
-age. A claim never repeats "X years ago": the script converts it to a year
+history, is never selected and is never quoted on a brand-facing page. A talking point or the
+lead quote of a strong concept rests on a fact with `last_seen` inside the
+last 24 months of the run date; an older fact backs a concept as dated
+backstory, or a thin one, only with its year stated; the Verdict, "Who they
+are" and the creative guardrails use every fact at any age, a past phase
+shown as the past. A claim never repeats "X years ago": the script converts it to a year
 from the upload date ("in about 2020, said in 2025"), and a claim about the
 channel's own start takes the channel's start date when they disagree by a
 year or more (the first upload, skipping at most five early uploads that a gap
