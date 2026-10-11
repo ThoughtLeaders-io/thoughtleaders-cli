@@ -85,8 +85,8 @@ counts in Paid to TL.
 | Actions | count of Actions, by state | `conversions` | Use Impact's; the TL value is hand-entered on few deals. |
 | Action Cost | sum of `Payout` | none | Affiliate commission paid to the creator through Impact. Never the TL price (2.1). |
 | Revenue | sum of `Amount` | `revenue` + `revenue_currency` | The brand's sales. In TL, "revenue" means sold deal price. Write "sales revenue (Impact)". |
-| Total Cost | sum of `ClientCost` | none | Action Cost plus Click Cost plus Other Cost, with no Impact platform fee; not the creator's cost. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
-| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. Suppressed per displayed ratio when the code-tracked share passes half (below); actions per 1,000 views is then the rate to read. |
+| Total Cost | Grouped report's Total Cost, mapped from its metadata (schema: *Reports*) | none | Action Cost plus Click Cost plus Other Cost, with no Impact platform fee; not the creator's cost. Never sum action-level `ClientCost` for this: it covers action payouts and fees, not all click and fixed payments. IF the route supplies neither Total Cost nor all three components for the same scope, mark Total Cost unavailable. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
+| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. Suppressed per displayed ratio when the code-tracked share passes half (below); actions per 1,000 views is then the rate to read where TL views are available. |
 | none | | Views: `views` on the video-index document (1.4), `projected_views_at_purchase_date` | TL only. Impact has no views. |
 | none | | Paid to TL: `price` + `price_currency` | TL only. |
 | none | | Sponsorship CPM: Paid to TL ÷ the video's current TL views × 1,000 | Always computed, on deals with TL views (1.4). Never from projected views (2.2). |
@@ -104,9 +104,10 @@ creator's actions — never once over the window and applied to every cell.
   and never a blank cell: the column keeps its shape so the reader can tell suppression from
   absence.
 - ELSE print the rate.
-- Give the reason once in the output: a sale made with a promo code never had to click, so the
-  rate would count conversions the clicks could not have produced. In the same note, point the
-  reader to actions per 1,000 views, which counts code and link sales alike.
+- Give the reason once in the output: a sale made with a promo code can occur without a click,
+  so the rate may count conversions the tracked clicks did not produce. In the same note, point the
+  reader to actions per 1,000 views, which counts code and link sales alike. IF the row has no TL
+  views or zero views, say this alternative rate is unavailable; never invent views or divide by zero.
 
 Event types: show approved actions per event type, plus a total labelled "all event types".
 Sales revenue and commission sum across types.
@@ -151,8 +152,11 @@ revenue, commission (approved only), TL views, Paid to TL, sponsorship CPM, acti
 views, clicks per 1,000 views. No figure that adds commission to Paid to TL.
 
 **Promo-code sales are sales.** A sale made with a promo code counts like a link sale in every
-figure. Approved actions state how many came by code, e.g. "40 (12 by promo code, 28 by link)",
-in the table and in the opening summary.
+figure. In the table and opening summary, split approved actions by the recorded promo-code
+field, e.g. "40 (12 with promo code, 28 without promo code)". This is code usage, not attribution:
+a coded action can also have a winning click. Use "by promo code" / "by link" only when Impact
+supplies evidence of the crediting method; never infer link attribution from a blank code. IF
+the promo-code field is unavailable, say the split is unavailable rather than infer zero codes.
 
 **Package pricing** — a row whose deals are priced 0 — drops that row's sponsorship CPM and
 nothing else. Pending actions, clicks, views and both per-1,000-view columns stay, on that row
@@ -205,7 +209,9 @@ where the heading is easiest to lose. Record the currency of the Impact figures 
 export; reports have a display-currency setting, so say so when Impact has already converted them.
 
 - Never convert the TL price. IF a TL deal's `price_currency` is not USD, name the deal and its
-  currency to the user, since TL prices are expected in USD.
+  currency to the user, since TL prices are expected in USD. Keep that price labelled in its
+  recorded currency and withhold every USD total or ratio that depends on it until its USD price
+  is confirmed. Never relabel it USD, mix it into a USD sum, or silently omit the deal from a total.
 - IF the Impact figures are in USD (the account's own currency, or a report whose display
   currency is USD): no conversion.
 - ELSE (for example EUR): show every Impact money figure in USD, with the original beside it,
@@ -215,7 +221,8 @@ export; reports have a display-currency setting, so say so when Impact has alrea
     euro.
   - Look the rate up; never use one from memory. IF the month's average is not yet published,
     average that month's published daily rates and say so. IF no rate is found, show the original
-    currency only and say a rate is needed.
+    currency only and say a rate is needed. Withhold affected USD figures and calculations that
+    combine currencies until every required rate is available; never treat a missing rate as 1.
   - Show the rates used in the column name or a note.
 
 ## 3. Identity join

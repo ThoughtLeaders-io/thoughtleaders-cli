@@ -42,7 +42,7 @@ Filters: `ActionDateStart` / `ActionDateEnd` (on `EventDate`; use these for wind
 | `AdId` | integer | Ad or link behind the winning click |
 | `Amount`, `DeltaAmount`, `IntendedAmount` | number | Sale value: current, last change, original |
 | `Payout`, `DeltaPayout`, `IntendedPayout` | number | Partner commission: current, last change, original |
-| `ClientCost` | number | Payout plus fees |
+| `ClientCost` | number | Cost for this action: payout plus fees. Not the grouped report's Total Cost; never sum it as a substitute for all action, click and fixed payments |
 | `Currency` | string | ISO 4217, for all money on the row |
 | `EventDate`, `ReferringDate`, `CreationDate`, `LockingDate`, `ClearedDate` | date-time | See mapping 1.2 |
 | `ReferringType`, `ReferringDomain` | string | Attribution method, click site |
@@ -119,7 +119,7 @@ documentation:
 | `Sales`, `Leads`, `Calls`, `Mobile_Installs` | Actions split by type |
 | `Sale_Amount` | Sale value ("Revenue" on the Brand dashboard) |
 | `Action_Cost` | Commission on actions |
-| `Other_Cost` | Fixed payments made through Impact (e.g. a flat fee), which can be spread as equal daily amounts across the payment period |
+| `Other_Cost` | Bonuses, make-good and fixed payments made through Impact (e.g. a flat fee), which can be spread as equal daily amounts across the payment period |
 | `Click_Cost` | Pay-per-click payments |
 | `Total_Cost` | `Action_Cost` + `Click_Cost` + `Other_Cost`. Holds no Impact platform fee |
 | `CR`, `EPC`, `AOV`, `RR` | Conversion rate, earnings per click, average order value, reversal rate |

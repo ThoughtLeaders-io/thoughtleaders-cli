@@ -79,7 +79,8 @@ TL data takes about a day to fill in.
 - Everything is reported in US dollars, because TL prices are always in USD. If your Impact
   account shows another currency, such as euros, those figures are converted to USD at the
   European Central Bank's monthly average rate, with the original amount and the rate shown.
-  The TL price is never converted.
+  The TL price is never converted. If a TL deal unexpectedly records another currency, you'll
+  see that price in its recorded currency and affected USD figures will wait for confirmation.
 
 Costs and CPMs here are last-click numbers from your own Impact account: they count sales that
 arrived through the creator's link, not sales the video may have driven some other way. They're a
@@ -94,7 +95,7 @@ floor on what a sponsorship did, not the full picture.
 | Action | A conversion: sale, sign-up or install |
 | Revenue | Your sales, not TL revenue |
 | Action Cost | Commission paid to the creator through Impact, not the TL price |
-| Total Cost | That commission plus any per-click and fixed payments made through Impact. No Impact platform fee |
+| Total Cost | That commission plus per-click payments, bonuses, make-good and fixed payments made through Impact. No Impact platform fee |
 | Ad | A tracking link or creative, not a TL ad spot |
 | Contract | Commission terms, not a TL IO |
 

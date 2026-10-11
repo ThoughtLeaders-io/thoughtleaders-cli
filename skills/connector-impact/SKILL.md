@@ -65,9 +65,11 @@ questions from `help.md` or the mapping file, then continue the run.
 - ELSE ask ONE question covering every unstated item (view, brand, window), one line per view on
   what it shows. Never default silently.
 - IF `autonomous`, `--auto` or "don't stop to ask": all three views, default window, no questions.
-- IF the user says "include pending" anywhere in the request: count pending actions in the
+- IF the user explicitly asks to include pending for this run: count pending actions in the
   headline numbers, label both states, and do not ask. This holds even beside a standing line
-  such as "keep pending separate unless I ask"; the explicit request wins.
+  such as "keep pending separate unless I ask"; the explicit request wins. Interpret the request's
+  meaning: "do not include pending" or a standing "unless I ask to include pending" rule does
+  not enable pending by itself.
 
 ## Workflow
 
@@ -139,7 +141,7 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    USD. On a report, the figures' currency is its display-currency setting; do not change it. IF
    the Impact figures are not in USD (usually EUR), tell the user now and apply mapping 2.3.
 9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
-   states (approved headline, pending separate), currencies.
+   the selected headline states with approved and pending labelled separately, currencies.
 
 ### 1. TL side
 
@@ -356,8 +358,10 @@ channel added from a link the user gave. IF the user wants results saved, offer 
     in the table's title covers the table.
 13. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
     figures only in the to-date block; Impact money not in USD is shown in USD at a shown ECB
-    monthly rate, with the original beside it; the TL price (USD) is never converted.
-14. Promo-code sales count like link sales: approved actions state the code and link split in
-    the table and the opening summary; a held-back conversion rate points to actions per 1,000
-    views; a creator with codes credited to other partners has the "including" line (mapping 2,
-    2.2, 3.4).
+    monthly rate, with the original beside it, or flagged when conversion is unavailable; the
+    TL price is never converted, and unexpected price currencies follow mapping 2.3.
+14. Promo-code sales count like link sales: approved actions state the observed promo-code split
+    in the table and the opening summary, with attribution labels only where Impact supplies
+    evidence (mapping 2.2); a held-back conversion rate points to actions per 1,000 views when
+    available; a creator with codes credited to other partners has the "including" line
+    (mapping 2, 2.2, 3.4).
