@@ -133,9 +133,9 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    type differs from the one the user described, stop and tell the user.
 6. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
 7. IF creators are named, resolve them to TL channel ids now (stage 1), before any deal read.
-8. Record the currency the Impact figures are in and the TL deals' `price_currency`. On a
-   report, the figures' currency is its display-currency setting; do not change it. IF the two
-   differ, tell the user now and apply mapping 2.3.
+8. Record the currency the Impact figures are in. TL prices are always USD, and the report is in
+   USD. On a report, the figures' currency is its display-currency setting; do not change it. IF
+   the Impact figures are not in USD (usually EUR), tell the user now and apply mapping 2.3.
 9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
    states (approved headline, pending separate), currencies.
 
@@ -347,5 +347,9 @@ channel added from a link the user gave. IF the user wants results saved, offer 
     otherwise empty: a bare `0` does not say which currency it is zero of. A currency named once
     in the table's title covers the table.
 13. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
-    figures only in the to-date block; converted columns use a shown ECB rate; the TL price is
-    never converted.
+    figures only in the to-date block; Impact money not in USD is shown in USD at a shown ECB
+    monthly rate, with the original beside it; the TL price (USD) is never converted.
+14. Promo-code sales count like link sales: approved actions state the code and link split in
+    the table and the opening summary; a held-back conversion rate points to actions per 1,000
+    views; a creator with codes credited to other partners has the "including" line (mapping 2,
+    2.2, 3.4).

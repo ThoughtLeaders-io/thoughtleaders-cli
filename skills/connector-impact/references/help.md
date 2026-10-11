@@ -75,9 +75,10 @@ TL data takes about a day to fill in.
 - The TL price and the Impact commission are always shown separately. They're added together
   only in an "All-in cost to date" box under the table, over the same videos and dates, with an
   as-of date.
-- If Impact and TL use different currencies, every money column names its currency. Where money
-  is compared with money, a converted column is added at the European Central Bank's monthly
-  average rate, with the rate shown. The TL price is never converted.
+- Everything is reported in US dollars, because TL prices are always in USD. If your Impact
+  account shows another currency, such as euros, those figures are converted to USD at the
+  European Central Bank's monthly average rate, with the original amount and the rate shown.
+  The TL price is never converted.
 
 Costs and CPMs here are last-click numbers from your own Impact account: they count sales that
 arrived through the creator's link, not sales the video may have driven some other way. They're a

@@ -86,7 +86,7 @@ counts in Paid to TL.
 | Action Cost | sum of `Payout` | none | Affiliate commission paid to the creator through Impact. Never the TL price (2.1). |
 | Revenue | sum of `Amount` | `revenue` + `revenue_currency` | The brand's sales. In TL, "revenue" means sold deal price. Write "sales revenue (Impact)". |
 | Total Cost | sum of `ClientCost` | none | Commission plus Impact fees and bonuses; not the creator's cost. Use only for whole-program cost. A flat fee paid through Impact sits in `Other_Cost`, inside Total Cost: IF it could be the same fee as a TL `price`, ask before adding them. |
-| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. Suppressed per displayed ratio when the code-tracked share passes half (below). |
+| Conversion Rate | Actions ÷ Clicks | none | Impact actions over Impact clicks only. Suppressed per displayed ratio when the code-tracked share passes half (below); actions per 1,000 views is then the rate to read. |
 | none | | Views: `views` on the video-index document (1.4), `projected_views_at_purchase_date` | TL only. Impact has no views. |
 | none | | Paid to TL: `price` + `price_currency` | TL only. |
 | none | | Sponsorship CPM: Paid to TL ÷ the video's current TL views × 1,000 | Always computed, on deals with TL views (1.4). Never from projected views (2.2). |
@@ -105,7 +105,8 @@ creator's actions — never once over the window and applied to every cell.
   absence.
 - ELSE print the rate.
 - Give the reason once in the output: a sale made with a promo code never had to click, so the
-  rate would count conversions the clicks could not have produced.
+  rate would count conversions the clicks could not have produced. In the same note, point the
+  reader to actions per 1,000 views, which counts code and link sales alike.
 
 Event types: show approved actions per event type, plus a total labelled "all event types".
 Sales revenue and commission sum across types.
@@ -125,13 +126,13 @@ Other cross metrics:
 |---|---|---|
 | Field | `price` (+ `price_currency`) | Action Cost (sum of `Payout`) |
 | Timing | Fixed before the video | Grows with every sale, including after the video |
-| Currency | The deal's `price_currency` | The Impact account's currency |
+| Currency | USD, always | The Impact account's currency, shown in USD (2.3) |
 
 Source of truth for what the brand paid:
 
 | The creator was | Source of truth | Also shown |
 |---|---|---|
-| Booked through TL | Paid to TL, in its own currency | Commission, as its own figure |
+| Booked through TL | Paid to TL, in USD | Commission, as its own figure |
 | Booked through TL and outside TL | Paid to TL, for the TL videos | Impact payments outside the TL bookings, own line, labelled "outside TL bookings" |
 | Never booked through TL | Commission plus fixed payments through Impact (`Other_Cost`) | Nothing from TL |
 
@@ -148,6 +149,10 @@ videos and the same dates.
 value is 0 or blank: Impact clicks, approved actions, pending actions, conversion rate, sales
 revenue, commission (approved only), TL views, Paid to TL, sponsorship CPM, actions per 1,000
 views, clicks per 1,000 views. No figure that adds commission to Paid to TL.
+
+**Promo-code sales are sales.** A sale made with a promo code counts like a link sale in every
+figure. Approved actions state how many came by code, e.g. "40 (12 by promo code, 28 by link)",
+in the table and in the opening summary.
 
 **Package pricing** — a row whose deals are priced 0 — drops that row's sponsorship CPM and
 nothing else. Pending actions, clicks, views and both per-1,000-view columns stay, on that row
@@ -166,7 +171,7 @@ it does not satisfy this.
 | Line | Definition |
 |---|---|
 | TL videos included | Every live sold TL deal for this brand and creator, across the creator's TL records in scope, to today |
-| Paid to TL | Sum of those prices, in the price currency |
+| Paid to TL | Sum of those prices, in USD |
 | Commission since the first TL video | Approved, first TL go-live to today, converted (2.3) |
 | Commission before the first TL video | Approved, from the partner's first action to the day before the first go-live. Own line, labelled "outside TL bookings". Not added to any all-in figure |
 | All-in cost | Paid to TL + commission since the first TL video |
@@ -189,20 +194,25 @@ it does not satisfy this.
 
 ### 2.3 Currency
 
+TL prices are always in USD, and the report is in USD. The ECB rate is for one case only: Impact
+figures in another currency, usually EUR.
+
 Every money heading names its currency, in every case, e.g. "Paid to TL (USD)", "Sales revenue,
-Impact (EUR)". A currency named once in the table's title covers that table. A money cell reading
-0 is still a money cell: "0" alone does not say which currency it is zero of, and a row that is
-otherwise empty — no commission before the first TL video, no sales in the period — is exactly
+Impact (USD; EUR original)". A currency named once in the table's title covers that table. A
+money cell reading 0 is still a money cell: "0" alone does not say which currency it is zero of,
+and a row that is otherwise empty — no commission before the first TL video, no sales in the period — is exactly
 where the heading is easiest to lose. Record the currency of the Impact figures from the report or
 export; reports have a display-currency setting, so say so when Impact has already converted them.
 
-- IF the Impact figures are in the TL `price_currency`: no conversion.
-- ELSE, when money is compared with money (everything in the all-in block): add a converted column
-  beside the original one, never in place of it. Money divided by a count or by views (sponsorship
-  CPM, sponsorship cost per action) is not converted.
-  - Convert the Impact figure into the price currency. Never convert the TL price.
-  - Rate: the ECB euro reference rate, averaged over the month of the Impact activity. Convert
-    each month at its own rate, then sum. Convert other currencies through the euro.
+- Never convert the TL price. IF a TL deal's `price_currency` is not USD, name the deal and its
+  currency to the user, since TL prices are expected in USD.
+- IF the Impact figures are in USD (the account's own currency, or a report whose display
+  currency is USD): no conversion.
+- ELSE (for example EUR): show every Impact money figure in USD, with the original beside it,
+  never in place of it, e.g. "Commission, Impact (USD 1,352; EUR 1,240)".
+  - Rate: the ECB euro reference rate for USD, averaged over the month of the Impact activity.
+    Convert each month at its own rate, then sum. A currency other than EUR goes through the
+    euro.
   - Look the rate up; never use one from memory. IF the month's average is not yet published,
     average that month's published daily rates and say so. IF no rate is found, show the original
     currency only and say a rate is needed.
@@ -264,6 +274,9 @@ The creator's codes are the promo codes on the creator's own actions that contai
 (3.1). They are read from Impact's actions; TL holds no copy of them. Actions using them but
 credited to another partner go on their own line under the creator, "creator's code, credited to
 <partner>", with counts, sales revenue and commission, not added to the creator's totals.
+Under the creator's totals, add one line labelled "including the creator's code credited to other
+partners": approved actions and sales revenue with those actions added. The commission stays with
+the partner that was paid it. The headline totals stay as they are.
 
 ### 3.5 Coverage count
 
@@ -355,7 +368,7 @@ Impact partner totals are lifetime and hide decay. Never judge a creator on a li
 | Group | Definition | Shown |
 |---|---|---|
 | Booked through TL | TL channel with a sold deal for this brand | Scorecard or timeline, and the block |
-| Not booked through TL | TL channel, no sold deal for this brand | Impact performance; what the brand paid through Impact as the source of truth, in Impact's currency; cost per action = Impact payments ÷ approved actions; the TL channel's subscribers, projected views and bookability |
+| Not booked through TL | TL channel, no sold deal for this brand | Impact performance; what the brand paid through Impact as the source of truth, in USD (2.3); cost per action = Impact payments ÷ approved actions; the TL channel's subscribers, projected views and bookability |
 | Not a TL creator | No TL channel | Impact performance and Impact cost only |
 
 - For the last two groups, Paid to TL reads "not booked through TL", never 0. Invent no TL figure.
@@ -364,7 +377,7 @@ Impact partner totals are lifetime and hide decay. Never judge a creator on a li
   in range; syntax in the `tl` skill's Elasticsearch reference). List date, title and views, and
   ask which ones the brand paid for; accept pasted links instead. Use only confirmed videos.
   - CPM: Impact payments ÷ confirmed videos' TL views × 1,000, labelled "CPM on what you paid
-    through Impact", in Impact's currency.
+    through Impact", in USD (2.3).
   - Rebooking signal: each confirmed video's `projected_views` (frozen when TL first indexed it)
     against the channel document's current projection, as a percent change. The channel
     document's field is `impression`; a `projected_views` field on a channel document matches no
@@ -423,7 +436,7 @@ there; add no tenth to this block, and state no schema fact outside it.
 | `adlink.media_url` | The sponsored video's own link; destination links live in `urls`. Its video id is the fallback when `article_id` is null (1.4). |
 | `adlink.conversions` | Action count, hand-entered; set on few deals. |
 | `adlink.revenue` + `adlink.revenue_currency` | Sales revenue and its currency, hand-entered; set on few deals. Elsewhere in TL "revenue" means the sold price. |
-| `adlink.price_currency` | The currency of `price`. Never converted (2.3). |
+| `adlink.price_currency` | The currency of `price`: always USD. Never converted (2.3). |
 | `adlink.projected_views_at_purchase_date` | TL's projected views for the video, frozen at the purchase date. Never a source for CPM (2.2). |
 | `adspot.ad_format` | The ad spot's format code: 4 YouTube, 8 TikTok, 9 Instagram, other values other placements (newsletter, podcast, stream, X). Nullable, and absent from the restricted schema. Not a source for whether a deal has TL views — that is the video-index document (1.4). |
 | `channel.social_links` | JSON of the creator's links: platform keys (`instagram`, `tiktok`, …), an `_other` dict of the labelled links in the channel header, and an `_emails` array. ⚠️ Select named keys only. Never select the column wholesale: `_emails` is contact data and has no place in a performance report. |
