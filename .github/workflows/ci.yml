@@ -32,12 +32,12 @@ jobs:
           enable-cache: true
       - name: Sync locked dependencies
         run: uv sync --frozen --python ${{ matrix.python-version }}
+      - name: Assemble, validate and zip the MCP plugin (tests read the assembled bundle)
+        run: uv run python scripts/build_mcp_plugin.py --output dist/thoughtleaders-youtube-data.zip
       - name: Run unit tests
         # tests/ mock the HTTP client (CliRunner + fake get_client), so there
         # is no network, no API key, and no credit spend.
         run: uv run --python ${{ matrix.python-version }} --with pytest pytest tests/ -v
-      - name: Assemble, validate and zip the MCP plugin
-        run: uv run python scripts/build_mcp_plugin.py --output dist/thoughtleaders-youtube-data.zip
 
   windows-launcher:
     name: Windows launcher (tl setup windows)
