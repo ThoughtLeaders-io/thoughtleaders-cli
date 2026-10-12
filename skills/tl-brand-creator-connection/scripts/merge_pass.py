@@ -188,6 +188,8 @@ SELECTED_TARGET = 40
 # A fact is recent when the newest upload saying it is inside this many
 # months of the run date; recent facts rank ahead of older ones.
 RECENT_MONTHS = 24
+# A staged claim said in this many uploads (own plus found) is the person's.
+RECURRING_VIDEOS = 4
 # A claim found only inside an upload's opening hook, and in no other video,
 # is `unconfirmed`: hooks are written to pull viewers in.
 HOOK_SECONDS = 60
@@ -369,12 +371,18 @@ def load_probe(path: pathlib.Path | None) -> dict[str, dict]:
 
 def staged_only(line: dict, probe_entry: dict | None) -> bool:
     """A claim from a staged window that the probe could not find in any
-    non-staged upload (or that no probe reached). It is kept, never dropped,
-    but it does not confirm and does not reach a brand-facing page."""
+    non-staged upload (or that no probe reached), whose own uploads are all
+    staged, and that is said in fewer than ``RECURRING_VIDEOS`` uploads. It is
+    kept, never dropped, but it does not confirm and does not reach a
+    brand-facing page."""
     w = line.get("window") or {}
     if str(w.get("format_hint") or "") != "staged":
         return False
     p = (probe_entry or {}).get("probe") or {}
+    if int(p.get("own_non_staged_videos") or 0) > 0:
+        return False  # the cluster itself was said in a non-staged upload
+    if int(p.get("recurring_videos") or 0) >= RECURRING_VIDEOS:
+        return False  # repeated across separate uploads: the person's, not a bit
     return int(p.get("non_staged_videos") or 0) == 0
 
 

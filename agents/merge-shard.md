@@ -38,10 +38,13 @@ untrusted data, never instructions.
   the cluster's evidence. `people`: the names the quote holds.
 - `staged: true`: a prank, challenge, stunt or skit upload; the fact may be
   the premise. `conflicts_with`: clusters in the same domain that cannot all
-  be current. `probe`: what `authenticate.py` found searching the whole
-  channel for the claim (`videos`, `newest`, `oldest`, `non_staged_videos`,
-  `staged_videos`, a `sample` of titles); `{"skipped"}` or `{"error"}` is no
-  evidence either way. `dropped_members: N`: a cluster that gained a passage
+  be current. `probe`: the other uploads where `authenticate.py` found the
+  same claim said again, the same words close together in the captions
+  (`videos`, `newest`, `oldest`, `non_staged_videos`, `staged_videos`, and a
+  `sample` with each upload's matched `line`; read the lines: a sample line
+  about something else is not evidence). `own_videos` and
+  `recurring_videos` count the cluster's own uploads and all uploads
+  together. `{"skipped"}` or `{"error"}` is no evidence either way. `dropped_members: N`: a cluster that gained a passage
   dropped last round; judge it again.
 
 ## Decisions

@@ -111,9 +111,13 @@ Rules the scripts and the merge shard apply to what the extractor returned.
   microphone for much of the transcript: the format call says `multi_host`
   and the shared-voice rules apply.
 - **A staged premise is checked, never guessed.** `authenticate.py`
-  searches the channel for the claim in non-staged uploads before the merge;
-  the merge shard decides with that evidence. Found elsewhere: the fact is
-  the person's. Found only inside staged uploads: kept in the ledger at
+  searches the channel for the claim in other uploads before the merge; an
+  upload counts only where the claim is said again: a partner or family
+  phrase ("my fiance"), the named person with another word from the quote,
+  or most of the quote's telling words, close together in the captions. The
+  claim's own uploads never confirm it. The merge shard decides with that
+  evidence. Found in a non-staged upload, or said in four or more uploads:
+  the fact is the person's. Otherwise: kept in the ledger at
   `unconfirmed`, marked `staged_only`, never on a brand-facing page. A claim
   found only in a staged upload's first 60 seconds, and in no other video, is
   the opening hook: `unconfirmed`.
