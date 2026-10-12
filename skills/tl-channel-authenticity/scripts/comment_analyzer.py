@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import statistics
+import sys
 from collections import Counter
 
 import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
@@ -68,10 +69,20 @@ def collect(channel, longform, shorts, focus_video=None) -> dict[str, dict]:
             seen.add(hv["video_id"])
     if focus_video and focus_video.get("video_id") and focus_video["video_id"] not in seen:
         targets.append(focus_video)
+    if not targets:
+        raise comment_scraper.CommentRetrievalError("Comment evidence is incomplete: no videos to inspect.")
     out: dict[str, dict] = {}
     for v in targets:
-        cs = comment_scraper.scrape(v["video_id"], v.get("views", 0))
+        try:
+            cs = comment_scraper.scrape(v["video_id"], v.get("views", 0))
+        except comment_scraper.VideoUnavailable as exc:
+            # Gone from YouTube: skip it rather than count it as zero comments.
+            sys.stderr.write(f"[comment_analyzer] skipped unavailable video {exc}\n")
+            continue
         out[v["video_id"]] = {"video": v, "comments": cs}
+    if not out:
+        raise comment_scraper.CommentRetrievalError(
+            "Comment evidence is incomplete: every sampled video is unavailable.")
     return out
 
 
@@ -298,17 +309,37 @@ def merge_passes(passes: list[list[dict]]) -> tuple[list[str], list[float]]:
     return merged, per_pass_share
 
 
+def validate_passes(batch: list[dict], passes: list[list[dict]]) -> None:
+    expected = {row["i"] for row in batch}
+    if not isinstance(passes, list):
+        raise ValueError("Classifier evidence must be a list of complete passes.")
+    if expected and len(passes) < 2:
+        raise ValueError("Incomplete classifier evidence: two complete passes are required.")
+    allowed = {"organic", "generic-template", "bot-like", "promotional", "spam"}
+    for number, items in enumerate(passes, 1):
+        if not isinstance(items, list):
+            raise ValueError(f"Classifier pass {number} must be a list.")
+        seen = set()
+        for row in items:
+            if not isinstance(row, dict) or type(row.get("i")) is not int:
+                raise ValueError(f"Classifier pass {number} has an invalid comment index.")
+            index = row["i"]
+            if index in seen or index not in expected or row.get("label") not in allowed:
+                raise ValueError(f"Classifier pass {number} has duplicate, unknown or invalid labels.")
+            seen.add(index)
+        if seen != expected:
+            raise ValueError(f"Classifier pass {number} does not cover every sampled comment.")
+
+
 def apply_llm(result: dict, classifications) -> dict:
-    """`classifications` is either a single pass ``[{i,label}]`` or a list
-    of passes ``[[{i,label}...], ...]``. Multiple passes are majority-voted
-    for a stable organic share (the verdict is robust either way; this just
-    stabilizes the reported number)."""
-    if not classifications:
+    """Validate two complete passes, then apply the shared majority-vote score."""
+    passes = classifications
+    validate_passes(result.get("llm_batch", []), passes)
+    if not result.get("llm_batch"):
         result["metrics"]["llm_organic_share"] = None
+        result["metrics"]["llm_passes"] = 0
+        result["metrics"]["llm_not_applicable"] = "No viewer comment text was collected."
         return result
-    passes = classifications if classifications and isinstance(
-        classifications[0], list
-    ) else [classifications]
 
     labels, per_pass = merge_passes(passes)
     if not labels:
@@ -372,7 +403,6 @@ def _largest_dup_cluster(texts: list[str]) -> float:
 
 if __name__ == "__main__":
     import json
-    import sys
 
     import resolve_channel
 
