@@ -315,9 +315,11 @@ def is_caveat(title_html: str) -> bool:
 
 
 def is_on_channel(title_html: str) -> bool:
-    """``## On the channel already``: where the brand or its category already
-    appears on the channel, paid or not. Evidence, never a concept."""
-    return plain(title_html).lower().startswith("on the channel")
+    """``## Done this before`` (or the older ``## On the channel already``):
+    the creator's past partnerships in the brand's category and the brand's
+    unpaid moments on the channel. Evidence, never a concept."""
+    t = plain(title_html).lower()
+    return t.startswith("on the channel") or "done this before" in t
 
 
 def is_booking(title_html: str) -> bool:
@@ -357,19 +359,42 @@ def _strip_verdict(body: str) -> str:
     """The verdict prose without its opening label: the panel prints the
     label as a pill, so the paragraph would otherwise repeat it."""
     def cut(m: re.Match) -> str:
-        rest = re.sub(r"^\s*(?:<strong>|<span[^>]*>)?\s*(?:strong|thin|no)[ -]fit\s*"
+        rest = re.sub(r"^\s*(?:<strong>|<span[^>]*>)?\s*(?:strong|thin|no)[ -]fit\s*[.:]?\s*"
                       r"(?:</strong>|</span>)?\s*[.:]?\s*", "", m.group(1), count=1, flags=re.I)
         return f"<p>{rest}</p>" if rest.strip() else ""
     return re.sub(r"<p>(.*?)</p>", cut, body, count=1, flags=re.S)
 
 
-def concept_name(title_html: str) -> tuple[str, str]:
-    """``(name, tags)`` of a connection heading ``<name> · **<type>** ·
-    **<strength>**``: the plain name, and the rendered type and strength
-    badges."""
+_INTERNAL_BADGES = ("badge-direct", "badge-adjacent", "badge-precedent", "badge-brandmoment",
+                    "badge-strong")
+
+
+def concept_parts(title_html: str) -> tuple[str, list[str], list[str]]:
+    """``(name, badges, words)`` of a connection heading ``<name> · **<route>** ·
+    **<type>** · **<strength>**``: the plain name, the rendered badges, and
+    the tags that are not badges (the route: the kind of video the concept
+    is, "Secret-stay series", "After the workout")."""
     title = re.sub(r"^\d+[.)]\s*", "", title_html)
     parts = [p.strip() for p in no_dashes(title, " · ").split("·")]
-    return parts[0], " ".join(p for p in parts[1:] if p)
+    badges = [p for p in parts[1:] if p and 'class="badge' in p]
+    words = [plain(p) for p in parts[1:] if p and 'class="badge' not in p and plain(p)]
+    return parts[0], badges, words
+
+
+def concept_route(title_html: str) -> str:
+    """The concept's route, the kind of video it is, lower case; "" when the
+    heading names none."""
+    return " ".join(concept_parts(title_html)[2]).strip().lower()
+
+
+def concept_name(title_html: str) -> tuple[str, str]:
+    """``(name, tags)``: the plain name, and what the brand sees beside it:
+    the route, and the strength only when it is thin. The concept type and a
+    strong tag are the writer's bookkeeping, not the reader's."""
+    name, badges, words = concept_parts(title_html)
+    shown = [f'<span class="badge badge-route">{html.escape(w)}</span>' for w in words]
+    shown += [b for b in badges if not any(c in b for c in _INTERNAL_BADGES)]
+    return name, " ".join(shown)
 
 
 def verdict_panel(thesis: list[tuple[str, str]], conns: list[tuple[str, str]],
@@ -593,7 +618,8 @@ def is_recent(fact: dict, today: str | None = None) -> bool:
     return seen >= f"{y:04d}-{m:02d}-{today[8:10]}"
 
 
-def people_section(facts: list[dict] | None, index: dict[str, dict]) -> str:
+def people_section(facts: list[dict] | None, index: dict[str, dict],
+                   heading: str = "People in their videos") -> str:
     """The people the creator's quotes name, from facts the page may use:
     one row per exact spelling, the relation words, and the newest upload
     that names them. The date is the upload's own date, never a later
@@ -616,7 +642,7 @@ def people_section(facts: list[dict] | None, index: dict[str, dict]) -> str:
         f'<tr><td>{html.escape(n)}</td><td>{html.escape(", ".join(r["rel"]))}</td>'
         f'<td class="n">{html.escape(r["last"][:7])}</td></tr>'
         for n, r in sorted(rows.items(), key=lambda kv: (kv[1]["last"], kv[0]), reverse=True))
-    return ('<h3>People in their videos</h3><div class="tablewrap"><table class="people"><thead><tr>'
+    return (f'<h3>{html.escape(heading)}</h3><div class="tablewrap"><table class="people"><thead><tr>'
             '<th>Name</th><th>Who</th><th>Seen in</th></tr></thead>'
             f'<tbody>{trs}</tbody></table></div>')
 
@@ -741,8 +767,10 @@ def _who_item(ids: list[str], line: str, index: dict[str, dict]) -> dict | None:
               if i in index and angle_ineligible_reason(index[i], index) is None]
     if not usable:
         return None
-    spoken = [f for f in usable if f.get("quote")]
-    date = max((str(f.get("published") or "")[:10] for f in spoken), default="")
+    # one fact speaks for the line: the newest, so its date, quote and link agree
+    spoken = sorted((f for f in usable if f.get("quote")),
+                    key=lambda f: str(f.get("published") or ""), reverse=True)
+    date = str(spoken[0].get("published") or "")[:10] if spoken else ""
     sources = []
     if spoken and str(spoken[0].get("url") or "").lower().startswith(("http://", "https://")):
         sources.append(f'<a href="{html.escape(str(spoken[0]["url"]), quote=True)}">Watch</a>')
@@ -755,7 +783,30 @@ def _who_item(ids: list[str], line: str, index: dict[str, dict]) -> dict | None:
             "sources": sources, "facts": usable}
 
 
-def who_they_are(facts: list[dict], meta: dict, about_html: str = "") -> str:
+def display_name(fm: dict, meta: dict, creator: str) -> str:
+    """The name the page's headings use: the host's first name when the map
+    gives one (``creator_name``), else the channel name."""
+    return str(fm.get("creator_name") or meta.get("creator_name") or creator or "the creator").strip()
+
+
+def who_intro(about_html: str, name: str) -> str:
+    """"Who <name> is": the ``## About <creator>`` prose, at the top of the
+    page, without its fact lines (those are the story, lower down)."""
+    prose, _lines = who_lines(about_html)
+    if not prose:
+        return ""
+    return f'<h2>Who {html.escape(name)} is</h2><div class="intro">{prose}</div>'
+
+
+def _years(rows: list[dict]) -> str:
+    ys = sorted({str(it["date"])[:4] for it in rows if str(it.get("date") or "")[:4].isdigit()})
+    if not ys:
+        return ""
+    return ys[0] if ys[0] == ys[-1] else f"{ys[0]} to {ys[-1]}"
+
+
+def who_they_are(facts: list[dict], meta: dict, about_html: str = "",
+                 heading: str = "Who they are", with_prose: bool = True) -> str:
     """The person behind the channel: the map's prose, then the facts it
     names, at most ``WHO_PAGE_MAX``, split into recent and background and
     newest first. A map that names no facts falls back to the ledger's
@@ -767,7 +818,8 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "") -> str:
                  for f in pick_who_flat(facts)]
     items = [it for it in (_who_item(ids, line, index) for ids, line in lines) if it]
     items = items[:WHO_PAGE_MAX]
-    head = '<h2>Who they are</h2>' + (f'<div class="intro">{prose}</div>' if prose else "")
+    head = f'<h2>{html.escape(heading)}</h2>' + (f'<div class="intro">{prose}</div>'
+                                                 if prose and with_prose else "")
     if not items:
         return head + '<p class="empty">The ledger holds no facts that can appear on a brand-facing page.</p>'
     recent = [it for it in items if it["date"] and is_recent({"published": it["date"]})]
@@ -788,8 +840,9 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "") -> str:
         return f'<div class="group"><h3>{title}</h3><ul class="who-run">{"".join(lis)}</ul></div>'
 
     return (head + '<div class="facts">'
-            + group(f"Recent, last {RECENT_MONTHS} months", recent)
-            + group("Background", older) + '</div>')
+            + group(f"Recent, {_years(recent)}" if _years(recent) else "Recent", recent)
+            + group(f"Background, {_years(older)}" if _years(older) else "Background", older)
+            + '</div>')
 
 
 # --------------------------------------------------------------------------- #
@@ -878,10 +931,10 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
                     if chips else "")
     intro, sections = split_sections(body_html)
 
-    # One deliverable, written for the brand, in the order it reads: the
-    # verdict and its concepts first, then the evidence that the brand
-    # already lives on the channel, then who the creator is, then what to
-    # avoid and what to know before booking.
+    # One deliverable, written for the brand, in the order it reads: who the
+    # creator is and what they have done in the category first, then the
+    # verdict and its concepts, then the creator's story and the people in
+    # it, then what to avoid and what to know before booking.
     creator_about, brand_about, thesis, caveats, conns = [], [], [], [], []
     on_channel, booking = [], []
     for sec in sections:
@@ -901,13 +954,21 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
 
     creator_intro = "".join(rest for _, rest in creator_about)
     index = {str(f.get("fact_id")): f for f in (facts or [])}
-    who = (who_they_are(facts, {**meta, "channel_name": creator}, creator_intro)
-           + people_section(facts, index)) if facts is not None else about_block(creator_about)
-    body_out = (verdict_panel(thesis, conns, brand_about)
+    name = display_name(fm, meta, creator)
+    if facts is not None:
+        top = who_intro(creator_intro, name)
+        story = (who_they_are(facts, {**meta, "channel_name": creator}, creator_intro,
+                              heading=f"{name}'s story so far", with_prose=False)
+                 + people_section(facts, index, heading=f"Who shows up in {name}'s videos"))
+    else:
+        top, story = about_block(creator_about), ""
+    done = "".join(f'<h2>{html.escape(name)} has done this before</h2><div class="onchannel">{rest}</div>'
+                   for _, rest in on_channel)
+    body_out = (top + done
+                + verdict_panel(thesis, conns, brand_about)
                 + ("<h2>Creative concepts</h2>" if conns or intro else "")
                 + concept_cards(conns, intro)
-                + plain_block(on_channel, "onchannel")
-                + who
+                + story
                 + caveat_block(caveats)
                 + plain_block(booking, "booking")
                 + built_footer({**meta, "channel_name": creator}))
@@ -1142,11 +1203,57 @@ def load_probe(in_path: pathlib.Path | None) -> dict | None:
         return None
 
 
+def load_moments(in_path: pathlib.Path | None, brand_id: str | None) -> dict | None:
+    """``moments-<brand_id>.json`` beside the map, written by moment_check.py."""
+    if in_path is None or not brand_id:
+        return None
+    p = in_path.parent / f"moments-{brand_id}.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+_ANY_LINK = re.compile(r'href="([^"]+)"')
+# "every", "always" and their kin claim a habit; outside a quotation the
+# sentence must say how many videos show it
+_PATTERN_WORD = re.compile(r"\b(every|always|each time|whenever|regularly|constantly|never misses)\b", re.I)
+_COUNTED = re.compile(r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|several|"
+                      r"\w+ (?:of|in) (?:his|her|their) )\b", re.I)
+_OVERCLAIM = re.compile(r"(\b100 ?%|\bfully verified\b|\bverified facts?\b|\bguaranteed accurate\b)", re.I)
+
+
+def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]:
+    """Every timed link on a concept card is a moment moment_check.py passed:
+    the words checked, the date real, nothing awkward or rival within two
+    minutes of it, the upload not a rival's, a plan still a plan."""
+    usable = [(str(m.get("video_id")), int(m.get("start") or 0), m) for m in moments.get("usable") or []]
+    rejected = [(str(m.get("video_id")), int(m.get("start") or 0), m) for m in moments.get("rejected") or []]
+    out: list[str] = []
+    for title, rest in sections:
+        name = plain(title)[:60]
+        for url in _ANY_LINK.findall(rest):
+            vid, t = _video_and_time(url)
+            if not vid or t is None:
+                continue
+            ok = next((m for v, st, m in usable if v == vid and abs(st - t) <= 20), None)
+            if ok is None:
+                bad = next((m for v, st, m in rejected if v == vid and abs(st - t) <= 20), None)
+                why = "; ".join(bad.get("reasons") or []) if bad else "not among the checked moments"
+                out.append(f"concept links a moment that did not pass moment_check ({why}): "
+                           f"{vid}&t={t}s in {name}")
+            elif ok.get("label") and ok["label"].lower() not in plain(rest).lower():
+                out.append(f"concept uses a plan without its label {ok['label']!r}: {name}")
+    return out
+
+
 def check_page(md_text: str, facts: list[dict] | None, meta: dict,
-               probe: dict | None = None) -> list[str]:
+               probe: dict | None = None, moments: dict | None = None) -> list[str]:
     """Contract problems with the deliverable, as one line each. Empty means
     the page is publishable. ``probe`` is the category probe's file when one
-    exists: a precedent card quotes one of its windows, or fails."""
+    exists: a precedent card quotes one of its windows, or fails.
+    ``moments`` is moment_check.py's file: every concept link must be one of
+    its usable moments, and no link anywhere may open a rival's upload."""
     problems: list[str] = []
     windows = probe_texts(probe)
     fm, body = parse_frontmatter(md_text)
@@ -1281,6 +1388,43 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
                         "any strong concept is a strong fit, thin ones only a thin fit")
     problems += supporting_problems(kinds["conn"], facts, probe, "a supporting moment's")
     problems += supporting_problems(kinds["channel"], facts, probe, "an On the channel already")
+
+    # three concepts, three ways in: each names the kind of video it is, and
+    # no two name the same one
+    routes: dict[str, str] = {}
+    for title, _rest in kinds["conn"]:
+        r = concept_route(title)
+        if not r:
+            problems.append(f"concept heading names no route (the kind of video it is, "
+                            f"as **<route>**): {plain(title)[:60]}")
+        elif r in routes:
+            problems.append(f"two concepts take the same route ({r!r}): {routes[r]} and "
+                            f"{plain(title)[:40]}; each concept is a different way in")
+        else:
+            routes[r] = plain(title)[:40]
+    if moments:
+        problems += moment_problems(kinds["conn"], moments)
+        # a past partnership in the category is shown where it belongs ("done
+        # this before", booking notes); everywhere else a rival's upload is
+        # never the evidence for this brand
+        rivals = set(str(v) for v in moments.get("rival_videos") or [])
+        for _title, rest in kinds["conn"] + kinds["thesis"] + kinds["creator"]:
+            for url in _ANY_LINK.findall(rest):
+                vid, _t = _video_and_time(url)
+                if vid and vid in rivals:
+                    problems.append(f"the page links an upload a rival brand sponsored: {vid}")
+    # a habit is counted, never assumed
+    for title, rest in kinds["conn"] + kinds["thesis"]:
+        prose = re.sub(r"<blockquote>.*?</blockquote>", " ", rest, flags=re.S)
+        prose = _INLINE_QUOTE.sub(" ", html.unescape(re.sub(r"<[^>]+>", " ", prose)))
+        for sentence in re.split(r"(?<=[.!?])\s+", prose):
+            if _PATTERN_WORD.search(sentence) and not _COUNTED.search(sentence) \
+                    and not re.match(r"\s*(Do|Don't|Do not|Sample)\b", sentence):
+                problems.append(f"{_PATTERN_WORD.search(sentence).group(0)!r} without a count of the "
+                                f"videos that show it: {sentence.strip()[:80]}")
+    m = _OVERCLAIM.search(html.unescape(re.sub(r"<[^>]+>", " ", render_markdown(body))))
+    if m:
+        problems.append(f"the page claims certainty ({m.group(0)!r}); say what was checked instead")
 
     # the bans that survive the sample-read exception
     for m in _MONEY.finditer(html.unescape(re.sub(r"<[^>]+>", " ", body))):
@@ -2069,7 +2213,8 @@ def main() -> None:
             print("BRIEF CONTRACT: " + "; ".join(problems), file=sys.stderr)
         return
 
-    problems = check_page(text, facts, meta, load_probe(in_path))
+    problems = check_page(text, facts, meta, load_probe(in_path),
+                          load_moments(in_path, parse_frontmatter(text)[0].get("brand_id")))
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))

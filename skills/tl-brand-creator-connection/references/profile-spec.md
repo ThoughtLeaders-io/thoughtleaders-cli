@@ -100,43 +100,58 @@ a rebuild.
 ## CONNECT: the connection map
 
 `<corpus>/connections-<brand_id>.md`, frontmatter `schema:
-tl-creator-connections/v2`, `channel_id`, `channel_name`, `brand_id`,
-`brand_name`, `facts_file`, `brand_read_date`. It is written for the brand:
-to judge the fit, or to pitch with. Sections, in this order; the order of the
+tl-creator-connections/v2`, `channel_id`, `channel_name`, `creator_name`
+(the host's first name as said on camera; the channel name when none was
+found), `brand_id`, `brand_name`, `facts_file`, `brand_read_date`. It is
+written for the brand: to judge the fit, or to pitch with, from the usable
+moments in `moments-<brand_id>.json` only. Sections; the order of the
 concepts is the ranking:
 
-1. `## Verdict`: opens with `**Strong fit.**`, `**Thin fit.**` or `**No
-   fit.**` (SKILL.md, CONNECT step 2), then three or four sentences on why
-   these two fit, then a `Best-fit products:` line.
-2. `## About <brand name>`: one or two neutral sentences from the brand-site
+1. `## About <creator name>`: two or three sentences on who they are now,
+   then up to 10 lines `- f021+f010: <line>` naming the facts the story
+   shows. Facts that say the same thing share a line.
+2. `## Done this before`, when the lanes found any: the creator's past
+   partnerships in the brand's category (older than 24 months) and the
+   brand's unpaid moments, one dated line each with its link.
+3. `## Verdict`: opens with `**Strong fit.**`, `**Thin fit.**` or `**No
+   fit.**` (SKILL.md, CONNECT step 3), then three or four sentences that
+   argue the fit in the creator's own words, then a `Best-fit products:`
+   line.
+4. `## About <brand name>`: one or two neutral sentences from the brand-site
    lane and the platform's category description only. Never a sponsored-read
    snippet, a price or another client's data.
-3. One `## <name> · **<type>** · **<strength>**` section per creative
-   concept, strongest first. Type: `direct`, `adjacent`, `category
-   precedent` or `brand moment`. Each holds, in order: the lead quote as a
-   `>` quote with its `&t=` link on a `>` continuation line; `The moment:`;
-   two or three dated further moments as list items, each with its link;
-   `The concept:`; at most one `Sample line (illustration only):`; one
-   `Do:` and one `Don't:` line, both concrete. At most two thin concepts.
-4. `## On the channel already`, when the lanes found any: the brand's unpaid
-   moments and the creator's past sponsors in the brand's category, one
-   dated line each with its link.
-5. `## About <creator name>`: two or three sentences on the person behind
-   the premise, then up to 10 lines `- f021+f010: <line>` naming the facts
-   "Who they are" shows. Facts that say the same thing share a line.
+5. One `## <name> · **<route>** · **<type>** · **<strength>**` section per
+   creative concept, strongest first, each a different way in (the
+   creator's format, a habit, a personal gem). Route: the kind of video,
+   shown to the brand, never repeated. Type: `direct`, `adjacent`,
+   `category precedent` or `brand moment`, for the writer only. Each holds,
+   in order: the lead quote as a `>` quote with its `&t=` link on a `>`
+   continuation line; `The moment:`; two or three dated further moments as
+   list items, each with its link; `The concept:`; at most one `Sample line
+   (illustration only):`; one `Do:` and one `Don't:` line, both concrete.
+   At most two thin concepts.
 6. `## Creative guardrails`: always present. What the integration must
    avoid, written for the brand. It reads the whole ledger, withheld tiers
    and old or ended facts included, and turns a sensitive fact into a
    category-level guardrail, never its detail.
-7. `## Good to know when booking`, when there is something: other brands in
-   the brand's category on the channel in the last 24 months, with dates.
+7. `## Good to know when booking`, when there is something: rival brands'
+   partnerships with the channel in the last 24 months, with dates.
 
-A fact used to argue against the brand's category is never a concept. Facts
-at tier `children` or `location` never appear in a concept or "Who they
-are"; `clinical` facts only with three or more videos (`evidence-rules.md`).
-Every fact the page quotes or lists is `confirmed`, current and not
-`staged_only`. IF nothing connects: the Verdict says no fit and what was
-searched, the About sections follow, and there are no concepts.
+The page shows them in this order: "Who <name> is" (section 1's prose),
+"<name> has done this before" (section 2), the verdict panel (sections 3
+and 4), the creative concepts, "<name>'s story so far" (section 1's fact
+lines, recent and background) with "Who shows up in <name>'s videos", the
+guardrails, the booking notes, and how the map was built.
+
+A fact used to argue against the brand's category is never a concept, and
+neither is a video where the creator mocks the brand: both shape the
+guardrails. Facts at tier `children` or `location` never appear in a
+concept or the story; `clinical` facts only with three or more videos
+(`evidence-rules.md`). Every fact the page quotes or lists is `confirmed`,
+current and not `staged_only`; a plan said in the last 12 months appears
+only with its label ("said March 2026, not yet confirmed"). IF nothing
+connects: the Verdict says no fit and what was searched, the About sections
+follow, and there are no concepts.
 
 ## CONNECT: the creator brief
 

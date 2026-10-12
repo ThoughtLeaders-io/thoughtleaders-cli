@@ -228,6 +228,6 @@ three business days. Publish only after written approval, then share the
 live link with your contact.
 ```
 
-The check and render commands are in SKILL.md, CONNECT step 3. The render is
+The check and render commands are in SKILL.md, CONNECT step 4. The render is
 named `<brand>-creator-brief-<creator>.html`, by names, because it is an
 attachment.

@@ -184,20 +184,23 @@ def _render_conn(tmp_path: Path, md: str, facts=None, meta=None,
     return Path(json.loads(proc.stdout)["html"]).read_text()
 
 
+_STORY = "<h2>Patterrz&#x27;s story so far</h2>"
+
+
 def test_connections_page_renders_concept_cards_then_who_they_are(tmp_path):
     html = _render_conn(tmp_path, _CONN_MD)
     assert "<title>Patterrz × Acme</title>" in html
-    concepts = html.split("<h2>Creative concepts</h2>")[1].split("<h2>Who they are</h2>")[0]
-    # the cards: numbered by order, type badge, provenance labels kept
+    concepts = html.split("<h2>Creative concepts</h2>")[1].split(_STORY)[0]
+    # the cards: numbered by order, provenance labels kept; the concept type
+    # is the writer's bookkeeping and never shows on the brand's page
     assert concepts.count('<article class="card"') == 2
     assert '<span class="k">Concept 1</span>' in concepts
     assert "<h3>Adopted a rescue dog</h3>" in concepts    # the "1." is the card's numeral
-    assert 'class="badge badge-direct">direct</span>' in concepts
-    assert 'class="badge badge-precedent">category precedent</span>' in concepts
+    assert "badge-direct" not in concepts and "badge-precedent" not in concepts
     assert "[web]" in concepts and "social: instagram" in concepts
     # a map that names no facts falls back to the ledger's picks, each with
     # its short quote and its link
-    who = html.split("<h2>Who they are</h2>")[1].split("<h2>")[0]
+    who = html.split(_STORY)[1].split("<h2>")[0]
     assert "has a dog" in who and "we finally adopted luna" in who
     assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s">Watch</a>' in who
     assert "wears glasses" in who and "badge-lifestyle" in who
@@ -340,7 +343,7 @@ def test_who_they_are_link_only_http_schemes(tmp_path):
               "quote": "I grew up in Ohio", "url": "javascript:alert(1)",
               "sensitivity": "none", "confidence": "confirmed"}]
     html = _render_conn(tmp_path, _CONN_MD, facts=facts)
-    who = html.split("<h2>Who they are</h2>")[1]
+    who = html.split(_STORY)[1]
     assert 'href="javascript' not in who and "grew up in Ohio" in who
 
 
@@ -453,7 +456,7 @@ _FULL_MD = (
     "Best-fit products: the adult dry food.\n\n"
     "## About Acme\n\n"
     "Acme is a direct-to-consumer dog food brand [web: product pages].\n\n"
-    "## Adopted a rescue dog — **direct** · **strong**\n\n"
+    "## Adopted a rescue dog — **Dog-walk vlogs** · **direct** · **strong**\n\n"
     "> we finally adopted luna [watch](https://youtube.com/w?v=abc&t=12s)\n\n"
     "The moment: he tells the adoption story on camera.\n\n"
     "The concept: Luna's first bowl of Acme, in his voice.\n\n"
@@ -478,12 +481,14 @@ def _check_conn(tmp_path: Path, md: str, name: str = "42-7-connections.md"):
     return proc.returncode, json.loads(proc.stdout)
 
 
-def test_the_page_leads_with_the_verdict_then_concepts_then_the_person(tmp_path):
+def test_the_page_leads_with_the_person_then_the_verdict_then_concepts(tmp_path):
     html = _render_conn(tmp_path, _FULL_MD)
-    # the brand reads the verdict and the concepts before any background
-    order = [html.index(x) for x in ('<section class="verdict">',
+    # the brand meets the creator first, then the verdict and the concepts,
+    # then the creator's dated story
+    order = [html.index(x) for x in ('<h2>Who Patterrz is</h2>',
+                                     '<section class="verdict">',
                                      '<h2>Creative concepts</h2>',
-                                     '<h2>Who they are</h2>',
+                                     _STORY,
                                      '<h2>Creative guardrails</h2>',
                                      '<h2>How this map was built</h2>')]
     assert order == sorted(order)
@@ -492,10 +497,12 @@ def test_the_page_leads_with_the_verdict_then_concepts_then_the_person(tmp_path)
     assert "Strong fit." not in verdict.split("</span>", 1)[1]   # the label is the pill
     assert "already lives the thing Acme sells" in verdict
     assert 'href="#c1"' in verdict and "<b>Adopted a rescue dog</b>" in verdict
-    # the creator introduction is prose inside "Who they are", not a card
-    who = html.split('<h2>Who they are</h2>')[1].split("<h2>")[0]
-    assert "posting since 2019" in who and "Adopted a rescue dog named Luna." in who
-    concepts = html.split("<h2>Creative concepts</h2>")[1].split("<h2>Who they are</h2>")[0]
+    # the introduction is prose at the top; its fact lines are the story lower down
+    intro = html.split('<h2>Who Patterrz is</h2>')[1].split("<h2>")[0]
+    assert "posting since 2019" in intro and "Adopted a rescue dog named Luna." not in intro
+    story = html.split(_STORY)[1].split("<h2>")[0]
+    assert "Adopted a rescue dog named Luna." in story and "posting since 2019" not in story
+    concepts = html.split("<h2>Creative concepts</h2>")[1].split(_STORY)[0]
     assert "About Patterrz" not in concepts
     assert '<span class="lbl">The concept</span>' in concepts
     assert '<div class="dodont">' in concepts
@@ -509,7 +516,7 @@ def test_each_quote_appears_once_inside_its_own_card(tmp_path):
     assert "In their own words" not in html
     verdict = html.split('<section class="verdict">')[1].split("</section>")[0]
     assert "we finally adopted luna" not in verdict
-    cards = html.split("<h2>Creative concepts</h2>")[1].split("<h2>Who they are</h2>")[0]
+    cards = html.split("<h2>Creative concepts</h2>")[1].split(_STORY)[0]
     assert cards.count("we finally adopted luna") == 1
     assert cards.count('href="https://youtube.com/w?v=abc&amp;t=12s"') == 1
 
@@ -518,7 +525,7 @@ def test_the_guardrails_are_kept_but_never_among_the_concepts(tmp_path):
     html = _render_conn(tmp_path, _FULL_MD)
     assert "distrusts subscription boxes" in html
     assert '<div class="caveat">' in html
-    concepts = html.split("<h2>Creative concepts</h2>")[1].split("<h2>Who they are</h2>")[0]
+    concepts = html.split("<h2>Creative concepts</h2>")[1].split(_STORY)[0]
     assert concepts.count('<article class="card"') == 1
     assert "guardrail" not in concepts.lower()
     assert html.index('<div class="conn">') < html.index('<div class="caveat">')
@@ -1971,7 +1978,7 @@ def test_a_brand_moment_quotes_an_unpaid_brand_window(tmp_path):
     import build_html
     md = _FULL_MD.replace(
         "## About Patterrz",
-        "## Back at Acme · **brand moment** · **strong**\n\n"
+        "## Back at Acme · **Kibble runs** · **brand moment** · **strong**\n\n"
         "> i drove an hour just for acme kibble\n"
         "> [Patterrz, 2026-01-01](https://www.youtube.com/watch?v=k&t=4s)\n\n"
         "Do: keep it his voice.\n\nDon't: script it.\n\n## About Patterrz")
@@ -1980,4 +1987,6 @@ def test_a_brand_moment_quotes_an_unpaid_brand_window(tmp_path):
     assert not [p for p in build_html.check_page(md, _FACTS, _META, probe)
                 if "Back at Acme" in p], build_html.check_page(md, _FACTS, _META, probe)
     html_out = build_html.render_connections(md, _FACTS, _META)[1][0]
-    assert 'badge badge-brandmoment">brand moment</span>' in html_out
+    # the route shows on the card; the concept type stays the writer's bookkeeping
+    assert 'badge badge-route">Kibble runs</span>' in html_out
+    assert 'class="badge badge-brandmoment"' not in html_out

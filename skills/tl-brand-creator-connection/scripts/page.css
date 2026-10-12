@@ -219,3 +219,4 @@ ul.more li > a:first-child {
 .links { list-style: none; padding: 0; margin: 0; font-size: .92rem; color: var(--ink-2); }
 .links li { margin: .3rem 0; word-break: break-word; }
 @media (prefers-reduced-motion: no-preference) { a { transition: color .15s; } }
+.badge-route { background: var(--accent-soft, rgba(11,111,143,.12)); color: var(--accent); }
