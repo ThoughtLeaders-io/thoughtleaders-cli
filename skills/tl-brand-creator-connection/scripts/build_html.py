@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import gzip
 import html
 import json
@@ -621,9 +622,9 @@ def is_recent(fact: dict, today: str | None = None) -> bool:
 def people_section(facts: list[dict] | None, index: dict[str, dict],
                    heading: str = "People in their videos") -> str:
     """The people the creator's quotes name, from facts the page may use:
-    one row per exact spelling, the relation words, and the newest upload
-    that names them. The date is the upload's own date, never a later
-    keyword match, so a 2021 mention never reads as 2026."""
+    one row per exact spelling with its relation words, and the newest upload
+    that names them: the fact's own upload or a later one the probe found
+    saying it again (``last_seen``). A name with no relation is left out."""
     rows: dict[str, dict] = {}
     for f in facts or []:
         if angle_ineligible_reason(f, index) is not None:
@@ -635,7 +636,9 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
             row = rows.setdefault(name, {"rel": [], "last": ""})
             if p.get("relation") and p["relation"] not in row["rel"]:
                 row["rel"].append(str(p["relation"]))
-            row["last"] = max(row["last"], str(f.get("published") or "")[:10])
+            row["last"] = max(row["last"], str(f.get("published") or "")[:10],
+                              str(f.get("last_seen") or "")[:10])
+    rows = {n: r for n, r in rows.items() if r["rel"]}
     if not rows:
         return ""
     trs = "".join(
@@ -833,7 +836,10 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "",
         for it in rows:
             q = (f'<span class="q">“{html.escape(short_quote(it["quote"]))}”</span>'
                  if it["quote"] else "")
-            badges = "".join(speaker_badge(f) + tier_badge(f) for f in it["facts"][:1])
+            # the story is brand-facing: an everyday lifestyle fact carries no tag,
+            # a clinical one keeps its warning
+            badges = "".join(speaker_badge(f) + (tier_badge(f) if tier_of(f) != "lifestyle" else "")
+                             for f in it["facts"][:1])
             lis.append(f'<li><span class="date">{html.escape(it["date"][:4] or "web")}</span>'
                        f'<span class="claim">{it["line"]}{badges}{q}</span>'
                        f'<span class="src">{" · ".join(it["sources"])}</span></li>')
@@ -986,7 +992,9 @@ def strength_of(title_html: str) -> str | None:
 
 
 def _norm_words(text: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", (text or "").lower())).strip()
+    # caption tags ([music], [applause]) are not words he said
+    text = re.sub(r"\[[^\]]*\]", " ", text or "")
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", text.lower())).strip()
 
 
 def quote_matches_ledger(quote_html: str, facts: list[dict] | None) -> dict | None:
@@ -1173,7 +1181,10 @@ def supporting_problems(sections: list[tuple[str, str]], facts: list[dict] | Non
     if probe is None and not facts:
         return []
     texts = (probe_texts(probe) + [_norm_words(str(f.get("quote") or "")) for f in facts or []]
-             + [_norm_words(str(m.get("quote") or "")) for m in (moments or {}).get("usable") or []])
+             + [_norm_words(str(m.get("quote") or "")) for m in (moments or {}).get("usable") or []]
+             # a whole sentence may start a cue before the window does
+             + [_norm_words(" ".join(str(c[1]) for c in m.get("cues") or []))
+                for m in (moments or {}).get("usable") or []])
     out = []
     for title, rest in sections:
         name = plain(title)[:60]
@@ -1205,6 +1216,29 @@ def load_probe(in_path: pathlib.Path | None) -> dict | None:
         return None
 
 
+def link_clean_moments(facts: list[dict] | None, moments: dict | None) -> list[dict] | None:
+    """A fact whose own moment failed moment_check for its surroundings (a
+    rival, an awkward act, an ad read) but which is said again in a moment
+    that passed takes that moment's date, link and words, the newest first."""
+    if not facts or not moments:
+        return facts
+    failed = {str(m.get("fact_id")) for m in moments.get("rejected") or [] if m.get("kind") == "fact"}
+    best: dict[str, dict] = {}
+    for m in moments.get("usable") or []:
+        fid = str(m.get("fact_id") or "")
+        if m.get("kind") == "member" and fid in failed:
+            if fid not in best or str(m.get("published") or "") > str(best[fid].get("published") or ""):
+                best[fid] = m
+    out = []
+    for f in facts:
+        m = best.get(str(f.get("fact_id")))
+        if m:
+            f = dict(f, url=m.get("url"), start=m.get("start"), published=m.get("published"),
+                     quote=str(m.get("quote") or "").strip())
+        out.append(f)
+    return out
+
+
 def load_moments(in_path: pathlib.Path | None, brand_id: str | None) -> dict | None:
     """``moments-<brand_id>.json`` beside the map, written by moment_check.py."""
     if in_path is None or not brand_id:
@@ -1225,6 +1259,43 @@ _COUNTED = re.compile(r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|elev
 _OVERCLAIM = re.compile(r"(\b100 ?%|\bfully verified\b|\bverified facts?\b|\bguaranteed accurate\b)", re.I)
 
 
+def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
+    """Where a quote really starts in its moment's captions, and whether it
+    stops with its sentence. None when both are fine or cannot be told."""
+    from verify_quotes import locate  # sibling; the one quote matcher
+    cues = [(float(t), str(x)) for t, x in moment.get("cues") or []]
+    if not cues or len(_norm_words(quote).split()) < 4:
+        return None
+    hit = locate(cues, quote, link_t)
+    if hit.get("match") != "exact":
+        return None
+    if hit["start"] - link_t > 8:
+        return f"the link starts {hit['start'] - link_t} s before the quote; link &t={hit['start']}s"
+    joined = " ".join(x for _t, x in cues)
+    q = quote.strip().rstrip("\"”")
+    if q and q[-1] not in ".?!":
+        tail = joined.lower().split(_norm_words(quote).split()[-1], 1)
+        nxt = re.sub(r"^[^\w]*", "", tail[1]) if len(tail) > 1 else ""
+        if nxt[:1].isalpha() and not re.match(r"^[,;:]", tail[1].strip()):
+            return "the quote stops mid-sentence; quote the whole sentence"
+    return None
+
+
+def _quotes_held_back(moment: dict, quote: str) -> str | None:
+    """The quote repeats a ledger line the page may not use (five words in a
+    row, or most of a short line), found in the window by moment_check."""
+    held = moment.get("held_back") or {}
+    line = _norm_words(str(held.get("quote") or "")).split()
+    said = _norm_words(quote).split()
+    if len(line) < 4 or not said:
+        return None
+    run = difflib.SequenceMatcher(None, line, said, autojunk=False).find_longest_match(
+        0, len(line), 0, len(said)).size
+    if run >= min(5, len(line)):
+        return f"quotes a line the ledger holds back ({held.get('why')})"
+    return None
+
+
 def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]:
     """Every timed link on a concept card is a moment moment_check.py passed:
     the words checked, the date real, nothing awkward or rival within two
@@ -1239,6 +1310,14 @@ def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]
             if not vid or t is None:
                 continue
             ok = next((m for v, st, m in usable if v == vid and abs(st - t) <= 20), None)
+            if ok is not None:
+                # the quote this link carries: the blockquote, or the list item's words
+                block = rest[max(0, rest.find(url) - 600): rest.find(url) + 400]
+                for q in _INLINE_QUOTE.findall(html.unescape(re.sub(r"<[^>]+>", " ", block))) or []:
+                    why = _quote_timing(ok, q, t) or _quotes_held_back(ok, q)
+                    if why:
+                        out.append(f"{why}: {q[:40]!r} in {name}")
+                        break
             if ok is None:
                 bad = next((m for v, st, m in rejected if v == vid and abs(st - t) <= 20), None)
                 why = "; ".join(bad.get("reasons") or []) if bad else "not among the checked moments"
@@ -1406,6 +1485,18 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
             routes[r] = plain(title)[:40]
     if moments:
         problems += moment_problems(kinds["conn"], moments)
+        # a fact said again in a clean moment is still usable: the story links there
+        clean = {str(m.get("fact_id")) for m in moments.get("usable") or [] if m.get("fact_id")}
+        failed = {str(m.get("fact_id")): "; ".join(m.get("reasons") or [])
+                  for m in moments.get("rejected") or []
+                  if m.get("kind") == "fact" and str(m.get("fact_id")) not in clean}
+        for _title, rest in kinds["creator"]:
+            for ids, line in who_lines(rest)[1]:
+                for fid in ids:
+                    why = failed.get(fid, "")
+                    if any(k in why for k in ("ad read", "rival", "awkward", "word for word")):
+                        problems.append(f"story line names {fid}, whose own moment failed "
+                                        f"moment_check ({why}); leave it out: {plain(line)[:50]}")
         # a past partnership in the category is shown where it belongs ("done
         # this before", booking notes); everywhere else a rival's upload is
         # never the evidence for this brand
@@ -2215,8 +2306,9 @@ def main() -> None:
             print("BRIEF CONTRACT: " + "; ".join(problems), file=sys.stderr)
         return
 
-    problems = check_page(text, facts, meta, load_probe(in_path),
-                          load_moments(in_path, parse_frontmatter(text)[0].get("brand_id")))
+    moments = load_moments(in_path, parse_frontmatter(text)[0].get("brand_id"))
+    facts = link_clean_moments(facts, moments)
+    problems = check_page(text, facts, meta, load_probe(in_path), moments)
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))

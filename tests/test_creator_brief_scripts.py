@@ -203,7 +203,7 @@ def test_connections_page_renders_concept_cards_then_who_they_are(tmp_path):
     who = html.split(_STORY)[1].split("<h2>")[0]
     assert "has a dog" in who and "we finally adopted luna" in who
     assert 'href="https://www.youtube.com/watch?v=abc&amp;t=12s">Watch</a>' in who
-    assert "wears glasses" in who and "badge-lifestyle" in who
+    assert "wears glasses" in who and "badge-lifestyle" not in who
     assert "was diagnosed with ADHD" in who and "badge-clinical" in who
     # withheld tiers and superseded facts never reach the brand-facing page
     assert "Maple" not in html and "Elm Street" not in html and "lived in LA" not in html
@@ -1945,13 +1945,23 @@ def test_who_they_are_dates_each_line_by_its_upload_and_joins_its_sources():
     assert "Eric runs the channel." in who and "f1+f2" not in who
 
 
-def test_people_are_dated_by_the_upload_not_a_later_match():
+def test_people_are_dated_by_the_newest_upload_that_says_it_again():
+    # last_seen is the probe's newest upload saying the claim again: the name
+    # and a word from the quote within 30 s, never a loose keyword hit
     import build_html
     fact = {"fact_id": "f1", "claim": "has a sister named Chloe", "domain": "family",
             "confidence": "confirmed", "sensitivity": "none", "published": "2021-05-24",
             "last_seen": "2026-03-18", "people": [{"name": "Chloe", "relation": "sister"}]}
     out = build_html.people_section([fact], {"f1": fact})
-    assert "2021-05" in out and "2026" not in out
+    assert "2026-03" in out and "2021" not in out
+
+
+def test_a_name_with_no_relation_is_not_a_people_row():
+    import build_html
+    fact = {"fact_id": "f1", "claim": "regards Will as his hero", "domain": "relationships",
+            "confidence": "confirmed", "sensitivity": "none", "published": "2025-06-15",
+            "people": [{"name": "Will", "relation": None}]}
+    assert build_html.people_section([fact], {"f1": fact}) == ""
 
 
 def test_check_matches_supporting_moments_to_the_lanes_or_the_ledger(tmp_path):

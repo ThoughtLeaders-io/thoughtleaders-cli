@@ -48,6 +48,7 @@ must never be built on moments that were not checked.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import pathlib
 import re
@@ -243,10 +244,60 @@ def candidates(facts: list[dict], probe: dict) -> list[dict]:
     return out
 
 
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", (t or "").lower())).strip()
+
+
+def held_back_line(text: str, index: dict[str, dict] | None) -> str | None:
+    """A ledger fact the page may not use whose quote sits inside this window:
+    the lane found the same line, the ledger already judged it."""
+    t = _norm(text).split()
+    for f in (index or {}).values():
+        q = _norm(str(f.get("quote") or "")).split()
+        if len(q) < 4:
+            continue
+        # a window cut at different edges still holds the line: five words in a
+        # row, or most of a short quote, is the same line
+        run = difflib.SequenceMatcher(None, q, t, autojunk=False).find_longest_match(0, len(q), 0, len(t)).size
+        if run >= min(5, len(q)):
+            why = angle_ineligible_reason(f, index)
+            if why:
+                return f"{f.get('fact_id')}: {why}"
+    return None
+
+
+# reasons about one moment, not the fact: a repeat of the fact elsewhere is
+# judged on its own surroundings
+MOMENT_LEVEL = ("ad read", "rival", "awkward", "word for word", "sponsored",
+                "ledger holds this line back", "mid-sentence")
+
+
+def fact_level(reasons: list[str]) -> list[str]:
+    """The reasons that hold for the fact in every video it is said in:
+    lapsed, changed, ended, unconfirmed, a stale plan."""
+    return [r for r in reasons if not any(k in r for k in MOMENT_LEVEL)]
+
+
+def widen_said(recs: list[dict]) -> None:
+    """A lapsed habit's span starts at the first video he said it in, its
+    repeats included, not only the ledger's own video."""
+    first: dict[str, str] = {}
+    for r in recs:
+        f, pub = str(r.get("fact_id") or ""), str(r.get("published") or "")[:10]
+        if f and pub and (f not in first or pub < first[f]):
+            first[f] = pub
+    for r in recs:
+        said = r.get("said")
+        if said and r.get("kind") == "fact" and first.get(str(r.get("fact_id"))):
+            end = said.split(" to ", 1)[1]
+            r["said"] = f"said from {month_label(first[str(r['fact_id'])])} to {end}"
+
+
 def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
           today: str, index: dict[str, dict] | None = None,
           latest_upload: str | None = None, rivals: list[str] | None = None,
-          brand_names: list[str] | None = None) -> dict:
+          brand_names: list[str] | None = None,
+          ad_spans: list[tuple[float, float]] | None = None) -> dict:
     """One candidate's checks: ``usable`` and the reasons it is not."""
     reasons: list[str] = []
     start = float(c.get("start") or 0)
@@ -281,6 +332,8 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
                 and months_between(last, latest_upload) >= LAPSE_MONTHS:
             reasons.append(f"lapsed: last said {month_label(last)}, not in the "
                            f"{LAPSE_MONTHS} months before the newest upload")
+            # how the story may say it: a past habit with its span
+            rec["said"] = f"said from {month_label(published or last)} to {month_label(last)}"
         if tense == "pattern":
             p = c.get("probe") or {}
             own = {str(m.get("video_id") if isinstance(m, dict) else str(m).split(":")[0])
@@ -295,7 +348,15 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
                 reasons.append(angle_ineligible_reason(index[fid], index))
         if not FIRST_PERSON.search(str(c.get("quote") or "")):
             reasons.append("not in the creator's own words (no first-person word)")
+        held = held_back_line(str(c.get("quote") or ""), index)
+        if held:
+            # the window may still hold a clean sentence; the map may not quote this one
+            fid = held.split(":", 1)[0]
+            rec["held_back"] = {"fact_id": fid, "why": held,
+                                "quote": str((index or {}).get(fid, {}).get("quote") or "")}
 
+    if any(a_ - 5 <= start <= b_ + 5 for a_, b_ in ad_spans or []):
+        reasons.append("said inside an ad read: another brand's script, not his own words")
     near = surroundings(cues, start)
     hit = near_rival(near, rivals or [], brand_names or [])
     if hit:
@@ -312,6 +373,10 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
         rec["premise"] = pl
     rec["staged"] = bool(TITLE_HINTS["staged"].search(title))
     rec["usable"] = not reasons
+    # the captions around the moment, so --check can find where a quote
+    # starts and whether it ends with its sentence
+    rec["cues"] = [[round(float(s_), 2), str(t)] for s_, t in cues
+                   if start - 5 <= float(s_) <= start + 75]
     if reasons:
         rec["reasons"] = reasons
     return rec
@@ -360,15 +425,18 @@ def main() -> None:
     cues = fetch_cues.fetch_transcripts(refs) if refs else {}
     summaries = fetch_cues.fetch_summaries(refs) if refs else {}
     metas = upload_meta(refs) if refs else {}
+    spans = fetch_cues.sponsor_segments(refs) if refs else {}
     usable, rejected, rival_videos = [], [], set()
     fact_reasons: dict[str, list[str]] = {}
     for c in cands:
         rec = judge(c, cues.get(c["ref"]) or [], summaries.get(c["ref"], ""),
                     metas.get(c["ref"], {}), rx, a.today, index,
                     str((_meta or {}).get("latest_video_date") or "")[:10] or None,
-                    rival_names, own_names)
+                    rival_names, own_names, spans.get(c["ref"]) or [])
         if c["kind"] == "fact" and not rec["usable"]:
-            fact_reasons[str(c.get("fact_id"))] = rec.get("reasons") or []
+            whole = fact_level(rec.get("reasons") or [])
+            if whole:
+                fact_reasons[str(c.get("fact_id"))] = whole
         if c["kind"] == "member" and str(c.get("fact_id")) in fact_reasons:
             # a fact said again inherits the fact's verdict: a lapsed or
             # changed fact is not current in any of its videos
@@ -381,6 +449,7 @@ def main() -> None:
         (usable if rec["usable"] else rejected).append(rec)
         if rec.get("rival_sponsored"):
             rival_videos.add(rec["video_id"])
+    widen_said(usable + rejected)
     out = {"brand_id": a.brand, "today": a.today, "recent_months": RECENT_MONTHS,
            "usable": usable, "rejected": rejected, "rival_videos": sorted(rival_videos)}
     path = a.corpus / f"moments-{a.brand}.json"

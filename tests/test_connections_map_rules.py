@@ -234,3 +234,60 @@ def test_an_audience_count_is_not_money():
     assert not th.names_money("the video hit 2 million views")
     assert th.names_money("I spent 1 million dollars on it")
     assert th.names_money("we won $5,000")
+
+
+def test_a_link_must_start_where_its_quote_starts():
+    m = {"cues": [[100.0, "around the corner I spotted a cooler"], [112.0, "this is liquid gold right here."]]}
+    assert "link &t=112s" in bh._quote_timing(m, "this is liquid gold right here.", 100)
+    assert bh._quote_timing(m, "this is liquid gold right here.", 110) is None
+
+
+def test_a_quote_that_stops_mid_sentence_fails():
+    m = {"cues": [[10.0, "it feels like 110 in here and we have to"], [12.0, "stand like this all night long."]]}
+    assert "mid-sentence" in bh._quote_timing(m, "it feels like 110 in here and we have to", 10)
+
+
+def test_a_window_holding_a_held_back_ledger_line_is_blocked():
+    idx = {"f3": {"fact_id": "f3", "quote": "Tyler is also my workout buddy", "confidence": "unconfirmed",
+                  "staged_only": True}}
+    assert mc.held_back_line("my best friend, Tyler is also my workout buddy. But", idx).startswith("f3")
+
+
+def test_a_moment_inside_an_ad_read_is_blocked():
+    rec = mc.judge({"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 560,
+                    "quote": "i'm from the city we got the team right here"},
+                   [(560.0, "i'm from the city we got the team right here")], "", {}, None,
+                   "2026-10-01", {}, None, [], ["Acme"], [(541.0, 587.0)])
+    assert not rec["usable"] and any("ad read" in r for r in rec["reasons"])
+
+
+def test_a_window_cut_at_other_edges_still_holds_the_held_back_line():
+    idx = {"f3": {"fact_id": "f3", "quote": "other than being my best friend, Tyler is also my workout buddy.",
+                  "confidence": "unconfirmed", "staged_only": True}}
+    assert mc.held_back_line("friend, Tyler is also my workout buddy. But mafia, he has", idx)
+    assert mc.held_back_line("I went to the gym with my buddy today", idx) is None
+
+
+def test_a_lapsed_span_starts_at_the_first_repeat():
+    recs = [{"kind": "fact", "fact_id": "f7", "published": "2025-11-08",
+             "said": "said from November 2025 to January 2026"},
+            {"kind": "member", "fact_id": "f7", "published": "2025-08-19"}]
+    mc.widen_said(recs)
+    assert recs[0]["said"] == "said from August 2025 to January 2026"
+
+
+def test_caption_tags_are_not_words_he_said():
+    assert bh._norm_words("we have to [music] stand like this") == "we have to stand like this"
+
+
+def test_a_clean_sentence_beside_a_held_back_line_stays_usable():
+    idx = {"f9": {"fact_id": "f9", "quote": "I'm boxing a YouTuber every time I go up a million subscribers",
+                  "confidence": "confirmed", "superseded_by": "f10"}}
+    rec = mc.judge({"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 980,
+                    "quote": "we have this entire gym to ourselves. Let's get a workout in. "
+                             "every time I go up a million subscribers I fight a new YouTuber"},
+                   [(980.0, "we have this entire gym to ourselves. Let's get a workout in.")],
+                   "", {}, None, "2026-10-01", idx, None, [], ["Acme"], [])
+    assert rec["usable"] and rec["held_back"]["fact_id"] == "f9"
+    assert bh._quotes_held_back(rec, "Let's get a workout in.") is None
+    assert bh._quotes_held_back(rec, "every time I go up a million subscribers") is not None
