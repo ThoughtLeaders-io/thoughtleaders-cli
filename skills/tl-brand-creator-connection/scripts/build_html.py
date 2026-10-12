@@ -762,12 +762,27 @@ def source_label(url: str) -> str:
     return host or "web"
 
 
+_HISTORY_SPAN = re.compile(r"\b(said from|from \w+ \d{4} to|until|used to|no longer|in \d{4})\b", re.I)
+
+
+def story_ok(fact: dict, index: dict[str, dict]) -> bool:
+    """A fact the story may list: one the page may use, or a phase that has
+    ended or been replaced, which stays as dated history and is never a
+    current connection."""
+    why = angle_ineligible_reason(fact, index)
+    if why is None:
+        return True
+    if not (why.startswith("superseded") or why.startswith("ended")):
+        return False
+    rest = dict(fact, superseded_by=None, ended=False)
+    return angle_ineligible_reason(rest, index) is None
+
+
 def _who_item(ids: list[str], line: str, index: dict[str, dict]) -> dict | None:
     """One renderable line: the usable facts it names, its date (the newest
     upload among them), the first quote, and the sources. None when no
     named fact may appear on the page."""
-    usable = [index[i] for i in ids
-              if i in index and angle_ineligible_reason(index[i], index) is None]
+    usable = [index[i] for i in ids if i in index and story_ok(index[i], index)]
     if not usable:
         return None
     # one fact speaks for the line: the newest, so its date, quote and link agree
@@ -1379,9 +1394,14 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
                                 f"{plain(line)[:50]}")
             else:
                 reason = angle_ineligible_reason(index[fid], index)
-                if reason:
+                if reason and not story_ok(index[fid], index):
                     problems.append(f"Who they are names an ineligible fact ({fid}, {reason}): "
                                     f"{plain(line)[:50]}")
+                elif reason and not _HISTORY_SPAN.search(plain(line)):
+                    # a replaced or ended phase is history: the line gives when
+                    problems.append(f"Who they are lists a past phase ({fid}, {reason}) without "
+                                    f"its span (\"said from <Month YYYY> to <Month YYYY>\", \"until\", "
+                                    f"\"used to\"): {plain(line)[:50]}")
 
     # every connection card must carry its evidence, and the evidence must be
     # the ledger's: a quote that matches no verified fact is the channel's

@@ -980,14 +980,18 @@ def capped_confidence(line: dict, fmt: str, override: str | None) -> str:
     return value
 
 
-def hook_only(line: dict, videos: list[str]) -> bool:
+def hook_only(line: dict, videos: list[str], probe_entry: dict | None = None) -> bool:
     """A staged upload (its title marks a prank, challenge or stunt), every
-    member in the first ``HOOK_SECONDS``, and no other video says it. An
+    member in the first ``HOOK_SECONDS``, and no other video says it: not
+    its own members, and not the uploads the probe found saying it again. An
     ordinary upload's opening is the creator introducing themselves."""
     members = members_of(line)
     staged = str((line.get("window") or {}).get("format_hint") or "") == "staged"
     if not staged or not members or len(videos) > 1:
         return False
+    p = (probe_entry or {}).get("probe") or {}
+    if int(p.get("non_staged_videos") or 0) > 0 or int(p.get("recurring_videos") or 0) >= RECURRING_VIDEOS:
+        return False  # said again elsewhere: his, not an opening bit
     return all(float(m.get("start") or 0) < HOOK_SECONDS for m in members)
 
 
@@ -1049,7 +1053,7 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         # said inside a set-up and found nowhere else: kept, never dropped,
         # never confirmed, never on a brand-facing page
         confidence = "unconfirmed"
-    hook = hook_only(line, videos)
+    hook = hook_only(line, videos, probe_entry)
     if hook:
         confidence = "unconfirmed"
     claim, date_note = dated_claim(claim, w.get("published"), first_upload)

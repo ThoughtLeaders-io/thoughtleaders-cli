@@ -128,3 +128,16 @@ def test_a_personal_fact_said_once_in_a_stunt_is_not_staged_only():
     p = {"probe": {"videos": 0, "non_staged_videos": 0, "own_videos": 1,
                    "own_non_staged_videos": 0, "recurring_videos": 1}}
     assert not mp.staged_only(line, p)
+
+
+def test_an_opening_line_said_again_elsewhere_is_not_a_hook():
+    line = {"window": {"format_hint": "staged"}, "members": [{"start": 1}]}
+    p = {"probe": {"videos": 10, "non_staged_videos": 7, "recurring_videos": 11}}
+    assert not mp.hook_only(line, ["v1"], p)
+    assert mp.hook_only(line, ["v1"], {"probe": {"videos": 0, "non_staged_videos": 0, "recurring_videos": 1}})
+
+
+def test_his_own_childhood_is_not_a_child():
+    import tier_hint
+    assert not tier_hint.names_child("loved anything with wheels as a kid and was the first kid with Heelys")
+    assert tier_hint.names_child("my son was the first kid in class to read")

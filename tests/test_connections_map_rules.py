@@ -291,3 +291,17 @@ def test_a_clean_sentence_beside_a_held_back_line_stays_usable():
     assert rec["usable"] and rec["held_back"]["fact_id"] == "f9"
     assert bh._quotes_held_back(rec, "Let's get a workout in.") is None
     assert bh._quotes_held_back(rec, "every time I go up a million subscribers") is not None
+
+
+def test_a_replaced_phase_stays_in_the_story_as_history():
+    old = {"fact_id": "f1", "claim": "boxes a YouTuber every million subscribers", "confidence": "confirmed",
+           "sensitivity": "none", "superseded_by": "f2", "quote": "I'm boxing a YouTuber", "published": "2025-08-19"}
+    held = dict(old, fact_id="f3", confidence="unconfirmed")
+    idx = {"f1": old, "f3": held}
+    assert bh.story_ok(old, idx)
+    assert not bh.story_ok(held, idx)
+
+
+def test_a_past_phase_in_the_story_must_give_its_span():
+    assert bh._HISTORY_SPAN.search("Said from August 2025 to January 2026 that he would box a YouTuber")
+    assert not bh._HISTORY_SPAN.search("Boxes a YouTuber every time the channel gains a million subscribers")
