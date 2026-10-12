@@ -11,6 +11,7 @@ credits on every run.
 from __future__ import annotations
 
 import json
+import os
 import statistics
 import time
 from pathlib import Path
@@ -24,7 +25,10 @@ import tl_data
 
 import channel_lookup
 
-CACHE = Path(__file__).resolve().parent.parent / "references" / "peer-cohort-cache.json"
+# An MCP session (mcp_run.py) keeps its cache in the session, not the install.
+CACHE = (Path(os.environ["TL_MCP_SESSION"]) / "peer-cohort-cache.json"
+         if os.environ.get("TL_MCP_SESSION") else
+         Path(__file__).resolve().parent.parent / "references" / "peer-cohort-cache.json")
 CACHE_TTL_DAYS = 30
 MAX_PEERS = 12
 

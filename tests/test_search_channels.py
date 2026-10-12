@@ -1,7 +1,7 @@
 """Tests for the tl-keyword-research search_channels.py script.
 
 Loaded by path (it lives under skills/, not the package); ES is mocked by
-patching the module's subprocess.run. The fake answers the collapsed article
+patching the shared CLI transport's subprocess.run. The fake answers the collapsed article
 search and the channel-doc enrichment by inspecting the body it receives.
 """
 import importlib.util
@@ -38,7 +38,7 @@ def _fake_run(search_rows=None, enrich_rows=None, capture=None):
          "has_outreach_email": True, "sponsorship_price": 4710.0, "reach": 938000},
     ]
 
-    def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+    def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
         body = json.loads(input)
         if capture is not None:
             capture.append(body)
@@ -52,7 +52,7 @@ def _fake_run(search_rows=None, enrich_rows=None, capture=None):
 
 
 def _main(monkeypatch, argv, **fake_kwargs):
-    monkeypatch.setattr(sc.subprocess, "run", _fake_run(**fake_kwargs))
+    monkeypatch.setattr(sc.tl_data.subprocess, "run", _fake_run(**fake_kwargs))
     monkeypatch.setattr(sc.sys, "argv", ["search_channels.py"] + argv)
     monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)  # no stdin keywords
     sc.main()
@@ -173,7 +173,7 @@ def _fake_run_intensity(buckets=None, totals=None, enrich_rows=None, capture=Non
         for k in totals
     ]
 
-    def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+    def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
         body = json.loads(input)
         if capture is not None:
             capture.append(body)
@@ -195,7 +195,7 @@ def _fake_run_intensity(buckets=None, totals=None, enrich_rows=None, capture=Non
 
 class TestIntensityMode:
     def _run(self, monkeypatch, argv, **kw):
-        monkeypatch.setattr(sc.subprocess, "run", _fake_run_intensity(**kw))
+        monkeypatch.setattr(sc.tl_data.subprocess, "run", _fake_run_intensity(**kw))
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py"] + argv)
         monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
         sc.main()
@@ -264,7 +264,7 @@ class TestIntensityTierFn:
         buckets = [{"key": "1", "doc_count": 12, "recent": {"doc_count": 5}}]
         totals = {"1": 20}
 
-        def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
             body = json.loads(input)
             filters = body["query"]["bool"].get("filter", [])
             if any(f.get("term", {}).get("doc_type") == "channel" for f in filters):
@@ -278,7 +278,7 @@ class TestIntensityTierFn:
                     "by_channel": {"buckets": buckets}}}
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
-        monkeypatch.setattr(sc.subprocess, "run", run)
+        monkeypatch.setattr(sc.tl_data.subprocess, "run", run)
         monkeypatch.setattr(sc.sys, "argv", ["search_channels.py", "--intensity", "investing"])
         monkeypatch.setattr(sc.sys.stdin, "isatty", lambda: True)
         sc.main()
