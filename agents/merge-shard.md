@@ -70,15 +70,21 @@ Rules:
   host's, or an ad read. Never drop, demote or supersede because you are
   unsure: a staged or contradicted claim is judged on its `probe` and kept
   at `unconfirmed` when the probe settles nothing.
-- **Staged claims.** Found in one or more non-staged uploads: `keep` at the
-  confidence the extractor gave. Found only in staged uploads, or no probe:
-  `keep` at `unconfirmed`; the script marks it `staged_only`. Never `drop` it.
+- **Staged claims.** A staged upload's line is held back only when it could
+  be the bit: it is the premise in the `title`, the stunt's set-up, or
+  something the stunt needs him to say. Found in one or more non-staged
+  uploads, or in four or more uploads: `keep` at `confirmed`. A personal fact
+  the stunt does not need (a family member's name, a past job, a fear, a
+  taste, a partner), in the host's voice, is his even when he says it once:
+  `keep` at `confirmed`. A line that could be the bit, found only in staged
+  uploads or with no probe: `keep` at `unconfirmed`; the script marks it
+  `staged_only`. Never `drop` it.
 - **Conflicts** are settled by the newest dated evidence: `last_seen` and
   `probe.newest` on each side, then the identity lane's `seen_date` when a
   lane record corroborates one side. The newer fact `supersedes` the older.
   When neither side is newer, or both recur into the present, `keep` both at
   `unconfirmed` and supersede nothing. Read every line in a `conflicts_with`
-  set the same way. `expand` refuses a supersession that points against the
+  set the same way. A conflict with a line you drop is no conflict. `expand` refuses a supersession that points against the
   dates and asks again with the dates; it never edits your decision.
 - **`ended`** when the claim states something as current and the evidence
   shows it is over: training for a marathon since run, a relationship since

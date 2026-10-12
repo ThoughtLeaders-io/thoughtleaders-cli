@@ -83,7 +83,8 @@ def test_word_forms_meet():
 
 # ---- what the probe decides ----
 def _staged_line():
-    return {"window": {"format_hint": "staged"}}
+    return {"window": {"format_hint": "staged", "title": "How Long Can I Secretly Live At 7/11?"},
+            "verdict": {"claim": "lives at a 7/11", "quote": "I live at this 7/11 now"}}
 
 
 def test_a_fact_said_once_in_a_bit_stays_staged_only():
@@ -118,3 +119,12 @@ def test_a_step_back_is_still_a_conflict():
     newer = {"c": "c2", "domain": "relationships", "claim": "has a boyfriend",
              "quote": "my boyfriend and I", "published": "2025-01-01"}
     assert au.find_conflicts([older, newer]) == 2
+
+
+def test_a_personal_fact_said_once_in_a_stunt_is_not_staged_only():
+    line = {"window": {"format_hint": "staged", "title": "I Tried Every Airline In America"},
+            "verdict": {"claim": "his mom is named Jean",
+                        "quote": "my mom's name is Jean she is the coolest lady I've ever met"}}
+    p = {"probe": {"videos": 0, "non_staged_videos": 0, "own_videos": 1,
+                   "own_non_staged_videos": 0, "recurring_videos": 1}}
+    assert not mp.staged_only(line, p)

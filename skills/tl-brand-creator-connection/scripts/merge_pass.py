@@ -98,6 +98,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # noqa: E402
 import assemble_extracts as _ax  # noqa: E402  sibling: the claim-to-quote check
+import authenticate as _auth  # noqa: E402  sibling: the probe's word helpers
 from store_io import read_ledger, write_ledger  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data  # noqa: E402  the shared CLI wrapper
@@ -369,15 +370,31 @@ def load_probe(path: pathlib.Path | None) -> dict[str, dict]:
     return {k: v for k, v in (results or {}).items() if isinstance(v, dict)}
 
 
+def premise_line(line: dict) -> bool:
+    """The claim shares a telling word with its upload's title: it could be
+    the stunt itself ("lives at a 7/11" in "Secretly Live At 7/11"). A
+    personal fact the stunt does not need shares none and is the shard's to
+    judge."""
+    w = line.get("window") or {}
+    v = line.get("verdict") or {}
+    def telling(text: str) -> set[str]:
+        return {_auth._stem(t) for t in _auth._words(text)
+                if t not in _auth.STOPWORDS and (len(t) > 2 or (t.isdigit() and len(t) > 1))}
+    return bool(telling(str(w.get("title") or ""))
+                & telling(f"{v.get('claim') or ''} {v.get('quote') or ''}"))
+
+
 def staged_only(line: dict, probe_entry: dict | None) -> bool:
-    """A claim from a staged window that the probe could not find in any
-    non-staged upload (or that no probe reached), whose own uploads are all
-    staged, and that is said in fewer than ``RECURRING_VIDEOS`` uploads. It is
-    kept, never dropped, but it does not confirm and does not reach a
-    brand-facing page."""
+    """A claim from a staged window that could be the bit (``premise_line``),
+    that the probe could not find in any non-staged upload (or that no probe
+    reached), whose own uploads are all staged, and that is said in fewer
+    than ``RECURRING_VIDEOS`` uploads. It is kept, never dropped, but it does
+    not confirm and does not reach a brand-facing page."""
     w = line.get("window") or {}
     if str(w.get("format_hint") or "") != "staged":
         return False
+    if not premise_line(line):
+        return False  # a personal fact the stunt does not need: the shard judges it
     p = (probe_entry or {}).get("probe") or {}
     if int(p.get("own_non_staged_videos") or 0) > 0:
         return False  # the cluster itself was said in a non-staged upload

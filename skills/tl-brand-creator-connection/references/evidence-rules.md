@@ -117,7 +117,11 @@ Rules the scripts and the merge shard apply to what the extractor returned.
   or most of the quote's telling words, close together in the captions. The
   claim's own uploads never confirm it. The merge shard decides with that
   evidence. Found in a non-staged upload, or said in four or more uploads:
-  the fact is the person's. Otherwise: kept in the ledger at
+  the fact is the person's. A personal fact the stunt does not need (a
+  family member's name, a past job, a fear, a taste), in the host's voice,
+  is the person's even when said once: only a line that could be the bit
+  (the premise in the title, the set-up, a line the stunt needs) is held
+  back. That line, found nowhere else: kept in the ledger at
   `unconfirmed`, marked `staged_only`, never on a brand-facing page. A claim
   found only in a staged upload's first 60 seconds, and in no other video, is
   the opening hook: `unconfirmed`.
