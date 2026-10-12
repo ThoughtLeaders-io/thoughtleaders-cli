@@ -1165,13 +1165,15 @@ _TO_CONFIRM = re.compile(r"\bconfirm (?:\w+ ){0,3}with (?:his|her|their|the crea
 
 
 def supporting_problems(sections: list[tuple[str, str]], facts: list[dict] | None,
-                        probe: dict | None, where: str) -> list[str]:
+                        probe: dict | None, where: str, moments: dict | None = None) -> list[str]:
     """Quotes inside list items (a concept's further moments, the "On the
-    channel already" lines) must be the creator's words a lane returned or
-    the ledger holds, and each item that quotes carries a link to the video."""
+    channel already" lines) must be the creator's words a lane returned, the
+    ledger holds or moment_check read and passed, and each item that quotes
+    carries a link to the video."""
     if probe is None and not facts:
         return []
-    texts = probe_texts(probe) + [_norm_words(str(f.get("quote") or "")) for f in facts or []]
+    texts = (probe_texts(probe) + [_norm_words(str(f.get("quote") or "")) for f in facts or []]
+             + [_norm_words(str(m.get("quote") or "")) for m in (moments or {}).get("usable") or []])
     out = []
     for title, rest in sections:
         name = plain(title)[:60]
@@ -1386,7 +1388,7 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
     elif label and label != want:
         problems.append(f"## Verdict says {label!r} but the concepts make it {want!r}: "
                         "any strong concept is a strong fit, thin ones only a thin fit")
-    problems += supporting_problems(kinds["conn"], facts, probe, "a supporting moment's")
+    problems += supporting_problems(kinds["conn"], facts, probe, "a supporting moment's", moments)
     problems += supporting_problems(kinds["channel"], facts, probe, "an On the channel already")
 
     # three concepts, three ways in: each names the kind of video it is, and

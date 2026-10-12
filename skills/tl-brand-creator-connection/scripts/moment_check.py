@@ -23,7 +23,10 @@ A moment is usable when:
 * **a plan is still a plan**: a ledger fact superseded by a newer one, or
   ended, never leads a concept; a "will" claim last said more than
   ``PLAN_MONTHS`` ago with no later mention is stale; a recent one is
-  usable only with the label ``said <Month YYYY>, not yet confirmed``.
+  usable only with the label ``said <Month YYYY>, not yet confirmed``;
+* **a habit is still a habit**: an "every time" or "always" claim not said
+  in the ``LAPSE_MONTHS`` before the channel's newest upload has lapsed (a
+  series replaced by another, a pledge dropped) and is past, never current.
 
 Usable moments also carry what the writer must say about them instead of
 guessing: ``premise`` (the venue or partner was in on it: the description
@@ -62,6 +65,9 @@ from build_html import angle_ineligible_reason  # noqa: E402  one home for what 
 
 RECENT_MONTHS = 24
 PLAN_MONTHS = 12
+# a habit ("every time", "always") not said for this long while the channel
+# kept posting has lapsed: past, never a current concept
+LAPSE_MONTHS = 6
 SURROUND_SECONDS = 120
 QUOTE_SLACK_SECONDS = 20
 META_CHUNK = 50
@@ -71,7 +77,7 @@ RISKY = re.compile(r"\b(steal(?:ing)?|stole|stolen|shoplift\w*|fake (?:coupon|id
                    r"room number|without paying|charg\w+ (?:it )?to (?:their|his|her|a) room|"
                    r"trespass\w*)\b", re.I)
 # A description line that says the venue or a partner was in on it.
-PREMISE = re.compile(r"(letting us film|for letting us|for having us|for hosting us|"
+PREMISE = re.compile(r"(letting us film|for having us|for hosting us|"
                      r"utm_medium=partnership|in partnership with|for entertainment purposes)", re.I)
 # A description line that says who paid for the video.
 SPONSOR_LINE = re.compile(r"(sponsor|partner|thank(?:s| you) (?:to )?\S+ for|#\w*(?:partner|ad)\b)", re.I)
@@ -101,12 +107,64 @@ def rival_pattern(rivals: list[str], brand_names: list[str]) -> re.Pattern | Non
     """One pattern for the rival names, spaces optional so a one-word hashtag
     (#celsiusbrandpartner) matches too. The brand's own names never count."""
     own = {b.lower() for b in brand_names if b}
-    names = sorted({r.strip() for r in rivals if r and r.strip() and r.strip().lower() not in own},
+    names = sorted({r.strip() for r in short_names(rivals) if r.strip().lower() not in own},
                    key=len, reverse=True)
     if not names:
         return None
     alts = [r"\s*".join(re.escape(part) for part in n.split()) for n in names]
     return re.compile(r"(?<![a-z])(" + "|".join(alts) + r")", re.I)
+
+
+# rival names that are also everyday words: near a link they count only as a
+# name (capitalised, where the captions carry capitals), never as the word
+COMMON_WORDS = {"prime", "cure", "ghost", "propel", "monster", "hydrant", "bloom",
+                "core", "body", "liquid", "spark", "pure", "fuel", "vital", "zero"}
+DRINK_CONTEXT = ("drink|drinks|drinking|bottle|bottles|can|cans|sip|lukewarm|cold|ice|iced|"
+                 "flavor|flavour|energy drink|hydration")
+
+
+GENERIC_BRAND_WORDS = {"hydration", "drink", "drinks", "energy", "nutrition", "beverage", "beverages",
+                       "water", "co", "company", "inc", "official", "brand", "brands"}
+
+
+def short_names(rivals: list[str]) -> list[str]:
+    """Each rival as written and as people say it: "Prime Hydration" is said
+    "Prime", "Drink LMNT" is said "LMNT"."""
+    out: list[str] = []
+    for r in rivals:
+        r = (r or "").strip()
+        if not r:
+            continue
+        out.append(r)
+        core = " ".join(w for w in r.split() if w.lower() not in GENERIC_BRAND_WORDS)
+        if core and core.lower() != r.lower():
+            out.append(core)
+    return out
+
+
+def near_rival(text: str, rivals: list[str], brand_names: list[str]) -> str | None:
+    """The rival a stretch of captions names, as a whole word: "poppi" is not
+    "poppin'", and "prime" the adjective is not Prime the drink."""
+    own = {b.lower() for b in brand_names if b}
+    cased = any(ch.isupper() for ch in text)
+    for name in sorted({r.strip() for r in short_names(rivals)}, key=len, reverse=True):
+        if name.lower() in own:
+            continue
+        words = name.split()
+        body = r"\s*".join(re.escape(w) for w in words)
+        if len(words) == 1 and words[0].lower() in COMMON_WORDS:
+            w = re.escape(words[0].lower())
+            # the drink, not the word: capitalised in cased captions, or with a
+            # drink word right beside it ("lukewarm prime", "a can of ghost")
+            m = (re.search(rf"(?<![A-Za-z]){re.escape(words[0][:1].upper() + words[0][1:].lower())}(?![A-Za-z])", text)
+                 if cased else None) or \
+                re.search(rf"\b(?:{DRINK_CONTEXT})\W+(?:\w+\W+){{0,2}}{w}\b|\b{w}\W+(?:\w+\W+){{0,2}}(?:{DRINK_CONTEXT})\b",
+                          text, re.I)
+        else:
+            m = re.search(rf"(?<![a-z]){body}(?![a-z])", text, re.I)
+        if m:
+            return m.group(0)
+    return None
 
 
 def upload_meta(refs: list[str]) -> dict[str, dict]:
@@ -159,6 +217,21 @@ def candidates(facts: list[dict], probe: dict) -> list[dict]:
                     "superseded_by": f.get("superseded_by"), "ended": bool(f.get("ended")),
                     "sensitivity": f.get("sensitivity"), "last_seen": f.get("last_seen"),
                     "probe": f.get("probe") or {}, "members": f.get("members") or []})
+    # the other uploads a fact was said in (its merged members): the same
+    # fact said again, a supporting moment once its own captions pass
+    for f in facts:
+        vid = str(f.get("video") or "")
+        if ":" not in vid or str(f.get("provenance") or "transcript") != "transcript":
+            continue
+        channel = vid.split(":", 1)[0]
+        for m in f.get("members") or []:
+            mvid, _, mstart = str(m).partition(":")
+            if not mvid or not mstart.isdigit() or (mvid == vid.split(":", 1)[1]
+                                                    and abs(int(mstart) - int(f.get("start") or 0)) < 20):
+                continue
+            out.append({"kind": "member", "fact_id": f.get("fact_id"), "ref": f"{channel}:{mvid}",
+                        "video_id": mvid, "start": int(mstart), "quote": None,
+                        "claim": f.get("claim")})
     for kind in ("windows", "brand_windows"):
         for w in probe.get(kind) or []:
             vid = str(w.get("video_id") or "")
@@ -171,7 +244,9 @@ def candidates(facts: list[dict], probe: dict) -> list[dict]:
 
 
 def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
-          today: str, index: dict[str, dict] | None = None) -> dict:
+          today: str, index: dict[str, dict] | None = None,
+          latest_upload: str | None = None, rivals: list[str] | None = None,
+          brand_names: list[str] | None = None) -> dict:
     """One candidate's checks: ``usable`` and the reasons it is not."""
     reasons: list[str] = []
     start = float(c.get("start") or 0)
@@ -202,20 +277,29 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
                 reasons.append(f"stale plan: last said {month_label(last)}, no later mention")
             else:
                 rec["label"] = f"said {month_label(last)}, not yet confirmed"
+        if tense == "pattern" and last and latest_upload \
+                and months_between(last, latest_upload) >= LAPSE_MONTHS:
+            reasons.append(f"lapsed: last said {month_label(last)}, not in the "
+                           f"{LAPSE_MONTHS} months before the newest upload")
         if tense == "pattern":
             p = c.get("probe") or {}
             own = {str(m.get("video_id") if isinstance(m, dict) else str(m).split(":")[0])
                    for m in c.get("members") or []} or {c["video_id"]}
             rec["videos"] = max(int(p.get("recurring_videos") or 0), len(own))
     else:
+        if c["kind"] == "member":
+            c["quote"] = " ".join(str(t) for s_, t in cues if start - 2 <= float(s_) <= start + 20)
+            rec["quote"] = c["quote"]
+            fid = str(c.get("fact_id") or "")
+            if index and fid in index and angle_ineligible_reason(index[fid], index):
+                reasons.append(angle_ineligible_reason(index[fid], index))
         if not FIRST_PERSON.search(str(c.get("quote") or "")):
             reasons.append("not in the creator's own words (no first-person word)")
 
     near = surroundings(cues, start)
-    if rx:
-        m = rx.search(near)
-        if m:
-            reasons.append(f"rival named within {SURROUND_SECONDS} s: {m.group(0)!r}")
+    hit = near_rival(near, rivals or [], brand_names or [])
+    if hit:
+        reasons.append(f"rival named within {SURROUND_SECONDS} s: {hit!r}")
     m = RISKY.search(near)
     if m:
         reasons.append(f"awkward act within {SURROUND_SECONDS} s: {m.group(0)!r}")
@@ -257,21 +341,43 @@ def main() -> None:
     sf = a.corpus / "brand-site.json"
     if sf.exists():
         site = json.loads(sf.read_text(encoding="utf-8"))
+    # a brand from the category history is a rival too: its sponsored upload is
+    # never this brand's evidence
     rival_names = [str(r.get("name") if isinstance(r, dict) else r)
-                   for r in [*(tl.get("rivals") or []), *(site.get("competitors") or [])]]
-    rx = rival_pattern(rival_names, [str(brand.get("name") or ""),
-                                     *[str(x) for x in brand.get("aliases") or []]])
+                   for r in [*(tl.get("rivals") or []), *(site.get("competitors") or []),
+                             *[h.get("brand") for h in tl.get("category_history") or [] if isinstance(h, dict)]]
+                   if r]
+    own_names = [str(brand.get("name") or ""), *[str(x) for x in brand.get("aliases") or []]]
+    rx = rival_pattern(rival_names, own_names)
 
     index = {str(f.get("fact_id")): f for f in facts}
+    # the category history names its sponsored uploads outright, whatever
+    # their description says ("Grab some free OLIPOP" carries no sponsor word)
+    history_videos = {str(h.get("video_id")) for h in tl.get("category_history") or []
+                      if isinstance(h, dict) and h.get("video_id")}
     cands = candidates(facts, probe)
     refs = sorted({c["ref"] for c in cands})
     cues = fetch_cues.fetch_transcripts(refs) if refs else {}
     summaries = fetch_cues.fetch_summaries(refs) if refs else {}
     metas = upload_meta(refs) if refs else {}
     usable, rejected, rival_videos = [], [], set()
+    fact_reasons: dict[str, list[str]] = {}
     for c in cands:
         rec = judge(c, cues.get(c["ref"]) or [], summaries.get(c["ref"], ""),
-                    metas.get(c["ref"], {}), rx, a.today, index)
+                    metas.get(c["ref"], {}), rx, a.today, index,
+                    str((_meta or {}).get("latest_video_date") or "")[:10] or None,
+                    rival_names, own_names)
+        if c["kind"] == "fact" and not rec["usable"]:
+            fact_reasons[str(c.get("fact_id"))] = rec.get("reasons") or []
+        if c["kind"] == "member" and str(c.get("fact_id")) in fact_reasons:
+            # a fact said again inherits the fact's verdict: a lapsed or
+            # changed fact is not current in any of its videos
+            rec.setdefault("reasons", []).append(
+                "the fact it repeats is not usable: " + "; ".join(fact_reasons[str(c.get("fact_id"))]))
+            rec["usable"] = False
+        if c["video_id"] in history_videos and not rec.get("rival_sponsored"):
+            rec.setdefault("reasons", []).append("upload sponsored by a brand in the category history")
+            rec["rival_sponsored"], rec["usable"] = True, False
         (usable if rec["usable"] else rejected).append(rec)
         if rec.get("rival_sponsored"):
             rival_videos.add(rec["video_id"])

@@ -145,7 +145,8 @@ def test_will_the_name_is_not_a_plan():
     assert mc.FUTURE.search("I'm not stopping until I win")
 
 
-def _judge(fact_extra=None, cues=None, summary="", today="2026-10-01", rx=None):
+def _judge(fact_extra=None, cues=None, summary="", today="2026-10-01", rx=None, latest=None,
+           rivals=None):
     f = {"fact_id": "f9", "claim": "forgets water", "quote": "i forgot my water again",
          "confidence": "confirmed", "sensitivity": "none", "video": "42:aaa", "start": 40,
          "published": "2026-03-01", "last_seen": "2026-03-01"}
@@ -156,7 +157,7 @@ def _judge(fact_extra=None, cues=None, summary="", today="2026-10-01", rx=None):
          "last_seen": f["last_seen"], "probe": {}, "members": []}
     cues = cues if cues is not None else [(38.0, "oh no"), (40.0, "i forgot my water again")]
     return mc.judge(c, cues, summary, {"title": "Hiding in a store", "published": f["published"]},
-                    rx, today, {"f9": f})
+                    rx, today, {"f9": f}, latest, rivals or [], ["Acme"])
 
 
 def test_a_checked_moment_is_usable_and_recent():
@@ -165,8 +166,8 @@ def test_a_checked_moment_is_usable_and_recent():
 
 
 def test_a_rival_or_an_awkward_act_nearby_blocks_the_moment():
-    rx = mc.rival_pattern(["Fizzco"], ["Acme"])
-    rec = _judge(cues=[(40.0, "i forgot my water again"), (95.0, "grab a fizzco from the cooler")], rx=rx)
+    rec = _judge(cues=[(40.0, "i forgot my water again"), (95.0, "grab a fizzco from the cooler")],
+                 rivals=["Fizzco"])
     assert not rec["usable"] and any("rival named" in r for r in rec["reasons"])
     rec = _judge(cues=[(40.0, "i forgot my water again"), (60.0, "then I stole his shampoo")])
     assert not rec["usable"] and any("awkward act" in r for r in rec["reasons"])
@@ -196,3 +197,40 @@ def test_a_recent_plan_carries_its_label():
 def test_a_misquoted_moment_is_blocked():
     rec = _judge(cues=[(40.0, "i remembered my water")])
     assert not rec["usable"] and any("word for word" in r for r in rec["reasons"])
+
+
+def test_a_habit_not_said_for_six_months_has_lapsed():
+    fact = {"quote": "every time I hit a million I box a streamer", "claim": "boxes a streamer every million",
+            "published": "2025-08-01", "last_seen": "2026-01-10"}
+    cues = [(40.0, "every time I hit a million I box a streamer")]
+    rec = _judge(fact, cues=cues, latest="2026-09-30")
+    assert not rec["usable"] and any("lapsed" in r for r in rec["reasons"])
+    rec = _judge(fact, cues=cues, latest="2026-03-01")
+    assert rec["usable"]
+
+
+def test_a_rival_that_is_also_a_word_counts_only_as_a_name():
+    assert mc.near_rival("we were poppin all night", ["Poppi"], ["Acme"]) is None
+    assert mc.near_rival("That was a prime spot to hide", ["Prime"], ["Acme"]) is None
+    assert mc.near_rival("Grab a Prime from the fridge", ["Prime"], ["Acme"]) == "Prime"
+    assert mc.near_rival("all I have in here is lukewarm prime and chocolate", ["Prime"], ["Acme"])
+    # rivals are said by their short name
+    assert mc.near_rival("all I have in here is lukewarm prime and chocolate", ["Prime Hydration"], ["Acme"])
+    assert mc.near_rival("grabbed an lmnt stick", ["Drink LMNT"], ["Acme"])
+    assert mc.near_rival("grab a fizz co please", ["Fizz Co"], ["Acme"]) == "fizz co"
+
+
+def test_members_are_checked_moments_of_their_fact():
+    facts = [{"fact_id": "f1", "video": "42:aaa", "start": 40, "provenance": "transcript",
+              "members": ["aaa:40", "bbb:300", "ccc:12"], "claim": "c", "quote": "q"}]
+    kinds = [(c["kind"], c["video_id"], c["start"]) for c in mc.candidates(facts, {})]
+    assert ("member", "bbb", 300) in kinds and ("member", "ccc", 12) in kinds
+    assert ("member", "aaa", 40) not in kinds      # the fact's own moment is the fact
+
+
+def test_an_audience_count_is_not_money():
+    import tier_hint as th
+    assert not th.names_money("every 1 million subscribers I have to do the top comment")
+    assert not th.names_money("the video hit 2 million views")
+    assert th.names_money("I spent 1 million dollars on it")
+    assert th.names_money("we won $5,000")

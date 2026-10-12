@@ -56,8 +56,11 @@ _CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|when (?:i
                          r"(?:mum|mom|mother|dad|father|parents)\b)", re.I)
 
 
+# a count of subscribers, views or followers is an audience, not a sum of money
 _MONEY_ANY = re.compile(r"[$€£]\s?\d|\b\d[\d,.]*\s?(?:k|grand|bucks|dollars?|euros?|pounds|"
-                        r"usd|eur|gbp|thousand|million)\b", re.I)
+                        r"usd|eur|gbp|thousand|million)\b(?!\s+(?:subscribers?|subs|followers?|views?|"
+                        r"viewers?|likes?|people|members?|fans?|downloads?|plays?|streams?|comments?|users?))",
+                        re.I)
 
 
 def names_child(*texts: str | None) -> bool:
