@@ -115,6 +115,9 @@ def retry(session: Path, request_id: str) -> dict:
     # Keep evidence intact but recompute derived stdout after a retry succeeds.
     for output in session.glob("*.output.txt"):
         output.unlink()
+    # Derived caches built from the failed attempt (e.g. a fallback peer
+    # cohort) must be rebuilt from the replacement receipt too.
+    (session / "peer-cohort-cache.json").unlink(missing_ok=True)
     return {"phase": "needs_tools", "requests": [requests[request_id]], "retry": len(previous) + 1}
 
 
@@ -147,7 +150,8 @@ def run(session: Path, script: Path, arguments: list[str], input_path: Path | No
                 runpy.run_path(str(script), run_name="__main__")
             except SystemExit as exc:
                 if exc.code not in (0, None):
-                    raise tl_data._error(tl_data.DataError, "Processing script failed: " + output.getvalue(),
+                    detail = exc.code if isinstance(exc.code, str) else ""
+                    raise tl_data._error(tl_data.DataError, "Processing script failed: " + output.getvalue() + detail,
                                          int(exc.code) if isinstance(exc.code, int) else 1) from exc
     except tl_data.PendingRequest as pending:
         requests = read(session / "requests.json")
