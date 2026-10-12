@@ -32,15 +32,26 @@ Public API:
     db_es(body: dict) -> list[dict]   rows (the CLI's ``results`` list)
     whoami()          -> dict
     preflight()       -> None         raises CliUnavailable if unusable
+    query(engine, body) -> dict       the full envelope (totals, aggregations)
+    prefetch([...])   -> None         batch independent reads (MCP sessions)
+
+MCP sessions. When ``TL_MCP_SESSION`` names a session directory (set by
+``mcp_run.py``), the same calls are answered from receipts of connected MCP
+tool results instead of the ``tl`` CLI. A read with no receipt raises
+``PendingRequest`` (a BaseException, so ``except Exception`` handlers in the
+skills never swallow it); the runner turns that into a tool request for the
+host, then replays the script once the host has ingested the result.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 TL_BIN = os.environ.get("TL_CLI_BIN", "tl")
 DEFAULT_TIMEOUT = 180
@@ -57,6 +68,13 @@ class DataError(RuntimeError):
 
 class IncompleteDataError(DataError):
     """A successful response was truncated and is unsafe to publish or cache."""
+
+
+def _error(cls, message: str, exit_code: int):
+    """Build an error carrying the CLI exit-code class (see module doc)."""
+    exc = cls(message)
+    exc.exit_code = exit_code
+    return exc
 
 
 def _require_complete(data) -> None:
@@ -112,22 +130,20 @@ def _tl(args: list[str], *, input_text: str | None = None,
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         if proc.returncode == 2:
-            raise CliUnavailable(
-                "tl CLI is not authenticated. Run `tl auth login` (or set "
-                "TL_API_KEY), then retry. " + err
-            )
+            raise _error(CliUnavailable,
+                         "tl CLI is not authenticated. Run `tl auth login` (or "
+                         "set TL_API_KEY), then retry. " + err, 2)
         if proc.returncode == 4:
-            raise CliUnavailable("tl CLI is out of credits: " + err)
+            raise _error(CliUnavailable, "tl CLI is out of credits: " + err, 4)
         if proc.returncode == 5:
-            raise CliUnavailable(
-                "tl CLI access denied (plan or permission): " + err
-            )
+            raise _error(CliUnavailable,
+                         "tl CLI access denied (plan or permission): " + err, 5)
         if proc.returncode == 3:
-            raise DataError(
-                f"tl {' '.join(args[:3])} rate-limited or server error "
-                f"(retryable): {err[:500]}"
-            )
-        raise DataError(f"tl {' '.join(args[:3])} failed: {err[:500]}")
+            raise _error(DataError,
+                         f"tl {' '.join(args[:3])} rate-limited or server error "
+                         f"(retryable): {err[:500]}", 3)
+        raise _error(DataError, f"tl {' '.join(args[:3])} failed: {err[:500]}",
+                     proc.returncode)
     return proc.stdout
 
 
@@ -157,6 +173,10 @@ def _tl_retrying(args: list[str], *, input_text: str | None = None,
 
 def _tl_json(args: list[str], *, input_text: str | None = None,
              timeout: int = DEFAULT_TIMEOUT):
+    if os.environ.get("TL_MCP_SESSION"):
+        data = _mcp(mcp_request(args, input_text))
+        _require_complete(data)
+        return data
     out = _tl_retrying(args, input_text=input_text, timeout=timeout).strip()
     if not out:
         return None
@@ -231,8 +251,184 @@ def whoami(*, timeout: int = DEFAULT_TIMEOUT) -> dict:
 
 
 def preflight() -> None:
-    """Confirm the tl CLI is usable; raise CliUnavailable otherwise."""
+    """Confirm the tl CLI (or MCP session) is usable; raise CliUnavailable otherwise."""
+    if os.environ.get("TL_MCP_SESSION"):
+        whoami()
+        return
     _tl(["whoami"], timeout=60)
+
+
+# --------------------------------------------------------------------------- #
+# MCP sessions: the same reads, answered by the host's connected MCP tools.
+# --------------------------------------------------------------------------- #
+CONTRACT_VERSION = 1
+MCP_TOOLS = {"tl_db_pg", "tl_db_fb", "tl_db_es", "tl_whoami", "tl_channels_similar"}
+PREFETCH_LIMIT = 100
+
+
+class PendingRequest(BaseException):
+    """No receipt yet for a read: suspend the script, never treat it as empty."""
+
+    def __init__(self, requests: list[dict]):
+        super().__init__(f"{len(requests)} MCP tool request(s) pending")
+        self.requests = requests
+
+
+def canonical(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False)
+
+
+def digest(value) -> str:
+    return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+
+
+def mcp_request(args: list[str], input_text: str | None = None) -> dict:
+    """Translate a ``tl`` argv into the connected MCP tool call it maps to.
+
+    Only reads with an MCP equivalent are allowed; anything else fails loudly
+    rather than silently degrading.
+    """
+    args = [a for a in args if a != "--json"]
+    if len(args) >= 2 and args[0] == "db" and args[1] in ("pg", "fb", "es"):
+        engine, flags = args[1], set(args[2:]) - {"-"}
+        if flags - {"--highlight", "--pricing"}:
+            raise _error(DataError, f"no MCP equivalent for tl {' '.join(args)}", 1)
+        body = json.loads(input_text) if engine == "es" else input_text
+        if engine == "es" and not isinstance(body, dict):
+            raise _error(DataError, "ES query must be an object", 1)
+        if engine != "es" and not isinstance(body, str):
+            raise _error(DataError, "SQL query must be text", 1)
+        # tl_db_es declares its query as a JSON *string* (the full DSL body).
+        arguments = {"query": canonical(body) if engine == "es" else body,
+                     "pricing": "--pricing" in flags}
+        if engine == "es":
+            arguments["include_highlight"] = "--highlight" in flags
+        return {"tool": f"tl_db_{engine}", "arguments": arguments}
+    if args == ["whoami"]:
+        return {"tool": "tl_whoami", "arguments": {}}
+    if (len(args) == 5 and args[:2] == ["channels", "similar"]
+            and args[3] == "--limit"):
+        return {"tool": "tl_channels_similar",
+                "arguments": {"channel": args[2], "limit": int(args[4])}}
+    raise _error(DataError, f"no MCP equivalent for tl {' '.join(args)}", 1)
+
+
+def _bind(req: dict) -> tuple[Path, dict]:
+    if req.get("tool") not in MCP_TOOLS:
+        raise _error(DataError, f"unsupported MCP read: {req.get('tool')}", 1)
+    session = Path(os.environ["TL_MCP_SESSION"]).resolve()
+    meta = json.loads((session / "session.json").read_text(encoding="utf-8"))
+    bound = {"contract": CONTRACT_VERSION, "session": meta["id"],
+             "source": meta["source"], **req}
+    return session, {"id": digest(bound), **bound}
+
+
+def _receipt(req: dict):
+    session, bound = _bind(req)
+    target = session / "responses" / (bound["id"] + ".json")
+    if not target.exists():
+        return bound, None
+    receipt = json.loads(target.read_text(encoding="utf-8"))
+    if receipt.get("request") != bound or "response" not in receipt:
+        raise _error(DataError, "receipt does not match the requested read", 1)
+    return bound, receipt
+
+
+def _mcp(req: dict) -> dict:
+    bound, receipt = _receipt(req)
+    if receipt is None:
+        raise PendingRequest([bound])
+    return normalize(receipt["response"])
+
+
+_AUTH_CODES = {"unauthenticated", "unauthorized", "authentication_required",
+               "auth_required"}
+_TRANSIENT_CODES = {"internal_error", "upstream_error", "timeout", "rate_limited",
+                    "service_unavailable"}
+
+
+def normalize(value) -> dict:
+    """Unwrap an MCP tool result to the CLI's JSON envelope; errors raise
+    with the same exit-code classes as the CLI."""
+    if not isinstance(value, dict):
+        raise _error(DataError, "expected a JSON tool result object; missing "
+                     "evidence is not an empty result", 1)
+    transport_error = bool(value.get("isError"))
+    if isinstance(value.get("structuredContent"), dict):
+        value = value["structuredContent"]
+    elif "content" in value and "results" not in value:
+        blocks = value.get("content")
+        if (not isinstance(blocks, list) or len(blocks) != 1
+                or blocks[0].get("type") != "text"):
+            raise _error(DataError, "expected one complete JSON tool result; "
+                         "do not reconstruct partial text", 1)
+        try:
+            value = json.loads(blocks[0]["text"])
+        except (ValueError, KeyError) as exc:
+            if transport_error:
+                raise _error(DataError, "MCP tool failed: "
+                             + str(blocks[0].get("text", ""))[:1000], 3) from exc
+            raise _error(DataError, "tool content is not complete JSON", 1) from exc
+    if not isinstance(value, dict):
+        raise _error(DataError, "tool payload must be an object", 1)
+    if value.get("error") or (value.get("detail") and "results" not in value):
+        code = str(value.get("code", ""))
+        message = str(value.get("error") or value.get("detail"))
+        if code in _AUTH_CODES:
+            raise _error(CliUnavailable, "MCP connection not authenticated: " + message, 2)
+        if "credit" in code:
+            raise _error(CliUnavailable, "out of credits: " + message, 4)
+        if any(s in code for s in ("premium", "quota", "seat", "forbidden",
+                                   "permission", "access")):
+            raise _error(CliUnavailable, "access denied (plan or permission): " + message, 5)
+        if code in _TRANSIENT_CODES:
+            raise _error(DataError, "rate-limited or server error (retryable): " + message, 3)
+        raise _error(DataError, message, 1)
+    if transport_error:
+        raise _error(DataError, "MCP tool failed: " + canonical(value)[:1000], 3)
+    return value
+
+
+def query(engine: str, body, *, highlight: bool = False,
+          timeout: int = DEFAULT_TIMEOUT) -> dict:
+    """Run a query and return the full envelope (totals, aggregations, rows).
+
+    Withheld premium fields and quota truncation raise, like the row helpers;
+    an envelope with no evidence at all is an error, not an empty result.
+    """
+    args = ["db", engine, "-", "--json"] + (["--highlight"] if highlight else [])
+    data = _tl_json(args, input_text=json.dumps(body) if engine == "es" else body,
+                    timeout=timeout)
+    if not isinstance(data, dict):
+        raise _error(DataError, f"tl db {engine} returned no result envelope", 1)
+    _rows(data)                       # raises on withheld fields / truncation
+    has_rows = any(isinstance(data.get(k), list) for k in ("results", "rows", "data"))
+    has_aggs = isinstance(data.get("aggregations"), dict) and bool(data["aggregations"])
+    if not (has_rows or has_aggs):
+        raise _error(DataError, f"tl db {engine} response is missing evidence; "
+                     "it is not a successful empty result", 1)
+    return data
+
+
+def prefetch(reads: list[tuple[str, object]]) -> None:
+    """Request independent reads together in an MCP session (no-op on the CLI).
+
+    ``reads`` is ``[(engine, body), ...]``; results are read later via query().
+    """
+    if not os.environ.get("TL_MCP_SESSION"):
+        return
+    pending: dict[str, dict] = {}
+    for engine, body in reads:
+        req = mcp_request(["db", engine, "-"],
+                          json.dumps(body) if engine == "es" else body)
+        bound, receipt = _receipt(req)
+        if receipt is None:
+            pending[bound["id"]] = bound
+        if len(pending) == PREFETCH_LIMIT:
+            break
+    if pending:
+        raise PendingRequest(list(pending.values()))
 
 
 if __name__ == "__main__":
