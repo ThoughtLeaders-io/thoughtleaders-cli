@@ -1091,7 +1091,8 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         if p.get("videos") is not None:
             fact["probe"] = {"videos": p.get("videos"),
                              "non_staged_videos": p.get("non_staged_videos"),
-                             "newest": p.get("newest")}
+                             "newest": p.get("newest"),
+                             "run_start": p.get("run_start")}
     if str(dec.get("gloss") or "").strip():
         fact["gloss"] = str(dec["gloss"]).strip()
     return fact

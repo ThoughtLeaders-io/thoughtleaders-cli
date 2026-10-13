@@ -305,3 +305,53 @@ def test_a_replaced_phase_stays_in_the_story_as_history():
 def test_a_past_phase_in_the_story_must_give_its_span():
     assert bh._HISTORY_SPAN.search("Said from August 2025 to January 2026 that he would box a YouTuber")
     assert not bh._HISTORY_SPAN.search("Boxes a YouTuber every time the channel gains a million subscribers")
+
+
+def test_a_secretly_title_marks_the_moment_a_premise():
+    assert mc.premise_title("I Secretly Worked At McDonald's")
+    assert mc.premise_title("I Tried Every Airline In America") is None
+
+
+def test_setting_off_an_alarm_is_an_awkward_act():
+    assert mc.RISKY.search("which is going to set off an alarm")
+    assert mc.RISKY.search("we set off the exit alarm")
+
+
+def test_a_link_counts_from_the_quotes_first_word_inside_a_long_cue():
+    m = {"cues": [[399.0, "after being hungry all day, I finally found food in the hallway. Oh, wait. Oh,"],
+                  [410.4, "pizza. I love pizza."]]}
+    assert "link &t=40" in bh._quote_timing(m, "Oh, wait. Oh, pizza. I love pizza.", 399)
+
+
+def _people_facts():
+    hope = {"fact_id": "f1", "claim": "keeps a regular date night with Hope", "confidence": "confirmed",
+            "sensitivity": "none", "published": "2025-04-20", "last_seen": "2026-09-20",
+            "people": [{"name": "Hope", "relation": "girlfriend"}]}
+    fiance = {"fact_id": "f2", "claim": "has a fiance", "confidence": "confirmed", "sensitivity": "none",
+              "published": "2026-07-27", "people": []}
+    jack = {"fact_id": "f3", "claim": "his cousin Jack", "confidence": "confirmed", "sensitivity": "none",
+            "published": "2021-12-27", "people": [{"name": "Jack", "relation": "cousin"}]}
+    return [hope, fiance, jack]
+
+
+def test_a_newer_engagement_makes_the_girlfriend_a_fiancee():
+    facts = _people_facts()
+    out = bh.people_section(facts, {f["fact_id"]: f for f in facts})
+    assert "fiancée" in out and "girlfriend" not in out
+
+
+def test_a_crew_member_with_the_same_name_does_not_date_the_cousin():
+    facts = _people_facts()
+    seen = {"jack": [("2025-03-22", "crew"), ("2021-12-27", "family")]}
+    out = bh.people_section(facts, {f["fact_id"]: f for f in facts}, seen=seen)
+    assert "2025-03" not in out and "2021-12" in out
+
+
+def test_a_lapsing_relation_carries_its_year_and_kin_do_not():
+    room = {"fact_id": "f1", "claim": "as of this video, had a roommate named Preston", "confidence": "confirmed",
+            "sensitivity": "none", "published": "2019-08-08", "people": [{"name": "Preston", "relation": "roommate"}]}
+    kin = {"fact_id": "f2", "claim": "as of this video, his cousin Jack lived in North Carolina",
+           "confidence": "confirmed", "sensitivity": "none", "published": "2019-07-31",
+           "people": [{"name": "Jack", "relation": "cousin"}]}
+    out = bh.people_section([room, kin], {"f1": room, "f2": kin})
+    assert "roommate (2019)" in out and "cousin (2019)" not in out

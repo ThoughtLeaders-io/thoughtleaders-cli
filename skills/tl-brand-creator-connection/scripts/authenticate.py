@@ -72,6 +72,7 @@ and the shard is told to treat it as "nothing found".
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import pathlib
 import re
@@ -427,6 +428,29 @@ def near_hit(fragments: list[str], phrase: str | None, name: str | None,
     return None
 
 
+RUN_GAP_DAYS = 183
+
+
+def run_start(dates: list[str]) -> str | None:
+    """The first upload of the unbroken run of mentions that ends at the
+    newest one: walking back, a gap of more than six months ends the run, so
+    one stray old match never stretches a habit's span."""
+    days = []
+    for d in sorted(set(dates)):
+        try:
+            days.append(dt.date.fromisoformat(d[:10]))
+        except ValueError:
+            continue
+    if not days:
+        return None
+    start = days[-1]
+    for prev in reversed(days[:-1]):
+        if (start - prev).days > RUN_GAP_DAYS:
+            break
+        start = prev
+    return start.isoformat()
+
+
 def probe(channel: int, line: dict, cluster: dict | None,
           freq: dict[str, int] | None = None, staged_videos: set[str] | None = None,
           own_videos: set[str] | None = None) -> dict:
@@ -468,6 +492,7 @@ def probe(channel: int, line: dict, cluster: dict | None,
         "videos": len(vids),
         "newest": dates[-1] if dates else None,
         "oldest": dates[0] if dates else None,
+        "run_start": run_start(dates),
         "staged_videos": staged_n,
         "non_staged_videos": len(vids) - staged_n,
         "staged_share": round(staged_n / len(vids), 2) if vids else None,

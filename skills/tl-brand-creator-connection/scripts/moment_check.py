@@ -76,7 +76,7 @@ META_CHUNK = 50
 # Acts a brand should never find a minute away from its pitch.
 RISKY = re.compile(r"\b(steal(?:ing)?|stole|stolen|shoplift\w*|fake (?:coupon|id|badge|ticket)s?|"
                    r"room number|without paying|charg\w+ (?:it )?to (?:their|his|her|a) room|"
-                   r"trespass\w*)\b", re.I)
+                   r"trespass\w*|set off (?:an|the) (?:\w+ )?alarm)\b", re.I)
 # A description line that says the venue or a partner was in on it.
 PREMISE = re.compile(r"(letting us film|for having us|for hosting us|"
                      r"utm_medium=partnership|in partnership with|for entertainment purposes)", re.I)
@@ -197,6 +197,16 @@ def sponsor_rival(summary: str, rx: re.Pattern | None) -> str | None:
     return None
 
 
+# a title that names the bit: the video is a premise, whoever was in on it
+TITLE_PREMISE = re.compile(r"\b(secretly|undercover|in disguise|disguised|prank\w*|fake|pretend\w*|"
+                           r"snuck|sneak\w*)\b", re.I)
+
+
+def premise_title(title: str) -> str | None:
+    """The title says the video is a bit ("I Secretly Worked At ...")."""
+    return f"title: {title.strip()[:120]}" if TITLE_PREMISE.search(title or "") else None
+
+
 def premise_line(summary: str) -> str | None:
     for line in (summary or "").splitlines():
         if PREMISE.search(line):
@@ -283,9 +293,11 @@ def widen_said(recs: list[dict]) -> None:
     repeats included, not only the ledger's own video."""
     first: dict[str, str] = {}
     for r in recs:
-        f, pub = str(r.get("fact_id") or ""), str(r.get("published") or "")[:10]
-        if f and pub and (f not in first or pub < first[f]):
-            first[f] = pub
+        f = str(r.get("fact_id") or "")
+        # the probe's unbroken run of mentions reaches uploads the ledger did not merge
+        for pub in (str(r.get("published") or "")[:10], str(r.get("run_start") or "")[:10]):
+            if f and pub and (f not in first or pub < first[f]):
+                first[f] = pub
     for r in recs:
         said = r.get("said")
         if said and r.get("kind") == "fact" and first.get(str(r.get("fact_id"))):
@@ -304,6 +316,8 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
     published = meta.get("published") or ""
     title = meta.get("title") or ""
     rec = {k: c.get(k) for k in ("kind", "fact_id", "video_id", "quote", "claim", "term") if c.get(k) is not None}
+    if (c.get("probe") or {}).get("run_start"):
+        rec["run_start"] = c["probe"]["run_start"]
     rec.update({"start": int(start), "url": f"https://www.youtube.com/watch?v={c['video_id']}&t={int(start)}s",
                 "published": published, "title": title, "views": meta.get("views")})
     rec["recent"] = bool(published) and months_between(published, today) < RECENT_MONTHS
@@ -368,7 +382,7 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
     if rival:
         reasons.append(f"upload sponsored by a rival: {rival}")
         rec["rival_sponsored"] = True
-    pl = premise_line(summary)
+    pl = premise_line(summary) or premise_title(title)
     if pl:
         rec["premise"] = pl
     rec["staged"] = bool(TITLE_HINTS["staged"].search(title))

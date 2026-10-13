@@ -619,12 +619,31 @@ def is_recent(fact: dict, today: str | None = None) -> bool:
     return seen >= f"{y:04d}-{m:02d}-{today[8:10]}"
 
 
+# the cast-sheet role a relation must carry for an appearance to count: a
+# different Jack on the crew is not the cousin
+_CAST_ROLE = {**{r: "family" for r in ("cousin", "sister", "brother", "mom", "mum", "mother", "dad",
+                                       "father", "aunt", "uncle", "grandma", "grandpa", "grandmother",
+                                       "grandfather", "girlfriend", "boyfriend", "fiancée", "fiancé",
+                                       "wife", "husband")},
+              **{r: "friend" for r in ("friend", "best friend", "hometown friend", "roommate",
+                                       "roommate friend", "childhood friend")}}
+# relations that never lapse: they carry no "as of" year
+_KIN = {"cousin", "sister", "brother", "mom", "mum", "mother", "dad", "father", "aunt", "uncle",
+        "grandma", "grandpa", "grandmother", "grandfather", "son", "daughter"}
+_PARTNER_UP = re.compile(r"\b(fianc[eé]e?|engaged|wife|husband|married)\b", re.I)
+
+
 def people_section(facts: list[dict] | None, index: dict[str, dict],
-                   heading: str = "People in their videos") -> str:
+                   heading: str = "People in their videos",
+                   seen: dict[str, str] | None = None) -> str:
     """The people the creator's quotes name, from facts the page may use:
     one row per exact spelling with its relation words, and the newest upload
-    that names them: the fact's own upload or a later one the probe found
-    saying it again (``last_seen``). A name with no relation is left out."""
+    that shows them: the fact's own upload, a later one the probe found saying
+    it again (``last_seen``), or a later one whose cast sheet names them
+    (``seen``, from cast.json). A name with no relation is left out. A
+    relation said only "as of" an older video carries its year, and a
+    girlfriend or boyfriend becomes the fiance(e), wife or husband a newer
+    fact names when they are the only partner in the table."""
     rows: dict[str, dict] = {}
     for f in facts or []:
         if angle_ineligible_reason(f, index) is not None:
@@ -633,12 +652,38 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
             name = str(p.get("name") or "").strip()
             if not name:
                 continue
-            row = rows.setdefault(name, {"rel": [], "last": ""})
-            if p.get("relation") and p["relation"] not in row["rel"]:
-                row["rel"].append(str(p["relation"]))
+            row = rows.setdefault(name, {"rel": [], "last": "", "said": ""})
+            rel = str(p.get("relation") or "")
+            if rel and rel.lower() not in _KIN and str(f.get("claim") or "").lower().startswith("as of this video") \
+                    and not is_recent({"last_seen": f.get("last_seen") or f.get("published")}):
+                rel = f"{rel} ({str(f.get('published') or '')[:4]})"
+            if rel and rel not in row["rel"]:
+                row["rel"].append(rel)
             row["last"] = max(row["last"], str(f.get("published") or "")[:10],
                               str(f.get("last_seen") or "")[:10])
+            if rel:
+                row["said"] = max(row["said"], str(f.get("published") or "")[:10])
+    for name, row in rows.items():
+        roles = {_CAST_ROLE.get(r.split(" (")[0].lower()) for r in row["rel"]} - {None}
+        for day, role in (seen or {}).get(name.lower()) or []:
+            if role in roles:
+                row["last"] = max(row["last"], str(day)[:10])
     rows = {n: r for n, r in rows.items() if r["rel"]}
+    partners = [n for n, r in rows.items()
+                if any(x in ("girlfriend", "boyfriend") for x in r["rel"])]
+    if len(partners) == 1:
+        row = rows[partners[0]]
+        newer = sorted((f for f in facts or [] if angle_ineligible_reason(f, index) is None
+                        and not f.get("people") and _PARTNER_UP.search(str(f.get("claim") or ""))
+                        and str(f.get("last_seen") or f.get("published") or "")[:10] > row["said"]),
+                       key=lambda f: str(f.get("last_seen") or f.get("published") or ""))
+        if newer:
+            word = _PARTNER_UP.search(str(newer[-1].get("claim"))).group(1).lower()
+            her = "girlfriend" in row["rel"]
+            up = {"fiance": "fiancée" if her else "fiancé", "fiancé": "fiancée" if her else "fiancé",
+                  "fiancee": "fiancée", "fiancée": "fiancée", "engaged": "fiancée" if her else "fiancé",
+                  "married": "wife" if her else "husband"}.get(word, word)
+            row["rel"] = [up if x in ("girlfriend", "boyfriend") else x for x in row["rel"]]
     if not rows:
         return ""
     trs = "".join(
@@ -648,6 +693,33 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
     return (f'<h3>{html.escape(heading)}</h3><div class="tablewrap"><table class="people"><thead><tr>'
             '<th>Name</th><th>Who</th><th>Seen in</th></tr></thead>'
             f'<tbody>{trs}</tbody></table></div>')
+
+
+def cast_appearances(corpus_dir: pathlib.Path | None) -> dict[str, list[tuple[str, str]]]:
+    """Every upload each person appears in, by the cast sheets: name or
+    alias, lower-cased, to (publish date, the sheet's role)."""
+    if corpus_dir is None:
+        return {}
+    try:
+        cast = json.loads((corpus_dir / "cast.json").read_text(encoding="utf-8"))
+        dates = {}
+        with gzip.open(corpus_dir / "corpus.jsonl.gz", "rt", encoding="utf-8") as fh:
+            for line in fh:
+                r = json.loads(line)
+                dates[str(r.get("id") or "").split(":")[-1]] = str(r.get("publication_date") or "")[:10]
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, list[tuple[str, str]]] = {}
+    for vid, sheet in (cast or {}).items():
+        day = dates.get(str(vid), "")
+        if not day:
+            continue
+        for g in (sheet or {}).get("guests") or []:
+            for n in [g.get("name")] + list(g.get("aliases") or []):
+                key = str(n or "").strip().lower()
+                if key:
+                    out.setdefault(key, []).append((day, str(g.get("role") or "")))
+    return out
 
 
 def built_footer(meta: dict) -> str:
@@ -980,7 +1052,8 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
         top = who_intro(creator_intro, name)
         story = (who_they_are(facts, {**meta, "channel_name": creator}, creator_intro,
                               heading=f"{name}'s story so far", with_prose=False)
-                 + people_section(facts, index, heading=f"Who shows up in {name}'s videos"))
+                 + people_section(facts, index, heading=f"Who shows up in {name}'s videos",
+                                  seen=meta.get("_seen")))
     else:
         top, story = about_block(creator_about), ""
     done = "".join(f'<h2>{html.escape(name)} has done this before</h2><div class="onchannel">{rest}</div>'
@@ -1274,6 +1347,25 @@ _COUNTED = re.compile(r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|elev
 _OVERCLAIM = re.compile(r"(\b100 ?%|\bfully verified\b|\bverified facts?\b|\bguaranteed accurate\b)", re.I)
 
 
+# a link may open this many seconds before the quote's first word
+LINK_LEAD_SECONDS = 3
+
+
+def _spoken_at(cues: list[tuple[float, str]], hit: dict, quote: str) -> int:
+    """The second the quote's first word is said: its cue's start, moved on
+    by how far into a long cue the words sit (cues run up to ten seconds)."""
+    idx = next((i for i, (t, _x) in enumerate(cues) if int(t) == int(hit["start"])), None)
+    if idx is None:
+        return int(hit["start"])
+    text = _norm_words(cues[idx][1])
+    first = " ".join(_norm_words(quote).split()[:3])
+    at = text.find(first)
+    if at <= 0 or not text:
+        return int(hit["start"])
+    end = cues[idx + 1][0] if idx + 1 < len(cues) else cues[idx][0] + 4.0
+    return int(cues[idx][0] + (end - cues[idx][0]) * at / len(text))
+
+
 def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
     """Where a quote really starts in its moment's captions, and whether it
     stops with its sentence. None when both are fine or cannot be told."""
@@ -1284,8 +1376,9 @@ def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
     hit = locate(cues, quote, link_t)
     if hit.get("match") != "exact":
         return None
-    if hit["start"] - link_t > 8:
-        return f"the link starts {hit['start'] - link_t} s before the quote; link &t={hit['start']}s"
+    begins = _spoken_at(cues, hit, quote)
+    if begins - link_t > LINK_LEAD_SECONDS:
+        return f"the link starts {begins - link_t} s before the quote; link &t={begins}s"
     joined = " ".join(x for _t, x in cues)
     q = quote.strip().rstrip("\"”")
     if q and q[-1] not in ".?!":
@@ -1436,6 +1529,12 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
                                            re.sub(r"<a\b[^>]*>.*?</a>", " ", quote, flags=re.S)))
                     hit = next((pw for pw in probe_windows(probe)
                                 if q and q in _norm_words(str(pw.get("text") or ""))), None)
+                    if hit is None and q:
+                        # a whole sentence may start a cue before the window does
+                        hit = next(({"published": m.get("published"), "text": q}
+                                    for m in (moments or {}).get("usable") or []
+                                    if m.get("kind") == "window" and q in _norm_words(
+                                        " ".join(str(c[1]) for c in m.get("cues") or []))), None)
                     if hit is None:
                         problems.append(f"precedent quote is not a window the brand-moments "
                                         f"lane returned (category-probe.json): {name}")
@@ -1510,8 +1609,21 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
         failed = {str(m.get("fact_id")): "; ".join(m.get("reasons") or [])
                   for m in moments.get("rejected") or []
                   if m.get("kind") == "fact" and str(m.get("fact_id")) not in clean}
+        by_link = {(str(m.get("video_id")), int(m.get("start") or 0)): m
+                   for m in (moments.get("usable") or []) + (moments.get("rejected") or [])
+                   if m.get("cues")}
         for _title, rest in kinds["creator"]:
             for ids, line in who_lines(rest)[1]:
+                item = _who_item(ids, line, index) if facts else None
+                spoken = next((f for f in (item or {}).get("facts") or []
+                               if f.get("quote") and str(f.get("quote")) == item.get("quote")), None)
+                if spoken:
+                    vid, t = _video_and_time(str(spoken.get("url") or ""))
+                    m = by_link.get((str(vid), int(t or 0))) if vid and t is not None else None
+                    why_t = _quote_timing(m, str(spoken["quote"]), int(t)) if m else None
+                    # the story shows the ledger's quote cut short, so only the link's timing counts
+                    if why_t and why_t.startswith("the link starts"):
+                        problems.append(f"story line {why_t}: {plain(line)[:50]}")
                 for fid in ids:
                     why = failed.get(fid, "")
                     if any(k in why for k in ("ad read", "rival", "awkward", "word for word")):
@@ -2338,6 +2450,7 @@ def main() -> None:
 
     out_path = (pathlib.Path(a.out) if a.out
                 else default_out(in_path, facts_path, parse_frontmatter(text)[0]))
+    meta = {**meta, "_seen": cast_appearances(in_path.parent)}
     title, (page, fragment) = render_connections(text, facts, meta)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(page, encoding="utf-8")

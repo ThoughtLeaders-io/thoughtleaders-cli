@@ -141,3 +141,9 @@ def test_his_own_childhood_is_not_a_child():
     import tier_hint
     assert not tier_hint.names_child("loved anything with wheels as a kid and was the first kid with Heelys")
     assert tier_hint.names_child("my son was the first kid in class to read")
+
+
+def test_a_habit_span_starts_at_its_unbroken_run_not_a_stray_old_match():
+    import authenticate
+    assert authenticate.run_start(["2022-06-02", "2025-07-14", "2025-08-19", "2026-01-11"]) == "2025-07-14"
+    assert authenticate.run_start([]) is None
