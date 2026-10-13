@@ -42,6 +42,7 @@ import tl_data
 
 import channel_lookup
 
+SKILL = "tl-channel-authenticity"
 OUT_DIR = Path("/tmp")
 
 
@@ -147,12 +148,18 @@ def main() -> None:
         if args.finalize:
             if len(args.finalize) < 2:
                 ap.error("--finalize needs STATE and at least one LLM file")
-            res = finalize(args.finalize[0], args.finalize[1:])
+            try:
+                res = finalize(args.finalize[0], args.finalize[1:])
+            except Exception:
+                tl_data.report_run(SKILL, "failed")
+                raise
             print(res["markdown"])
             print(
                 f"\n<!-- final JSON: {res['final_json']} · "
                 f"report: {res['report_md']} -->"
             )
+            # The verdict is the deliverable; the run is counted once it is printed.
+            tl_data.report_run(SKILL)
         elif args.ref:
             res = collect(args.ref)
             print(json.dumps(res, indent=2))

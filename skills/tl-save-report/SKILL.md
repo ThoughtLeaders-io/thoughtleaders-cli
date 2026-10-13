@@ -505,9 +505,11 @@ The follow-up offer matters because **FilterSet changes (keywords, demographics,
 
 If the user requests a chart, create it as a SVG graphic.
 
+Then, as the last step, run `tl agent complete tl-save-report`. A run opened from a ThoughtLeaders surface (the Chrome extension's skill buttons) is counted as finished by it; one started by hand gets a short note and nothing else, which is fine.
+
 ### On failure
 
-If the command exits non-zero, the CLI prints the error on stderr (shape: `Error (NNN): <detail>` for most codes; specific lines for 401/402/403). **Surface the error verbatim** — do NOT silently report success.
+If the command exits non-zero, the CLI prints the error on stderr (shape: `Error (NNN): <detail>` for most codes; specific lines for 401/402/403). **Surface the error verbatim** — do NOT silently report success. Then run `tl agent complete tl-save-report --outcome failed`.
 
 Map the visible code + detail to the likely cause:
 
