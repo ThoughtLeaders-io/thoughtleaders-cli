@@ -56,7 +56,7 @@ ids; return paths, never content.
 | `speaker` | `host`, `cohost` (the second named host), `shared` (a "we" line about the hosts' shared life) |
 | `people` | the people the quote names, `[{"name", "relation"}]`; `<corpus>/people.json` rolls them up across the ledger |
 | `superseded_by` | the newer fact's id when latest wins; the old fact stays as history |
-| `ended` | true when the merge shard found a claim stated as current is now over; history, never selected, never on a page |
+| `ended` | true when the merge shard found a claim stated as current is now over; never selected, on a page only as dated history in the map's About lines |
 | `staged`, `staged_only`, `probe` | the title read as a prank, challenge, stunt or skit; no non-staged upload confirms the claim (so `unconfirmed`, never selected, never on a page); what the search found |
 | `hook_only` | the claim was found only in a staged upload's first 60 seconds and in no other video; `unconfirmed` |
 | `dated` | present when the script turned "X years ago" in the claim into a year |
@@ -99,59 +99,30 @@ a rebuild.
 
 ## CONNECT: the connection map
 
-`<corpus>/connections-<brand_id>.md`, frontmatter `schema:
-tl-creator-connections/v2`, `channel_id`, `channel_name`, `creator_name`
-(the host's first name as said on camera; the channel name when none was
-found), `brand_id`, `brand_name`, `facts_file`, `brand_read_date`. It is
-written for the brand: to judge the fit, or to pitch with, from the usable
-moments in `moments-<brand_id>.json` only. Sections; the order of the
-concepts is the ranking:
+`<corpus>/connections-<brand_id>.md`, written for the brand from the usable
+moments in `moments-<brand_id>.json`. Frontmatter: `schema:
+tl-creator-connections/v2`, `channel_id`, `channel_name`, `creator_name`,
+`brand_id`, `brand_name`, `facts_file`, `brand_read_date`. Sections (content
+rules in SKILL.md, CONNECT step 3; `build_html.py` sets the page order, so
+only the concepts' order, strongest first, matters):
 
-1. `## About <creator name>`: two or three sentences on who they are now,
-   then up to 10 lines `- f021+f010: <line>` naming the facts the story
-   shows. Facts that say the same thing share a line.
-2. `## Done this before`, when the lanes found any: the creator's past
-   partnerships in the brand's category (older than 24 months) and the
-   brand's unpaid moments, one dated line each with its link.
-3. `## Verdict`: opens with `**Strong fit.**`, `**Thin fit.**` or `**No
-   fit.**` (SKILL.md, CONNECT step 3), then three or four sentences that
-   argue the fit in the creator's own words, then a `Best-fit products:`
-   line.
+1. `## About <creator name>`
+2. `## Done this before`, only when the lanes found any.
+3. `## Verdict`
 4. `## About <brand name>`: one or two neutral sentences from the brand-site
-   lane and the platform's category description only. Never a sponsored-read
+   lane and the platform's category description. Never a sponsored-read
    snippet, a price or another client's data.
-5. One `## <name> · **<route>** · **<type>** · **<strength>**` section per
-   creative concept, strongest first, each a different way in (the
-   creator's format, a habit, a personal gem). Route: the kind of video,
-   shown to the brand, never repeated. Type: `direct`, `adjacent`,
-   `category precedent` or `brand moment`, for the writer only. Each holds,
-   in order: the lead quote as a `>` quote with its `&t=` link on a `>`
-   continuation line; `The moment:`; two or three dated further moments as
-   list items, each with its link; `The concept:`; at most one `Sample line
-   (illustration only):`; one `Do:` and one `Don't:` line, both concrete.
-   At most two thin concepts.
-6. `## Creative guardrails`: always present. What the integration must
-   avoid, written for the brand. It reads the whole ledger, withheld tiers
-   and old or ended facts included, and turns a sensitive fact into a
-   category-level guardrail, never its detail.
-7. `## Good to know when booking`, when there is something: rival brands'
-   partnerships with the channel in the last 24 months, with dates.
+5. One section per concept.
+6. `## Creative guardrails`, always: what the integration must avoid. Read
+   the whole ledger, withheld tiers and old or ended facts included; state a
+   sensitive fact as a category-level guardrail, never its detail.
+7. `## Good to know when booking`, only when there is something.
 
-The page shows them in this order: "Who <name> is" (section 1's prose),
-"<name> has done this before" (section 2), the verdict panel (sections 3
-and 4), the creative concepts, "<name>'s story so far" (section 1's fact
-lines, recent and background) with "Who shows up in <name>'s videos", the
-guardrails, the booking notes, and how the map was built.
-
-A fact used to argue against the brand's category is never a concept, and
-neither is a video where the creator mocks the brand: both shape the
-guardrails. Facts at tier `children` or `location` never appear in a
-concept or the story; `clinical` facts only with three or more videos
-(`evidence-rules.md`). Every fact the page quotes or lists is `confirmed`,
-current and not `staged_only`; a plan said in the last 12 months appears
-only with its label ("said March 2026, not yet confirmed"). IF nothing
-connects: the Verdict says no fit and what was searched, the About sections
-follow, and there are no concepts.
+IF nothing connects: the Verdict says no fit and what was searched, and
+there are no concept sections. On the page, `children` and `location` facts
+never appear in a concept or the About lines, `clinical` facts only when
+discussed in three or more videos (`evidence-rules.md`), `staged_only` facts
+never, and a plan said in the last 12 months only with its `label`.
 
 ## CONNECT: the creator brief
 
@@ -161,18 +132,6 @@ whole ledger, and writes `<corpus>/creator-brief-<brand_id>.md` with
 frontmatter `schema: tl-creator-brief/v1`, `channel_name`, `brand_name`,
 `talking_points_supplied`. Layouts, rules and the example are in
 `creator-brief-template.md`.
-
-## The page
-
-`build_html.py` renders the map as one fixed template: the verdict panel
-(the verdict, the argument, one chip per concept, the brand in a line), the
-creative concepts, on the channel already, who they are (the facts the map
-names, in a recent and a background group, each dated by the upload it was
-said in), the people in their videos, the creative guardrails, good to know
-when booking, and how the map was built (transcript coverage and "absence is
-not evidence"). `--check` enforces the map rules above and exits 3 with the
-problems; fix the markdown, never the checker. Publish the fragment where the
-host allows; give the user the page's absolute path.
 
 ## Never in any file
 

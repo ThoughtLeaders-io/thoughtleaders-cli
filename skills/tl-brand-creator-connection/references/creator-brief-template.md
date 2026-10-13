@@ -63,7 +63,7 @@ is, and say that every quote links to the second it was said.
   prohibition under Don't do, an approval step under Creative approval
   process, each once and verbatim. Only what the creator should say or show
   becomes a `###`. Nothing the brand wrote is dropped, reworded or softened.
-- Start from the gems, not the brand's list. Read the map's thesis and cards
+- Start from the gems, not the brand's list. Read the map's verdict and concepts
   and the whole ledger (family, origin, habits, tastes, work history all
   count; the page's two-thin-card cap does not apply), and pick the gems: a
   story with its people and details, a turning point, a thing they built, a
@@ -115,7 +115,7 @@ guardrails", "Good to know when booking").
 Every point is a creative point from a gem, same bar as above. Product facts
 come from the map's About-brand section only. No `**From <brand>'s brief:**`
 and no `### Also from <brand>`; the checker refuses both. The creative ask
-comes from the map's thesis, the promoting line first when given.
+comes from the map's verdict, the promoting line first when given.
 Requirements and Creative approval process use the defaults; Don't do holds
 the map's craft don'ts. The render carries the label "built from the
 creator's own material; no brand talking points supplied". A promoting line

@@ -113,7 +113,7 @@ Rules the scripts and the merge shard apply to what the extractor returned.
 - **A staged premise is checked, never guessed.** `authenticate.py`
   searches the channel for the claim in other uploads before the merge; an
   upload counts only where the claim is said again: a partner or family
-  phrase ("my fiance"), the named person with another word from the quote,
+  phrase ("my <relation>"), the named person with another word from the quote,
   or most of the quote's telling words, close together in the captions. The
   claim's own uploads never confirm it. The merge shard decides with that
   evidence. Found in a non-staged upload, or said in four or more uploads:
@@ -240,8 +240,8 @@ diagnosed with X", and that difference is the whole judgment:
 - **Only `clinical`, `children` and `location` are withheld from connection
   angles by default.** They still appear in the profile, so the human reading
   it knows they exist.
-- **Withheld is withheld from angles, not from the warnings.** "Where this
-  could go wrong" exists to say what NOT to pitch, and the withheld tiers are
+- **Withheld is withheld from angles, not from the warnings.** `## Creative
+  guardrails` exists to say what NOT to pitch, and the withheld tiers are
   where that knowledge lives: a creator who talks about sobriety must not be
   handed a hangover-cure read, a creator with a chronic condition must not be
   asked to joke about it. So every tier, withheld ones included, is read when
