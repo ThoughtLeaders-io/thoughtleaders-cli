@@ -15,11 +15,17 @@ Usage:
 import argparse
 import datetime
 import json
+import pathlib as _pathlib
 import random
 import subprocess
 import sys
 from dataclasses import dataclass
 from typing import TypedDict
+
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data  # noqa: E402
+
+SKILL = "tl-views-guarantee"
 
 SEED = 42  # passed to a fresh random.Random in bootstrap_sweep so each call starts from the same RNG state
 DEFAULT_MAX_BUNDLE_SIZE = 4
@@ -368,4 +374,15 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # The run is counted once the four lines are out; a data shortfall (a
+    # message exit) is a run with nothing to show, a crash is a failed one.
+    try:
+        main()
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            tl_data.report_run(SKILL, "no_results" if isinstance(exc.code, str) else "failed")
+        raise
+    except Exception:
+        tl_data.report_run(SKILL, "failed")
+        raise
+    tl_data.report_run(SKILL)

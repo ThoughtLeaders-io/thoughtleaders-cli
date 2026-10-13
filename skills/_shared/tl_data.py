@@ -235,6 +235,26 @@ def preflight() -> None:
     _tl(["whoami"], timeout=60)
 
 
+def report_run(skill: str, outcome: str = "completed") -> None:
+    """Tell ThoughtLeaders a skill opened from one of its surfaces has finished.
+
+    Best effort, never raises: the skill's own result is already on the way
+    to the user, and a report that cannot be delivered must not change that.
+    A skill started by hand has no run to close; the CLI says so and exits 0.
+    """
+    exe = shutil.which(TL_BIN) or TL_BIN
+    try:
+        subprocess.run(
+            [exe, "agent", "complete", skill, "--outcome", outcome],
+            capture_output=True,
+            env=_child_env(),
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "preflight":
         preflight()

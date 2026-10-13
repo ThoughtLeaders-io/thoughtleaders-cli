@@ -166,3 +166,21 @@ class TestTransientRetry:
         _use(monkeypatch, self._flaky(tmp_path, 1, "no such table"))
         with pytest.raises(tl_data.DataError, match="no such table"):
             tl_data.db_pg("SELECT 1")
+
+
+class TestReportRun:
+    def test_reports_the_skill_and_outcome(self, tmp_path: Path, monkeypatch) -> None:
+        runner = _stub(tmp_path, exit_code=0, stdout="{}")
+        monkeypatch.setattr(tl_data, "TL_BIN", str(runner))
+        tl_data.report_run("tl-views-guarantee", "no_results")
+        call = json.loads((tmp_path / "call.json").read_text())
+        assert call["argv"] == ["agent", "complete", "tl-views-guarantee", "--outcome", "no_results"]
+
+    def test_never_raises(self, tmp_path: Path, monkeypatch) -> None:
+        # The report sits after the skill's own result; a missing or failing
+        # CLI must not turn a finished run into a crash.
+        monkeypatch.setattr(tl_data, "TL_BIN", str(tmp_path / "no-such-tl"))
+        tl_data.report_run("tl-views-guarantee")
+        runner = _stub(tmp_path, exit_code=3, stderr="server error")
+        monkeypatch.setattr(tl_data, "TL_BIN", str(runner))
+        tl_data.report_run("tl-views-guarantee", "failed")
