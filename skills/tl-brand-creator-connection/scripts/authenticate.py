@@ -26,7 +26,7 @@ Elasticsearch query and keeps only the uploads that say the same thing:
 * otherwise the claim's three rarest words on this channel (rarity from the
   corpus windows) are searched, and an upload counts only where at least two
   of them sit within ``NEAR_SECONDS`` of each other in its captions
-  (``"cousin"`` near ``"jack"``, ``"terrified"`` near ``"flying"``);
+  (``"cousin"`` near ``"marlo"``, ``"afraid"`` near ``"heights"``);
 * the cluster's own uploads never count as confirming themselves;
 * an upload is staged when its title, its cast sheet or its windows say so.
 
@@ -257,7 +257,7 @@ def find_conflicts(lines: list[dict]) -> int:
 
 
 def _stem(word: str) -> str:
-    """A light stem so "boxing", "boxes" and "box" meet and "loves" meets
+    """A light stem so "jumping", "jumps" and "jump" meet and "loves" meets
     "love"; never a dictionary."""
     w = word.lower().strip("'’")
     if len(w) > 4 and w.endswith("ies"):
@@ -309,7 +309,7 @@ def doc_freq(corpus: pathlib.Path | None) -> dict[str, int]:
 
 def claim_names(line: dict) -> list[str]:
     """Names the claim gives a person or place that the quote also says
-    ("Jack", "Hope"), never the claim's capitalised first word ("Has",
+    ("Marlo", "Rose"), never the claim's capitalised first word ("Has",
     "His", "Loves") and never a platform name."""
     claim = str(line.get("claim") or "")
     first = (_words(claim) or [""])[0]
@@ -363,7 +363,7 @@ def es_body(channel: int, phrase: str | None, name: str | None, terms: list[str]
             {"match_phrase": {"transcript": {"query": v}}} for v in _phrase_variants(phrase)
         ], "minimum_should_match": 1}}]
     else:
-        # each term as said and as its stem ("forklifts", "forklift"): the
+        # each term as said and as its stem ("tractors", "tractor"): the
         # index does not stem, the captions vary
         must = [{"bool": {"should": [
             {"bool": {"should": [{"match": {"transcript": {"query": v}}}
@@ -390,8 +390,8 @@ def es_body(channel: int, phrase: str | None, name: str | None, terms: list[str]
 
 
 def _has_name(text: str, name: str, cased: bool) -> bool:
-    """The name as a name: where the captions carry capitals, "Hope" and
-    never the verb "hope"; in older all-lowercase captions, the word."""
+    """The name as a name: where the captions carry capitals, "Rose" and
+    never the verb "rose"; in older all-lowercase captions, the word."""
     if cased:
         return re.search(rf"\b{re.escape(name[:1].upper() + name[1:])}\b", text) is not None
     return name in _words(text)

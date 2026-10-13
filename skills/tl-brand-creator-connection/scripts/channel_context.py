@@ -111,7 +111,7 @@ TITLE_HINTS = {
         r"\bnew girlfriend\b|"
         # in-character formats: a talent show joke ("I got fired from my job
         # at the bank"), an undercover or hide-in-plain-sight premise ("I
-        # Secretly Lived In A Mall", "I live with a giant mouse as my
+        # Secretly Lived In A Store", "I live with a giant mouse as my
         # roommate"), scam-bait (a scammer's "I grew up in Florida" can be
         # published as the host's), comedy and roast
         # formats. The line is a bit until the rest of the channel says
@@ -160,7 +160,7 @@ def channel_doc(channel_id: int) -> dict:
 
 
 def _bare(link: str) -> str:
-    """``https://www.instagram.com/airrack/`` -> ``instagram.com/airrack``, the
+    """``https://www.instagram.com/creator/`` -> ``instagram.com/creator``, the
     form the index keeps, so the two sources dedupe against each other."""
     link = re.sub(r"^https?://", "", str(link or "").strip(), flags=re.I)
     link = re.sub(r"^www\.", "", link, flags=re.I)

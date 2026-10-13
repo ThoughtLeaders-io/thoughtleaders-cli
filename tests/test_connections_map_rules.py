@@ -13,7 +13,7 @@ _MAP = (
     "## Verdict\n\n**Strong fit.** Robin's stunts keep landing him where Acme fits.\n\n"
     "Best-fit products: the drink mix.\n\n"
     "## About Acme\n\nAcme makes a drink mix.\n\n"
-    "## Before the stunt · **Secret-stay series** · **adjacent** · **strong**\n\n"
+    "## Before the stunt · **Challenge series** · **adjacent** · **strong**\n\n"
     "> i forgot my water again\n> [Patterrz, 2026-03-01](https://www.youtube.com/watch?v=aaa&t=40s)\n\n"
     "The moment: he forgets water on a stay.\n\n"
     "- [2026-02-01](https://www.youtube.com/watch?v=bbb&t=90s) Hiding in a box: \"so thirsty in here\"\n\n"
@@ -53,7 +53,7 @@ def test_a_complete_map_passes():
 
 
 def test_two_concepts_on_the_same_route_fail():
-    md = _MAP.replace("**Workout clips**", "**Secret-stay series**")
+    md = _MAP.replace("**Workout clips**", "**Challenge series**")
     assert any("same route" in p for p in _check(md))
 
 
@@ -111,7 +111,7 @@ def test_the_page_order_and_the_name_headings():
                                      '<section class="verdict">', "<h2>Creative concepts</h2>",
                                      "<h2>Robin&#x27;s story so far</h2>")]
     assert order == sorted(order)
-    assert 'badge badge-route">Secret-stay series</span>' in page
+    assert 'badge badge-route">Challenge series</span>' in page
     assert 'class="badge badge-adjacent"' not in page and 'class="badge badge-strong"' not in page
 
 
@@ -141,7 +141,7 @@ def test_a_rival_hashtag_matches_without_spaces():
 
 def test_will_the_name_is_not_a_plan():
     assert not mc.FUTURE.search("calls Will his childhood hero")
-    assert mc.FUTURE.search("I will box a streamer at ten million")
+    assert mc.FUTURE.search("I will run a marathon at ten million")
     assert mc.FUTURE.search("I'm not stopping until I win")
 
 
@@ -200,9 +200,9 @@ def test_a_misquoted_moment_is_blocked():
 
 
 def test_a_habit_not_said_for_six_months_has_lapsed():
-    fact = {"quote": "every time I hit a million I box a streamer", "claim": "boxes a streamer every million",
+    fact = {"quote": "every time I hit a million I run a marathon", "claim": "runs a marathon every million",
             "published": "2025-08-01", "last_seen": "2026-01-10"}
-    cues = [(40.0, "every time I hit a million I box a streamer")]
+    cues = [(40.0, "every time I hit a million I run a marathon")]
     rec = _judge(fact, cues=cues, latest="2026-09-30")
     assert not rec["usable"] and any("lapsed" in r for r in rec["reasons"])
     rec = _judge(fact, cues=cues, latest="2026-03-01")
@@ -210,13 +210,13 @@ def test_a_habit_not_said_for_six_months_has_lapsed():
 
 
 def test_a_rival_that_is_also_a_word_counts_only_as_a_name():
-    assert mc.near_rival("we were poppin all night", ["Poppi"], ["Acme"]) is None
-    assert mc.near_rival("That was a prime spot to hide", ["Prime"], ["Acme"]) is None
-    assert mc.near_rival("Grab a Prime from the fridge", ["Prime"], ["Acme"]) == "Prime"
-    assert mc.near_rival("all I have in here is lukewarm prime and chocolate", ["Prime"], ["Acme"])
+    assert mc.near_rival("what a zinger that was", ["Zing"], ["Acme"]) is None
+    assert mc.near_rival("That was a spark of genius", ["Spark"], ["Acme"]) is None
+    assert mc.near_rival("Grab a Spark from the fridge", ["Spark"], ["Acme"]) == "Spark"
+    assert mc.near_rival("all I have in here is a cold spark and crackers", ["Spark"], ["Acme"])
     # rivals are said by their short name
-    assert mc.near_rival("all I have in here is lukewarm prime and chocolate", ["Prime Hydration"], ["Acme"])
-    assert mc.near_rival("grabbed an lmnt stick", ["Drink LMNT"], ["Acme"])
+    assert mc.near_rival("all I have in here is a cold spark and crackers", ["Spark Hydration"], ["Acme"])
+    assert mc.near_rival("grabbed a volto stick", ["Drink Volto"], ["Acme"])
     assert mc.near_rival("grab a fizz co please", ["Fizz Co"], ["Acme"]) == "fizz co"
 
 
@@ -230,41 +230,41 @@ def test_members_are_checked_moments_of_their_fact():
 
 def test_an_audience_count_is_not_money():
     import tier_hint as th
-    assert not th.names_money("every 1 million subscribers I have to do the top comment")
+    assert not th.names_money("every 1 million subscribers I have to dye my hair")
     assert not th.names_money("the video hit 2 million views")
     assert th.names_money("I spent 1 million dollars on it")
     assert th.names_money("we won $5,000")
 
 
 def test_a_link_must_start_where_its_quote_starts():
-    m = {"cues": [[100.0, "around the corner I spotted a cooler"], [112.0, "this is liquid gold right here."]]}
-    assert "link &t=112s" in bh._quote_timing(m, "this is liquid gold right here.", 100)
-    assert bh._quote_timing(m, "this is liquid gold right here.", 110) is None
+    m = {"cues": [[100.0, "around the corner I spotted a vending machine"], [112.0, "this is exactly what I needed."]]}
+    assert "link &t=112s" in bh._quote_timing(m, "this is exactly what I needed.", 100)
+    assert bh._quote_timing(m, "this is exactly what I needed.", 110) is None
 
 
 def test_a_quote_that_stops_mid_sentence_fails():
-    m = {"cues": [[10.0, "it feels like 110 in here and we have to"], [12.0, "stand like this all night long."]]}
-    assert "mid-sentence" in bh._quote_timing(m, "it feels like 110 in here and we have to", 10)
+    m = {"cues": [[10.0, "it is so cold out here and we have to"], [12.0, "wait like this all night long."]]}
+    assert "mid-sentence" in bh._quote_timing(m, "it is so cold out here and we have to", 10)
 
 
 def test_a_window_holding_a_held_back_ledger_line_is_blocked():
-    idx = {"f3": {"fact_id": "f3", "quote": "Tyler is also my workout buddy", "confidence": "unconfirmed",
+    idx = {"f3": {"fact_id": "f3", "quote": "Sam is also my workout buddy", "confidence": "unconfirmed",
                   "staged_only": True}}
-    assert mc.held_back_line("my best friend, Tyler is also my workout buddy. But", idx).startswith("f3")
+    assert mc.held_back_line("my best friend, Sam is also my workout buddy. But", idx).startswith("f3")
 
 
 def test_a_moment_inside_an_ad_read_is_blocked():
     rec = mc.judge({"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 560,
-                    "quote": "i'm from the city we got the team right here"},
-                   [(560.0, "i'm from the city we got the team right here")], "", {}, None,
+                    "quote": "i grew up here and we love this team"},
+                   [(560.0, "i grew up here and we love this team")], "", {}, None,
                    "2026-10-01", {}, None, [], ["Acme"], [(541.0, 587.0)])
     assert not rec["usable"] and any("ad read" in r for r in rec["reasons"])
 
 
 def test_a_window_cut_at_other_edges_still_holds_the_held_back_line():
-    idx = {"f3": {"fact_id": "f3", "quote": "other than being my best friend, Tyler is also my workout buddy.",
+    idx = {"f3": {"fact_id": "f3", "quote": "other than being my best friend, Sam is also my workout buddy.",
                   "confidence": "unconfirmed", "staged_only": True}}
-    assert mc.held_back_line("friend, Tyler is also my workout buddy. But mafia, he has", idx)
+    assert mc.held_back_line("friend, Sam is also my workout buddy. But honestly, he has", idx)
     assert mc.held_back_line("I went to the gym with my buddy today", idx) is None
 
 
@@ -276,17 +276,17 @@ def test_a_lapsed_span_starts_at_the_first_repeat():
     assert recs[0]["said"] == "said from August 2025 to January 2026"
 
 
-def test_caption_tags_are_not_words_he_said():
+def test_caption_tags_are_not_words_the_creator_said():
     assert bh._norm_words("we have to [music] stand like this") == "we have to stand like this"
 
 
 def test_a_clean_sentence_beside_a_held_back_line_stays_usable():
-    idx = {"f9": {"fact_id": "f9", "quote": "I'm boxing a YouTuber every time I go up a million subscribers",
+    idx = {"f9": {"fact_id": "f9", "quote": "I'm running a marathon every time I go up a million subscribers",
                   "confidence": "confirmed", "superseded_by": "f10"}}
     rec = mc.judge({"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 980,
-                    "quote": "we have this entire gym to ourselves. Let's get a workout in. "
-                             "every time I go up a million subscribers I fight a new YouTuber"},
-                   [(980.0, "we have this entire gym to ourselves. Let's get a workout in.")],
+                    "quote": "we have this entire track to ourselves. Let's get a workout in. "
+                             "every time I go up a million subscribers I run another marathon"},
+                   [(980.0, "we have this entire track to ourselves. Let's get a workout in.")],
                    "", {}, None, "2026-10-01", idx, None, [], ["Acme"], [])
     assert rec["usable"] and rec["held_back"]["fact_id"] == "f9"
     assert bh._quotes_held_back(rec, "Let's get a workout in.") is None
@@ -294,8 +294,8 @@ def test_a_clean_sentence_beside_a_held_back_line_stays_usable():
 
 
 def test_a_replaced_phase_stays_in_the_story_as_history():
-    old = {"fact_id": "f1", "claim": "boxes a YouTuber every million subscribers", "confidence": "confirmed",
-           "sensitivity": "none", "superseded_by": "f2", "quote": "I'm boxing a YouTuber", "published": "2025-08-19"}
+    old = {"fact_id": "f1", "claim": "runs a marathon every million subscribers", "confidence": "confirmed",
+           "sensitivity": "none", "superseded_by": "f2", "quote": "I'm running a marathon", "published": "2025-08-19"}
     held = dict(old, fact_id="f3", confidence="unconfirmed")
     idx = {"f1": old, "f3": held}
     assert bh.story_ok(old, idx)
@@ -303,35 +303,35 @@ def test_a_replaced_phase_stays_in_the_story_as_history():
 
 
 def test_a_past_phase_in_the_story_must_give_its_span():
-    assert bh._HISTORY_SPAN.search("Said from August 2025 to January 2026 that he would box a YouTuber")
-    assert not bh._HISTORY_SPAN.search("Boxes a YouTuber every time the channel gains a million subscribers")
+    assert bh._HISTORY_SPAN.search("Said from August 2025 to January 2026 that they would run a marathon")
+    assert not bh._HISTORY_SPAN.search("Runs a marathon every time the channel gains a million subscribers")
 
 
 def test_a_secretly_title_marks_the_moment_a_premise():
-    assert mc.premise_title("I Secretly Worked At McDonald's")
-    assert mc.premise_title("I Tried Every Airline In America") is None
+    assert mc.premise_title("I Secretly Worked At A Pizza Shop")
+    assert mc.premise_title("I Tried Every Pizza In Town") is None
 
 
 def test_setting_off_an_alarm_is_an_awkward_act():
     assert mc.RISKY.search("which is going to set off an alarm")
-    assert mc.RISKY.search("we set off the exit alarm")
+    assert mc.RISKY.search("we set off the fire alarm")
 
 
 def test_a_link_counts_from_the_quotes_first_word_inside_a_long_cue():
-    m = {"cues": [[399.0, "after being hungry all day, I finally found food in the hallway. Oh, wait. Oh,"],
-                  [410.4, "pizza. I love pizza."]]}
-    assert "link &t=40" in bh._quote_timing(m, "Oh, wait. Oh, pizza. I love pizza.", 399)
+    m = {"cues": [[399.0, "after walking around all day, I finally found a bench in the park. Oh, wait. Oh,"],
+                  [410.4, "tacos. I love tacos."]]}
+    assert "link &t=40" in bh._quote_timing(m, "Oh, wait. Oh, tacos. I love tacos.", 399)
 
 
 def _people_facts():
-    hope = {"fact_id": "f1", "claim": "keeps a regular date night with Hope", "confidence": "confirmed",
+    rose = {"fact_id": "f1", "claim": "keeps a regular date night with Rose", "confidence": "confirmed",
             "sensitivity": "none", "published": "2025-04-20", "last_seen": "2026-09-20",
-            "people": [{"name": "Hope", "relation": "girlfriend"}]}
+            "people": [{"name": "Rose", "relation": "girlfriend"}]}
     fiance = {"fact_id": "f2", "claim": "has a fiance", "confidence": "confirmed", "sensitivity": "none",
               "published": "2026-07-27", "people": []}
-    jack = {"fact_id": "f3", "claim": "his cousin Jack", "confidence": "confirmed", "sensitivity": "none",
-            "published": "2021-12-27", "people": [{"name": "Jack", "relation": "cousin"}]}
-    return [hope, fiance, jack]
+    theo = {"fact_id": "f3", "claim": "their cousin Theo", "confidence": "confirmed", "sensitivity": "none",
+            "published": "2021-12-27", "people": [{"name": "Theo", "relation": "cousin"}]}
+    return [rose, fiance, theo]
 
 
 def test_a_newer_engagement_makes_the_girlfriend_a_fiancee():
@@ -342,16 +342,16 @@ def test_a_newer_engagement_makes_the_girlfriend_a_fiancee():
 
 def test_a_crew_member_with_the_same_name_does_not_date_the_cousin():
     facts = _people_facts()
-    seen = {"jack": [("2025-03-22", "crew"), ("2021-12-27", "family")]}
+    seen = {"theo": [("2025-03-22", "crew"), ("2021-12-27", "family")]}
     out = bh.people_section(facts, {f["fact_id"]: f for f in facts}, seen=seen)
     assert "2025-03" not in out and "2021-12" in out
 
 
 def test_a_lapsing_relation_carries_its_year_and_kin_do_not():
-    room = {"fact_id": "f1", "claim": "as of this video, had a roommate named Preston", "confidence": "confirmed",
-            "sensitivity": "none", "published": "2019-08-08", "people": [{"name": "Preston", "relation": "roommate"}]}
-    kin = {"fact_id": "f2", "claim": "as of this video, his cousin Jack lived in North Carolina",
+    room = {"fact_id": "f1", "claim": "as of this video, had a roommate named Quinn", "confidence": "confirmed",
+            "sensitivity": "none", "published": "2019-08-08", "people": [{"name": "Quinn", "relation": "roommate"}]}
+    kin = {"fact_id": "f2", "claim": "as of this video, their cousin Theo lived out of state",
            "confidence": "confirmed", "sensitivity": "none", "published": "2019-07-31",
-           "people": [{"name": "Jack", "relation": "cousin"}]}
+           "people": [{"name": "Theo", "relation": "cousin"}]}
     out = bh.people_section([room, kin], {"f1": room, "f2": kin})
     assert "roommate (2019)" in out and "cousin (2019)" not in out

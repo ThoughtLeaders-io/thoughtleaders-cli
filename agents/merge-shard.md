@@ -72,10 +72,10 @@ Rules:
   at `unconfirmed` when the probe settles nothing.
 - **Staged claims.** A staged upload's line is held back only when it could
   be the bit: it is the premise in the `title`, the stunt's set-up, or
-  something the stunt needs him to say. Found in one or more non-staged
+  something the stunt needs them to say. Found in one or more non-staged
   uploads, or in four or more uploads: `keep` at `confirmed`. A personal fact
   the stunt does not need (a family member's name, a past job, a fear, a
-  taste, a partner), in the host's voice, is his even when he says it once:
+  taste, a partner), in the host's voice, is theirs even when said once:
   `keep` at `confirmed`. A line that could be the bit, found only in staged
   uploads or with no probe: `keep` at `unconfirmed`; the script marks it
   `staged_only`. Never `drop` it.
@@ -102,7 +102,7 @@ Rules:
   number or a name absent from both the quote and the original claim; the line's `published` date is not evidence, so never
   write a year from it. A script converts "X years ago" to a year after your
   decision. Right: "as of this video, had never done a brand deal". Wrong:
-  "said in March 2020 that he had never done a brand deal".
+  "said in March 2020 that they had never done a brand deal".
 - **Fold** clusters that state the same fact; 10 to 20 folds per 100
   clusters is normal. A fold may cross a domain; the merged fact takes the
   target's domain, so fold into the copy filed where you want it. `target`

@@ -374,7 +374,7 @@ def concept_parts(title_html: str) -> tuple[str, list[str], list[str]]:
     """``(name, badges, words)`` of a connection heading ``<name> · **<route>** ·
     **<type>** · **<strength>**``: the plain name, the rendered badges, and
     the tags that are not badges (the route: the kind of video the concept
-    is, "Secret-stay series", "After the workout")."""
+    is, "Challenge series", "After the workout")."""
     title = re.sub(r"^\d+[.)]\s*", "", title_html)
     parts = [p.strip() for p in no_dashes(title, " · ").split("·")]
     badges = [p for p in parts[1:] if p and 'class="badge' in p]
@@ -620,7 +620,7 @@ def is_recent(fact: dict, today: str | None = None) -> bool:
 
 
 # the cast-sheet role a relation must carry for an appearance to count: a
-# different Jack on the crew is not the cousin
+# crew member who shares the cousin's name is not the cousin
 _CAST_ROLE = {**{r: "family" for r in ("cousin", "sister", "brother", "mom", "mum", "mother", "dad",
                                        "father", "aunt", "uncle", "grandma", "grandpa", "grandmother",
                                        "grandfather", "girlfriend", "boyfriend", "fiancée", "fiancé",
@@ -809,7 +809,7 @@ def pick_who_flat(facts: list[dict], *, max_facts: int = WHO_MAX_FACTS,
 
 
 # A "Who they are" line in the map: fact ids joined by "+", then the line
-# the page prints, e.g. "- f021+f010+f038: From Atlanta, now in Los Angeles."
+# the page prints, e.g. "- f021+f010+f038: Grew up on a farm, now lives in the city."
 _WHO_LINE = re.compile(r"<li>\s*(f\d{1,4}(?:\s*\+\s*f\d{1,4})*)\s*:\s*(.*?)</li>", re.S)
 
 
@@ -1080,7 +1080,7 @@ def strength_of(title_html: str) -> str | None:
 
 
 def _norm_words(text: str) -> str:
-    # caption tags ([music], [applause]) are not words he said
+    # caption tags ([music], [applause]) are not words the creator said
     text = re.sub(r"\[[^\]]*\]", " ", text or "")
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", text.lower())).strip()
 

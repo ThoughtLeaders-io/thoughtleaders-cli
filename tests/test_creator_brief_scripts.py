@@ -1917,50 +1917,50 @@ def test_check_holds_who_they_are_to_publishable_facts_and_ten_lines(tmp_path):
 
 
 def test_who_they_are_dates_each_line_by_its_upload_and_joins_its_sources():
-    """Airrack (2026-10-07): "from Atlanta" printed twice, once from a video
+    """A hometown fact printed twice, once from a video
     and once from Wikipedia, and facts said in 2021 read as 2026 because the
     date came from a later keyword match. One line per fact now, dated by
     the upload the quote is from, with every source beside it."""
     import build_html
     facts = [
-        {"fact_id": "f1", "claim": "is from Atlanta", "domain": "origin",
+        {"fact_id": "f1", "claim": "is from Millbrook", "domain": "origin",
          "provenance": "transcript", "confidence": "confirmed", "sensitivity": "none",
-         "quote": "i'm from atlanta we got the hawks", "published": "2021-06-09",
+         "quote": "i'm from millbrook we have the best lake", "published": "2021-06-09",
          "last_seen": _RECENT, "url": "https://www.youtube.com/watch?v=a&t=9s"},
-        {"fact_id": "f2", "claim": "is from Atlanta, Georgia", "domain": "origin",
+        {"fact_id": "f2", "claim": "is from Millbrook, Ohio", "domain": "origin",
          "provenance": "web", "confidence": "confirmed", "sensitivity": "none",
          "source_url": "https://en.wikipedia.org/wiki/X"},
-        {"fact_id": "f3", "claim": "loves pizza", "domain": "tastes",
+        {"fact_id": "f3", "claim": "loves hiking", "domain": "tastes",
          "provenance": "transcript", "confidence": "confirmed", "sensitivity": "none",
-         "quote": "oh pizza i love pizza", "published": _RECENT, "last_seen": _RECENT,
+         "quote": "oh hiking i love hiking", "published": _RECENT, "last_seen": _RECENT,
          "url": "https://www.youtube.com/watch?v=p&t=3s"},
     ]
-    about = "<p>Eric runs the channel.</p><ul><li>f1+f2: From Atlanta.</li><li>f3: Loves pizza.</li></ul>"
+    about = "<p>Robin runs the channel.</p><ul><li>f1+f2: From Millbrook.</li><li>f3: Loves hiking.</li></ul>"
     who = build_html.who_they_are(facts, _META, about)
-    assert who.count("From Atlanta.") == 1 and "Atlanta, Georgia" not in who
+    assert who.count("From Millbrook.") == 1 and "Millbrook, Ohio" not in who
     assert ">Watch</a> · <a href=\"https://en.wikipedia.org/wiki/X\">Wikipedia</a>" in who
     recent, background = who.split("Background")
-    assert "Loves pizza." in recent and "From Atlanta." in background
+    assert "Loves hiking." in recent and "From Millbrook." in background
     assert '<span class="date">2021</span>' in background
-    assert "Eric runs the channel." in who and "f1+f2" not in who
+    assert "Robin runs the channel." in who and "f1+f2" not in who
 
 
 def test_people_are_dated_by_the_newest_upload_that_says_it_again():
     # last_seen is the probe's newest upload saying the claim again: the name
     # and a word from the quote within 30 s, never a loose keyword hit
     import build_html
-    fact = {"fact_id": "f1", "claim": "has a sister named Chloe", "domain": "family",
+    fact = {"fact_id": "f1", "claim": "has a sister named Ivy", "domain": "family",
             "confidence": "confirmed", "sensitivity": "none", "published": "2021-05-24",
-            "last_seen": "2026-03-18", "people": [{"name": "Chloe", "relation": "sister"}]}
+            "last_seen": "2026-03-18", "people": [{"name": "Ivy", "relation": "sister"}]}
     out = build_html.people_section([fact], {"f1": fact})
     assert "2026-03" in out and "2021" not in out
 
 
 def test_a_name_with_no_relation_is_not_a_people_row():
     import build_html
-    fact = {"fact_id": "f1", "claim": "regards Will as his hero", "domain": "relationships",
+    fact = {"fact_id": "f1", "claim": "regards Ezra as their hero", "domain": "relationships",
             "confidence": "confirmed", "sensitivity": "none", "published": "2025-06-15",
-            "people": [{"name": "Will", "relation": None}]}
+            "people": [{"name": "Ezra", "relation": None}]}
     assert build_html.people_section([fact], {"f1": fact}) == ""
 
 
@@ -1982,7 +1982,7 @@ def test_check_matches_supporting_moments_to_the_lanes_or_the_ledger(tmp_path):
 
 
 def test_a_brand_moment_quotes_an_unpaid_brand_window(tmp_path):
-    """McDonald's (2026-10-08): the creator's unpaid crew-shift video was the
+    """A creator's unpaid video at one of the brand's own locations was the
     strongest evidence, and the old lane dropped every window naming the
     brand. A brand moment quotes those windows."""
     import build_html

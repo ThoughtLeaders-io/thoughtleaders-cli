@@ -372,7 +372,7 @@ def load_probe(path: pathlib.Path | None) -> dict[str, dict]:
 
 def premise_line(line: dict) -> bool:
     """The claim shares a telling word with its upload's title: it could be
-    the stunt itself ("lives at a 7/11" in "Secretly Live At 7/11"). A
+    the stunt itself ("lives in a store" in "I Secretly Lived In A Store"). A
     personal fact the stunt does not need shares none and is the shard's to
     judge."""
     w = line.get("window") or {}
@@ -991,7 +991,7 @@ def hook_only(line: dict, videos: list[str], probe_entry: dict | None = None) ->
         return False
     p = (probe_entry or {}).get("probe") or {}
     if int(p.get("non_staged_videos") or 0) > 0 or int(p.get("recurring_videos") or 0) >= RECURRING_VIDEOS:
-        return False  # said again elsewhere: his, not an opening bit
+        return False  # said again elsewhere: theirs, not an opening bit
     return all(float(m.get("start") or 0) < HOOK_SECONDS for m in members)
 
 

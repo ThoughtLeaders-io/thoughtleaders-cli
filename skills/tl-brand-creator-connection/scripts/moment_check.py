@@ -106,7 +106,7 @@ def month_label(d: str) -> str:
 
 def rival_pattern(rivals: list[str], brand_names: list[str]) -> re.Pattern | None:
     """One pattern for the rival names, spaces optional so a one-word hashtag
-    (#celsiusbrandpartner) matches too. The brand's own names never count."""
+    (#fizzcobrandpartner) matches too. The brand's own names never count."""
     own = {b.lower() for b in brand_names if b}
     names = sorted({r.strip() for r in short_names(rivals) if r.strip().lower() not in own},
                    key=len, reverse=True)
@@ -129,8 +129,8 @@ GENERIC_BRAND_WORDS = {"hydration", "drink", "drinks", "energy", "nutrition", "b
 
 
 def short_names(rivals: list[str]) -> list[str]:
-    """Each rival as written and as people say it: "Prime Hydration" is said
-    "Prime", "Drink LMNT" is said "LMNT"."""
+    """Each rival as written and as people say it: "Fizzco Hydration" is said
+    "Fizzco", "Drink Volto" is said "Volto"."""
     out: list[str] = []
     for r in rivals:
         r = (r or "").strip()
@@ -144,8 +144,8 @@ def short_names(rivals: list[str]) -> list[str]:
 
 
 def near_rival(text: str, rivals: list[str], brand_names: list[str]) -> str | None:
-    """The rival a stretch of captions names, as a whole word: "poppi" is not
-    "poppin'", and "prime" the adjective is not Prime the drink."""
+    """The rival a stretch of captions names, as a whole word: a rival named "Zing"
+    is not "zinger", and "spark" the everyday word is not a rival named Spark."""
     own = {b.lower() for b in brand_names if b}
     cased = any(ch.isupper() for ch in text)
     for name in sorted({r.strip() for r in short_names(rivals)}, key=len, reverse=True):
@@ -156,7 +156,7 @@ def near_rival(text: str, rivals: list[str], brand_names: list[str]) -> str | No
         if len(words) == 1 and words[0].lower() in COMMON_WORDS:
             w = re.escape(words[0].lower())
             # the drink, not the word: capitalised in cased captions, or with a
-            # drink word right beside it ("lukewarm prime", "a can of ghost")
+            # drink word right beside it ("a cold spark", "a can of spark")
             m = (re.search(rf"(?<![A-Za-z]){re.escape(words[0][:1].upper() + words[0][1:].lower())}(?![A-Za-z])", text)
                  if cased else None) or \
                 re.search(rf"\b(?:{DRINK_CONTEXT})\W+(?:\w+\W+){{0,2}}{w}\b|\b{w}\W+(?:\w+\W+){{0,2}}(?:{DRINK_CONTEXT})\b",
@@ -370,7 +370,7 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
                                 "quote": str((index or {}).get(fid, {}).get("quote") or "")}
 
     if any(a_ - 5 <= start <= b_ + 5 for a_, b_ in ad_spans or []):
-        reasons.append("said inside an ad read: another brand's script, not his own words")
+        reasons.append("said inside an ad read: another brand's script, not the creator's own words")
     near = surroundings(cues, start)
     hit = near_rival(near, rivals or [], brand_names or [])
     if hit:
@@ -431,7 +431,7 @@ def main() -> None:
 
     index = {str(f.get("fact_id")): f for f in facts}
     # the category history names its sponsored uploads outright, whatever
-    # their description says ("Grab some free OLIPOP" carries no sponsor word)
+    # their description says ("grab some free <brand>" carries no sponsor word)
     history_videos = {str(h.get("video_id")) for h in tl.get("category_history") or []
                       if isinstance(h, dict) and h.get("video_id")}
     cands = candidates(facts, probe)
