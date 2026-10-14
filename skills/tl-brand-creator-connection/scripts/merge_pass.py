@@ -374,12 +374,15 @@ def premise_line(line: dict) -> bool:
     """The claim shares a telling word with its upload's title: it could be
     the stunt itself ("lives in a store" in "I Secretly Lived In A Store"). A
     personal fact the stunt does not need shares none and is the shard's to
-    judge."""
+    judge. A family or partner word ("My Husband Pranks Me", "my husband grew
+    up in Ohio") or a number ("24 Hours", "I'm 24") is shared by chance, not
+    by the bit, so neither counts."""
     w = line.get("window") or {}
     v = line.get("verdict") or {}
     def telling(text: str) -> set[str]:
         return {_auth._stem(t) for t in _auth._words(text)
-                if t not in _auth.STOPWORDS and (len(t) > 2 or (t.isdigit() and len(t) > 1))}
+                if t not in _auth.STOPWORDS and t not in _auth.SPECIFIC_NOUNS
+                and len(t) > 2 and not t.isdigit()}
     return bool(telling(str(w.get("title") or ""))
                 & telling(f"{v.get('claim') or ''} {v.get('quote') or ''}"))
 

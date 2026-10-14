@@ -178,3 +178,12 @@ def test_someone_elses_first_kid_is_still_a_child():
     import tier_hint
     assert tier_hint.names_child("he was the first kid in his class to walk")
     assert not tier_hint.names_child("was the first kid on the block with a skateboard")
+
+
+def test_a_family_word_or_a_number_shared_with_the_title_is_not_the_bit():
+    def line(title, quote):
+        return {"window": {"format_hint": "staged", "title": title},
+                "verdict": {"claim": quote, "quote": quote}}
+    assert not mp.premise_line(line("My Husband Pranks Me For 24 Hours", "my husband grew up in Ohio"))
+    assert not mp.premise_line(line("24 Hours In A Store", "I'm 24 years old"))
+    assert mp.premise_line(_staged_line())

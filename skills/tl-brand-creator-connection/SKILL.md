@@ -31,7 +31,7 @@ description: |
 
 ## Scope
 
-Use for: creator self-disclosure research, a reusable creator profile, an internal creator × brand fit assessment, talking points for a booked or proposed creator campaign.
+Use for: creator self-disclosure research, a reusable creator profile, a creator × brand connection map written for the brand, talking points for a booked or proposed creator campaign.
 Do not use for: channel discovery, performance or authenticity analysis, a brand brief with no creator, keyword research. Route those to the matching TL skill.
 
 **Help requests** ("help", "how does this work", "what are the options"): run nothing, spend no credits. Explain PROFILE vs CONNECT, the socials option, the creator-brief option, the evidence and sensitivity rules, and the output files. Offer to start.
@@ -102,7 +102,7 @@ Ask at most once, before any fetch, both questions in one message.
 
 **Creator brief** (CONNECT, only when the summary says `creator_brief: ask`; on `reuse` it is the only question):
   > **Do you want a version you can send to the creator, with talking points for the ad?**
-  > - **No** (default): internal connections page only.
+  > - **No** (default): the connection map only.
   > - **Yes**: also a creator-friendly brief.
 
 IF Yes: one follow-up only: "Paste the brand's brief or talking points (or a file path), and what the brand is promoting. 'We have none' is fine." Pass the answers as `--talking-points` / `--promoting` on the second call. IF the user has no brief or talking points, omit `--talking-points`. Never ask separately for requirements, don'ts or approval process. Autonomous/fast → no brief; the completion line says so.

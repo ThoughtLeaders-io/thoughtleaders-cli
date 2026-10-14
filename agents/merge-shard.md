@@ -79,6 +79,9 @@ Rules:
   - A line that could be the bit (the premise in the `title`, the stunt's
     set-up, a line the stunt needs), found only in staged uploads or with no
     probe: `keep` at `unconfirmed`; the script marks it `staged_only`.
+  - A line said only in a stunt's first minute, and not found again in an
+    ordinary upload or in four or more uploads, is the hook: the script keeps
+    it `unconfirmed` whatever you decide.
 - **Conflicts** are settled by the newest dated evidence: `last_seen` and
   `probe.newest` on each side, then the identity lane's `seen_date` when a
   lane record corroborates one side. The newer fact `supersedes` the older.
