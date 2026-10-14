@@ -87,6 +87,7 @@ from collections import Counter, defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # sibling module  # noqa: E402
 from store_io import read_ledger  # sibling module  # noqa: E402
+from verify_quotes import locate  # sibling module; the one quote matcher  # noqa: E402
 
 BADGES = {
     "direct": "direct",
@@ -331,12 +332,12 @@ def is_booking(title_html: str) -> bool:
     return t.startswith("good to know") or "when booking" in t
 
 
-def names_creator(title_html: str, creator: str) -> bool:
+def names_creator(title_html: str, *creators: str) -> bool:
     """Does this ``## About …`` heading introduce the creator rather than the
-    brand? Compared on the name so a brand called "About Time" cannot win."""
+    brand? Compared on the names (the channel's, the host's) so a brand
+    called "About Time" cannot win."""
     t = plain(title_html).lower()
-    c = str(creator or "").strip().lower()
-    return bool(c) and c in t
+    return any(c and c in t for c in (str(x or "").strip().lower() for x in creators))
 
 
 def about_block(sections: list[tuple[str, str]]) -> str:
@@ -460,7 +461,7 @@ def no_dashes(text: str, sep: str = ", ") -> str:
 # the labelled lines of a concept card, as the map writes them
 _CARD_FIELD = re.compile(
     r"<p>(The moment|The concept|What meets it|How it could be used"
-    r"|Sample (?:line|read)[^:<]*|Do not|Don't|Do):\s*", re.I)
+    r"|Sample (?:line|read)[^:<]*|Do not|Don[’']t|Do):\s*", re.I)
 
 
 def _card_body(rest: str) -> str:
@@ -1040,7 +1041,7 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
         elif is_booking(sec[0]):
             booking.append(sec)
         elif is_about(sec[0]):
-            (creator_about if names_creator(sec[0], creator)
+            (creator_about if names_creator(sec[0], creator, str(fm.get("creator_name") or ""))
              else brand_about).append(sec)
         else:
             conns.append(sec)
@@ -1072,9 +1073,9 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
 
 def strength_of(title_html: str) -> str | None:
     """The strength tag on a connection heading, or None when it carries none."""
-    t = plain(title_html).lower()
+    _name, badges, _words = concept_parts(title_html)
     for s in STRENGTHS:
-        if re.search(rf"\b{s}\b", t):
+        if any(f"badge-{s}\"" in b for b in badges):
             return s
     return None
 
@@ -1208,6 +1209,7 @@ def section_kinds(md_text: str, meta: dict) -> dict[str, list]:
     empty one is the no-fit verdict."""
     fm, body = parse_frontmatter(md_text)
     creator = fm.get("channel_name") or meta.get("channel_name") or ""
+    host = str(fm.get("creator_name") or "")
     _, sections = split_sections(render_markdown(body))
 
     kinds = {"thesis": [], "caveat": [], "creator": [], "brand": [], "conn": [],
@@ -1222,7 +1224,7 @@ def section_kinds(md_text: str, meta: dict) -> dict[str, list]:
         elif is_booking(sec[0]):
             kinds["booking"].append(sec)
         elif is_about(sec[0]):
-            kinds["creator" if names_creator(sec[0], creator) else "brand"].append(sec)
+            kinds["creator" if names_creator(sec[0], creator, host) else "brand"].append(sec)
         else:
             kinds["conn"].append(sec)
     return kinds
@@ -1332,18 +1334,21 @@ def load_moments(in_path: pathlib.Path | None, brand_id: str | None) -> dict | N
     if in_path is None or not brand_id:
         return None
     p = in_path.parent / f"moments-{brand_id}.json"
-    try:
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
-    except (OSError, ValueError):
+    if not p.is_file():
         return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"{p}: cannot be read ({e}); run moment_check.py again") from e
 
 
 _ANY_LINK = re.compile(r'href="([^"]+)"')
 # "every", "always" and their kin claim a habit; outside a quotation the
 # sentence must say how many videos show it
 _PATTERN_WORD = re.compile(r"\b(every|always|each time|whenever|regularly|constantly|never misses)\b", re.I)
-_COUNTED = re.compile(r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|several|"
-                      r"\w+ (?:of|in) (?:his|her|their) )\b", re.I)
+_COUNTED = re.compile(r"\b(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|several|"
+                      r"most|half|all|dozens?) (?:of (?:his|her|their|them|the)\b|videos?\b|uploads?\b|"
+                      r"times\b|clips?\b|episodes?\b|stunts?\b|streams?\b)", re.I)
 _OVERCLAIM = re.compile(r"(\b100 ?%|\bfully verified\b|\bverified facts?\b|\bguaranteed accurate\b)", re.I)
 
 
@@ -1369,7 +1374,6 @@ def _spoken_at(cues: list[tuple[float, str]], hit: dict, quote: str) -> int:
 def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
     """Where a quote really starts in its moment's captions, and whether it
     stops with its sentence. None when both are fine or cannot be told."""
-    from verify_quotes import locate  # sibling; the one quote matcher
     cues = [(float(t), str(x)) for t, x in moment.get("cues") or []]
     if not cues or len(_norm_words(quote).split()) < 4:
         return None
@@ -1379,14 +1383,45 @@ def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
     begins = _spoken_at(cues, hit, quote)
     if begins - link_t > LINK_LEAD_SECONDS:
         return f"the link starts {begins - link_t} s before the quote; link &t={begins}s"
-    joined = " ".join(x for _t, x in cues)
     q = quote.strip().rstrip("\"”")
     if q and q[-1] not in ".?!":
-        tail = joined.lower().split(_norm_words(quote).split()[-1], 1)
-        nxt = re.sub(r"^[^\w]*", "", tail[1]) if len(tail) > 1 else ""
-        if nxt[:1].isalpha() and not re.match(r"^[,;:]", tail[1].strip()):
+        after = _after_quote(cues, hit, quote)
+        nxt = after.lstrip()
+        if nxt[:1].isalpha() and not re.match(r"^[,;:]", nxt):
             return "the quote stops mid-sentence; quote the whole sentence"
     return None
+
+
+def _after_quote(cues: list[tuple[float, str]], hit: dict, quote: str) -> str:
+    """The raw caption text right after the quote, found from the cue where
+    the quote begins, so the captions' own full stop is seen and a repeat of
+    the quote's last word elsewhere is not mistaken for its end."""
+    idx = next((i for i, (t, _x) in enumerate(cues) if int(t) == int(hit["start"])), 0)
+    raw = " ".join(x for _t, x in cues[idx:])
+    # the normalised stream with a map back to the raw text
+    norm, back = [], []
+    tag = 0
+    for i, ch in enumerate(raw):
+        if ch == "[":
+            tag += 1
+        if tag:
+            tag -= ch == "]"
+            continue
+        if ch.isalnum() or ch == "_":
+            norm.append(ch.lower())
+            back.append(i)
+        elif ch.isspace() and norm and norm[-1] != " ":
+            norm.append(" ")
+            back.append(i)
+    hay = "".join(norm)
+    needle = _norm_words(quote)
+    pos = hay.find(needle)
+    while pos >= 0 and not ((pos == 0 or hay[pos - 1] == " ")
+                            and (pos + len(needle) == len(hay) or hay[pos + len(needle)] == " ")):
+        pos = hay.find(needle, pos + 1)
+    if pos < 0 or pos + len(needle) >= len(back):
+        return ""
+    return raw[back[pos + len(needle) - 1] + 1:]
 
 
 def _quotes_held_back(moment: dict, quote: str) -> str | None:
@@ -1413,6 +1448,21 @@ def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]
     out: list[str] = []
     for title, rest in sections:
         name = plain(title)[:60]
+        if is_probe_quoted(title):
+            # the lead quote is a lane window, not a ledger fact, so nothing
+            # else checks where its link starts or whether it ends its sentence
+            for block in _BLOCKQUOTE.findall(rest):
+                raw_q = html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<a\b[^>]*>.*?</a>", " ",
+                                                                   block, flags=re.S))).strip()
+                for url in quote_links(block):
+                    vid, t = _video_and_time(url)
+                    if not vid or t is None:
+                        continue
+                    ok = next((m for v, st, m in usable if v == vid and abs(st - t) <= 20), None)
+                    why = _quote_timing(ok, raw_q, t) if ok is not None and raw_q else None
+                    if why:
+                        out.append(f"{why}: {raw_q[:40]!r} in {name}")
+                    break
         for url in _ANY_LINK.findall(rest):
             vid, t = _video_and_time(url)
             if not vid or t is None:
@@ -1533,7 +1583,7 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
                         # a whole sentence may start a cue before the window does
                         hit = next(({"published": m.get("published"), "text": q}
                                     for m in (moments or {}).get("usable") or []
-                                    if m.get("kind") == "window" and q in _norm_words(
+                                    if m.get("kind") in ("window", "brand_window") and q in _norm_words(
                                         " ".join(str(c[1]) for c in m.get("cues") or []))), None)
                     if hit is None:
                         problems.append(f"precedent quote is not a window the brand-moments "
@@ -1626,7 +1676,8 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
                         problems.append(f"story line {why_t}: {plain(line)[:50]}")
                 for fid in ids:
                     why = failed.get(fid, "")
-                    if any(k in why for k in ("ad read", "rival", "awkward", "word for word")):
+                    if any(k in why for k in ("ad read", "rival", "awkward", "word for word",
+                                              "sponsored", "no transcript")):
                         problems.append(f"story line names {fid}, whose own moment failed "
                                         f"moment_check ({why}); leave it out: {plain(line)[:50]}")
         # a past partnership in the category is shown where it belongs ("done
@@ -1644,7 +1695,7 @@ def check_page(md_text: str, facts: list[dict] | None, meta: dict,
         prose = _INLINE_QUOTE.sub(" ", html.unescape(re.sub(r"<[^>]+>", " ", prose)))
         for sentence in re.split(r"(?<=[.!?])\s+", prose):
             if _PATTERN_WORD.search(sentence) and not _COUNTED.search(sentence) \
-                    and not re.match(r"\s*(Do|Don't|Do not|Sample)\b", sentence):
+                    and not re.match(r"\s*(Do|Don[’']t|Do not|Sample)\b", sentence):
                 problems.append(f"{_PATTERN_WORD.search(sentence).group(0)!r} without a count of the "
                                 f"videos that show it: {sentence.strip()[:80]}")
     m = _OVERCLAIM.search(html.unescape(re.sub(r"<[^>]+>", " ", render_markdown(body))))
@@ -2438,9 +2489,14 @@ def main() -> None:
             print("BRIEF CONTRACT: " + "; ".join(problems), file=sys.stderr)
         return
 
-    moments = load_moments(in_path, parse_frontmatter(text)[0].get("brand_id"))
+    brand_id = parse_frontmatter(text)[0].get("brand_id")
+    moments = load_moments(in_path, brand_id)
     facts = link_clean_moments(facts, moments)
     problems = check_page(text, facts, meta, load_probe(in_path), moments)
+    if moments is None and section_kinds(text, meta)["conn"]:
+        # the concept links were never checked: the gate cannot pass by absence
+        problems.insert(0, f"moments-{brand_id or '<brand_id>'}.json is not beside the map; "
+                           "run moment_check.py before the map is checked")
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))

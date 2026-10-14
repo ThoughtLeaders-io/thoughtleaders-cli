@@ -286,7 +286,8 @@ def test_a_clean_sentence_beside_a_held_back_line_stays_usable():
     rec = mc.judge({"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 980,
                     "quote": "we have this entire track to ourselves. Let's get a workout in. "
                              "every time I go up a million subscribers I run another marathon"},
-                   [(980.0, "we have this entire track to ourselves. Let's get a workout in.")],
+                   [(980.0, "we have this entire track to ourselves. Let's get a workout in."),
+                    (984.0, "every time I go up a million subscribers I run another marathon")],
                    "", {}, None, "2026-10-01", idx, None, [], ["Acme"], [])
     assert rec["usable"] and rec["held_back"]["fact_id"] == "f9"
     assert bh._quotes_held_back(rec, "Let's get a workout in.") is None
@@ -355,3 +356,138 @@ def test_a_lapsing_relation_carries_its_year_and_kin_do_not():
            "people": [{"name": "Theo", "relation": "cousin"}]}
     out = bh.people_section([room, kin], {"f1": room, "f2": kin})
     assert "roommate (2019)" in out and "cousin (2019)" not in out
+
+
+# ---- what the review of the first version caught ----
+def test_a_moment_with_no_transcript_is_not_checked_and_not_usable():
+    rec = _judge(cues=[])
+    assert not rec["usable"] and any("no transcript" in r for r in rec["reasons"])
+    rec = mc.judge({"kind": "window", "ref": "42:zzz", "video_id": "zzz", "start": 30,
+                    "quote": "i love a cold drink after a run"}, [], "", {}, None, "2026-10-01",
+                   {}, None, ["Fizzco"], ["Acme"], [])
+    assert not rec["usable"] and any("no transcript" in r for r in rec["reasons"])
+
+
+def test_a_lane_window_must_be_word_for_word_in_the_captions():
+    cues = [(28.0, "so after the run"), (30.0, "i love a cold drink after a run")]
+    base = {"kind": "window", "ref": "42:aaa", "video_id": "aaa", "start": 30}
+    ok = mc.judge(dict(base, quote="i love a cold drink after a run"), cues, "", {}, None,
+                  "2026-10-01", {}, None, [], ["Acme"], [])
+    assert ok["usable"]
+    bad = mc.judge(dict(base, quote="i love a cold drink after my runs"), cues, "", {}, None,
+                   "2026-10-01", {}, None, [], ["Acme"], [])
+    assert not bad["usable"] and any("word for word" in r for r in bad["reasons"])
+
+
+def test_a_read_logged_at_second_zero_is_not_a_span_over_the_opening():
+    f = {"fact_id": "f9", "claim": "forgets water", "quote": "i forgot my water again",
+         "confidence": "confirmed", "sensitivity": "none", "video": "42:aaa", "start": 2,
+         "published": "2026-03-01", "last_seen": "2026-03-01"}
+    c = {"kind": "fact", "fact": f, "fact_id": "f9", "ref": "42:aaa", "video_id": "aaa", "start": 2,
+         "quote": f["quote"], "claim": f["claim"], "last_seen": f["last_seen"], "probe": {}, "members": []}
+    cues = [(0.0, "hey"), (2.0, "i forgot my water again")]
+    meta = {"title": "Hiding", "published": "2026-03-01"}
+    assert mc.judge(c, cues, "", meta, None, "2026-10-01", {"f9": f}, None, [], ["Acme"],
+                    [(-1.0, -1.0)])["usable"]
+    assert not mc.judge(c, cues, "", meta, None, "2026-10-01", {"f9": f}, None, [], ["Acme"],
+                        [(0.0, 20.0)])["usable"]
+
+
+def test_idioms_are_neither_plans_nor_habits():
+    assert not mc.FUTURE.search("I will never forget my first marathon")
+    assert not mc.FUTURE.search("I'll never go back there")
+    assert mc.FUTURE.search("I will run it again next year")
+    assert not mc.PATTERN.search("I've always loved this city")
+    assert not mc.PATTERN.search("I have always wanted to be a pilot")
+    assert mc.PATTERN.search("I always forget my water")
+    assert mc.PATTERN.search("every time I go up a million subscribers")
+
+
+def test_a_rival_that_is_also_a_word_sponsors_a_video_only_as_a_name():
+    rx = mc.rival_pattern(["Prime", "Monster Energy"], ["Acme"])
+    assert mc.sponsor_rival("follow me #vlog its prime time baby", rx) is None
+    assert mc.sponsor_rival("my partner and I love monster trucks", rx) is None
+    assert mc.sponsor_rival("#primepartner", rx) == "prime"
+    assert mc.sponsor_rival("Thanks to Prime for sponsoring", rx) == "Prime"
+    assert mc.sponsor_rival("paid partnership with monster energy", rx) == "monster energy"
+
+
+def test_the_brands_own_past_deals_are_history_not_a_rivals():
+    tl = {"category_history": [{"brand": "Acme", "video_id": "own"},
+                               {"brand": "Fizzco", "video_id": "theirs"},
+                               {"brand": "", "video_id": "unnamed"}]}
+    assert mc.history_rival_videos(tl, ["Acme", ""]) == {"theirs", "unnamed"}
+
+
+def test_a_window_keeps_its_occasion():
+    cands = mc.candidates([], {"channel_id": "42", "windows": [
+        {"video_id": "bbb", "start": 90, "text": "so thirsty in here", "occasion": "after the workout"}]})
+    assert cands[0]["occasion"] == "after the workout" and cands[0]["ref"] == "42:bbb"
+
+
+def test_a_strength_word_in_a_concept_name_is_not_its_strength():
+    md = _MAP.replace("## Before the stunt · **Challenge series** · **adjacent** · **strong**",
+                      "## Strong start · **Challenge series** · **adjacent** · **thin**") \
+             .replace("## After the workout · **Workout clips** · **adjacent** · **strong**",
+                      "## After the workout · **Workout clips** · **adjacent** · **thin**")
+    assert any("says 'strong fit' but the concepts make it 'thin fit'" in p for p in _check(md))
+
+
+def test_the_about_heading_may_carry_the_hosts_name():
+    md = _MAP.replace("## About Patterrz", "## About Robin")
+    assert not any("missing section" in p for p in _check(md))
+    _title, (page, _frag) = bh.render_connections(md, _FACTS, {})
+    assert "<h2>Who Robin is</h2>" in page and "Robin runs Patterrz as a crew show" in page
+
+
+def test_a_story_line_never_names_a_fact_from_a_category_sponsors_upload():
+    md = _MAP.replace("- f1: Forgets water on stays.", "- f2: Trains legs between stunts.")
+    moments = {"usable": [m for m in _MOMENTS["usable"] if m["video_id"] != "ccc"],
+               "rejected": [{"video_id": "ccc", "start": 10, "kind": "fact", "fact_id": "f2",
+                             "reasons": ["upload sponsored by a brand in the category history"],
+                             "rival_sponsored": True}],
+               "rival_videos": ["ccc"]}
+    assert any("story line names f2" in p for p in _check(md, moments))
+
+
+def test_a_count_of_videos_is_not_any_number():
+    md = _MAP.replace("The moment: he forgets water on a stay.",
+                      "The moment: he always forgets water, as on his 2025 Vegas stay.")
+    assert any("without a count" in p for p in _check(md))
+    md = _MAP.replace("The moment: he forgets water on a stay.",
+                      "The moment: he always forgets water, in 3 videos this year.")
+    assert not any("without a count" in p for p in _check(md))
+
+
+def test_a_curly_apostrophe_still_marks_a_dont_line():
+    md = _MAP.replace("Don't: script health claims.", "Don’t: always script health claims.")
+    assert not any("without a count" in p for p in _check(md))
+    _title, (page, _frag) = bh.render_connections(md, _FACTS, {})
+    assert "f-dont" in page
+
+
+def test_the_captions_own_full_stop_ends_the_quote():
+    m = {"cues": [[10.0, "i love this city."], [13.0, "next day we left"]]}
+    assert bh._quote_timing(m, "i love this city", 10) is None
+    m = {"cues": [[8.0, "the city is big and"], [10.0, "i love this city. next day we left"]]}
+    assert bh._quote_timing(m, "i love this city", 10) is None
+    m = {"cues": [[8.0, "nothing beats this,"], [10.0, "i am all in. then we left"]]}
+    assert bh._quote_timing(m, "i am all in", 10) is None
+    m = {"cues": [[10.0, "i love this city and"], [13.0, "its people"]]}
+    assert bh._quote_timing(m, "i love this city", 10) == "the quote stops mid-sentence; quote the whole sentence"
+
+
+def test_a_precedent_cards_lead_quote_is_timed_too():
+    md = _MAP.replace(
+        "## Done this before",
+        "## Thirsty · **Box stunts** · **category precedent** · **thin**\n\n"
+        "> oh man so thirsty in here right now\n> [Patterrz, 2026-02-01](https://www.youtube.com/watch?v=bbb&t=72s)\n\n"
+        "The moment: he is thirsty in the box.\n\nThe concept: Acme in the box.\n\n"
+        "Do: keep it real.\n\nDon't: fake it.\n\n## Done this before")
+    moments = {"usable": [*_MOMENTS["usable"][:1], *_MOMENTS["usable"][2:],
+                          {"video_id": "bbb", "start": 90, "kind": "window",
+                           "cues": [[88.0, "ok"], [90.0, "oh man so thirsty in here right now."]]}],
+               "rejected": [], "rival_videos": []}
+    assert any("the link starts 18 s before the quote" in p for p in _check(md, moments))
+    md = md.replace("bbb&t=72s", "bbb&t=90s")
+    assert not any("the link starts" in p for p in _check(md, moments))

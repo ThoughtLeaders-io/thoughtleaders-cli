@@ -148,3 +148,33 @@ def test_a_habit_span_starts_at_its_unbroken_run_not_a_stray_old_match():
     import authenticate
     assert authenticate.run_start(["2022-06-02", "2025-07-14", "2025-08-19", "2026-01-11"]) == "2025-07-14"
     assert authenticate.run_start([]) is None
+
+
+# ---- what the review of the first version caught ----
+def test_a_caption_tag_does_not_make_the_captions_cased():
+    frags = [_frag((5, "[Music]"), (7, "date night with rose tonight"))]
+    assert au.near_hit(frags, None, "rose", ["date"], 1) is not None
+
+
+def test_a_camel_case_name_is_a_name_in_cased_captions():
+    assert au._has_name("I saw McKenna today", "mckenna", True)
+    assert au._has_name("ROSE is here", "rose", True)
+    assert not au._has_name("the sun rose", "rose", True)
+
+
+def test_accented_words_are_whole_words():
+    assert au._words("mi fiancé vive en Bogotá") == ["mi", "fiancé", "vive", "en", "bogotá"]
+
+
+def test_a_relationship_with_no_date_on_one_side_is_no_step_back():
+    married = {"c": "c1", "domain": "relationships", "claim": "is married",
+               "quote": "my husband and I", "published": ""}
+    dating = {"c": "c2", "domain": "relationships", "claim": "has a girlfriend",
+              "quote": "my girlfriend and I", "published": "2025-01-01"}
+    assert au.find_conflicts([married, dating]) == 0
+
+
+def test_someone_elses_first_kid_is_still_a_child():
+    import tier_hint
+    assert tier_hint.names_child("he was the first kid in his class to walk")
+    assert not tier_hint.names_child("was the first kid on the block with a skateboard")

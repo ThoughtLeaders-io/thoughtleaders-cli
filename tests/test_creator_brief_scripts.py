@@ -471,9 +471,22 @@ _FULL_MD = (
 )
 
 
-def _check_conn(tmp_path: Path, md: str, name: str = "42-7-connections.md"):
+def _write_moments(tmp_path: Path, md: str, brand_id: str = "7") -> Path:
+    """A moments file that passes every timed link in the map, as a run of
+    moment_check.py would after checking them."""
+    usable = [{"video_id": v, "start": int(t)}
+              for v, t in re.findall(r"[?&]v=([\w-]+)&t=(\d+)s", md)]
+    path = tmp_path / f"moments-{brand_id}.json"
+    path.write_text(json.dumps({"usable": usable, "rejected": [], "rival_videos": []}))
+    return path
+
+
+def _check_conn(tmp_path: Path, md: str, name: str = "42-7-connections.md",
+                moments: bool = True):
     src = tmp_path / name
     src.write_text(md)
+    if moments:
+        _write_moments(tmp_path, md)
     proc = subprocess.run(
         [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
          "--facts", str(_write_ledger(tmp_path)), "--check"],
@@ -534,6 +547,13 @@ def test_the_guardrails_are_kept_but_never_among_the_concepts(tmp_path):
 def test_check_passes_a_complete_map(tmp_path):
     code, report = _check_conn(tmp_path, _FULL_MD)
     assert code == 0 and report["ok"] and report["problems"] == []
+
+
+def test_check_refuses_a_map_whose_moments_were_never_checked(tmp_path):
+    # no moments file beside the map: the concept links were not checked, so
+    # the gate cannot pass by absence
+    code, report = _check_conn(tmp_path, _FULL_MD, moments=False)
+    assert code == 3 and any("moments-7.json" in p and "moment_check" in p for p in report["problems"])
 
 
 def test_check_names_every_missing_section(tmp_path):

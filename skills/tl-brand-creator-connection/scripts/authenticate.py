@@ -247,10 +247,10 @@ def find_conflicts(lines: list[dict]) -> int:
             if (na in committed and nb in uncommitted) or (na in uncommitted and nb in committed):
                 # girlfriend then fiancee is the same relationship moving on,
                 # not two relationships: only a step back is a conflict
-                newer_committed = (str(a.get("published") or "") >= str(b.get("published") or "")
-                                   if na in committed else
-                                   str(b.get("published") or "") >= str(a.get("published") or ""))
-                if newer_committed:
+                da, db = str(a.get("published") or ""), str(b.get("published") or "")
+                newer_committed = (da >= db) if na in committed else (db >= da)
+                # with a date missing the order cannot be told: no step back
+                if newer_committed or not (da and db):
                     continue
                 link(a, b)
     return marked
@@ -275,7 +275,8 @@ def _stem(word: str) -> str:
 
 
 def _words(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9][a-z0-9'’]*", (text or "").lower())
+    # letters in any script: "fiancé" and "bogotá" are words, not "fianc" and "bogot"
+    return re.findall(r"[^\W_](?:[^\W_]|['’])*", (text or "").lower())
 
 
 def specific_phrase(phrase: str | None) -> bool:
@@ -384,7 +385,9 @@ def es_body(channel: int, phrase: str | None, name: str | None, terms: list[str]
         # fragments centred on the name when there is one, so a name said
         # once is not crowded out by a common word said twenty times
         "highlight": {"fields": {"transcript": {
-            "fragment_size": 600, "number_of_fragments": 10, "order": "score",
+            # a fragment holds the cues within NEAR_SECONDS either side of the
+            # name (about 80 characters of timed text per cue)
+            "fragment_size": 1500, "number_of_fragments": 10, "order": "score",
             **({"highlight_query": {"match": {"transcript": {"query": name}}}} if name else {})}}},
     }
 
@@ -393,7 +396,9 @@ def _has_name(text: str, name: str, cased: bool) -> bool:
     """The name as a name: where the captions carry capitals, "Rose" and
     never the verb "rose"; in older all-lowercase captions, the word."""
     if cased:
-        return re.search(rf"\b{re.escape(name[:1].upper() + name[1:])}\b", text) is not None
+        # capitalised as the captions have it: "Rose", "McKenna", "ROSE"
+        return any(m.group(0)[:1].isupper()
+                   for m in re.finditer(rf"\b{re.escape(name)}\b", text, re.I))
     return name in _words(text)
 
 
@@ -413,7 +418,8 @@ def near_hit(fragments: list[str], phrase: str | None, name: str | None,
             if phrase.lower() in joined or phrase.lower().replace("'", "") in joined.replace("'", ""):
                 return int(pieces[0][0]), " ".join(p[1] for p in pieces)[:240]
             continue
-        cased = any(ch.isupper() for p in pieces for ch in p[1])
+        # a caption tag ([Music], [Applause]) is not the captions carrying capitals
+        cased = any(ch.isupper() for p in pieces for ch in re.sub(r"\[[^\]]*\]", "", p[1]))
         found = [(float(st), {_stem(w) for w in _words(tx)} & stems) for st, tx in pieces]
         anchors = ([float(st) for st, tx in pieces if _has_name(tx, name, cased)] if name
                    else [t for t, hit in found if hit])

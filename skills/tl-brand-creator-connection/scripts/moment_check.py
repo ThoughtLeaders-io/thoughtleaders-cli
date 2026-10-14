@@ -81,13 +81,17 @@ RISKY = re.compile(r"\b(steal(?:ing)?|stole|stolen|shoplift\w*|fake (?:coupon|id
 PREMISE = re.compile(r"(letting us film|for having us|for hosting us|"
                      r"utm_medium=partnership|in partnership with|for entertainment purposes)", re.I)
 # A description line that says who paid for the video.
-SPONSOR_LINE = re.compile(r"(sponsor|partner|thank(?:s| you) (?:to )?\S+ for|#\w*(?:partner|ad)\b)", re.I)
+SPONSOR_LINE = re.compile(r"(sponsor|\bpartner(?:ed|ship)s?\b|\bpaid partner|\bpartner(?:ed)? with|"
+                          r"thank(?:s| you) (?:to )?\S+ for|#\w*(?:partner|ad)\b)", re.I)
 # a plan in the creator's own voice: "I will", "we're going to", "I'm not
 # stopping until"; never the name Will
 FUTURE = re.compile(r"\b(?:(?:i|we|i'm|im|we're|i 39 m|we 39 re)\s+(?:will|'ll|am going to|are going to|"
                     r"going to|gonna|plan(?:ning)? to)|i'll|i 39 ll|we'll|not stopping until|"
-                    r"next (?:video|year|month))\b", re.I)
-PATTERN = re.compile(r"\b(every|always|each time|whenever|weekly|daily|never miss)\b", re.I)
+                    r"next (?:video|year|month))\b(?!\s+never\b)", re.I)   # "I will never forget" is no plan
+# a habit; "I've always loved", "I always wanted to be" are the past, not a habit
+PATTERN = re.compile(r"\b(every|(?<!have )(?<!ve )(?<!had )always(?! (?:wanted|loved|been|had|thought|"
+                     r"dreamed|dreamt|known|liked|hated|wished|said|felt|admired)\b)|each time|whenever|"
+                     r"weekly|daily|never miss)\b", re.I)
 FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|we|our|us|mine)\b", re.I)
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
           "September", "October", "November", "December"]
@@ -191,9 +195,14 @@ def sponsor_rival(summary: str, rx: re.Pattern | None) -> str | None:
         return None
     for line in (summary or "").splitlines():
         if SPONSOR_LINE.search(line) or "#" in line:
-            m = rx.search(line)
-            if m:
-                return m.group(0)
+            for m in rx.finditer(line):
+                hit = m.group(0)
+                # "prime time" is not Prime: a rival that is also a word counts
+                # only as a name (capitalised) or inside a hashtag
+                if hit.lower() in COMMON_WORDS and not hit[:1].isupper() \
+                        and line[max(0, m.start() - 1):m.start()] != "#":
+                    continue
+                return hit
     return None
 
 
@@ -250,7 +259,7 @@ def candidates(facts: list[dict], probe: dict) -> list[dict]:
                 continue
             out.append({"kind": kind[:-1], "ref": vid if ":" in vid else f"{probe.get('channel_id', '')}:{vid}",
                         "video_id": vid.split(":", 1)[-1], "start": w.get("start"),
-                        "quote": w.get("text"), "term": w.get("term")})
+                        "quote": w.get("text"), "occasion": w.get("occasion")})
     return out
 
 
@@ -305,6 +314,23 @@ def widen_said(recs: list[dict]) -> None:
             r["said"] = f"said from {month_label(first[str(r['fact_id'])])} to {end}"
 
 
+def _said_at(cues: list, quote: str, start: float) -> bool:
+    """The quote is in the captions, word for word, within ``QUOTE_SLACK_SECONDS``
+    of ``start``."""
+    hit = locate(cues, quote, start)
+    return hit.get("match") == "exact" and abs(float(hit.get("start", -999)) - start) <= QUOTE_SLACK_SECONDS
+
+
+def history_rival_videos(tl: dict, brand_names: list[str]) -> set[str]:
+    """The uploads the category history shows another brand sponsored,
+    whatever their description says ("grab some free <brand>" carries no
+    sponsor word). The brand's own past deals are its history, not a rival's."""
+    own = {b.strip().lower() for b in brand_names if b and b.strip()}
+    return {str(h.get("video_id")) for h in tl.get("category_history") or []
+            if isinstance(h, dict) and h.get("video_id")
+            and str(h.get("brand") or "").strip().lower() not in own}
+
+
 def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
           today: str, index: dict[str, dict] | None = None,
           latest_upload: str | None = None, rivals: list[str] | None = None,
@@ -315,19 +341,22 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
     start = float(c.get("start") or 0)
     published = meta.get("published") or ""
     title = meta.get("title") or ""
-    rec = {k: c.get(k) for k in ("kind", "fact_id", "video_id", "quote", "claim", "term") if c.get(k) is not None}
+    rec = {k: c.get(k) for k in ("kind", "fact_id", "video_id", "quote", "claim", "occasion") if c.get(k) is not None}
     if (c.get("probe") or {}).get("run_start"):
         rec["run_start"] = c["probe"]["run_start"]
     rec.update({"start": int(start), "url": f"https://www.youtube.com/watch?v={c['video_id']}&t={int(start)}s",
                 "published": published, "title": title, "views": meta.get("views")})
     rec["recent"] = bool(published) and months_between(published, today) < RECENT_MONTHS
+    # with no captions nothing below can be told: the surroundings, the ad
+    # reads and the words all read as clean, so the moment is not checked
+    if not cues:
+        reasons.append("no transcript for the upload; the moment cannot be checked")
 
     if c["kind"] == "fact":
         why = angle_ineligible_reason(c["fact"], index)
         if why:
             reasons.append(why)
-        hit = locate(cues, str(c.get("quote") or ""), start) if cues else {"match": "none"}
-        if hit.get("match") != "exact" or abs(float(hit.get("start", -999)) - start) > QUOTE_SLACK_SECONDS:
+        if cues and not _said_at(cues, str(c.get("quote") or ""), start):
             reasons.append("quote not word for word in the captions at its timestamp")
         text = f"{c.get('claim') or ''} {c.get('quote') or ''}"
         tense = "future" if FUTURE.search(text) else "pattern" if PATTERN.search(text) else "past or ongoing"
@@ -360,6 +389,9 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
             fid = str(c.get("fact_id") or "")
             if index and fid in index and angle_ineligible_reason(index[fid], index):
                 reasons.append(angle_ineligible_reason(index[fid], index))
+        elif cues and not _said_at(cues, str(c.get("quote") or ""), start):
+            # a lane window is judged like a fact: its words at its timestamp
+            reasons.append("quote not word for word in the captions at its timestamp")
         if not FIRST_PERSON.search(str(c.get("quote") or "")):
             reasons.append("not in the creator's own words (no first-person word)")
         held = held_back_line(str(c.get("quote") or ""), index)
@@ -369,7 +401,8 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
             rec["held_back"] = {"fact_id": fid, "why": held,
                                 "quote": str((index or {}).get(fid, {}).get("quote") or "")}
 
-    if any(a_ - 5 <= start <= b_ + 5 for a_, b_ in ad_spans or []):
+    # a read the index logged at second 0 sits somewhere unknown: not a span
+    if any(a_ - 5 <= start <= b_ + 5 for a_, b_ in ad_spans or [] if a_ >= 0):
         reasons.append("said inside an ad read: another brand's script, not the creator's own words")
     near = surroundings(cues, start)
     hit = near_rival(near, rivals or [], brand_names or [])
@@ -386,6 +419,7 @@ def judge(c: dict, cues: list, summary: str, meta: dict, rx: re.Pattern | None,
     if pl:
         rec["premise"] = pl
     rec["staged"] = bool(TITLE_HINTS["staged"].search(title))
+    reasons = list(dict.fromkeys(reasons))
     rec["usable"] = not reasons
     # the captions around the moment, so --check can find where a quote
     # starts and whether it ends with its sentence
@@ -430,10 +464,7 @@ def main() -> None:
     rx = rival_pattern(rival_names, own_names)
 
     index = {str(f.get("fact_id")): f for f in facts}
-    # the category history names its sponsored uploads outright, whatever
-    # their description says ("grab some free <brand>" carries no sponsor word)
-    history_videos = {str(h.get("video_id")) for h in tl.get("category_history") or []
-                      if isinstance(h, dict) and h.get("video_id")}
+    history_videos = history_rival_videos(tl, own_names)
     cands = candidates(facts, probe)
     refs = sorted({c["ref"] for c in cands})
     cues = fetch_cues.fetch_transcripts(refs) if refs else {}

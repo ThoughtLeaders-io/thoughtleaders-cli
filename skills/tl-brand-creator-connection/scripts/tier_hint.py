@@ -51,7 +51,7 @@ _CHILD_ANY = re.compile(
     r"|\b(?:new\s+baby|newborn|nieces?|nephews?|grandchild(?:ren)?|granddaughters?|grandsons?|"
     r"pregnan\w*|gave birth|birth of (?:our|their|his|her))\b",
     re.I)
-_CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|(?:i|was|were) the (?:first|only) kid"
+_CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|(?<!he )(?<!she )(?<!they )(?:was|were) the (?:first|only) kid"
                          r"|when (?:i|she|he|they) (?:was|were) "
                          r"(?:a )?(?:child|kid|little)|childhood|(?:her|his|their|my) (?:own )?"
                          r"(?:mum|mom|mother|dad|father|parents)\b)", re.I)

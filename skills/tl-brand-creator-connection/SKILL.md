@@ -253,7 +253,7 @@ python3 <skill>/scripts/moment_check.py --facts <profiles>/<id>-facts.jsonl \
   --corpus <corpus> --brand <brand_id>
 ```
 
-It writes `<corpus>/moments-<brand_id>.json`: `usable` moments, and `rejected` ones with the reason. Each usable moment carries `published`, `title`, `views`, `recent`, `premise`, `label`, `videos` and, for a lapsed habit, `said`.
+It writes `<corpus>/moments-<brand_id>.json`: `usable` moments, and `rejected` ones with their `reasons`. Each usable moment carries `published`, `title`, `views`, `recent`, `premise`, `label` and `videos`; a lane window carries its `occasion`. A lapsed habit is rejected and carries its `said` span, for the story. An upload with no transcript is rejected: nothing on it can be checked.
 
 **Step 3. Connection map.** Start when the moments file exists. Name a missing lane in the completion line. Follow-up queries may only confirm. Write `<corpus>/connections-<brand_id>.md` in the format of `profile-spec.md`, "CONNECT". The reader is the brand. Every quote and link is a `usable` moment; the guardrails read the whole ledger, withheld tiers included.
 
@@ -284,14 +284,14 @@ Quotes and descriptions, every section:
 
 Sections:
 - `## Verdict` opens with `**Strong fit.**` (any strong concept), `**Thin fit.**` (only thin concepts) or `**No fit.**` (no concepts; nothing in the moments meets what the brand sells). Then three or four sentences arguing the fit from the creator's moments, with two or three short quotes and the concepts' routes, not a list of videos. Then `Best-fit products: …`. Claim only what the quoted moments show.
-- `## About <creator>`: two or three sentences on who they are now, then up to 10 lines `- <fact ids joined by +>: <line>` about the person, one line per fact or group of facts saying the same thing. A fact about the person outranks one the channel page already shows (schedule, format). A past phase, a `superseded_by` or an `ended` fact is dated history with its span, never current. Date the saying, not the event ("said in <Month YYYY> that …"), unless the quote dates it; a lapsed habit uses its `said` span. Leave out a fact whose own moment failed moment_check for its words, its voice (an ad read) or its surroundings.
+- `## About <creator>` (the channel name or `creator_name`): two or three sentences on who they are now, then up to 10 lines `- <fact ids joined by +>: <line>` about the person, one line per fact or group of facts saying the same thing. A fact about the person outranks one the channel page already shows (schedule, format). A past phase, a `superseded_by` or an `ended` fact is dated history with its span, never current. Date the saying, not the event ("said in <Month YYYY> that …"), unless the quote dates it; a lapsed habit uses its `said` span. Leave out a fact whose own moment failed moment_check for its words, its voice (an ad read) or its surroundings.
 - `## Done this before`: `category_history` partnerships older than 24 months and the brand's unpaid moments, one dated, linked line each.
 - `## Good to know when booking`: a rival's partnership inside 24 months, a direct competitor's (the same kind of business) at any age, and a brand the creator launched in the category. Name a brand only when a `line` in `category_history` or `description_tags`, or a read in the video, shows the deal.
 - Sample and `Do:` lines follow the guardrails: no coverage, speed, health or performance claims; no filming or tracking people who have not agreed.
 - Frontmatter `creator_name`: the run's host name (the first name said on camera), else the channel name.
 - Every fact quoted or listed is `confirmed`. Never ask the reader to check anything with the creator's team.
 
-Write the map, then run the check and the render. `--check` exits 3 with one line per broken rule: fix the markdown from those lines, never the checker, and never read the scripts to learn the rules.
+Write the map, then run the check and the render. `--check` refuses a map whose moments file is missing. It exits 3 with one line per broken rule: fix the markdown from those lines, never the checker, and never read the scripts to learn the rules.
 
 ```bash
 python3 <skill>/scripts/build_html.py --check --in <corpus>/connections-<brand_id>.md \
