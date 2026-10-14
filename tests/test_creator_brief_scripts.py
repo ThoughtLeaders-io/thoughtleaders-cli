@@ -554,6 +554,14 @@ def test_check_refuses_a_map_whose_moments_were_never_checked(tmp_path):
     # the gate cannot pass by absence
     code, report = _check_conn(tmp_path, _FULL_MD, moments=False)
     assert code == 3 and any("moments-7.json" in p and "moment_check" in p for p in report["problems"])
+    # an unreadable one is no better than none
+    (tmp_path / "moments-7.json").write_text("{not json")
+    src = tmp_path / "42-7-connections.md"
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "build_html.py"), "--in", str(src),
+         "--facts", str(_write_ledger(tmp_path)), "--check"],
+        capture_output=True, text=True)
+    assert proc.returncode == 3 and "unreadable" in json.loads(proc.stdout)["problems"][0]
 
 
 def test_check_names_every_missing_section(tmp_path):

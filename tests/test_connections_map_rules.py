@@ -491,3 +491,36 @@ def test_a_precedent_cards_lead_quote_is_timed_too():
     assert any("the link starts 18 s before the quote" in p for p in _check(md, moments))
     md = md.replace("bbb&t=72s", "bbb&t=90s")
     assert not any("the link starts" in p for p in _check(md, moments))
+
+
+def test_a_sponsor_line_names_its_sponsor_however_it_is_written():
+    rx = mc.rival_pattern(["Monster Energy", "Prime Hydration", "Liquid Death"], ["Acme"])
+    assert mc.sponsor_rival("Partner: Monster Energy", rx)
+    assert mc.sponsor_rival("Today's partner: Prime Hydration", rx)
+    assert mc.sponsor_rival("Big thanks to our partners at Liquid Death!", rx)
+    assert mc.sponsor_rival("Sponsored by prime", rx) == "prime"
+    assert mc.sponsor_rival("my partner and I love monster trucks", rx) is None
+
+
+def test_a_habit_said_with_ive_is_still_a_habit():
+    assert mc.PATTERN.search("I've always run before work")
+    assert not mc.PATTERN.search("I've always loved this city")
+
+
+def test_a_window_with_escaped_apostrophes_is_matched_decoded():
+    cands = mc.candidates([], {"channel_id": "42", "windows": [
+        {"video_id": "bbb", "start": 30, "text": "I&amp;#39;m so thirsty after this challenge"}]})
+    rec = mc.judge(cands[0], [(30.0, "I'm so thirsty after this challenge")], "", {}, None,
+                   "2026-10-01", {}, None, [], ["Acme"], [])
+    assert rec["usable"], rec.get("reasons")
+
+
+def test_a_caption_tag_after_a_cut_quote_does_not_hide_the_cut():
+    m = {"cues": [[10.0, "i grew up in a small town"], [13.0, "[Music] and then we moved away"]]}
+    assert bh._quote_timing(m, "i grew up in a small town", 10) == \
+        "the quote stops mid-sentence; quote the whole sentence"
+
+
+def test_a_short_host_name_does_not_claim_the_brands_about():
+    assert not bh.names_creator("<b>About Samsung</b>", "Tech Lab", "Sam")
+    assert bh.names_creator("About Sam", "Tech Lab", "Sam")

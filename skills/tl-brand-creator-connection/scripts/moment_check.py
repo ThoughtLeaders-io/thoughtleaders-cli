@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import html
 import json
 import pathlib
 import re
@@ -81,7 +82,10 @@ RISKY = re.compile(r"\b(steal(?:ing)?|stole|stolen|shoplift\w*|fake (?:coupon|id
 PREMISE = re.compile(r"(letting us film|for having us|for hosting us|"
                      r"utm_medium=partnership|in partnership with|for entertainment purposes)", re.I)
 # A description line that says who paid for the video.
-SPONSOR_LINE = re.compile(r"(sponsor|\bpartner(?:ed|ship)s?\b|\bpaid partner|\bpartner(?:ed)? with|"
+# "my partner and I" is a person, not a sponsor; "Partner: X", "our partners
+# at X" and "partnered with X" are sponsors
+SPONSOR_LINE = re.compile(r"(sponsor|\bpartner(?:ed|ship)s?\b|\bpartners?\s*:|"
+                          r"\b(?:our|today'?s|video|brand|official) partners?\b|"
                           r"thank(?:s| you) (?:to )?\S+ for|#\w*(?:partner|ad)\b)", re.I)
 # a plan in the creator's own voice: "I will", "we're going to", "I'm not
 # stopping until"; never the name Will
@@ -89,7 +93,7 @@ FUTURE = re.compile(r"\b(?:(?:i|we|i'm|im|we're|i 39 m|we 39 re)\s+(?:will|'ll|a
                     r"going to|gonna|plan(?:ning)? to)|i'll|i 39 ll|we'll|not stopping until|"
                     r"next (?:video|year|month))\b(?!\s+never\b)", re.I)   # "I will never forget" is no plan
 # a habit; "I've always loved", "I always wanted to be" are the past, not a habit
-PATTERN = re.compile(r"\b(every|(?<!have )(?<!ve )(?<!had )always(?! (?:wanted|loved|been|had|thought|"
+PATTERN = re.compile(r"\b(every|always(?! (?:wanted|loved|been|had|thought|"
                      r"dreamed|dreamt|known|liked|hated|wished|said|felt|admired)\b)|each time|whenever|"
                      r"weekly|daily|never miss)\b", re.I)
 FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|i'd|i'll|my|me|we|our|us|mine)\b", re.I)
@@ -194,12 +198,13 @@ def sponsor_rival(summary: str, rx: re.Pattern | None) -> str | None:
     if not rx:
         return None
     for line in (summary or "").splitlines():
-        if SPONSOR_LINE.search(line) or "#" in line:
+        said = bool(SPONSOR_LINE.search(line))
+        if said or "#" in line:
             for m in rx.finditer(line):
                 hit = m.group(0)
-                # "prime time" is not Prime: a rival that is also a word counts
-                # only as a name (capitalised) or inside a hashtag
-                if hit.lower() in COMMON_WORDS and not hit[:1].isupper() \
+                # on a line that is only hashtags, "prime time" is not Prime: a
+                # rival that is also a word counts only as a name or a hashtag
+                if not said and hit.lower() in COMMON_WORDS and not hit[:1].isupper() \
                         and line[max(0, m.start() - 1):m.start()] != "#":
                     continue
                 return hit
@@ -259,7 +264,8 @@ def candidates(facts: list[dict], probe: dict) -> list[dict]:
                 continue
             out.append({"kind": kind[:-1], "ref": vid if ":" in vid else f"{probe.get('channel_id', '')}:{vid}",
                         "video_id": vid.split(":", 1)[-1], "start": w.get("start"),
-                        "quote": w.get("text"), "occasion": w.get("occasion")})
+                        "quote": html.unescape(html.unescape(str(w.get("text") or ""))),
+                        "occasion": w.get("occasion")})
     return out
 
 

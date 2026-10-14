@@ -379,10 +379,12 @@ def premise_line(line: dict) -> bool:
     by the bit, so neither counts."""
     w = line.get("window") or {}
     v = line.get("verdict") or {}
+    family = {_auth._stem(n) for n in _auth.SPECIFIC_NOUNS}
     def telling(text: str) -> set[str]:
-        return {_auth._stem(t) for t in _auth._words(text)
-                if t not in _auth.STOPWORDS and t not in _auth.SPECIFIC_NOUNS
-                and len(t) > 2 and not t.isdigit()}
+        # "sisters", "husband's" and "dogs" are the family words too
+        stems = {_auth._stem(re.sub(r"['’]s?$", "", t)) for t in _auth._words(text)
+                 if t not in _auth.STOPWORDS and len(t) > 2 and not t.isdigit()}
+        return stems - family
     return bool(telling(str(w.get("title") or ""))
                 & telling(f"{v.get('claim') or ''} {v.get('quote') or ''}"))
 

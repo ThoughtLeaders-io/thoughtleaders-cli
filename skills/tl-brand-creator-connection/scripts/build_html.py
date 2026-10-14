@@ -341,7 +341,9 @@ def names_creator(title_html: str, *creators: str) -> bool:
     brand? Compared on the names (the channel's, the host's) so a brand
     called "About Time" cannot win."""
     t = plain(title_html).lower()
-    return any(c and c in t for c in (str(x or "").strip().lower() for x in creators))
+    # whole words: a host called Sam does not make "About Samsung" theirs
+    return any(c and re.search(rf"(?<!\w){re.escape(c)}(?!\w)", t)
+               for c in (str(x or "").strip().lower() for x in creators))
 
 
 def about_block(sections: list[tuple[str, str]]) -> str:
@@ -1342,8 +1344,8 @@ def load_moments(in_path: pathlib.Path | None, brand_id: str | None) -> dict | N
         return None
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise SystemExit(f"{p}: cannot be read ({e}); run moment_check.py again") from e
+    except (OSError, ValueError):
+        return None   # unreadable is unchecked: main reports it like a missing file
 
 
 _ANY_LINK = re.compile(r'href="([^"]+)"')
@@ -1389,8 +1391,8 @@ def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
         return f"the link starts {begins - link_t} s before the quote; link &t={begins}s"
     q = quote.strip().rstrip("\"”")
     if q and q[-1] not in ".?!":
-        after = _after_quote(cues, hit, quote)
-        nxt = after.lstrip()
+        # a caption tag ([Music]) between the quote and the next words is not punctuation
+        nxt = re.sub(r"^(?:\s*\[[^\]]*\])+", "", _after_quote(cues, hit, quote)).lstrip()
         if nxt[:1].isalpha() and not re.match(r"^[,;:]", nxt):
             return "the quote stops mid-sentence; quote the whole sentence"
     return None
@@ -2499,8 +2501,8 @@ def main() -> None:
     problems = check_page(text, facts, meta, load_probe(in_path), moments)
     if moments is None and section_kinds(text, meta)["conn"]:
         # the concept links were never checked: the gate cannot pass by absence
-        problems.insert(0, f"moments-{brand_id or '<brand_id>'}.json is not beside the map; "
-                           "run moment_check.py before the map is checked")
+        problems.insert(0, f"moments-{brand_id or '<brand_id>'}.json is missing or unreadable "
+                           "beside the map; run moment_check.py before the map is checked")
     if a.check:
         print(json.dumps({"in": str(in_path), "problems": problems,
                           "ok": not problems}, indent=1))
