@@ -2,13 +2,10 @@
 name: tl-channel-authenticity
 tl-blurb: vet a channel for fake views
 description: >
-  Detect non-organic views / fake engagement / bot comments on a YouTube
-  channel before booking (or after delivering) a sponsorship. Use when asked
-  to vet a channel, check if views/comments are real, investigate suspicious
-  engagement, audit a sponsorship delivery, or whenever someone shares a
-  YouTube channel/handle/URL and asks "is this real / safe to buy an ad on".
-  Triggers: "fake views", "bot comments", "non-organic", "is this channel
-  legit", "vet this channel", "engagement looks off", "audit this sponsorship".
+  Detect fake views, fake engagement or bot comments on a YouTube channel before booking (or after
+  delivering) a sponsorship. Use when asked to vet a channel, check if views/comments are real, or
+  audit a delivery. Triggers: "fake views", "bot comments", "non-organic", "is this channel legit /
+  safe to buy an ad on", "vet this channel", "engagement looks off", "audit this sponsorship".
 ---
 
 # Channel Authenticity
