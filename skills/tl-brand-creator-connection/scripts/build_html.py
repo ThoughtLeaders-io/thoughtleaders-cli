@@ -88,6 +88,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # sibling module  # noqa: E402
 from store_io import read_ledger  # sibling module  # noqa: E402
 from verify_quotes import locate  # sibling module; the one quote matcher  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data  # noqa: E402
+
+SKILL = "tl-brand-creator-connection"
 
 BADGES = {
     "direct": "direct",
@@ -2524,6 +2528,8 @@ def main() -> None:
            elapsed_s=round(time.monotonic() - t0, 1))
     if problems:
         print("PAGE CONTRACT: " + "; ".join(problems), file=sys.stderr)
+    # The connections page is the deliverable; a no-fit page is still a result.
+    tl_data.report_run(SKILL)
 
 
 if __name__ == "__main__":

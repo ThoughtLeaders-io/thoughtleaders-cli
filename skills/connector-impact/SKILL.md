@@ -65,7 +65,11 @@ questions from `help.md` or the mapping file, then continue the run.
 - ELSE ask ONE question covering every unstated item (view, brand, window), one line per view on
   what it shows. Never default silently.
 - IF `autonomous`, `--auto` or "don't stop to ask": all three views, default window, no questions.
-- IF the user says "include pending": count pending actions in the headline numbers.
+- IF the user explicitly asks to include pending for this run: count pending actions in the
+  headline numbers, label both states, and do not ask. This holds even beside a standing line
+  such as "keep pending separate unless I ask"; the explicit request wins. Interpret the request's
+  meaning: "do not include pending" or a standing "unless I ask to include pending" rule does
+  not enable pending by itself.
 
 ## Workflow
 
@@ -133,11 +137,11 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    type differs from the one the user described, stop and tell the user.
 6. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
 7. IF creators are named, resolve them to TL channel ids now (stage 1), before any deal read.
-8. Record the currency the Impact figures are in and the TL deals' `price_currency`. On a
-   report, the figures' currency is its display-currency setting; do not change it. IF the two
-   differ, tell the user now and apply mapping 2.3.
+8. Record the currency the Impact figures are in. TL prices are always USD, and the report is in
+   USD. On a report, the figures' currency is its display-currency setting; do not change it. IF
+   the Impact figures are not in USD (usually EUR), tell the user now and apply mapping 2.3.
 9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
-   states (approved headline, pending separate), currencies.
+   the selected headline states with approved and pending labelled separately, currencies.
 
 ### 1. TL side
 
@@ -272,6 +276,9 @@ group (mapping 4.4).
   platforms); ELSE list it as unresolved without asking.
 - List actions that used the creator's promo codes but are credited to another partner (mapping
   3.4).
+- Use only promo codes that appear on Impact actions. Never build a code from a creator's name to
+  search for, and never call a code the creator's unless it is on their own actions. IF their
+  actions carry no code, say so.
 - List TL deals with no Impact partner, with the likely reason.
 
 ### 4. Dates
@@ -314,6 +321,9 @@ not reach a number quoted earlier — the reader meets the figure first. Where t
 repeat several times in one section, mark each figure and carry one note for the section, placed
 where a reader meets the first of them.
 
+Deliver final figures only. IF a figure changes while you write, replace it: no old figure,
+arrow or "correction" note stays in the report.
+
 Use business terms from the `tl` glossary, not table names. IF the user asks for a chart, render
 it as SVG.
 
@@ -347,5 +357,11 @@ channel added from a link the user gave. IF the user wants results saved, offer 
     otherwise empty: a bare `0` does not say which currency it is zero of. A currency named once
     in the table's title covers the table.
 13. Mapping 2 holds: views from TL only; Paid to TL and commission in separate columns; all-in
-    figures only in the to-date block; converted columns use a shown ECB rate; the TL price is
-    never converted.
+    figures only in the to-date block; Impact money not in USD is shown in USD at a shown ECB
+    monthly rate, with the original beside it, or flagged when conversion is unavailable; the
+    TL price is never converted, and unexpected price currencies follow mapping 2.3.
+14. Promo-code sales count like link sales: approved actions state the observed promo-code split
+    in the table and the opening summary, with attribution labels only where Impact supplies
+    evidence (mapping 2.2); a held-back conversion rate points to actions per 1,000 views when
+    available; a creator with codes credited to other partners has the "including" line
+    (mapping 2, 2.2, 3.4).

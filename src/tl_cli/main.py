@@ -10,33 +10,35 @@ import typer
 from rich.console import Console
 
 from tl_cli import __version__
-from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli import config as tl_config
+from tl_cli._typer_utils import AlphaSortedTyperGroup
 from tl_cli.auth.commands import app as auth_app
+from tl_cli.commands.agent import app as agent_app
 from tl_cli.commands.balance import app as balance_app
-from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.brands import app as brands_app
 from tl_cli.commands.bulk_import import bulk_import_command
-from tl_cli.commands.credits import app as credits_app
+from tl_cli.commands.changelog import changelog_command
 from tl_cli.commands.channels import app as channels_app
+from tl_cli.commands.credits import app as credits_app
 from tl_cli.commands.db import app as db_app
 from tl_cli.commands.deals import app as deals_app
+from tl_cli.commands.describe import app as describe_app
+from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.matches import app as matches_app
 from tl_cli.commands.memory import app as memory_app
 from tl_cli.commands.profiles import app as profiles_app
 from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.recommender import app as recommender_app
-from tl_cli.commands.sponsorships import app as sponsorships_app
-from tl_cli.commands.describe import app as describe_app
-from tl_cli.commands.schema import app as schema_app
-from tl_cli.commands.doctor import app as doctor_app
 from tl_cli.commands.reports import app as reports_app
-from tl_cli.commands.workflows import app as workflows_app
+from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.setup import app as setup_app
-from tl_cli.commands.skills import app as skills_app, check_skill_staleness
+from tl_cli.commands.skills import app as skills_app
+from tl_cli.commands.skills import check_skill_staleness
 from tl_cli.commands.snapshots import app as snapshots_app
+from tl_cli.commands.sponsorships import app as sponsorships_app
 from tl_cli.commands.uploads import app as uploads_app
 from tl_cli.commands.whoami import app as whoami_app
+from tl_cli.commands.workflows import app as workflows_app
 
 app = typer.Typer(
     name="tl",
@@ -124,6 +126,7 @@ app.add_typer(balance_app, name="balance")
 app.add_typer(credits_app, name="credits")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
+app.add_typer(agent_app, name="agent")
 
 # `changelog` is a single command (not a sub-typer) so positional version args
 # don't get interpreted as subcommand names.

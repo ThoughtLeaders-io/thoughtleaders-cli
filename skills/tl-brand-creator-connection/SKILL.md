@@ -225,6 +225,8 @@ PROFILE completion, three lines:
 2. Fact count and what the socials lane did: `socials off, N linked platforms listed unread` or `socials on, N websites opened, N sources read, N facts`. Report "on" with 0 facts as such.
 3. What was cached on the channel record this run (host name, format label, host aliases, sibling channels), from `host_name_cache` and `cache`.
 
+A PROFILE-only run (no brand) is finished here: run `tl agent complete tl-brand-creator-connection` so a run opened from a ThoughtLeaders surface is counted (the CONNECT page reports itself). If the ledger could not be built, run it with `--outcome failed`.
+
 **Fast run** (a run shape, not a flag): PROFILE only, primary channel only, socials OFF without asking, default selection, no corroboration round.
 
 ## 4. CONNECT pipeline

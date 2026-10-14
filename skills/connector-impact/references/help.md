@@ -17,7 +17,8 @@ the right tool for you.
 - Your TL login (the `tl` CLI).
 - One way into Impact:
   - Impact's connector for Claude (recommended): add a custom connector with the URL
-    `https://mcp.impact.com/mcp` and sign in with your Impact login.
+    `https://mcp.impact.com/mcp`, enter `mcp-impact-claude` as the OAuth client ID under
+    Advanced settings, and sign in with your Impact login.
   - The Impact API, with a read-only token you create in Impact (Settings → Technical → API).
   - A CSV export from Impact's Reports (Performance by Partner or by Day), dropped into the chat.
   - The Impact website, open and signed in in your browser. Slowest, but no setup.
@@ -75,9 +76,11 @@ TL data takes about a day to fill in.
 - The TL price and the Impact commission are always shown separately. They're added together
   only in an "All-in cost to date" box under the table, over the same videos and dates, with an
   as-of date.
-- If Impact and TL use different currencies, every money column names its currency. Where money
-  is compared with money, a converted column is added at the European Central Bank's monthly
-  average rate, with the rate shown. The TL price is never converted.
+- Everything is reported in US dollars, because TL prices are always in USD. If your Impact
+  account shows another currency, such as euros, those figures are converted to USD at the
+  European Central Bank's monthly average rate, with the original amount and the rate shown.
+  The TL price is never converted. If a TL deal unexpectedly records another currency, you'll
+  see that price in its recorded currency and affected USD figures will wait for confirmation.
 
 Costs and CPMs here are last-click numbers from your own Impact account: they count sales that
 arrived through the creator's link, not sales the video may have driven some other way. They're a
@@ -92,7 +95,7 @@ floor on what a sponsorship did, not the full picture.
 | Action | A conversion: sale, sign-up or install |
 | Revenue | Your sales, not TL revenue |
 | Action Cost | Commission paid to the creator through Impact, not the TL price |
-| Total Cost | That commission plus Impact's fees |
+| Total Cost | That commission plus per-click payments, bonuses, make-good and fixed payments made through Impact. No Impact platform fee |
 | Ad | A tracking link or creative, not a TL ad spot |
 | Contract | Commission terms, not a TL IO |
 
