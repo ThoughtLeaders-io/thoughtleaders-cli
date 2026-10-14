@@ -98,6 +98,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # noqa: E402
 import assemble_extracts as _ax  # noqa: E402  sibling: the claim-to-quote check
+import authenticate as _auth  # noqa: E402  sibling: the probe's word helpers
 from store_io import read_ledger, write_ledger  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data  # noqa: E402  the shared CLI wrapper
@@ -188,6 +189,8 @@ SELECTED_TARGET = 40
 # A fact is recent when the newest upload saying it is inside this many
 # months of the run date; recent facts rank ahead of older ones.
 RECENT_MONTHS = 24
+# A staged claim said in this many uploads (own plus found) is the person's.
+RECURRING_VIDEOS = 4
 # A claim found only inside an upload's opening hook, and in no other video,
 # is `unconfirmed`: hooks are written to pull viewers in.
 HOOK_SECONDS = 60
@@ -367,14 +370,41 @@ def load_probe(path: pathlib.Path | None) -> dict[str, dict]:
     return {k: v for k, v in (results or {}).items() if isinstance(v, dict)}
 
 
+def premise_line(line: dict) -> bool:
+    """The claim shares a telling word with its upload's title: it could be
+    the stunt itself ("lives in a store" in "I Secretly Lived In A Store"). A
+    personal fact the stunt does not need shares none and is the shard's to
+    judge. A family or partner word ("My Husband Pranks Me", "my husband grew
+    up in Ohio") or a number ("24 Hours", "I'm 24") is shared by chance, not
+    by the bit, so neither counts."""
+    w = line.get("window") or {}
+    v = line.get("verdict") or {}
+    family = {_auth._stem(n) for n in _auth.SPECIFIC_NOUNS}
+    def telling(text: str) -> set[str]:
+        # "sisters", "husband's" and "dogs" are the family words too
+        stems = {_auth._stem(re.sub(r"['’]s?$", "", t)) for t in _auth._words(text)
+                 if t not in _auth.STOPWORDS and len(t) > 2 and not t.isdigit()}
+        return stems - family
+    return bool(telling(str(w.get("title") or ""))
+                & telling(f"{v.get('claim') or ''} {v.get('quote') or ''}"))
+
+
 def staged_only(line: dict, probe_entry: dict | None) -> bool:
-    """A claim from a staged window that the probe could not find in any
-    non-staged upload (or that no probe reached). It is kept, never dropped,
-    but it does not confirm and does not reach a brand-facing page."""
+    """A claim from a staged window that could be the bit (``premise_line``),
+    that the probe could not find in any non-staged upload (or that no probe
+    reached), whose own uploads are all staged, and that is said in fewer
+    than ``RECURRING_VIDEOS`` uploads. It is kept, never dropped, but it does
+    not confirm and does not reach a brand-facing page."""
     w = line.get("window") or {}
     if str(w.get("format_hint") or "") != "staged":
         return False
+    if not premise_line(line):
+        return False  # a personal fact the stunt does not need: the shard judges it
     p = (probe_entry or {}).get("probe") or {}
+    if int(p.get("own_non_staged_videos") or 0) > 0:
+        return False  # the cluster itself was said in a non-staged upload
+    if int(p.get("recurring_videos") or 0) >= RECURRING_VIDEOS:
+        return False  # repeated across separate uploads: the person's, not a bit
     return int(p.get("non_staged_videos") or 0) == 0
 
 
@@ -955,14 +985,18 @@ def capped_confidence(line: dict, fmt: str, override: str | None) -> str:
     return value
 
 
-def hook_only(line: dict, videos: list[str]) -> bool:
+def hook_only(line: dict, videos: list[str], probe_entry: dict | None = None) -> bool:
     """A staged upload (its title marks a prank, challenge or stunt), every
-    member in the first ``HOOK_SECONDS``, and no other video says it. An
+    member in the first ``HOOK_SECONDS``, and no other video says it: not
+    its own members, and not the uploads the probe found saying it again. An
     ordinary upload's opening is the creator introducing themselves."""
     members = members_of(line)
     staged = str((line.get("window") or {}).get("format_hint") or "") == "staged"
     if not staged or not members or len(videos) > 1:
         return False
+    p = (probe_entry or {}).get("probe") or {}
+    if int(p.get("non_staged_videos") or 0) > 0 or int(p.get("recurring_videos") or 0) >= RECURRING_VIDEOS:
+        return False  # said again elsewhere: theirs, not an opening bit
     return all(float(m.get("start") or 0) < HOOK_SECONDS for m in members)
 
 
@@ -1024,7 +1058,7 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         # said inside a set-up and found nowhere else: kept, never dropped,
         # never confirmed, never on a brand-facing page
         confidence = "unconfirmed"
-    hook = hook_only(line, videos)
+    hook = hook_only(line, videos, probe_entry)
     if hook:
         confidence = "unconfirmed"
     claim, date_note = dated_claim(claim, w.get("published"), first_upload)
@@ -1062,7 +1096,8 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         if p.get("videos") is not None:
             fact["probe"] = {"videos": p.get("videos"),
                              "non_staged_videos": p.get("non_staged_videos"),
-                             "newest": p.get("newest")}
+                             "newest": p.get("newest"),
+                             "run_start": p.get("run_start")}
     if str(dec.get("gloss") or "").strip():
         fact["gloss"] = str(dec["gloss"]).strip()
     return fact

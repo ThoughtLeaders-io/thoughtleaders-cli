@@ -13,8 +13,9 @@ description: |
   creator's transcripts for first-person disclosures, verifies every retained
   quote against its timestamped source, resolves contradictions and
   sensitivity, and writes a reusable fact ledger. With a brand, it also
-  researches the brand, produces an internal connection map (including an
-  honest thin-fit or no-fit verdict), and can produce a creator-ready brief
+  researches the brand, produces a connection map a brand can read (a fit
+  verdict and creative concepts built on the creator's own moments; thin fit
+  and no fit are valid verdicts), and can produce a creator-ready brief
   whose talking points are built from the creator's own gems and lead to the
   brand: the brand's own brief mirrored when it sent one, a six-section
   fallback when it did not. Social and web identity research is OPT-IN;
@@ -30,7 +31,7 @@ description: |
 
 ## Scope
 
-Use for: creator self-disclosure research, a reusable creator profile, an internal creator × brand fit assessment, talking points for a booked or proposed creator campaign.
+Use for: creator self-disclosure research, a reusable creator profile, a creator × brand connection map written for the brand, talking points for a booked or proposed creator campaign.
 Do not use for: channel discovery, performance or authenticity analysis, a brand brief with no creator, keyword research. Route those to the matching TL skill.
 
 **Help requests** ("help", "how does this work", "what are the options"): run nothing, spend no credits. Explain PROFILE vs CONNECT, the socials option, the creator-brief option, the evidence and sensitivity rules, and the output files. Offer to start.
@@ -101,7 +102,7 @@ Ask at most once, before any fetch, both questions in one message.
 
 **Creator brief** (CONNECT, only when the summary says `creator_brief: ask`; on `reuse` it is the only question):
   > **Do you want a version you can send to the creator, with talking points for the ad?**
-  > - **No** (default): internal connections page only.
+  > - **No** (default): the connection map only.
   > - **Yes**: also a creator-friendly brief.
 
 IF Yes: one follow-up only: "Paste the brand's brief or talking points (or a file path), and what the brand is promoting. 'We have none' is fine." Pass the answers as `--talking-points` / `--promoting` on the second call. IF the user has no brief or talking points, omit `--talking-points`. Never ask separately for requirements, don'ts or approval process. Autonomous/fast → no brief; the completion line says so.
@@ -235,22 +236,64 @@ A PROFILE-only run (no brand) is finished here: run `tl agent complete tl-brand-
 - **TL data** → `brand-tl.json` (target < 60 s). Run exactly:
   - `tl brands show <id> --json` per id. Use `company_description`, `what_it_does`, `offer`, `ideal_customers`, `type`, `website`, `sponsored_topics` (`sponsored_topics` is a hint to check against the reads, not a fact).
   - `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` (the brand's newest sponsored reads) and `python3 <skill>/scripts/brand_reads.py --brand <id> --channel <channel_id> --max 50` (this creator's own past reads).
-  - One `tl db es` aggregation with `"size": 0` over the brand's sponsored mentions: bucket by publication year, then by channel (top 20). Take the field names and the aggregation shape from `<plugin>/skills/tl/references/elasticsearch-schema.md` (the sponsored-mention query patterns and the aggregation example), never from memory. Resolve the channel ids to names with one lookup written from `<plugin>/skills/tl/references/postgres-schema.md` (the channel table), via `tl db pg`.
+  - One `tl db es` aggregation with `"size": 0` over the brand's sponsored mentions: bucket by publication year, then by channel (top 20). Every `tl db es` call in this lane takes its field names and query shape from `<plugin>/skills/tl/references/elasticsearch-schema.md` (the sponsored-mention patterns and the aggregation example), never from memory. Resolve the channel ids to names with one lookup written from `<plugin>/skills/tl/references/postgres-schema.md` (the channel table), via `tl db pg`.
+  - This channel's sponsors, last 24 months: one `tl db es` aggregation (`"size": 0`) over the channel's sponsored mentions, bucketed by brand (top 50), names resolved with `tl brands show`; and one `tl db es` search of the channel's uploads in the same window whose description has a sponsor line ("partner", "sponsor", "thank you to", or a hashtag ending in `partner` or `ad`), returning title, publication date and the line. A detection is a tag, not a deal: report it as tagged, with its line when there is one.
+  - `rivals`: up to 30 brands in the brand's product category: brands TL data shows sponsoring the brand's `sponsored_topics`, plus the category's best-known names you are certain of.
+  - `category_history`: the same description search and sponsored-mention aggregation over all years. Keep every sponsor whose product substitutes for or complements the brand's, not only `rivals`.
   - Never `tl brands history`. No web lookups.
-  - Write `{"brand": {<the show fields>}, "reads": [<rows of the first brand_reads.py call, unchanged>], "this_channel_reads": [<rows of the second, unchanged>], "by_year": {"<year>": <n>}, "top_channels": [{"id", "name", "count"}], "notes": "…"}`. `--check` refuses the other channels' names in the creator brief, and any talking point inside a `this_channel_reads` read or within 45 seconds of it.
-- **Brand site** → `brand-site.json`, `{"status": "read | fallback | unreachable", "urls_read": […], "positioning", "product_lines": […], "stated_audience", "cause", "campaign_themes": […], "creator_use", "notes"}` (target < 90 s). Read the `website` from `tl brands show` and only socials linked from that site: positioning, product lines, stated audience, founder story or cause, campaign themes, creator use. One WebFetch per URL; stop at the first failure per host. IF unreachable: use the platform brand record, then ONE WebFetch of `https://en.wikipedia.org/wiki/<brand>` labelled `[web: wikipedia]`. Never search the web for the brand.
-- **Category precedent** → `category-probe.json` (target < 90 s). Channel-scoped transcript search for moments the creator already does what the product enables, without naming the brand. Return term counts and the strongest windows with `&t=` links. The `transcript` field is timed-text XML (`<text start="…">`, HTML entities escaped twice); a window is consecutive cues' text, `start` the first cue's seconds. Drop windows that name the brand, a discount code or a link, windows within 60 seconds of any `sponsored` `brand_mentions` span on that video (any brand), and videos whose description names the brand. Max 3 ES queries, `size` ≤ 10, foreground only, no deepening. Write the file when the third query returns: `{"terms": {"<term>": <n>}, "windows": [{"video_id", "start", "published", "url", "text"}], "coverage": {"note": "…"}}`. `text` is the window's words; `--check` matches each precedent card quote against it and applies the card recency rule to `published`. A precedent quote that becomes a talking point contains a first-person word (I, my, we, our).
+  - Write `{"brand": {<the show fields>}, "reads": [<rows of the first brand_reads.py call, unchanged>], "this_channel_reads": [<rows of the second, unchanged>], "by_year": {"<year>": <n>}, "top_channels": [{"id", "name", "count"}], "channel_sponsors": [{"id", "name", "videos", "last_seen"}], "description_tags": [{"video_id", "published", "title", "line"}], "rivals": ["…"], "category_history": [{"brand", "video_id", "published", "title", "line"}], "notes": "…"}`. `--check` refuses the other channels' names in the creator brief, and any talking point inside a `this_channel_reads` read or within 45 seconds of it.
+- **Brand site** → `brand-site.json`, `{"status": "read | fallback | unreachable", "urls_read": […], "positioning", "product_lines": […], "use_occasions": […], "stated_audience", "cause", "campaign_themes": […], "creator_use", "competitors": […], "notes"}` (target < 90 s). Read the `website` from `tl brands show` and only socials linked from that site: positioning, product lines, the occasions the brand says the product is for (`use_occasions`), stated audience, founder story or cause, campaign themes, creator use, and any competitor the site names. One WebFetch per URL; stop at the first failure per host. IF unreachable: use the platform brand record, then ONE WebFetch of `https://en.wikipedia.org/wiki/<brand>` labelled `[web: wikipedia]`. Never search the web for the brand.
+- **Brand moments** → `category-probe.json` (target < 120 s). Channel-scoped transcript search for the creator's own moments, in two lists:
+  - `windows`: the creator using the product, or doing what it enables (thirst during a challenge, for a drinks brand). One query per occasion in the brand record and `use_occasions`, tagged with its `occasion`. Search the last 24 months first; older uploads only for an occasion with no recent window.
+  - `brand_windows`: the creator naming the brand or its products, from uploads the brand did not sponsor.
+  Return term counts and the strongest windows with `&t=` links, each with the upload's title and views. The `transcript` field is timed-text XML (`<text start="…">`, HTML entities escaped twice); a window is consecutive cues' text, `start` the first cue's seconds. Keep only the creator's own lines: first person, or their narration of their own stunt. Drop a line said by a friend, guest, contestant or commentator, a window that does not show who is speaking, a window with a discount code or a link, and any window within 60 seconds of a `sponsored` `brand_mentions` span on that video (any brand). Max 16 ES queries, `size` ≤ 20, foreground only, no deepening. Write the file when the last query returns: `{"terms": {"<term>": <n>}, "windows": [{"video_id", "start", "published", "url", "title", "views", "text", "occasion"}], "brand_windows": [<same shape>], "coverage": {"note": "…"}}`. `text` is the window's words. A window quote that becomes a talking point contains a first-person word (I, my, we, our).
 
-**Step 2. Connection map.** Start when the merge decisions are saved and `brand-tl.json` exists. Do not wait for the other lanes; name a missing lane in the caveat section. Follow-up queries may only confirm. Write `<corpus>/connections-<brand_id>.md` per `profile-spec.md`, "CONNECT", using the whole ledger, withheld tiers included.
+**Step 2. Check the moments.** When the ledger is saved and the lanes have written, run:
 
-Card rules:
-- Every card quotes a ledger fact, or for a category-precedent card a probe window, verbatim: the quote alone on `>` lines, then one `>` line holding only `[<creator>, <YYYY-MM-DD>](<url>&t=<N>s)`, where the date is the quoted video's publish date. Nothing else inside the block.
-- A category-precedent card follows the strength and recency rules below, with the window's `published` in place of `last_seen`.
-- Write the map, then run `--check`. Each problem it prints is one line naming the rule broken: fix the markdown from that line. Never read the scripts to learn the rules.
-- **strong** = the quoted fact itself names what the brand offers. **thin** = the link runs through the channel's format or a generic trait. Heading: `## <title> · **<type>** · **<strength>**`.
-- A fact told to argue against what the brand sells is never a card; it goes in "Where this could go wrong". IF the only product-naming facts are of that kind → no fit.
-- A strong card rests on a fact with `last_seen` inside the last 24 months. An older fact carries a thin card only with its year stated. The Thesis and "Where this could go wrong" use every fact at any age. An `unconfirmed` or `ended` fact is never quoted on the page; `--check` refuses it.
-- Max two thin cards. IF no card is strong: the Thesis says **thin fit**, names the one or two honest angles and what to confirm first, and the verdict sits above the cards. Never pad.
+```bash
+python3 <skill>/scripts/moment_check.py --facts <profiles>/<id>-facts.jsonl \
+  --corpus <corpus> --brand <brand_id>
+```
+
+It writes `<corpus>/moments-<brand_id>.json`: `usable` moments, and `rejected` ones with their `reasons`. Each usable moment carries `published`, `title`, `views`, `recent`, `premise`, `label` and `videos`; a lane window carries its `occasion`. A lapsed habit is rejected and carries its `said` span, for the story. An upload with no transcript is rejected: nothing on it can be checked.
+
+**Step 3. Connection map.** Start when the moments file exists. Name a missing lane in the completion line. Follow-up queries may only confirm. Write `<corpus>/connections-<brand_id>.md` in the format of `profile-spec.md`, "CONNECT". The reader is the brand. Every quote and link is a `usable` moment; the guardrails read the whole ledger, withheld tiers included.
+
+Concepts:
+- At most three, each a different route, never two takes on one idea: the creator's format (a recurring series or stunt type the product fits), a habit they talk about (a workout, a routine, food, travel), and a personal gem from the ledger (a person, a story, a turning point). Write fewer when fewer routes hold.
+- A concept is an idea for a future video built from what the brand sells and the creator's gems, never a replay of a past clip.
+- Heading `## <name> · **<route>** · **<type>** · **<strength>**`:
+  - route: the kind of video in two to four words, shown to the brand ("After the workout"); unique per map.
+  - type, for the writer only: `direct` (a ledger fact names what the brand offers), `adjacent` (a ledger fact about their life where the product fits), `category precedent` (a `windows` moment), `brand moment` (a `brand_windows` moment).
+  - strength: `strong` when the moment puts the creator where the product is used, or the brand appears on the channel unpaid; `thin` when the link is only the channel's format or a generic trait. At most two `thin`.
+- Body, in order:
+  1. Lead quote: `>` lines holding only the quote, then one `>` line holding only `[<creator>, <YYYY-MM-DD>](<url>&t=<N>s)`, the date the quoted video's publish date.
+  2. `The moment:` one sentence.
+  3. Two or three further moments, each `- [<YYYY-MM-DD>](<url>&t=<N>s) <what happens>: "<their words>"`.
+  4. `The concept:` the content they could make.
+  5. At most one `Sample line (illustration only): "…"`.
+  6. `Do:` and `Don't:`, both concrete.
+- A strong concept's lead quote and further moments are `recent`. An older moment appears only as dated backstory with its year.
+- A fact told against what the brand sells, or a video mocking or undercutting the brand, is never a concept or precedent; it shapes the guardrails. IF every fact naming the product is of that kind → no fit.
+
+Quotes and descriptions, every section:
+- Quote whole sentences, verbatim. Link the second the quote's first word is said (`--check` allows three seconds).
+- Name the place the captions name at the linked second, not the one in the title. Two uploads with one title: add the year.
+- Describe a moment only with what its quote, title or captions show; add no circumstances (time of day, "off camera", "hidden", a routine).
+- `premise` set: describe the moment as the video's premise ("in a video built on <premise>"), never as real life. `label` set: include it as written.
+- "Every", "always" and their kin only with the `videos` count ("in <n> of their videos").
+- Dates are publish dates ("in a video published <Month YYYY>").
+
+Sections:
+- `## Verdict` opens with `**Strong fit.**` (any strong concept), `**Thin fit.**` (only thin concepts) or `**No fit.**` (no concepts; nothing in the moments meets what the brand sells). Then three or four sentences arguing the fit from the creator's moments, with two or three short quotes and the concepts' routes, not a list of videos. Then `Best-fit products: …`. Claim only what the quoted moments show.
+- `## About <creator>` (the channel name or `creator_name`): two or three sentences on who they are now, then up to 10 lines `- <fact ids joined by +>: <line>` about the person, one line per fact or group of facts saying the same thing. A fact about the person outranks one the channel page already shows (schedule, format). A past phase, a `superseded_by` or an `ended` fact is dated history with its span, never current. Date the saying, not the event ("said in <Month YYYY> that …"), unless the quote dates it; a lapsed habit uses its `said` span. Leave out a fact whose own moment failed moment_check for its words, its voice (an ad read) or its surroundings.
+- `## Done this before`: `category_history` partnerships older than 24 months and the brand's unpaid moments, one dated, linked line each.
+- `## Good to know when booking`: a rival's partnership inside 24 months, a direct competitor's (the same kind of business) at any age, and a brand the creator launched in the category. Name a brand only when a `line` in `category_history` or `description_tags`, or a read in the video, shows the deal.
+- Sample and `Do:` lines follow the guardrails: no coverage, speed, health or performance claims; no filming or tracking people who have not agreed.
+- Frontmatter `creator_name`: the run's host name (the first name said on camera), else the channel name.
+- Every fact quoted or listed is `confirmed`. Never ask the reader to check anything with the creator's team.
+
+Write the map, then run the check and the render. `--check` refuses a map whose moments file is missing. It exits 3 with one line per broken rule: fix the markdown from those lines, never the checker, and never read the scripts to learn the rules.
 
 ```bash
 python3 <skill>/scripts/build_html.py --check --in <corpus>/connections-<brand_id>.md \
@@ -259,9 +302,9 @@ python3 <skill>/scripts/build_html.py --in <corpus>/connections-<brand_id>.md \
   --facts <profiles>/<id>-facts.jsonl
 ```
 
-`--check` exit 3: fix the markdown, never the checker. IF an Artifact tool exists, publish the `.fragment.html`; otherwise `open` the page. Without a brief, CONNECT completion: the page's absolute path, the artifact link if any, and one line naming any brand lane that fell back or was unreachable.
+IF an Artifact tool exists, publish the `.fragment.html`; otherwise `open` the page. Without a brief, CONNECT completion: the page's absolute path, the artifact link if any, and one line naming any brand lane that fell back or was unreachable.
 
-**Step 3. Creator brief** (only if `creator_brief: on`). IF the verdict is no fit, skip and say why. Otherwise read `<corpus>/creator-brief-input-<brand_id>.json`, the connection map, the whole ledger, and the creator's past reads for this brand in `brand-tl.json` `this_channel_reads` (never build a point on a moment from one).
+**Step 4. Creator brief** (only if `creator_brief: on`). IF the verdict is no fit, skip and say why. Otherwise read `<corpus>/creator-brief-input-<brand_id>.json`, the connection map, the whole ledger, and the creator's past reads for this brand in `brand-tl.json` `this_channel_reads` (never build a point on a moment from one).
 
 1. Search the finished ledger only (no new retrieval). For each confirmed gem with `last_seen` inside the last 24 months that fits the brand (a story with people and details, a turning point, something they built, a long-kept habit, how they describe themselves), write the talking point only this creator could make about the product. An older or `ended` gem is background only, with its year, never a talking point.
 2. Place each brand line under the point whose gem backs it best. A gem that leads to the product but to no brand line becomes a creative point under the promoting line.
@@ -286,8 +329,8 @@ Publish the fragment where possible. Completion: both absolute paths, artifact l
 - Read-only. Nothing is sent to anyone, including the creator brief.
 - No prices, costs, rate cards or deal terms in any output.
 - At most one labelled sample read per connection ("you could" in the brief). No scripts, full reads, CTA wording or alternates.
-- Internal material never reaches the creator brief: strength tags, provenance labels, thesis hedges, "Where this could go wrong". The brief never sets the brand against another product.
-- Sensitivity tiers (`evidence-rules.md`): `clinical`, `children`, `location` are never connection angles, but MUST inform fit and "Where this could go wrong" as a category-level warning, never the detail, never a talking point. A lane record naming a person that a withheld-tier fact names inherits that tier. Beliefs are not sensitive. Never infer a protected trait.
+- Internal material never reaches the creator brief: strength tags, provenance labels, verdict hedges, "Creative guardrails", "Good to know when booking". The brief never sets the brand against another product.
+- Sensitivity tiers (`evidence-rules.md`): `children` and `location` are never connection angles, `clinical` only when discussed in three or more videos; every tier MUST inform fit and the creative guardrails as a category-level guardrail ("keep the product away from talk of mood"), never the detail, never a talking point. A lane record naming a person that a withheld-tier fact names inherits that tier. Beliefs are not sensitive. Never infer a protected trait.
 - Never drop, demote or supersede a fact for being uncertain; unsettled claims stay `unconfirmed` in the ledger and off every page. A line the window shows is someone else's is not uncertain: it never enters.
 - Quotes are verbatim: the full displayed quote must be contained in its verified source. No partial matches, no dubbed tracks.
 - IF a response is marked quota-truncated: stop before caching rows, advancing watermarks or publishing. Report the retry information.

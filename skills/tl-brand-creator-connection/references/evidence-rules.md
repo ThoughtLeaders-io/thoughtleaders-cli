@@ -111,9 +111,17 @@ Rules the scripts and the merge shard apply to what the extractor returned.
   microphone for much of the transcript: the format call says `multi_host`
   and the shared-voice rules apply.
 - **A staged premise is checked, never guessed.** `authenticate.py`
-  searches the channel for the claim in non-staged uploads before the merge;
-  the merge shard decides with that evidence. Found elsewhere: the fact is
-  the person's. Found only inside staged uploads: kept in the ledger at
+  searches the channel for the claim in other uploads before the merge; an
+  upload counts only where the claim is said again: a partner or family
+  phrase ("my <relation>"), the named person with another word from the quote,
+  or most of the quote's telling words, close together in the captions. The
+  claim's own uploads never confirm it. The merge shard decides with that
+  evidence. Found in a non-staged upload, or said in four or more uploads:
+  the fact is the person's. A personal fact the stunt does not need (a
+  family member's name, a past job, a fear, a taste), in the host's voice,
+  is the person's even when said once: only a line that could be the bit
+  (the premise in the title, the set-up, a line the stunt needs) is held
+  back. That line, found nowhere else: kept in the ledger at
   `unconfirmed`, marked `staged_only`, never on a brand-facing page. A claim
   found only in a staged upload's first 60 seconds, and in no other video, is
   the opening hook: `unconfirmed`.
@@ -163,7 +171,7 @@ as a fact:
 | corroborated by a transcript fact | `none`, `lifestyle` | **`confirmed`**, both sides, and usable like any confirmed fact |
 | corroborated by a transcript fact | `clinical` | `confirmed`; the transcript side still answers to the repetition rule below, and the bio side is never `selected` |
 | corroborated by a transcript fact | `children`, `location` | `confirmed` but withheld as usual, the tier decides the page, not the confidence |
-| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed`, never a claim and never a connection angle; renders only under "In their own words (unverified)"; on a refresh it expires unless the About text still says it |
+| **uncorroborated** | `none`, `lifestyle` | stays `unconfirmed` in the ledger as a lead to check, never a claim and never a connection angle; on a refresh it expires unless the About text still says it |
 | **uncorroborated** | `clinical`, `children`, `location` | **dropped from the ledger entirely** |
 
 - **Only a transcript fact corroborates a bio fact.** A second written source
@@ -232,8 +240,8 @@ diagnosed with X", and that difference is the whole judgment:
 - **Only `clinical`, `children` and `location` are withheld from connection
   angles by default.** They still appear in the profile, so the human reading
   it knows they exist.
-- **Withheld is withheld from angles, not from the warnings.** "Where this
-  could go wrong" exists to say what NOT to pitch, and the withheld tiers are
+- **Withheld is withheld from angles, not from the warnings.** `## Creative
+  guardrails` exists to say what NOT to pitch, and the withheld tiers are
   where that knowledge lives: a creator who talks about sobriety must not be
   handed a hangover-cure read, a creator with a chronic condition must not be
   asked to joke about it. So every tier, withheld ones included, is read when
@@ -273,11 +281,12 @@ evidence, computed by the script. A claim stated as current that the
 evidence shows is over (a marathon since run, a relationship since ended, a
 job since left) is marked `ended` by the merge shard; past history ("used
 to", "as a kid") never is. An `ended` fact stays in the ledger as
-history, is never selected and is never quoted on a brand-facing page. A talking point or a strong
-connection rests on a fact with `last_seen` inside the last 24 months of the
-run date; an older fact supports a thin connection only with its year
-stated; the Thesis and "Where this could go wrong" use every fact at any
-age. A claim never repeats "X years ago": the script converts it to a year
+history, is never selected and is never quoted on a brand-facing page. A talking point or the
+lead quote of a strong concept rests on a fact with `last_seen` inside the
+last 24 months of the run date; an older fact backs a concept as dated
+backstory, or a thin one, only with its year stated; the Verdict, "Who they
+are" and the creative guardrails use every fact at any age, a past phase
+shown as the past. A claim never repeats "X years ago": the script converts it to a year
 from the upload date ("in about 2020, said in 2025"), and a claim about the
 channel's own start takes the channel's start date when they disagree by a
 year or more (the first upload, skipping at most five early uploads that a gap

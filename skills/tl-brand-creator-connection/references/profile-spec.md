@@ -56,7 +56,7 @@ ids; return paths, never content.
 | `speaker` | `host`, `cohost` (the second named host), `shared` (a "we" line about the hosts' shared life) |
 | `people` | the people the quote names, `[{"name", "relation"}]`; `<corpus>/people.json` rolls them up across the ledger |
 | `superseded_by` | the newer fact's id when latest wins; the old fact stays as history |
-| `ended` | true when the merge shard found a claim stated as current is now over; history, never selected, never on a page |
+| `ended` | true when the merge shard found a claim stated as current is now over; never selected, on a page only as dated history in the map's About lines |
 | `staged`, `staged_only`, `probe` | the title read as a prank, challenge, stunt or skit; no non-staged upload confirms the claim (so `unconfirmed`, never selected, never on a page); what the search found |
 | `hook_only` | the claim was found only in a staged upload's first 60 seconds and in no other video; `unconfirmed` |
 | `dated` | present when the script turned "X years ago" in the claim into a year |
@@ -99,42 +99,30 @@ a rebuild.
 
 ## CONNECT: the connection map
 
-`<corpus>/connections-<brand_id>.md`, frontmatter `schema:
-tl-creator-connections/v2`, `channel_id`, `channel_name`, `brand_id`,
-`brand_name`, `facts_file`, `brand_read_date`. Sections, in this order; the
-section order is the ranking:
+`<corpus>/connections-<brand_id>.md`, written for the brand from the usable
+moments in `moments-<brand_id>.json`. Frontmatter: `schema:
+tl-creator-connections/v2`, `channel_id`, `channel_name`, `creator_name`,
+`brand_id`, `brand_name`, `facts_file`, `brand_read_date`. Sections (content
+rules in SKILL.md, CONNECT step 3; `build_html.py` sets the page order, so
+only the concepts' order, strongest first, matters):
 
-1. `## About <creator name>`: two or three sentences on the person behind
-   the premise. The renderer prints the platform's description under it; do
-   not restate it, and do not list facts.
-2. `## Thesis`: three or four sentences on why these two fit. On a thin fit
-   it says "thin fit" and names the one or two angles and what to confirm.
-3. `## About <brand name>`: two or three neutral sentences from the
-   brand-site lane and the platform's category description only. Never a
-   sponsored-read snippet, a price or another client's data.
-4. One `## <title> · **<type>** · **<strength>**` section per connection,
-   strongest first. Type: `direct` (fact to product), `adjacent` (lifestyle
-   fit), `category precedent` (the creator already does what the product
-   enables, from the probe). Strength: `strong` when the quoted fact itself
-   names what the brand offers and `last_seen` is inside 24 months; `thin`
-   when the link runs through the channel's format or a generic trait, or
-   the fact is older (then the year is stated). At most two thin cards. Each
-   section holds, in order: the creator's words as a `>` quote with its
-   `&t=` link on a `>` continuation line (a ledger fact's verified quote, or
-   a probe window on a precedent card); what the brand offers that meets it,
-   with the lane it came from; one line on how it could be used; at most
-   one labelled sample read; one Do line and one Do not line, both
-   concrete.
-5. `## Where this could go wrong`: always present, always last. Reads the
-   whole ledger, withheld tiers and old or ended facts included, and names
-   the kind of fact, never its detail.
+1. `## About <creator name>`
+2. `## Done this before`, only when the lanes found any.
+3. `## Verdict`
+4. `## About <brand name>`: one or two neutral sentences from the brand-site
+   lane and the platform's category description. Never a sponsored-read
+   snippet, a price or another client's data.
+5. One section per concept.
+6. `## Creative guardrails`, always: what the integration must avoid. Read
+   the whole ledger, withheld tiers and old or ended facts included; state a
+   sensitive fact as a category-level guardrail, never its detail.
+7. `## Good to know when booking`, only when there is something.
 
-A fact used to argue against the brand's category is never a card. Facts at
-tier `children` or `location` never appear in a card; `clinical` facts only
-with three or more videos (`evidence-rules.md`). `unconfirmed`, `ended`,
-superseded and `staged_only` facts are never quoted. IF nothing honestly
-connects: the About sections, a no-fit verdict in prose, what was searched,
-and no cards.
+IF nothing connects: the Verdict says no fit and what was searched, and
+there are no concept sections. On the page, `children` and `location` facts
+never appear in a concept or the About lines, `clinical` facts only when
+discussed in three or more videos (`evidence-rules.md`), `staged_only` facts
+never, and a plan said in the last 12 months only with its `label`.
 
 ## CONNECT: the creator brief
 
@@ -144,17 +132,6 @@ whole ledger, and writes `<corpus>/creator-brief-<brand_id>.md` with
 frontmatter `schema: tl-creator-brief/v1`, `channel_name`, `brand_name`,
 `talking_points_supplied`. Layouts, rules and the example are in
 `creator-brief-template.md`.
-
-## The page
-
-`build_html.py` renders the map as one fixed template: thesis, who they are
-(the `selected` facts), people they mention, timeline, the creator's own
-unverified words when the bio lane left any, about the brand, the numbered
-cards, where this could go wrong, and the ledger's honesty strip (counts,
-tiers, coverage, format, lanes, linked platforms). `--check` enforces the
-map rules above and exits 3 with the problems; fix the markdown, never the
-checker. Publish the fragment where the host allows; give the user the
-page's absolute path.
 
 ## Never in any file
 

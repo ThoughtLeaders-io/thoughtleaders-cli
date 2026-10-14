@@ -51,13 +51,17 @@ _CHILD_ANY = re.compile(
     r"|\b(?:new\s+baby|newborn|nieces?|nephews?|grandchild(?:ren)?|granddaughters?|grandsons?|"
     r"pregnan\w*|gave birth|birth of (?:our|their|his|her))\b",
     re.I)
-_CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|when (?:i|she|he|they) (?:was|were) "
+_CHILD_SELF = re.compile(r"\b(?:as a (?:child|kid|little (?:girl|boy))|(?<!he )(?<!she )(?<!they )(?:was|were) the (?:first|only) kid"
+                         r"|when (?:i|she|he|they) (?:was|were) "
                          r"(?:a )?(?:child|kid|little)|childhood|(?:her|his|their|my) (?:own )?"
                          r"(?:mum|mom|mother|dad|father|parents)\b)", re.I)
 
 
+# a count of subscribers, views or followers is an audience, not a sum of money
 _MONEY_ANY = re.compile(r"[$€£]\s?\d|\b\d[\d,.]*\s?(?:k|grand|bucks|dollars?|euros?|pounds|"
-                        r"usd|eur|gbp|thousand|million)\b", re.I)
+                        r"usd|eur|gbp|thousand|million)\b(?!\s+(?:subscribers?|subs|followers?|views?|"
+                        r"viewers?|likes?|people|members?|fans?|downloads?|plays?|streams?|comments?|users?))",
+                        re.I)
 
 
 def names_child(*texts: str | None) -> bool:

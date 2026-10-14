@@ -63,7 +63,7 @@ is, and say that every quote links to the second it was said.
   prohibition under Don't do, an approval step under Creative approval
   process, each once and verbatim. Only what the creator should say or show
   becomes a `###`. Nothing the brand wrote is dropped, reworded or softened.
-- Start from the gems, not the brand's list. Read the map's thesis and cards
+- Start from the gems, not the brand's list. Read the map's verdict and concepts
   and the whole ledger (family, origin, habits, tastes, work history all
   count; the page's two-thin-card cap does not apply), and pick the gems: a
   story with its people and details, a turning point, a thing they built, a
@@ -107,15 +107,15 @@ CTA); channel or brand ids, fact ids, filenames, the words ledger, probe,
 strong, thin, precedent, sponsorship pattern, ad-read sample, or any
 provenance label; other creators' names, reads or channels; anything from a
 withheld tier (`children`, `location`, `clinical` below three videos);
-anything written for the account manager (thesis hedges, "Where this could
-go wrong", the honesty strip).
+anything written for the brand's side of the map (verdict hedges, "Creative
+guardrails", "Good to know when booking").
 
 ## When the brand sent no brief
 
 Every point is a creative point from a gem, same bar as above. Product facts
 come from the map's About-brand section only. No `**From <brand>'s brief:**`
 and no `### Also from <brand>`; the checker refuses both. The creative ask
-comes from the map's thesis, the promoting line first when given.
+comes from the map's verdict, the promoting line first when given.
 Requirements and Creative approval process use the defaults; Don't do holds
 the map's craft don'ts. The render carries the label "built from the
 creator's own material; no brand talking points supplied". A promoting line
@@ -228,6 +228,6 @@ three business days. Publish only after written approval, then share the
 live link with your contact.
 ```
 
-The check and render commands are in SKILL.md, CONNECT step 3. The render is
+The check and render commands are in SKILL.md, CONNECT step 4. The render is
 named `<brand>-creator-brief-<creator>.html`, by names, because it is an
 attachment.

@@ -91,31 +91,8 @@ header { padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
   font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-3); margin: .8rem 0 .35rem;
 }
-.tally { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .2rem 0 0; padding: 0; list-style: none; }
-.tally li { margin: 0; font-variant-numeric: tabular-nums; }
 table.people { border-collapse: collapse; margin: .4rem 0 1rem; font-size: .92rem; }
 table.people th, table.people td { text-align: left; padding: .15rem .8rem .15rem 0; border-bottom: 1px solid var(--line); }
-ul.timeline { list-style: none; padding: 0; margin: .4rem 0 1rem; }
-ul.timeline > li { margin: .3rem 0; }
-ul.timeline ul { margin: .1rem 0 0 1rem; padding: 0; }
-.who {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem 1.6rem; margin: 0;
-}
-.who .domain { border-top: 2px solid var(--accent); padding-top: .5rem; }
-.who .domain h3 {
-  font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500;
-  font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-3); margin: 0 0 .35rem;
-}
-.who ul { list-style: none; margin: 0; padding: 0; }
-.who li { margin: 0 0 .55rem; }
-.who .claim { font-weight: 600; }
-.who .q {
-  display: block; color: var(--ink-2); font-size: .92rem; font-style: italic;
-  font-family: Fraunces, "Iowan Old Style", Georgia, serif;
-}
-.who .q a { color: var(--ink-3); font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: .72rem; }
 .who-run { list-style: none; margin: 0; padding: 0; }
 .who-run li {
   margin: 0 0 .6rem; padding-left: .9rem; border-left: 2px solid var(--accent);
@@ -126,19 +103,6 @@ ul.timeline ul { margin: .1rem 0 0 1rem; padding: 0; }
 }
 .who-run .q a {
   color: var(--ink-3); font-style: normal;
-  font-family: "IBM Plex Mono", monospace; font-size: .72rem;
-}
-/* the creator's own written words, corroborated by nothing: deliberately
-   quieter than the run above it, and never dressed as a quote with a link */
-.own-words { list-style: none; margin: 0; padding: 0; }
-.own-words li {
-  margin: 0 0 .6rem; padding-left: .9rem;
-  border-left: 2px dashed var(--ink-3, #999);
-}
-.own-words .claim { font-weight: 600; }
-.own-words .said { display: block; font-style: italic; color: var(--ink-2); }
-.own-words .src {
-  display: block; color: var(--ink-3);
   font-family: "IBM Plex Mono", monospace; font-size: .72rem;
 }
 .caveat { color: var(--ink-2); font-size: .92em; margin: .2rem 0 .8rem; }
@@ -152,21 +116,86 @@ ul.timeline ul { margin: .1rem 0 0 1rem; padding: 0; }
   padding: .8rem 1rem; margin: 1rem 0 1.6rem; background: var(--surface);
 }
 .caveat p { margin: .35rem 0; max-width: 70ch; }
-.conn { list-style: none; margin: 0; padding: 0; counter-reset: rank; }
-.conn > li {
-  display: grid; grid-template-columns: 3rem 1fr; gap: 0 1rem; margin: 0 0 1.1rem;
-  padding: 1rem 1.1rem 1.1rem .9rem; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 6px;
+.conn { display: grid; gap: 1.1rem; }
+.card {
+  padding: 1.15rem 1.3rem; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+  display: grid; gap: .7rem; min-width: 0;
 }
-.conn > li::before {
-  counter-increment: rank; content: counter(rank, decimal-leading-zero);
-  font-family: Fraunces, Georgia, serif; font-size: 1.9rem; line-height: 1;
-  color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: .1rem;
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.card-head .k, .chip .k {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .72rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
 }
-.conn .body { min-width: 0; }
-.conn h3 { margin: 0 0 .4rem; }
-.conn h3 .badge { margin-left: .5rem; vertical-align: .2em; }
-.conn p { max-width: 70ch; }
+.card h3 { margin: 0; font-size: 1.2rem; }
+.card p { max-width: 70ch; margin: 0; }
+.card blockquote { margin: 0; }
+.f .lbl {
+  display: block; font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.f-sample { background: var(--bg); border-radius: 6px; padding: .6rem .85rem; font-size: .96rem; }
+.dodont { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; font-size: .95rem; }
+.f-do .lbl { color: var(--badge-confirmed); }
+.f-dont .lbl { color: var(--badge-withheld); }
+ul.more { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; font-size: .95rem; color: var(--ink-2); }
+ul.more li { margin: 0; padding-left: .8rem; border-left: 2px solid var(--line); }
+ul.more li > a:first-child {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .78rem;
+  margin-right: .4rem; font-variant-numeric: tabular-nums;
+}
+.verdict {
+  margin: 1.6rem 0 0; padding: 1.3rem 1.4rem; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 1rem;
+}
+.verdict .thesis { border: 0; padding: 0; margin: 0; }
+.verdict-top { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; }
+.vmeta { color: var(--ink-3); font-size: .9rem; }
+.pill {
+  display: inline-block; border-radius: 999px; padding: .2rem .8rem;
+  font-weight: 700; font-size: .8rem; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--surface);
+}
+.pill-big { font-size: .95rem; padding: .3rem 1rem; }
+.pill-strong { background: var(--badge-confirmed); }
+.pill-thin { background: var(--badge-unconfirmed); }
+.pill-no { background: var(--badge-nofit); }
+.chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .7rem; }
+.chip {
+  display: grid; gap: .25rem; align-content: start; padding: .7rem .8rem; min-width: 0;
+  border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none;
+}
+.chip:hover, .chip:focus-visible { border-color: var(--accent); text-decoration: none; }
+.chip b { font-weight: 600; line-height: 1.3; }
+.chip .badge { justify-self: start; }
+.verdict .brand { color: var(--ink-2); font-size: .97rem; }
+.verdict .brand p { margin: .2rem 0; }
+.intro p { font-size: 1.05rem; margin: .3rem 0 .8rem; }
+.facts { display: grid; gap: 1.1rem; }
+.facts .group h3 {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500;
+  font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 .4rem;
+}
+.facts .who-run li {
+  display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; gap: .8rem;
+  align-items: baseline; border-left: 0; padding: .5rem 0; margin: 0;
+  border-top: 1px solid var(--line);
+}
+.facts .who-run .date, td.n {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .8rem;
+  color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.facts .who-run .src { font-size: .85rem; white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
+.onchannel, .booking { margin: .2rem 0 1rem; }
+.onchannel ul, .booking ul { margin: 0; padding-left: 1.2rem; display: grid; gap: .45rem; }
+.badge-brandmoment { background: var(--accent); }
+@media (max-width: 640px) {
+  .dodont { grid-template-columns: minmax(0, 1fr); }
+  .facts .who-run li { grid-template-columns: minmax(0, 1fr); gap: .15rem; }
+  .card, .verdict { padding: 1.05rem; }
+}
 .prose { margin-top: 1rem; }
 .badge {
   display: inline-block; padding: .08rem .5rem; border-radius: 3px;
@@ -182,18 +211,12 @@ ul.timeline ul { margin: .1rem 0 0 1rem; padding: 0; }
 .badge-lifestyle { background: var(--badge-lifestyle); }
 .badge-clinical { background: var(--badge-clinical); }
 .badge-withheld { background: var(--badge-withheld); }
-.platform { margin: 0.35rem 0; color: var(--muted, #555); font-size: 0.95em; }
-.platform .k { font-weight: 600; color: inherit; }
-.platform .k::after { content: ":"; }
 .badge-nofit { background: var(--badge-nofit); }
 .badge-strong { background: var(--badge-confirmed); }
 .badge-thin { background: var(--badge-nofit); }
 .badge-thinfit { background: var(--badge-unconfirmed); }
-.thinfit {
-  border: 1px solid var(--line); border-left: 3px solid var(--badge-unconfirmed);
-  padding: .6rem 1rem; margin: 0 0 1rem; background: var(--surface); font-size: .95rem;
-}
 .empty { color: var(--ink-2); font-style: italic; }
 .links { list-style: none; padding: 0; margin: 0; font-size: .92rem; color: var(--ink-2); }
 .links li { margin: .3rem 0; word-break: break-word; }
 @media (prefers-reduced-motion: no-preference) { a { transition: color .15s; } }
+.badge-route { background: var(--accent-soft, rgba(11,111,143,.12)); color: var(--accent); }
