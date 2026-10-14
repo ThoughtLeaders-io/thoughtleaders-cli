@@ -243,6 +243,8 @@ Send `{"query": "…", "pricing": true}` to `POST /raw/pg` (CLI: `tl db pg "…"
 
 The same `{"pricing": true}` flag works on `POST /raw/fb` and `POST /raw/es`. Those backends are flat-rate (no per-table/column extras), so the estimate carries `multiplier` = the backend rate, `per_row_extra` = 0, empty expensive-item maps, and `limit` = the row ceiling (Firebolt `LIMIT`; Elasticsearch `size`, or the aggregation doc cap for agg queries). A Firebolt query with no `LIMIT` returns `limit`/`estimated_cost_at_limit` as `null` (unbounded). No query executes; flat 1 credit.
 
+For Elasticsearch aggregation queries, when premium fields are read the row limit counts **aggregation buckets**, not documents. The estimate then also carries `max_agg_buckets` (the worst-case bucket count, or `null` when it can't be bounded, e.g. a histogram) and `agg_bucket_rate` (credits per bucket), plus a `note` explaining any surcharge or unestimated histogram. `tl db es "…" --pricing` prints the note and both bucket fields in table output.
+
 ### Common rejections
 
 - `MISSING_LIMIT` / `LIMIT_TOO_HIGH` — always include `LIMIT N` with `N ≤ 10,000`.

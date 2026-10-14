@@ -646,6 +646,13 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
         console.print(
             f"  [dim]Planner row estimate (pre-LIMIT): {planner_rows:,}[/dim]"
         )
+    max_buckets = est.get("max_agg_buckets")
+    if max_buckets is not None:
+        rate = est.get("agg_bucket_rate")
+        rate_txt = f" at {_fmt_credits(rate)} credits/bucket" if rate is not None else ""
+        console.print(
+            f"  Max aggregation buckets:              {max_buckets:,}{rate_txt}"
+        )
 
     tables = est.get("table_rates") or {}
     columns = est.get("expensive_columns") or {}
@@ -659,6 +666,10 @@ def output_pricing_estimate(data: dict, fmt: str) -> None:
         for path, val in sorted(columns.items()):
             sub.add_row(path, "column (per row)", f"{_fmt_credits(val)}/row")
         console.print(sub)
+
+    note = est.get("note")
+    if note:
+        console.print(f"  [yellow]Note:[/yellow] {note}")
 
     _print_server_warnings(data)
     _print_usage(data.get("usage"))
