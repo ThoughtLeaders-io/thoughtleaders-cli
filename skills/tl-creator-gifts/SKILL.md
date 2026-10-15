@@ -84,6 +84,8 @@ Exclude unconfirmed, ended, superseded, staged-only and hook-only premises.
 For gifting, also exclude clinical, children and precise-location details,
 intimate relationships, finances, bereavement, and third-party personal details,
 even if publicly disclosed. Public does not automatically mean appropriate.
+Respect the creator's stated no-gift policy and boundaries around private life;
+public professional work may be the only appropriate basis for a concept.
 Do not encode rejected details in a design, example, note, filename or explanation;
 explain exclusions only by category. Lifestyle facts still need contextual review.
 Do not print a spouse's name, home location or private milestone onto a gift.
