@@ -1,28 +1,11 @@
 ---
 name: tl-keyword-research
 tl-blurb: build & validate keyword filter sets + context-validated channels
-description: |
-  Turn a topic into a *validated* content filter and the channels it selects.
-  Invoke whenever the user wants to find videos or channels by what they are
-  about — topics, concepts, niches, not IDs or names: "a group/set of keywords
-  for <topic>", "keywords that represent <topic> content", "find content/channels
-  about <topic>", "find investing channels" — or when you'd otherwise
-  hand-compose a `tl db es` content search. It expands the topic into candidate
-  keywords (with a gated web lookup for post-cutoff entities), probes
-  Elasticsearch for each (counts + samples), validates matches against the
-  user's stated intent, refines a boolean filter over ≥3 rounds, and delivers
-  a keyword-group filter set + a clickable report link + the results the user
-  chose: trend data at the video level (matching uploads + prevalence), or
-  channel targets classified by topic intensity (core / recurring / one-off)
-  and context-validated with cheap agents, or both. It ASKS which deliverable
-  and which run mode (quick single pass vs deep ≥3-round refinement) the user
-  wants whenever the request doesn't say — never a silent default;
-  `autonomous` / `--auto` means deep + both deliverables with every pause
-  skipped. Keyword-distribution output (counts per keyword) is OPT-IN — only
-  when the user explicitly asks for "keyword counts / distribution / how
-  common is X". Also invoke for HELP asks about this skill — "help", "how
-  does keyword research work", "what are my options", "describe this skill" —
-  answered free from the built-in guide, no queries run.
+description: >
+  Turn a topic into a validated keyword filter set and the videos or channels it selects. Invoke for
+  "keywords for <topic>", "find content/channels about <topic>", "find investing channels", or before
+  hand-writing a `tl db es` content search. Asks for deliverable (trend data, channel targets, both)
+  and mode (quick / deep); `--auto` = deep + both. Also for help: "how does keyword research work".
 ---
 
 # tl-keyword-research — topic → validated filter set + the results you choose
