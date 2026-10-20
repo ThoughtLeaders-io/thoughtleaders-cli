@@ -10,7 +10,7 @@ The user brings one route. This skill never holds a login, and every route is re
 
 | Route | Setup | Best for |
 |---|---|---|
-| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login, plus an Advanced Action Listing export for action detail | Partners, clicks and grouped numbers |
+| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login, plus an Advanced Action Listing export for action detail | Most questions; aggregates on Impact's side |
 | Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API); read-only access is enough | Action-level detail, long ranges |
 | CSV export | The user exports the reports from Impact: Performance by Partner, Performance by Day, Advanced Action Listing | No setup; same report data |
 
@@ -20,7 +20,8 @@ MCP tools on a Brand account (the only MCP tools this skill calls):
 |---|---|---|
 | `query_performance` | Clicks, actions, revenue, grouped by partner or date | Per-partner, per-day numbers |
 | `list_partners` | Program partners | Join input |
-| `investigate_order_action` | The action for one order id | The user asks about one order |
+| `investigate_order_action` | The action for one order id | One disputed conversion |
+| `list_action_inquiries`, `get_action_inquiry` | Open credit claims | Missing credit (some editions only) |
 
 Map each tool's first response to the objects below before doing any math.
 
@@ -155,6 +156,7 @@ live Brand account, from Impact's documentation.
 | Social platform | none | `social_platform` | none |
 | Partner property | none | `property_type`, `property_name` | `property_type`, `property_name` |
 
+CSV exports carry display labels ("Action Date", "Shared Id"); match them to the rows above.
 Report views and their CSV exports return only the columns the view shows, and blanks as "". A
 needed column absent from every row is hidden, not blank: ask the user to add it to the report and
 export again (SKILL.md stage 2).
