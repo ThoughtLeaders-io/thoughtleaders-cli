@@ -8,8 +8,8 @@ unless another table is named. TL-only facts (deal statuses, TL dates, grade cod
 Select only the columns this file and `SKILL.md` name. `tl schema pg` prints the full schema to
 every caller, but an external caller's query runs against a restricted schema holding fewer
 columns, so the listing can show a column the query then rejects (`42703`, "column does not
-exist"). IF a query is rejected for a missing column, drop the column and re-run: the schema
-listing cannot tell you whether this caller may read it.
+exist"). IF a query is rejected for a missing column, drop the column, re-run, and name the figure
+that is now unavailable: the schema listing cannot tell you whether this caller may read it.
 
 ## 1. Vocabulary
 
@@ -19,7 +19,7 @@ listing cannot tell you whether this caller may read it.
 |---|---|---|
 | Account / `AccountSID` | Brand (`tl brands find`) | A Brand account is one brand. |
 | Program, older UI Campaign / `CampaignId`, `CampaignName`, `ProgramId` | The brand's affiliate program, `thoughtleaders_brand.id` | Not a TL Campaign (a report or deal group). One brand can run several Programs. |
-| Partner, Media Partner / `MediaPartnerId`, `MediaPartnerName` (Actions), `MediaId`, `MediaName` (Clicks) | Channel, via `ad_spot_id → adspot.channel_id` | Not a brand. Can be an agency holding several channels. On a Partner account see section 5. |
+| Partner, Media Partner / `MediaPartnerId`, `MediaPartnerName` (Actions), `MediaId`, `MediaName` (Clicks) | Channel, via the deal's `channel_id` | Not a brand. Can be an agency holding several channels. On a Partner account see section 5. |
 | Partner property / `Properties[].Url`, `.Platform` | `thoughtleaders_channel.url`, `common_name` (@handle) | Strongest partner → channel bridge. |
 | Partner website / `Website` | Sometimes the channel URL | Often a personal site. |
 | Contract / `ContractId`, `ContractName` | none | Commission terms. Not a TL IO. |
@@ -53,8 +53,8 @@ end>'`. `<= '<window end>'` resolves to midnight and drops the whole last day.
 |---|---|---|
 | `APPROVED` | Locked or manually approved | Headline numbers |
 | `PENDING` | In the brand's review window, can reverse | Shown beside approved, labelled "pending" |
-| `REVERSED` | Refund, fraud, duplicate or credited elsewhere | Excluded; report the count |
-| `N/A (Media Source)` | Not a commissionable state | Excluded from approved and pending; report the count |
+| `REVERSED` | Refund, fraud, duplicate or credited elsewhere | Excluded; count in the caveats when above 0 |
+| `N/A (Media Source)` | Not a commissionable state | Excluded from approved and pending; count in the caveats when above 0 |
 
 Match state values case-insensitively (reports write "Approved", the API `APPROVED`). Impact
 dashboard totals include pending. Every number states which states it includes.
@@ -134,8 +134,8 @@ Source of truth for what the brand paid:
 | The creator was | Source of truth | Also shown |
 |---|---|---|
 | Booked through TL | Paid to TL, in USD | Commission, as its own figure |
-| Booked through TL and outside TL | Paid to TL, for the TL videos | Impact payments outside the TL bookings, own line, labelled "outside TL bookings" |
-| Never booked through TL | Commission plus fixed payments through Impact (`Other_Cost`) | Nothing from TL |
+| Booked through TL and outside TL | Paid to TL, for the TL videos | Impact payments that per-video evidence (4.1) ties to content outside the TL bookings, own line, labelled "outside TL bookings". Without that evidence they stay in the block's commission, under its "Commission may include other sales" note |
+| Never booked through TL | Impact payments: commission plus click and fixed payments for the partner (`Action_Cost` + `Click_Cost` + `Other_Cost`) | Nothing from TL |
 
 - Never replace Paid to TL with an Impact number.
 - Show commission next to Paid to TL, never inside it. No commission in the window shows 0.
@@ -177,7 +177,7 @@ it does not satisfy this.
 | TL videos included | Every live sold TL deal for this brand and creator, across the creator's TL records in scope, to today |
 | Paid to TL | Sum of those prices, in USD |
 | Commission since the first TL video | Approved, first TL go-live to today, converted (2.3) |
-| Commission before the first TL video | Approved, from the partner's first action to the day before the first go-live. Own line, labelled "outside TL bookings". Not added to any all-in figure |
+| Commission before the first TL video | Approved, from the partner's first action to the day before the first go-live. Own line, labelled "before the first TL video". Not added to any all-in figure |
 | All-in cost | Paid to TL + commission since the first TL video |
 | Views to date | Current TL views of those videos. Count each video once (same `article_id` or `media_url`); each deal's price still counts. Deals with no TL views (1.4) are listed by id and left out. Never channel total views |
 | Sponsorship CPM / all-in CPM | Paid to TL ÷ views × 1,000 / all-in cost ÷ views × 1,000 |
@@ -194,7 +194,8 @@ it does not satisfy this.
   Paid to TL while its views stay outside the denominator, so sponsorship CPM and all-in CPM both
   read higher than the cost per 1,000 views actually delivered.
 - Put the note "Commission may include other sales." under the block.
-- Never compute a CPM from Action Cost alone or call an Impact cost a CPM.
+- Every CPM in the block uses Paid to TL. The only CPM built on an Impact cost is "CPM on what you
+  paid through Impact", for creators not booked through TL (4.4).
 
 ### 2.3 Currency
 
@@ -233,8 +234,8 @@ Two steps: partner to creator (3.2), then action to deal where the data allows (
 
 For each creator in scope, collect from TL: `channel_name` and `common_name` of every TL record of
 the creator (the YouTube channel and any separate TikTok or Instagram record), the handle in each
-record's `url`, and the handles in `social_links`. Compare case-insensitively, ignoring `@`,
-spaces and punctuation.
+record's `url`, and the handles in `social_links`. Match exactly, ignoring case (`UPPER()` on both
+sides): try each alias as written and with `@`, spaces and punctuation removed.
 
 ⚠️ Read `social_links` by **named platform key** (`youtube`, `tiktok`, `instagram`, …). Never
 select the column wholesale and never read `_emails`: it holds the creator's contact addresses,
@@ -243,19 +244,20 @@ video index mirrors the same links with e-mails stripped, so it is the safer sou
 
 ### 3.2 Partner to creator
 
-Stop at the first key that resolves.
+Try every key. The strongest key that resolves sets the match and its confidence. A key that
+points to another TL channel makes the partner multi-channel (another record of the same creator)
+or an agency (a different creator): SKILL.md stage 3.
 
 | # | Impact field | TL field | Strength | Notes |
 |---|---|---|---|---|
 | 1 | Partner tracking or vanity link | `tracking_url` | Strong | String equality on the whole link, ignoring `https://`, `www.` and a trailing slash. Host-agnostic: it fires wherever TL stored a `tracking_url`, whatever domain the link is on (about 82% of sold deals) |
 | 2 | `Properties[].Url` | `url` or `external_channel_id` of any of the creator's records | Strong | |
 | 3 | Partner name, `Website` or a `Properties[]` handle | An alias (3.1) | Strong if exact | |
-| 4 | `SharedId`, SubIds or `PartnerValues` holding a TL id | `adlink.id` or `thoughtleaders_channel.id` | Strong if a TL id is there | Check a sample first |
+| 4 | `SharedId`, SubIds or `PartnerValues` holding a TL id | `adlink.id` or `thoughtleaders_channel.id` | Strong if a TL id is there | Check the first 20 actions first |
 | 5 | Promo code on the partner's own actions | Contains an alias (3.1), e.g. code "JANE10" for "Jane Cooks" | Medium | The code is Impact's; the match is against TL aliases, not a TL column. Needs a second signal |
-| 6 | Partner name | `channel_name` | Weak | Needs a second signal |
-| 7 | `MediaPartnerId` | none | | TL stores no Impact partner id |
+| 6 | `MediaPartnerId` | none | | TL stores no Impact partner id |
 
-Second signals (a medium or weak key needs at least one):
+Second signals (key 5 needs at least one):
 - The partner's first action falls within 14 days after the creator's first TL go-live for the brand.
 - The partner's Impact contract name mentions ThoughtLeaders.
 - A property URL, country or partner group consistent with the TL record.
@@ -309,7 +311,7 @@ it. Report the count as what this caller sees, not as the brand's whole history.
 ## 4. Dates
 
 Impact knows which creator drove a sale. It knows which video only if each video had its own
-link, code or id.
+link or id.
 
 ### 4.1 Per-video evidence
 
@@ -375,12 +377,12 @@ Impact partner totals are lifetime and hide decay. Never judge a creator on a li
 | Group | Definition | Shown |
 |---|---|---|
 | Booked through TL | TL channel with a sold deal for this brand | Scorecard or timeline, and the block |
-| Not booked through TL | TL channel, no sold deal for this brand | Impact performance; what the brand paid through Impact as the source of truth, in USD (2.3); cost per action = Impact payments ÷ approved actions; the TL channel's subscribers, projected views and bookability |
+| Not booked through TL | TL channel, no sold deal for this brand | Impact performance; Impact payments (2.1) as the source of truth, in USD (2.3); cost per action = Impact payments ÷ approved actions; the TL channel's subscribers, projected views and bookability |
 | Not a TL creator | No TL channel | Impact performance and Impact cost only |
 
 - For the last two groups, Paid to TL reads "not booked through TL", never 0. Invent no TL figure.
 - Videos for "not booked through TL": search TL's video index for the channel's videos in the
-  window that mention the brand (channel id, brand id in `all_brand_mentions`, `publication_date`
+  window that mention the brand (`channel.id`, brand id in `all_brand_mentions`, `publication_date`
   in range; syntax in the `tl` skill's Elasticsearch reference). List date, title and views, and
   ask which ones the brand paid for; accept pasted links instead. Use only confirmed videos.
   - CPM: Impact payments ÷ confirmed videos' TL views × 1,000, labelled "CPM on what you paid

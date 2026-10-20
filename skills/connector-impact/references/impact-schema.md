@@ -10,7 +10,7 @@ The user brings one route. This skill never holds a login, and every route is re
 
 | Route | Setup | Best for |
 |---|---|---|
-| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login | Most questions; aggregates on Impact's side |
+| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login, plus an Advanced Action Listing export for action detail | Partners, clicks and grouped numbers |
 | Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API); read-only access is enough | Action-level detail, long ranges |
 | CSV export | The user exports the reports from Impact: Performance by Partner, Performance by Day, Advanced Action Listing | No setup; same report data |
 
@@ -20,8 +20,7 @@ MCP tools on a Brand account (the only MCP tools this skill calls):
 |---|---|---|
 | `query_performance` | Clicks, actions, revenue, grouped by partner or date | Per-partner, per-day numbers |
 | `list_partners` | Program partners | Join input |
-| `investigate_order_action` | The action for one order id | One disputed conversion |
-| `list_action_inquiries`, `get_action_inquiry` | Open credit claims | Missing credit (some editions only) |
+| `investigate_order_action` | The action for one order id | The user asks about one order |
 
 Map each tool's first response to the objects below before doing any math.
 
@@ -147,7 +146,7 @@ live Brand account, from Impact's documentation.
 | Sale amount | `Amount` | `Sale_Amount` ("Revenue") | `Sale_Amount` |
 | Commission | `Payout` | `Payout` ("Action Cost") | `Payout` ("Action Earnings") |
 | Bonus | none | `bonus_cost` | `Bonus_Payout` |
-| Client cost | `ClientCost` | `Client_Cost` (can be 0 on every row: take Total Cost from a grouped report) | none |
+| Client cost | `ClientCost` | `Client_Cost` (can be 0 on every row; it is not Total Cost, which comes from a grouped report) | none |
 | Promo code | `PromoCode` | `Promo_Code` | `Promo_Code` |
 | SharedId | `SharedId` | `Shared_Id` | `SharedId` |
 | SubIds | Click `PartnerRelated.SubId1-3` | `SubId1` to `SubId3` | `SubId1` to `SubId3` |

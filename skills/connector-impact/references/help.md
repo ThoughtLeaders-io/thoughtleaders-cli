@@ -18,9 +18,11 @@ the right tool for you.
 - One way into Impact:
   - Impact's connector for Claude (recommended): add a custom connector with the URL
     `https://mcp.impact.com/mcp`, enter `mcp-impact-claude` as the OAuth client ID under
-    Advanced settings, and sign in with your Impact login.
+    Advanced settings, and sign in with your Impact login. You'll also be asked for one Advanced
+    Action Listing export, the only Impact report with each sale's status.
   - The Impact API, with a token you create in Impact (Settings → Technical → API). Read-only access is enough.
-  - A CSV export from Impact's Reports (Performance by Partner or by Day), dropped into the chat.
+  - CSV exports from Impact's Reports (Performance by Partner or by Day, plus the Advanced Action
+    Listing), dropped into the chat.
 
 This connector only reads your Impact data. It never changes, approves or deletes anything
 there. Never paste an Impact password or token into the chat.
@@ -44,19 +46,20 @@ Treat these figures as a floor on what a sponsorship did, not a verdict on it.
 
 ## How matching works
 
-In order: the tracking link, the links on the Impact partner's profile, the creator's handles on
-any platform, a TL id stored in the link, a promo code containing the creator's name, and last the
-partner's name. The weaker matches are double-checked, for example against the date of the first
-TL video. If a partner could be more than one TL channel, you're asked which to include.
+Every clue is checked, strongest first: the tracking link, the links on the Impact partner's
+profile, the partner's name or the creator's handles on any platform, a TL id stored in the link,
+and a promo code containing the creator's name. A promo-code match is double-checked, for example against the date of the first
+TL video. If a partner with approved sales could be more than one TL channel, you're asked which
+to include.
 
 YouTube, TikTok and Instagram deals for the same creator are read together, as one creator.
-TikTok and Instagram posts have no TL views, so they're listed but left out of view-based
-figures. If TL doesn't have a creator's channel yet, you'll be asked for the link; their
+Deals that aren't YouTube videos (podcasts, newsletters, TikTok, Instagram) have no TL views, so
+they're listed but left out of view-based figures. If TL doesn't have a creator's channel yet, you'll be asked for the link; their
 TL data takes about a day to fill in.
 
 ## Dates
 
-- If each video has its own link or code, results are tied to that exact sponsorship.
+- If each video has its own link, results are tied to that exact sponsorship.
 - If all the videos share one link (common, but not always), you get a go-live timeline: each
   date the creator went live for you, and what Impact recorded until the next go-live. Earlier
   videos were still live during each period. A video that went live before your date range is

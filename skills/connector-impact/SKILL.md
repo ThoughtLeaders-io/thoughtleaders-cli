@@ -51,9 +51,9 @@ Use only these calls:
 
 | Route | Allowed calls |
 |---|---|
-| Impact MCP | `query_performance`, `list_partners`, `investigate_order_action`, `list_action_inquiries`, `get_action_inquiry` |
+| Impact MCP | `query_performance`, `list_partners`, and `investigate_order_action` when the user asks about one order |
 | Impact API | `GET` requests to the resources in the schema |
-| CSV export | Reading the files the user supplies |
+| CSV export | Reading the files the user supplies (also on the MCP route, stage 2) |
 
 IF the user asks for a change in Impact (approve or reverse an action, resolve an inquiry, message
 or edit a partner, change a contract, payout or setting): say this skill only reads and point them
@@ -70,9 +70,9 @@ questions from `help.md` or the mapping file, then continue the run.
 
 ## Scope and view
 
-- **Scope:** brand; creators (default: all); window. IF the user states a window ("last 12
-  months"), use it as stated, counted back from today. ELSE default: the earliest sold deal
-  `publish_date` in the last 12 months, to today.
+- **Scope:** brand (required); creators (default: all); window. IF the user states a window
+  ("last 12 months"), use it as stated, counted back from today. ELSE default: the earliest sold
+  deal `publish_date` in the last 12 months, to today.
 - **Views** (any combination):
   - *Deal scorecard:* one row per sold sponsorship where Impact can tell the videos apart,
     otherwise the go-live timeline (mapping 4).
@@ -82,10 +82,11 @@ questions from `help.md` or the mapping file, then continue the run.
   run only the named views, without asking. ELSE IF it uses these words, run the matching view:
   - "per deal", "scorecard", "how did each sponsorship do" → deal scorecard
   - "which creators", "top partners", "rank" → creator rollup
-  - "declining", "over time", "since it went live", "renew" → decay over time
-- ELSE ask ONE question covering every unstated item (view, brand, window), one line per view on
-  what it shows. Never default silently.
-- IF `autonomous`, `--auto` or "don't stop to ask": all three views, default window, no questions.
+  - "declining", "over time", "since it went live", "week by week", "renew" → decay over time
+- IF the brand or the view is still unstated, ask ONE question covering both, one line per view
+  on what it shows. Never default silently.
+- IF `autonomous`, `--auto`, "all of it" or "don't stop to ask": all three views, default window,
+  no questions.
 - IF the user explicitly asks to include pending for this run: count pending actions in the
   headline numbers, label both states, and do not ask. This holds even beside a standing line
   such as "keep pending separate unless I ask"; the explicit request wins. Interpret the request's
@@ -161,11 +162,10 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    Partner column is reference for reading a partner's own figures, not a flow. IF the account
    type differs from the one the user described, stop and tell the user.
 6. Resolve the brand with `tl brands find "<name>"`. Never match brand names in SQL.
-7. IF creators are named, resolve them to TL channel ids now (stage 1), before any deal read.
-8. Record the currency the Impact figures are in. TL prices are always USD, and the report is in
+7. Record the currency the Impact figures are in. TL prices are always USD, and the report is in
    USD. On a report, the figures' currency is its display-currency setting; do not change it. IF
    the Impact figures are not in USD (usually EUR), tell the user now and apply mapping 2.3.
-9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
+8. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
    the selected headline states with approved and pending labelled separately, currencies, and
    this line: "Read-only run: <Impact route>, reading <what will be read>."
 
@@ -222,7 +222,8 @@ Join the two result sets on deal id.
 - Select from `thoughtleaders_adlink` only, and only the columns above. A caller's raw-DB access
   runs against a restricted schema holding fewer columns than `tl schema pg` reports, so a column
   confirmed there still fails at execution with `column does not exist`. Do not widen the select
-  to find a field; if the join needs one that is not here, say so and stop.
+  to find a field. IF a column is rejected, drop it, re-run, and name the figure that is now
+  unavailable (mapping, top).
 - TL stores no promo code, so a code is never a deal key: per-video evidence comes from the
   tracking link, a `SharedId` or SubId carrying a TL deal id, or an Ad that names one video
   (mapping 3.3). Impact's own codes still reach the creator (3.2 key 5) and drive 3.4.
@@ -263,7 +264,9 @@ tl db es '{"size": <number of ids>, "from": 0, "query": {"terms": {"id": ["<vide
 2. Action-level data for the partners in scope (Advanced Action Listing, or `GET .../Actions`
    filtered with `ActionDateStart` / `ActionDateEnd`): date, status, event type, promo code, Ad,
    SubIds, SharedId, social platform, sale amount, commission. Group by partner, date, status and
-   event type. This is the source of actions, sales revenue and commission.
+   event type. This is the source of actions, sales revenue and commission. On the MCP route, ask
+   the user for the Advanced Action Listing export for the window: no MCP tool returns each
+   action's status, promo code or SharedId.
 3. Clicks per partner per day from grouped performance (`query_performance`, ReportExport, or a
    Performance by Partner / by Day report).
 4. Map every column to its name in the schema's *Field names by route* table before any math.
@@ -281,8 +284,8 @@ Walk each partner in scope down the creator ladder (mapping 3.2), then look for 
 evidence (mapping 3.3). Record `partner_id, channel_id(s), key, confidence` and the partner's
 group (mapping 4.4).
 
-- Match aliases exactly, `UPPER()` on both sides, with the bulk handle/name form named in stage
-  1. This lookup adds nothing to TL. Never `ILIKE` on names.
+- Match aliases per mapping 3.1, with the bulk handle/name form named in stage 1. This lookup
+  adds nothing to TL. Never `ILIKE` on names.
 - A partner that matches no alias: group "not a TL creator".
 - IF a creator named in scope has no matching partner: stop and ask the user for the creator's
   partner name or promo code in Impact.
@@ -291,8 +294,8 @@ group (mapping 4.4).
 - IF a YouTube creator is not in TL: ask the user for the channel link, add it with
   `tl channels find "<link>"`, tell the user TL data for it takes about a day, and report that
   creator from Impact only until then.
-- Medium and weak keys need a second signal (mapping 3.2), or the match is listed as "probable,
-  please confirm".
+- A medium key needs a second signal (mapping 3.2), or the match is listed as "probable, please
+  confirm".
 - A partner whose keys point to different creators is an agency. Split by tracking link or ask.
   Never assign an agency's actions to one creator. Several TL records of one creator are not an
   agency.
@@ -330,7 +333,7 @@ In this order:
 3. Join table: partner → channel → deal, key, confidence.
 4. Creators not booked through TL, then partners that are not TL creators, then TL deals with no
    partner, then sold deals not yet live.
-5. Caveats that change the reading: pending share, rates used, shared links (periods, not
+5. Caveats that change the reading: pending share, reversed and N/A counts above 0, rates used, shared links (periods, not
    videos), deals with no TL views (mapping 1.4), the creator's codes credited to other partners,
    agencies, low-confidence matches.
 
