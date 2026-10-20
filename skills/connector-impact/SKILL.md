@@ -13,7 +13,8 @@ description: |
   "cost per action on our sponsorships", "is [creator] declining", "match Impact partners to our
   channels", "what does [Impact term] mean in TL", or any question mixing Impact terms (Partner,
   Action, Action Cost, Total Cost, Program, PromoCode, SharedId) with TL data. The user supplies
-  the Impact connection (Impact MCP, Impact API, CSV export or the Impact web app) and a `tl` login. Asks which view
+  the Impact connection (Impact MCP, Impact API or a CSV export) and a `tl` login. Read-only:
+  it never changes anything in Impact. Asks which view
   (deal scorecard, creator rollup, decay over time) when the request doesn't say. Also invoke for
   help asks about this skill; answered from the guide, no queries run.
 ---
@@ -40,6 +41,26 @@ Do not use:
 - TL-only question: use the `tl` skill.
 - Renew / don't-renew verdict: build the join here, then apply the renewal rule in the `tl`
   skill's `references/business-glossary.md` (*Performance Grade*). This skill sets no grade.
+
+## Read-only
+
+This skill reads Impact data. It looks data up and never creates, changes, approves, reverses or
+deletes anything in Impact, on any route, whatever the user's login or token would allow.
+
+Use only these calls:
+
+| Route | Allowed calls |
+|---|---|
+| Impact MCP | `query_performance`, `list_partners`, `investigate_order_action`, `list_action_inquiries`, `get_action_inquiry` |
+| Impact API | `GET` requests to the resources in the schema |
+| CSV export | Reading the files the user supplies |
+
+IF the user asks for a change in Impact (approve or reverse an action, resolve an inquiry, message
+or edit a partner, change a contract, payout or setting): say this skill only reads and point them
+to Impact's own website, then carry on with the read-only run.
+
+Files the run creates (pulled data, working tables) go in a temporary folder that is deleted when
+the run ends. The user's own exports stay where they put them, and a report is saved only on a yes.
 
 ## Help mode
 
@@ -127,11 +148,15 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    and a seller-side login returns the creator's own deals instead. The run would finish and
    produce a complete, plausible report of the wrong org's spend with no error anywhere. A
    media-buyer login is required.
-3. Confirm the user's Impact route (schema: *Access routes*). IF none: list the four routes and stop.
+3. Confirm the user's Impact route (schema: *Access routes*): Impact MCP, Impact API or a CSV
+   export. IF none: list the three routes and stop. IF the user offers the Impact website, ask for
+   a CSV export instead and name the reports and filters to pick (stage 2). Use the user's token as
+   it is: the run stays read-only whatever the token allows (*Read-only* above), so the token's
+   permissions need no comment.
 4. Never ask for, accept or repeat an Impact token or password. IF the user pastes one, tell them
    to revoke it.
-5. **The supported direction is brand → partners.** Identify the account from the API base or the
-   web app address (mapping 5). A Brand account (`/Advertisers/`, `/secure/advertiser/`) is the
+5. **The supported direction is brand → partners.** Identify the account from the API base, or from
+   the web app address the user exports from (mapping 5). A Brand account (`/Advertisers/`, `/secure/advertiser/`) is the
    only connection this skill runs. IF it is a Partner account, stop and say so: mapping 5's
    Partner column is reference for reading a partner's own figures, not a flow. IF the account
    type differs from the one the user described, stop and tell the user.
@@ -141,7 +166,8 @@ deliverable is per partner and per deal; nothing below that grain leaves Impact.
    USD. On a report, the figures' currency is its display-currency setting; do not change it. IF
    the Impact figures are not in USD (usually EUR), tell the user now and apply mapping 2.3.
 9. Quote the run's credit cost (above), then state the scope back: brand, creators, window, view,
-   the selected headline states with approved and pending labelled separately, currencies.
+   the selected headline states with approved and pending labelled separately, currencies, and
+   this line: "Read-only run: <Impact route>, reading <what will be read>."
 
 ### 1. TL side
 
@@ -231,8 +257,8 @@ tl db es '{"size": <number of ids>, "from": 0, "query": {"terms": {"id": ["<vide
 
 ### 2. Impact side
 
-1. Partners: id, name, website, property URLs (`list_partners`, `GET .../MediaPartners`, or the
-   Partners screen search; report partner filters are capped). IF creators are named, search
+1. Partners: id, name, website, property URLs (`list_partners`, `GET .../MediaPartners`, or a
+   partner list export; report partner filters are capped). IF creators are named, search
    only for those creators' partners, by their aliases (mapping 3.1).
 2. Action-level data for the partners in scope (Advanced Action Listing, or `GET .../Actions`
    filtered with `ActionDateStart` / `ActionDateEnd`): date, status, event type, promo code, Ad,
@@ -243,9 +269,9 @@ tl db es '{"size": <number of ids>, "from": 0, "query": {"terms": {"id": ["<vide
 4. Map every column to its name in the schema's *Field names by route* table before any math.
    Name any column not in it before using it.
 
-Web app route: before reading a report, set its filters (dates, status, partner, channel) to the
-run's scope and add any needed column that the view does not return, on screen only. Never save,
-schedule, export or download.
+CSV route: name the reports for the user to export (Performance by Partner, Performance by Day,
+Advanced Action Listing), with the run's dates, status and partner filters and any needed column
+the default view leaves out, then read the files they supply.
 
 IF the route returns lifetime totals only, tell the user decay over time is unavailable.
 
@@ -327,8 +353,9 @@ arrow or "correction" note stays in the report.
 Use business terms from the `tl` glossary, not table names. IF the user asks for a chart, render
 it as SVG.
 
-Write nothing to Impact or TL, set no performance grade, edit no sheet. The only TL write is a
-channel added from a link the user gave. IF the user wants results saved, offer and wait for a yes.
+Impact stays read-only (*Read-only* above). In TL the only write is a channel added from a link
+the user gave. Set no performance grade and edit no sheet. IF the user wants results saved, offer
+and wait for a yes.
 
 ## Self-check before finishing
 
@@ -365,3 +392,6 @@ channel added from a link the user gave. IF the user wants results saved, offer 
     evidence (mapping 2.2); a held-back conversion rate points to actions per 1,000 views when
     available; a creator with codes credited to other partners has the "including" line
     (mapping 2, 2.2, 3.4).
+15. Read-only held: every Impact call was on the *Read-only* list, any change request was declined
+    and pointed to Impact, the scope statement carried the "Read-only run" line, and the run's own
+    working files were deleted.

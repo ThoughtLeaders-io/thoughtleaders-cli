@@ -19,11 +19,11 @@ the right tool for you.
   - Impact's connector for Claude (recommended): add a custom connector with the URL
     `https://mcp.impact.com/mcp`, enter `mcp-impact-claude` as the OAuth client ID under
     Advanced settings, and sign in with your Impact login.
-  - The Impact API, with a read-only token you create in Impact (Settings → Technical → API).
+  - The Impact API, with a token you create in Impact (Settings → Technical → API). Read-only access is enough.
   - A CSV export from Impact's Reports (Performance by Partner or by Day), dropped into the chat.
-  - The Impact website, open and signed in in your browser. Slowest, but no setup.
 
-Never paste an Impact password or token into the chat.
+This connector only reads your Impact data. It never changes, approves or deletes anything
+there. Never paste an Impact password or token into the chat.
 
 ## What you get
 
