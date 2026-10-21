@@ -1,7 +1,7 @@
 """Tests for the tl-keyword-research probe.py script.
 
 The script lives under skills/ (not the package), so we load it by path. ES is
-mocked by patching the module's subprocess.run.
+mocked by patching the shared CLI transport's subprocess.run.
 """
 import importlib.util
 import json
@@ -44,7 +44,7 @@ def _fake_run(counts, samples=None, distinct=None, recent=None, active=None):
     """
     samples = samples or {}
 
-    def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+    def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
         body = json.loads(input)
         term = _term_of(body)
         rows = samples.get(term, [])
@@ -310,7 +310,7 @@ class TestArgValidation:
 class TestMainEndToEnd:
     def test_keeps_all_nonzero_drops_empty(self, monkeypatch, capsys):
         counts = {"tiktok shop": 60000, "rugpull-xyz": 0, "tiktok": 40000000}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0", "tiktok shop", "rugpull-xyz", "tiktok"])
         probe.main()
@@ -323,7 +323,7 @@ class TestMainEndToEnd:
 
     def test_operator_and_no_subsumption(self, monkeypatch, capsys):
         counts = {"tiktok shop": 50, "tiktok shop affiliate": 5}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--operator", "AND", "--samples", "0",
                              "tiktok shop", "tiktok shop affiliate"])
@@ -334,7 +334,7 @@ class TestMainEndToEnd:
     def test_topic_level_count_is_documents_plus_channels(self, monkeypatch, capsys):
         counts = {"retirement planning": 34594}
         distinct = {"retirement planning": 2447}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts, distinct=distinct))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts, distinct=distinct))
         monkeypatch.setattr(probe.sys, "argv", ["probe.py", "--samples", "0", "retirement planning"])
         probe.main()
         out = json.loads(capsys.readouterr().out)
@@ -348,7 +348,7 @@ class TestMainEndToEnd:
         # count must be the distinct-channel cardinality, not the doc total.
         counts = {"retirement planning": 20876}
         distinct = {"retirement planning": 614}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts, distinct=distinct))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts, distinct=distinct))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--level", "channel", "--samples", "0", "retirement planning"])
         probe.main()
@@ -368,7 +368,7 @@ class TestMainEndToEnd:
             "myspace marketing": [2, 2],             # 2<5 but share 10.5% (>=10%) -> THIN, not stale
             "disco fashion": [1, 1],                 # 1<5 and share 1% (<10%) -> STALE
         }
-        monkeypatch.setattr(probe.subprocess, "run",
+        monkeypatch.setattr(probe.tl_data.subprocess, "run",
                             _fake_run(counts, distinct=distinct, recent=recent))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0",
@@ -388,7 +388,7 @@ class TestMainEndToEnd:
         counts = {"retirement planning": 20000}     # raw channel-doc total
         distinct = {"retirement planning": 614}     # all-time distinct channels
         active = {"retirement planning": 387}       # posts_per_90_days>0
-        monkeypatch.setattr(probe.subprocess, "run",
+        monkeypatch.setattr(probe.tl_data.subprocess, "run",
                             _fake_run(counts, distinct=distinct, active=active))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--level", "channel", "--samples", "0", "retirement planning"])
@@ -402,7 +402,7 @@ class TestMainEndToEnd:
 
     def test_output_echoes_scope(self, monkeypatch, capsys):
         counts = {"retirement planning": 5000}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0", "--content-type", "all", "retirement planning"])
         probe.main()
@@ -412,7 +412,7 @@ class TestMainEndToEnd:
     def test_no_recency_omits_recency_fields(self, monkeypatch, capsys):
         counts = {"retirement planning": 68000}
         distinct = {"retirement planning": 8000}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts, distinct=distinct))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts, distinct=distinct))
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--no-recency", "--samples", "0", "retirement planning"])
         probe.main()
@@ -424,7 +424,7 @@ class TestMainEndToEnd:
     def test_samples_friendly_keys(self, monkeypatch, capsys):
         counts = {"tiktok shop": 2}
         samples = {"tiktok shop": [{"title": "Selling on TikTok Shop", "summary": "guide", "channel": {"id": 1}, "url": "u"}]}
-        monkeypatch.setattr(probe.subprocess, "run", _fake_run(counts, samples))
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", _fake_run(counts, samples))
         monkeypatch.setattr(probe.sys, "argv", ["probe.py", "--samples", "3", "tiktok shop"])
         probe.main()
         out = json.loads(capsys.readouterr().out)
@@ -440,13 +440,13 @@ class TestFailureResilience:
     def test_one_failure_recorded_others_survive(self, monkeypatch, capsys):
         base = _fake_run({"crypto": 10})
 
-        def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
             body = json.loads(input)
             if _term_of(body) == "heavy term":
                 raise subprocess.TimeoutExpired(cmd, timeout or 0)
             return base(cmd, input=input, capture_output=capture_output, text=text, timeout=timeout)
 
-        monkeypatch.setattr(probe.subprocess, "run", run)
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", run)
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0", "--no-recency", "crypto", "heavy term"])
         probe.main()
@@ -458,13 +458,13 @@ class TestFailureResilience:
     def test_nonzero_exit_failure_recorded(self, monkeypatch, capsys):
         base = _fake_run({"crypto": 10})
 
-        def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
             body = json.loads(input)
             if _term_of(body) == "bad":
                 return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="server error")
             return base(cmd, input=input, capture_output=capture_output, text=text, timeout=timeout)
 
-        monkeypatch.setattr(probe.subprocess, "run", run)
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", run)
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0", "--no-recency", "crypto", "bad"])
         probe.main()
@@ -473,10 +473,10 @@ class TestFailureResilience:
         assert "server error" in out["failed"][0]["error"]
 
     def test_all_failures_exit_nonzero_but_json_still_emitted(self, monkeypatch, capsys):
-        def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
             raise subprocess.TimeoutExpired(cmd, timeout or 0)
 
-        monkeypatch.setattr(probe.subprocess, "run", run)
+        monkeypatch.setattr(probe.tl_data.subprocess, "run", run)
         monkeypatch.setattr(probe.sys, "argv",
                             ["probe.py", "--samples", "0", "--no-recency", "a", "b"])
         with pytest.raises(SystemExit):

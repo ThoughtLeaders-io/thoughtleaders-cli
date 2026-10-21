@@ -1,6 +1,6 @@
 """Tests for the tl-keyword-research search_videos.py script (the trend lane).
 
-Loaded by path; ES is mocked by patching the module's subprocess.run. The fake
+Loaded by path; ES is mocked by patching the shared CLI transport's subprocess.run. The fake
 answers the article search and the channel-doc enrichment by inspecting the
 body it receives.
 """
@@ -41,7 +41,7 @@ def _fake_run(video_rows=None, enrich_rows=None, capture=None):
         {"id": 466311, "name": "Tech Notes", "reach": 51000},
     ]
 
-    def run(cmd, input=None, capture_output=None, text=None, timeout=None):
+    def run(cmd, input=None, capture_output=None, text=None, timeout=None, **kwargs):
         body = json.loads(input)
         if capture is not None:
             capture.append(body)
@@ -55,7 +55,7 @@ def _fake_run(video_rows=None, enrich_rows=None, capture=None):
 
 
 def _main(monkeypatch, argv, **fake_kwargs):
-    monkeypatch.setattr(sv.subprocess, "run", _fake_run(**fake_kwargs))
+    monkeypatch.setattr(sv.tl_data.subprocess, "run", _fake_run(**fake_kwargs))
     monkeypatch.setattr(sv.sys, "argv", ["search_videos.py"] + argv)
     monkeypatch.setattr(sv.sys.stdin, "isatty", lambda: True)  # no stdin keywords
     sv.main()

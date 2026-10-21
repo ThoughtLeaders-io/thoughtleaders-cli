@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -31,6 +32,7 @@ from pathlib import Path
 import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
 import anomaly_detector
 import comment_analyzer
+import comment_scraper
 import engagement_ratios
 import resolve_channel
 import score as score_mod
@@ -43,10 +45,12 @@ import tl_data
 import channel_lookup
 
 SKILL = "tl-channel-authenticity"
-OUT_DIR = Path("/tmp")
+# An MCP session (mcp_run.py) keeps every artifact inside its own directory.
+OUT_DIR = Path(os.environ.get("TL_MCP_SESSION", "/tmp"))
 
 
 def collect(ref: str) -> dict:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     tl_data.preflight()
     data = resolve_channel.resolve(ref)
     ch = data["channel"]
@@ -67,6 +71,7 @@ def collect(ref: str) -> dict:
 
     ts = time.strftime("%Y%m%d-%H%M%S")
     state = {
+        "comment_collection_complete": True,
         "ref": ref,
         "channel": ch,
         "focus_video": data.get("focus_video"),
@@ -95,24 +100,25 @@ def collect(ref: str) -> dict:
             "Send the JSON array in llm_batch_path to the "
             "`youtube-comment-classifier` subagent (prepend a line: "
             f"'channel niche: cat {ch.get('content_category')}, language "
-            f"{ch.get('language')}'). Save its JSON reply to a file, then run: "
-            "analyze_channel.py --finalize <state_path> <llm_reply.json>"
+            f"{ch.get('language')}'). Run two independent complete classification "
+            "passes and save each JSON reply, then run: "
+            "analyze_channel.py --finalize <state_path> <pass1.json> <pass2.json>"
         ),
     }
 
 
 def finalize(state_path: str, llm_paths: list[str]) -> dict:
     state = json.loads(Path(state_path).read_text(encoding="utf-8"))
+    if state.get("comment_collection_complete") is not True:
+        raise ValueError("Incomplete comment evidence: recollect with verified comment retrieval.")
+    # A missing, unreadable or partial classifier pass is an error, never a
+    # silently smaller vote (validated in comment_analyzer.apply_llm).
     passes: list[list[dict]] = []
     for lp in llm_paths:
-        try:
-            c = json.loads(Path(lp).read_text(encoding="utf-8"))
-            if isinstance(c, dict):
-                c = c.get("classifications", [])
-            if c:
-                passes.append(c)
-        except (json.JSONDecodeError, FileNotFoundError):
-            continue
+        c = json.loads(Path(lp).read_text(encoding="utf-8"))
+        if isinstance(c, dict):
+            c = c.get("classifications")
+        passes.append(c)
 
     comment_analyzer.apply_llm(state["group_c"], passes)
     state["score"] = score_mod.composite(
@@ -139,8 +145,8 @@ def main() -> None:
         "--finalize",
         nargs="+",
         metavar="STATE LLM [LLM ...]",
-        help="state.json followed by one or more classifier-output files "
-        "(multiple = majority-voted for a stable organic share)",
+        help="state.json followed by the two classifier-output files "
+        "(majority-voted for a stable organic share)",
     )
     args = ap.parse_args()
 
@@ -204,6 +210,13 @@ def main() -> None:
             )
         )
         sys.exit(3)
+    except (comment_scraper.CommentRetrievalError, tl_data.DataError,
+            ValueError, OSError) as exc:
+        # Missing evidence is never scored: a failed scrape or a partial
+        # classifier pass must not read as "no comments" or a clean channel.
+        print(json.dumps({"error": "incomplete_evidence", "message": str(exc)},
+                         indent=2))
+        sys.exit(getattr(exc, "exit_code", 3))
 
 
 if __name__ == "__main__":
