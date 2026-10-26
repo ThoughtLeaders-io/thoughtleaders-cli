@@ -161,11 +161,11 @@ tl sponsorships list status:sold brand:"<brand name>" --limit 500 --offset 0 --j
   (mapping 4.4).
 - `publish-date-end` on `tl sponsorships list` is inclusive. In SQL, bound dates per mapping 1.2.
 
-Then read the join keys and currencies the list lacks, for the deal ids pulled, and join on deal id:
+Then read the join keys the list lacks, for the deal ids pulled, and join on deal id:
 
 ```sql
-SELECT al.id, al.tracking_url, al.media_url, al.price_currency,
-       al.conversions, al.revenue, al.revenue_currency
+SELECT al.id, al.tracking_url, al.media_url,
+       al.conversions, al.revenue
 FROM thoughtleaders_adlink al
 WHERE al.id IN (<deal ids>)
 LIMIT 500 OFFSET 0

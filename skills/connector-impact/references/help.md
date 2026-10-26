@@ -79,8 +79,7 @@ TL data takes about a day.
   "All-in cost to date" box under the table, over the same videos and dates, with an as-of date.
 - Everything is in US dollars, as TL prices are. Impact figures in another currency, such as euros,
   are converted at the European Central Bank's monthly average rate, with the original and the rate
-  shown. The TL price is never converted. If a TL deal records another currency, its price stays as recorded and the USD figures
-  that depend on it wait for confirmation.
+  shown. The TL price is never converted.
 
 ## Impact terms in TL language
 

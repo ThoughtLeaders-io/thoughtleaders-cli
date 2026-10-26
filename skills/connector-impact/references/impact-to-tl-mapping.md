@@ -77,11 +77,11 @@ price still counts in Paid to TL.
 | Clicks | Unique clicks (`UniqueClick`) | `total_clicks`, `unique_clicks` | Use Impact's; TL's are mostly empty. Label "clicks tracked by Impact" |
 | Actions | Count of actions, by state | `conversions` | Use Impact's; TL's is hand-entered on few deals |
 | Action Cost | Sum of `Payout` | none | Commission paid to the creator through Impact. Never the TL price |
-| Revenue | Sum of `Amount` | `revenue` + `revenue_currency` | The brand's sales; in TL "revenue" means deal price. Write "sales revenue (Impact)" |
+| Revenue | Sum of `Amount` | `revenue` | The brand's sales; in TL "revenue" means deal price. Write "sales revenue (Impact)" |
 | Total Cost | A grouped report's Total Cost (schema: *Reports*) | none | Action + Click + Other Cost, no Impact platform fee. Never sum `ClientCost` for it. If the route gives neither Total Cost nor all three parts for the same scope, mark it unavailable. Whole-program cost only. A flat fee paid through Impact sits in `Other_Cost`: if it could be the same fee as a TL `price`, ask before adding them |
 | Conversion rate | Actions ÷ clicks | none | Impact only; withheld per the rule below |
 | none | | Views (1.4); `projected_views_at_purchase_date` | TL only. Impact has no views |
-| none | | Paid to TL: `price` + `price_currency` | TL only |
+| none | | Paid to TL: `price` (USD) | TL only |
 | none | | Sponsorship CPM: Paid to TL ÷ current TL views × 1,000 | On deals with TL views; never from projected views |
 | none | | `performance_grade` | Never set by this skill |
 
@@ -107,7 +107,7 @@ sponsorship and all-in return only in the block (2.2).
 
 | | Paid to TL | Commission (Impact) |
 |---|---|---|
-| Field | `price` (+ `price_currency`) | Action Cost (sum of `Payout`) |
+| Field | `price` | Action Cost (sum of `Payout`) |
 | Timing | Fixed before the video | Grows with every sale, after the video too |
 | Currency | USD | The Impact currency, shown in USD (2.3) |
 
@@ -178,9 +178,7 @@ TL (USD)", "Sales revenue, Impact (USD; EUR original)"; a currency in the table 
 table. A 0 is still money and needs its currency. If Impact already converted a report (its
 display-currency setting), say so.
 
-- Never convert the TL price. If a deal's `price_currency` is not USD, name the deal to the user,
-  keep its price in that currency, and hold every USD total or ratio that depends on it until its
-  USD price is confirmed. Never relabel it USD, add it to a USD sum, or drop the deal silently.
+- Never convert the TL price.
 - Impact figures in USD: no conversion.
 - Otherwise (usually EUR): show every Impact money figure in USD with the original beside it,
   e.g. "Commission, Impact (USD 1,352; EUR 1,240)". Use the ECB euro reference rate for USD,
@@ -356,8 +354,7 @@ Kept here until they move to the `tl` skill's references.
 | `adlink.cta_text` | Call-to-action text, labelled "promo code" in the web app but not a promo code. Never read as one |
 | `adlink.media_url` | The sponsored video's link (destination links are in `urls`); source of the video id when `article_id` is empty (1.4) |
 | `adlink.conversions` | Action count, hand-entered on few deals |
-| `adlink.revenue` + `revenue_currency` | Sales revenue, hand-entered on few deals |
-| `adlink.price_currency` | Currency of `price`: USD, never converted (2.3) |
+| `adlink.revenue` | Sales revenue, hand-entered on few deals |
 | `adlink.projected_views_at_purchase_date` | TL's projected views for the video, frozen at the purchase date. Never a source for CPM (2.2) |
 | `adspot.ad_format` | 4 YouTube, 8 TikTok, 9 Instagram, other values other placements. Not a test for TL views (1.4) |
 | `channel.social_links` | Platform keys, an `_other` dict and an `_emails` array; read named keys only (SKILL.md *Personal data*) |
