@@ -354,6 +354,8 @@ tl proposals create -c 5607 -b 11459    # creates with publish_status=matched (7
 
 Required: `--channel/-c <int>`, `--brand/-b <int>` (or the equivalent keys in the JSON body). Optional: `--price/-p <float>`, `--json`, `--toon`. **JSON and command-line flags are mutually exclusive on `tl sponsorships create` — pass one form or the other, never both.** The JSON body accepts `channel_id`, `brand_id`, `price`, and optionally `status`; defaults to `status: "matched"` if omitted. Returns the created adlink with a `tl sponsorships show <id>` hint.
 
+A channel with no ad spot can still get a `matched` sponsorship, but only for CLI full-access users and only in `matched` status (the default). That sponsorship sits on a temporary placeholder ad spot with no publisher (price and cost 0). Other users, and other statuses, get a 404 on such a channel. A deal on a placeholder can only be `matched`, rejected, or `open` with the channel pending and the brand not yet asked; anything further is refused until the placeholder is turned into a real ad spot. Ad spot records carry an `is_placeholder` flag, and `publisher_id` / `publisher_email` are null on a placeholder, so do not assume a publisher is present.
+
 The adlink is owned by the **brand's** advertiser profile (not the calling user's profile) and its `list` FK is set to the requested brand — so the new sponsorship appears under the brand's pipeline, not the AM's.
 
 #### Vetting (state transitions via `tl sponsorships update`)

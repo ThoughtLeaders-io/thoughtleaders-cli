@@ -202,6 +202,9 @@ def create_cmd(
     Creates the sponsorship in `matched` status by default; pass a different
     `status` in the JSON body to override.
 
+    A channel with no ad spot gets a temporary placeholder spot (no publisher),
+    for full-access users in `matched` status only; otherwise it is a 404.
+
     Either pass --channel and --brand (with optional --price) as flags, or
     pass a JSON body as the positional argument — never both.
 
