@@ -5,16 +5,16 @@ Shape of Impact's data: objects, fields, filters, traps. For TL meaning, see
 
 ## Access routes
 
-The user brings one route. This skill never holds a login.
+The user brings one route. This skill never holds a login, and every route is read-only (SKILL.md
+*Read-only*).
 
 | Route | Setup | Best for |
 |---|---|---|
-| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login | Most questions; aggregates on Impact's side |
-| Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API) | Action-level detail, long ranges |
-| CSV export | Reports: Performance by Partner, Performance by Day, Advanced Action Listing | No setup |
-| Impact web app | The user's own browser, already signed in. Read report pages only: no downloads, no settings, no answers to pop-ups | When none of the above is set up. Slowest route; same report data |
+| Impact MCP | Custom connector `https://mcp.impact.com/mcp` with OAuth client ID `mcp-impact-claude` under Advanced settings (Impact does not support dynamic client registration), signed in with the user's Impact login, plus an Advanced Action Listing export for action detail | Most questions; aggregates on Impact's side |
+| Impact Brand API | `AccountSID` + a token the user creates (Settings → Technical → API); read-only access is enough | Action-level detail, long ranges |
+| CSV export | The user exports the reports from Impact: Performance by Partner, Performance by Day, Advanced Action Listing | No setup; same report data |
 
-MCP tools on a Brand account:
+MCP tools on a Brand account (the only MCP tools this skill calls):
 
 | Tool | Returns | Use |
 |---|---|---|
@@ -147,7 +147,7 @@ live Brand account, from Impact's documentation.
 | Sale amount | `Amount` | `Sale_Amount` ("Revenue") | `Sale_Amount` |
 | Commission | `Payout` | `Payout` ("Action Cost") | `Payout` ("Action Earnings") |
 | Bonus | none | `bonus_cost` | `Bonus_Payout` |
-| Client cost | `ClientCost` | `Client_Cost` (can be 0 on every row: take Total Cost from a grouped report) | none |
+| Client cost | `ClientCost` | `Client_Cost` (can be 0 on every row; it is not Total Cost, which comes from a grouped report) | none |
 | Promo code | `PromoCode` | `Promo_Code` | `Promo_Code` |
 | SharedId | `SharedId` | `Shared_Id` | `SharedId` |
 | SubIds | Click `PartnerRelated.SubId1-3` | `SubId1` to `SubId3` | `SubId1` to `SubId3` |
@@ -156,8 +156,10 @@ live Brand account, from Impact's documentation.
 | Social platform | none | `social_platform` | none |
 | Partner property | none | `property_type`, `property_name` | `property_type`, `property_name` |
 
-Web app reports return only the columns the view shows, and blanks as "". A needed column absent
-from every row is hidden, not blank: add it on screen (SKILL.md stage 2).
+CSV exports carry display labels ("Action Date", "Shared Id"); match them to the rows above.
+Report views and their CSV exports return only the columns the view shows, and blanks as "". A
+needed column absent from every row is hidden, not blank: ask the user to add it to the report and
+export again (SKILL.md stage 2).
 
 ## Traps
 
