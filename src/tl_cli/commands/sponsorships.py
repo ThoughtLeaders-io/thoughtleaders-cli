@@ -114,6 +114,7 @@ def do_create(
     price: float | None,
     fmt: str,
     status: str | None = None,
+    integration: str | None = None,
 ) -> None:
     """Shared create logic (flag-style args)."""
     body: dict = {"channel_id": channel, "brand_id": brand}
@@ -121,6 +122,8 @@ def do_create(
         body["price"] = price
     if status is not None:
         body["status"] = status
+    if integration is not None:
+        body["integration"] = integration
     do_create_body(body, fmt)
 
 
@@ -188,12 +191,16 @@ def create_cmd(
     fields: Optional[str] = typer.Argument(
         None,
         help='Optional JSON body — alternative to --channel/--brand/--price flags. '
-             'Shape: {"channel_id": int, "brand_id": int, "price"?: float, "status"?: str}. '
+             'Shape: {"channel_id": int, "brand_id": int, "price"?: float, "status"?: str, "integration"?: str}. '
              'Mutually exclusive with the flag form.',
     ),
     channel: Optional[int] = typer.Option(None, "--channel", "-c", help="Channel ID"),
     brand: Optional[int] = typer.Option(None, "--brand", "-b", help="Brand ID"),
     price: Optional[float] = typer.Option(None, "--price", "-p", help="Deal price"),
+    integration: Optional[str] = typer.Option(
+        None, "--integration",
+        help="Ad spot integration: mention (default), dedicated, interview, product_placement, usage_rights, youtube_short",
+    ),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
@@ -202,20 +209,24 @@ def create_cmd(
     Creates the sponsorship in `matched` status by default; pass a different
     `status` in the JSON body to override.
 
+    A channel with no ad spot gets a temporary placeholder spot (no publisher),
+    for full-access users in `matched` status only; otherwise it is a 404.
+
     Either pass --channel and --brand (with optional --price) as flags, or
     pass a JSON body as the positional argument — never both.
 
     Examples:
         tl sponsorships create --channel 1 --brand 2
         tl sponsorships create --channel 1 --brand 2 --price 2500
+        tl sponsorships create --channel 1 --brand 2 --integration dedicated
         tl sponsorships create '{"channel_id": 1, "brand_id": 2, "price": 2500}'
     """
     fmt = detect_format(json_output, False, False, toon_output)
 
-    used_flags = channel is not None or brand is not None or price is not None
+    used_flags = channel is not None or brand is not None or price is not None or integration is not None
     if fields is not None and used_flags:
         Console(stderr=True).print(
-            "[red]Error:[/red] Pass either a JSON body OR --channel/--brand/--price flags, not both."
+            "[red]Error:[/red] Pass either a JSON body OR --channel/--brand/--price/--integration flags, not both."
         )
         raise typer.Exit(1)
 
@@ -242,7 +253,7 @@ def create_cmd(
             "[red]Error:[/red] --channel and --brand are required (or pass a JSON body)."
         )
         raise typer.Exit(1)
-    do_create(channel, brand, price, fmt, status="matched")
+    do_create(channel, brand, price, fmt, status="matched", integration=integration)
 
 
 @app.command("update")
