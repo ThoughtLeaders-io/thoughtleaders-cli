@@ -1,6 +1,8 @@
-"""Tests for sponsorship result formatting."""
+"""Tests for sponsorship result formatting and create bodies."""
 
-from tl_cli.commands.sponsorships import _format_results
+from unittest.mock import patch
+
+from tl_cli.commands.sponsorships import _format_results, do_create
 
 
 class TestFormatResults:
@@ -39,3 +41,12 @@ class TestFormatResults:
     def test_scheduled_date_truncated(self):
         results = [{"scheduled_date": "2026-04-26T12:34:56Z"}]
         assert _format_results(results)[0]["scheduled_date"] == "2026-04-26"
+
+
+class TestCreateIntegration:
+    def test_flag_sent_in_body_only_when_given(self):
+        with patch("tl_cli.commands.sponsorships.do_create_body") as sent:
+            do_create(1, 2, None, "json", status="matched", integration="dedicated")
+            assert sent.call_args[0][0]["integration"] == "dedicated"
+            do_create(1, 2, None, "json", status="matched")
+            assert "integration" not in sent.call_args[0][0]
