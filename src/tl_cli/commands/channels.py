@@ -71,7 +71,7 @@ def show_cmd(
     csv_output: bool = typer.Option(False, "--csv", help="CSV output (flattens adspots: one row per adspot)"),
     toon_output: bool = typer.Option(False, "--toon", help="TOON output (token-efficient for LLMs)"),
 ) -> None:
-    """Show channel detail by ID or name (includes active adspots).
+    """Show channel detail by ID or name (includes preferred adspots).
 
     Accepts either a numeric channel ID or a partial name. Names that
     match more than one active channel return a 400 with the candidate
