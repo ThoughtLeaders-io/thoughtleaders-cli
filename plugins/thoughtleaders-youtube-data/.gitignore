@@ -1,0 +1,9 @@
+# Assembled from the canonical skills by scripts/build_mcp_plugin.py --generate.
+# Never edit or commit these copies; change the canonical source instead.
+skills/_shared/
+skills/tl-mcp/references/methodology.md
+skills/tl-mcp/references/query-examples.md
+skills/tl-keyword-research-mcp/scripts/
+skills/tl-keyword-research-mcp/references/
+skills/tl-channel-authenticity-mcp/scripts/
+skills/tl-channel-authenticity-mcp/references/

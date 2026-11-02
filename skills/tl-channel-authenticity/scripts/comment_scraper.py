@@ -18,9 +18,23 @@ Normalized comment shape:
 """
 from __future__ import annotations
 
+import importlib
 import sys
 
 import _io_utf8  # noqa: F401  (side effect: forces UTF-8 stdout/stderr on Windows)
+
+
+class CommentRetrievalError(RuntimeError):
+    """Collection failed; this is not evidence of an empty comment section."""
+
+
+class VideoUnavailable(RuntimeError):
+    """YouTube says the video is gone (deleted, private, removed). That is a
+    real outcome, scored by video_integrity, not a failed comment retrieval."""
+
+
+_UNAVAILABLE = ("video unavailable", "this video is unavailable", "private video",
+                "this video has been removed", "this video is private")
 
 
 def limit_for_views(views: int) -> int:
@@ -35,7 +49,12 @@ def limit_for_views(views: int) -> int:
 # yt-dlp scrape (android InnerTube client — no cookies / API key)
 # --------------------------------------------------------------------------- #
 def _scrape_ytdlp(video_id: str, cap: int) -> list[dict]:
-    import yt_dlp
+    try:
+        yt_dlp = importlib.import_module("yt_dlp")
+    except ModuleNotFoundError as exc:
+        raise CommentRetrievalError(
+            "Comment evidence is incomplete: install yt-dlp in this Python runtime."
+        ) from exc
 
     opts = {
         "quiet": True,
@@ -56,7 +75,9 @@ def _scrape_ytdlp(video_id: str, cap: int) -> list[dict]:
         info = ydl.extract_info(
             f"https://www.youtube.com/watch?v={video_id}", download=False
         )
-    raw = info.get("comments") or []
+    if not isinstance(info, dict) or not isinstance(info.get("comments"), list):
+        raise CommentRetrievalError("Comment evidence is incomplete: collector returned no comments field.")
+    raw = info["comments"]
     out: list[dict] = []
     for c in raw:
         out.append(
@@ -81,9 +102,14 @@ def scrape(video_id: str, views: int = 0, *, hard_cap: int | None = None) -> lis
     cap = hard_cap or limit_for_views(views)
     try:
         return _scrape_ytdlp(video_id, cap)
+    except CommentRetrievalError:
+        raise
     except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"[comment_scraper] {video_id} yt-dlp failed: {exc}\n")
-        return []
+        if any(m in str(exc).lower() for m in _UNAVAILABLE):
+            raise VideoUnavailable(f"{video_id}: {exc}") from exc
+        raise CommentRetrievalError(
+            f"Comment evidence is incomplete for {video_id}: {exc}"
+        ) from exc
 
 
 if __name__ == "__main__":

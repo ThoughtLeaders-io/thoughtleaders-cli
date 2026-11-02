@@ -25,8 +25,11 @@ Output (stdout): a single JSON object — see OUTPUT_SHAPE at the bottom.
 import argparse
 import datetime
 import json
-import subprocess
 import sys
+
+import pathlib as _pathlib
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data
 
 DEFAULT_FIELDS = "title^4,summary^2,transcript^1"  # title > summary > transcript
 # ES channel docs keep the LEGACY field names (reach / is_tl_channel …) — the
@@ -45,22 +48,12 @@ CONTENT_TYPES = ("longform", "short", "live", "all")
 
 
 def run_es(body):
-    """POST an ES body via `tl db es` and return the parsed envelope, or exit."""
-    proc = subprocess.run(
-        ["tl", "db", "es", "-", "--json"],
-        input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
-    )
-    if proc.returncode != 0:
-        sys.stderr.write(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()}\n"
-        )
-        sys.exit(proc.returncode or 1)
+    """Run an ES body through the shared tl_data seam; return the full envelope, or exit."""
     try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"could not parse tl db es output: {exc}\n")
-        sys.exit(1)
+        return tl_data.query("es", body, timeout=ES_TIMEOUT)
+    except (tl_data.CliUnavailable, tl_data.DataError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        sys.exit(getattr(exc, "exit_code", 1) or 1)
 
 
 def keyword_clauses(keywords, fields):

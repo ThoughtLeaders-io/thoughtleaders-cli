@@ -33,8 +33,11 @@ import argparse
 import datetime
 import json
 import re
-import subprocess
 import sys
+
+import pathlib as _pathlib
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
 # `summary` holds the video's creator-written description (links, hashtags, promo)
@@ -192,30 +195,20 @@ class ProbeError(Exception):
 
 
 def run_es(body):
-    """Run `tl db es - --json` with `body` on stdin; return parsed response.
+    """Run `body` through the shared tl_data seam; return the full envelope.
 
-    Raises ProbeError on failure so the caller can record the candidate and
-    continue — one slow/heavy term must not abort a 60-candidate batch.
+    Raises ProbeError on a query failure so the caller can record the candidate
+    and continue — one slow/heavy term must not abort a 60-candidate batch.
+    Auth, credit and plan failures end the run: every later candidate would
+    fail the same way.
     """
     try:
-        proc = subprocess.run(
-            ["tl", "db", "es", "-", "--json"],
-            input=json.dumps(body),
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise ProbeError(f"timed out after {PROBE_TIMEOUT}s")
-    if proc.returncode != 0:
-        raise ProbeError(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()[:300]}"
-        )
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise ProbeError(f"could not parse tl db es output: {exc}: {proc.stdout[:300]}")
+        return tl_data.query("es", body, timeout=PROBE_TIMEOUT)
+    except tl_data.CliUnavailable as exc:
+        sys.stderr.write(f"{exc}\n")
+        sys.exit(getattr(exc, "exit_code", 1) or 1)
+    except tl_data.DataError as exc:
+        raise ProbeError(str(exc)[:300]) from exc
 
 
 def extract_total(data):
@@ -490,11 +483,14 @@ def main():
     if recency:
         recency_cutoff = months_ago_iso(args.recency_months) if args.level == "topic" else "active"
 
+    bodies = [build_body(cand, fields=fields, level=args.level, samples=samples,
+                         source_paths=source_paths, since=args.since, until=args.until,
+                         recency_cutoff=recency_cutoff, content_type=args.content_type)
+              for cand in candidates]
+    # In an MCP session, ask for every candidate's read in one round trip.
+    tl_data.prefetch([("es", body) for body in bodies])
     results, failed = [], []
-    for cand in candidates:
-        body = build_body(cand, fields=fields, level=args.level, samples=samples,
-                          source_paths=source_paths, since=args.since, until=args.until,
-                          recency_cutoff=recency_cutoff, content_type=args.content_type)
+    for cand, body in zip(candidates, bodies):
         try:
             data = run_es(body)
         except ProbeError as exc:

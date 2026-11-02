@@ -24,8 +24,11 @@ import argparse
 import html
 import json
 import re
-import subprocess
 import sys
+
+import pathlib as _pathlib
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "_shared"))
+import tl_data
 
 DEFAULT_FIELDS = ["title", "summary", "transcript"]
 ES_TIMEOUT = 90
@@ -34,21 +37,12 @@ WS_RE = re.compile(r"\s+")
 
 
 def run_es(body):
-    proc = subprocess.run(
-        ["tl", "db", "es", "-", "--json"],
-        input=json.dumps(body), capture_output=True, text=True, timeout=ES_TIMEOUT,
-    )
-    if proc.returncode != 0:
-        sys.stderr.write(
-            f"tl db es failed (rc={proc.returncode}): "
-            f"{(proc.stderr or proc.stdout).strip()}\n"
-        )
-        sys.exit(proc.returncode or 1)
+    """Run an ES body through the shared tl_data seam; return the full envelope, or exit."""
     try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"could not parse tl db es output: {exc}\n")
-        sys.exit(1)
+        return tl_data.query("es", body, timeout=ES_TIMEOUT)
+    except (tl_data.CliUnavailable, tl_data.DataError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        sys.exit(getattr(exc, "exit_code", 1) or 1)
 
 
 def clean_text(value):

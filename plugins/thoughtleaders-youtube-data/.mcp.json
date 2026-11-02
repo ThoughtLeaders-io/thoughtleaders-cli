@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "thoughtleaders": {
+      "type": "http",
+      "url": "https://app.thoughtleaders.io/mcp"
+    }
+  }
+}
