@@ -33,8 +33,19 @@ Usage:
     python3 expand_entities.py --existing "cannes lions" "advertising awards" < resolver.json > expanded.json
     # pipe the candidates straight into probe.py:
     python3 expand_entities.py --probe-batch < resolver.json | python3 probe.py --samples 5
+
+Library use: the file is import-safe (standard library only, nothing runs at import),
+so another Python program can load it by path and call `expand(resolver_reply, *,
+existing=None)` (what the default mode prints) or `probe_batch(resolver_reply, *,
+existing=None)` (what `--probe-batch` prints). `resolver_reply` is the parsed resolver
+JSON; `existing` lists the candidates already brainstormed. Both return fresh structures
+that share nothing with the input. Bad input raises `ExpandInputError` (a `ValueError`).
+Library functions never print, read stdin or exit.
 """
+from __future__ import annotations
+
 import argparse
+import copy
 import json
 import re
 import sys
@@ -78,6 +89,10 @@ def solid(text):
     are kept (re.UNICODE), so accented names survive.
     """
     return _NONWORD_RE.sub("", text)
+
+
+class ExpandInputError(ValueError):
+    """The resolver reply or options handed to the expander are unusable."""
 
 
 def _norm(text):
@@ -156,8 +171,25 @@ def _collect_names(resolver, max_insider):
     return fams
 
 
-def expand(resolver, existing, max_insider):
-    """Build probe candidates + family detail from a resolver JSON object."""
+def check_resolver(resolver_reply):
+    """Raise ExpandInputError unless the resolver reply is a JSON object."""
+    if not isinstance(resolver_reply, dict):
+        raise ExpandInputError("resolver JSON must be an object")
+
+
+def expand(resolver_reply, *, existing=None, max_insider=MAX_INSIDER_DEFAULT):
+    """Build probe candidates + family detail from a resolver JSON object (what the default mode prints).
+
+    `existing` lists candidates already brainstormed; matching forms are dropped.
+    `max_insider` caps the insider terms folded in. Raises ExpandInputError.
+    """
+    check_resolver(resolver_reply)
+    resolver = resolver_reply
+    existing = [] if existing is None else existing
+    if not isinstance(existing, (list, tuple)) or not all(isinstance(x, str) for x in existing):
+        raise ExpandInputError("existing must be a list of strings")
+    if max_insider < 0:
+        raise ExpandInputError("--max-insider must be >= 0")
     seen = {_norm(x) for x in existing}          # forms already covered → skip
     deduped = []
 
@@ -211,7 +243,7 @@ def expand(resolver, existing, max_insider):
     )
     collisions = [c for c in (resolver.get("collisions", []) or []) if isinstance(c, dict)]
 
-    return {
+    result = {
         "probe_candidates": probe_candidates,
         "families": families,
         "aliases": aliases,
@@ -228,6 +260,12 @@ def expand(resolver, existing, max_insider):
             "deduped": len(deduped),
         },
     }
+    return copy.deepcopy(result)   # the caller's input is never shared with the output
+
+
+def probe_batch(resolver_reply, *, existing=None, max_insider=MAX_INSIDER_DEFAULT):
+    """Just the probe_candidates array (what --probe-batch prints), ready for probe.py."""
+    return expand(resolver_reply, existing=existing, max_insider=max_insider)["probe_candidates"]
 
 
 def load_resolver():
@@ -240,8 +278,10 @@ def load_resolver():
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         sys.exit(f"invalid resolver JSON on stdin: {exc}")
-    if not isinstance(data, dict):
-        sys.exit("resolver JSON must be an object")
+    try:
+        check_resolver(data)
+    except ExpandInputError as exc:
+        sys.exit(str(exc))
     return data
 
 
@@ -259,7 +299,11 @@ def main():
     if args.max_insider < 0:
         sys.exit("--max-insider must be >= 0")
 
-    out = expand(load_resolver(), args.existing, args.max_insider)
+    resolver = load_resolver()
+    try:
+        out = expand(resolver, existing=args.existing, max_insider=args.max_insider)
+    except ExpandInputError as exc:
+        sys.exit(str(exc))
     if args.probe_batch:
         print(json.dumps(out["probe_candidates"], ensure_ascii=False))
     else:

@@ -28,13 +28,24 @@ Usage:
     echo '[{"label":"shop+amazon","sqs":"\"tiktok shop\" +amazon"}]' | probe.py --mode sqs
 
 Output (stdout): a single JSON object — see OUTPUT CONTRACT at the bottom.
+
+Library use: the file is import-safe (standard library only, nothing runs at import),
+so another Python program can load it by path and call
+`run_probe(candidates, *, run_es, fields, ...)`. It returns the same object the command
+prints. `run_es(body) -> dict` is the caller's query function (an Elasticsearch body in,
+the parsed response out); a candidate whose query raises is recorded under `failed`.
+`fields` is required — the command's defaults live only in `main()`. Bad input raises
+`ProbeInputError` (a `ValueError`). Library functions never print, read stdin or exit.
 """
+from __future__ import annotations
+
 import argparse
 import datetime
 import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 
 # Article-level (doc_type:article) text fields vs channel-level (doc_type:channel).
 # `summary` holds the video's creator-written description (links, hashtags, promo)
@@ -140,12 +151,12 @@ def build_body(candidate, *, fields, level, samples, source_paths, since, until,
         match = {
             "simple_query_string": {
                 "query": candidate["value"],
-                "fields": fields,
+                "fields": list(fields),
                 "default_operator": "and",
             }
         }
     else:
-        match = {"multi_match": {"query": candidate["value"], "type": "phrase", "fields": fields}}
+        match = {"multi_match": {"query": candidate["value"], "type": "phrase", "fields": list(fields)}}
 
     # Always scope to YouTube uploads (format 4). At topic level also default to
     # longform videos (content_type is article-only; channel docs have none).
@@ -180,7 +191,7 @@ def build_body(candidate, *, fields, level, samples, source_paths, since, until,
     return {
         "size": samples,
         "track_total_hits": True,
-        "_source": source_paths,
+        "_source": list(source_paths),
         "collapse": {"field": collapse_field},
         "aggs": aggs,
         "query": {"bool": {"filter": filters, "must": [match]}},
@@ -189,6 +200,10 @@ def build_body(candidate, *, fields, level, samples, source_paths, since, until,
 
 class ProbeError(Exception):
     """One candidate's ES probe failed (timeout, non-zero exit, bad JSON)."""
+
+
+class ProbeInputError(ValueError):
+    """The candidates or options handed to the probe are unusable."""
 
 
 def run_es(body):
@@ -324,7 +339,7 @@ def collect_candidates(argv_words):
         return [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if isinstance(parsed, list):
         return parsed
-    sys.exit("stdin JSON must be a list")
+    raise ProbeInputError("stdin JSON must be a list")
 
 
 def normalize(raw_items, default_mode):
@@ -341,7 +356,7 @@ def normalize(raw_items, default_mode):
             elif "keyword" in item:
                 value, mode = item["keyword"], item.get("mode", default_mode)
             else:
-                sys.exit(f"candidate object missing value/sqs/phrase/keyword: {item}")
+                raise ProbeInputError(f"candidate object missing value/sqs/phrase/keyword: {item}")
             value = str(value).strip()
             label = str(item.get("label", value)).strip() or value
         else:
@@ -416,6 +431,139 @@ def annotate_recency(row, data, *, level, min_recent_channels, min_share):
     row["thin"] = below_floor and not stale
 
 
+def check_options(*, fields, level, mode, content_type, operator, since, until, recency_months):
+    """Raise ProbeInputError for an unusable option combination (first problem wins)."""
+    if level not in COLLAPSE_FIELD:
+        raise ProbeInputError(f"level must be one of {sorted(COLLAPSE_FIELD)}, got {level!r}")
+    if mode not in ("phrase", "sqs"):
+        raise ProbeInputError(f"mode must be phrase or sqs, got {mode!r}")
+    if content_type not in CONTENT_TYPES:
+        raise ProbeInputError(f"content_type must be one of {list(CONTENT_TYPES)}, got {content_type!r}")
+    if operator not in ("AND", "OR"):
+        raise ProbeInputError(f"operator must be AND or OR, got {operator!r}")
+    if recency_months < 1:
+        raise ProbeInputError("--recency-months must be >= 1")
+
+    # Date windowing only makes sense for articles — channel docs have no
+    # publication_date, so a range filter there silently zeroes every count.
+    if (since or until) and level != "topic":
+        raise ProbeInputError("--since/--until apply only at --level topic (channel docs have no publication date)")
+    for flag, val in (("--since", since), ("--until", until)):
+        if val and not valid_date(val):
+            raise ProbeInputError(f"{flag} must be YYYY-MM-DD, got {val!r}")
+
+    if not isinstance(fields, (list, tuple)):
+        raise ProbeInputError("fields must be a list of ES field paths")
+    if not fields:
+        raise ProbeInputError("--fields must list at least one ES field")
+    bad = [f for f in fields if not (isinstance(f, str) and _FIELD_RE.match(f))]
+    if bad:
+        raise ProbeInputError(f"invalid --fields entries {bad}; use ES field paths, optionally boosted (e.g. title^3)")
+
+
+def run_probe(candidates: list, *, run_es: Callable[[dict], dict], fields: list[str], level: str = "topic",
+              mode: str = "phrase", samples: int = 5, content_type: str = "longform", since: str | None = None,
+              until: str | None = None, operator: str = "OR", recency: bool = True, recency_months: int = 12,
+              min_recent_channels: int = 5, min_recent_share: float = 0.10, min_active_share: float = 0.33) -> dict:
+    """Probe every candidate through `run_es` and return the object `main()` prints.
+
+    `candidates` are strings or dicts (what `normalize` accepts). `run_es(body)` takes an
+    Elasticsearch body and returns the parsed response; if it raises, that candidate is
+    recorded under `failed` and the rest continue. Raises ProbeInputError on bad input.
+    """
+    check_options(fields=fields, level=level, mode=mode, content_type=content_type, operator=operator,
+                  since=since, until=until, recency_months=recency_months)
+    fields = list(fields)
+    if not isinstance(candidates, (list, tuple)):
+        raise ProbeInputError("candidates must be a list of strings or objects")
+
+    field_pairs = TOPIC_SAMPLE_FIELDS if level == "topic" else CHANNEL_SAMPLE_FIELDS
+    source_paths = [p for p, _ in field_pairs]
+    samples = min(MAX_SAMPLES, max(0, samples))
+
+    candidates = normalize(candidates, mode)
+    if not candidates:
+        raise ProbeInputError("provide at least one candidate (positional args or JSON array on stdin)")
+
+    # Topic level needs a date cutoff; channel level uses a non-date sentinel so
+    # build_body emits the posts_per_90_days "active" agg instead.
+    recency_cutoff = None
+    if recency:
+        recency_cutoff = months_ago_iso(recency_months) if level == "topic" else "active"
+
+    results, failed = [], []
+    for cand in candidates:
+        body = build_body(cand, fields=fields, level=level, samples=samples,
+                          source_paths=source_paths, since=since, until=until,
+                          recency_cutoff=recency_cutoff, content_type=content_type)
+        try:
+            data = run_es(body)
+        except Exception as exc:
+            failed.append({"keyword": cand["value"], "label": cand["label"],
+                           "error": str(exc) or type(exc).__name__})
+            continue
+        documents = extract_total(data)
+        channels = extract_distinct(data)
+        # `count` is the level-appropriate headline used for ranking/subsumption:
+        # videos at topic level, distinct channels at channel level (where the raw
+        # document total is inflated by index duplication). Both raw numbers are
+        # always emitted as `documents` and `channels`.
+        row = {
+            "keyword": cand["value"],
+            "label": cand["label"],
+            "count": documents if level == "topic" else channels,
+            "documents": documents,
+            "channels": channels,
+            "samples": extract_samples(data, field_pairs) if samples else [],
+            "_mode": cand["mode"],
+            "subsumed_by": [],
+        }
+        if recency:
+            annotate_recency(row, data, level=level,
+                             min_recent_channels=min_recent_channels,
+                             min_share=(min_recent_share if level == "topic" else min_active_share))
+        results.append(row)
+
+    mark_subsumed(results, operator)
+
+    # `count` is 0 exactly when the document total is 0 (a non-empty match always
+    # reaches >=1 distinct channel), so it is the single no-match gate.
+    recency_keys = (("recent_documents", "recent_channels", "recent_channel_share")
+                    if level == "topic" else ("active_channels", "active_channel_share"))
+    survivors, dropped = [], []
+    for r in results:
+        if r["count"] == 0:
+            dropped.append({"keyword": r["keyword"], "count": 0, "reason": "no_matches"})
+            continue
+        kept = {"keyword": r["keyword"], "count": r["count"],
+                "documents": r["documents"], "channels": r["channels"],
+                "subsumed_by": r["subsumed_by"], "samples": r["samples"]}
+        if recency:
+            for k in (*recency_keys, "stale", "stale_reason", "thin"):
+                kept[k] = r[k]
+        survivors.append(kept)
+
+    survivors.sort(key=lambda r: r["count"], reverse=True)
+
+    # Echo the always-on scope so the caller (and user) sees what was filtered.
+    scope = {"format": "youtube"}
+    if level == "topic":
+        scope["content_type"] = content_type
+    out = {
+        "operator": operator,
+        "level": level,
+        "fields": fields,
+        "scope": scope,
+        "keywords": survivors,
+        "dropped": dropped,
+        "failed": failed,
+    }
+    if recency:
+        out["recency"] = ({"months": recency_months, "cutoff": recency_cutoff}
+                          if level == "topic" else {"signal": "posts_per_90_days>0"})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Probe ES for keyword counts + validation samples; drop empty, annotate subsumed."
@@ -456,113 +604,24 @@ def main():
                     help="Channel STALE share: active_channels/channels below this AND below the floor → stale (default 0.33).")
     args = ap.parse_args()
 
-    if args.recency_months < 1:
-        sys.exit("--recency-months must be >= 1")
-
-    # Date windowing only makes sense for articles — channel docs have no
-    # publication_date, so a range filter there silently zeroes every count.
-    if (args.since or args.until) and args.level != "topic":
-        sys.exit("--since/--until apply only at --level topic (channel docs have no publication date)")
-    for flag, val in (("--since", args.since), ("--until", args.until)):
-        if val and not valid_date(val):
-            sys.exit(f"{flag} must be YYYY-MM-DD, got {val!r}")
-
     fields = ([f.strip() for f in args.fields.split(",") if f.strip()] if args.fields
               else (TOPIC_FIELDS if args.level == "topic" else CHANNEL_FIELDS))
-    if not fields:
-        sys.exit("--fields must list at least one ES field")
-    bad = [f for f in fields if not _FIELD_RE.match(f)]
-    if bad:
-        sys.exit(f"invalid --fields entries {bad}; use ES field paths, optionally boosted (e.g. title^3)")
+    options = dict(fields=fields, level=args.level, mode=args.mode, content_type=args.content_type,
+                   operator=args.operator, since=args.since, until=args.until,
+                   recency_months=args.recency_months)
+    try:
+        check_options(**options)  # an unusable option outranks a malformed stdin
+        candidates = collect_candidates(args.keywords)
+        out = run_probe(candidates, run_es=run_es, samples=args.samples, recency=not args.no_recency,
+                        min_recent_channels=args.min_recent_channels, min_recent_share=args.min_recent_share,
+                        min_active_share=args.min_active_share, **options)
+    except ProbeInputError as exc:
+        sys.exit(str(exc))
 
-    field_pairs = TOPIC_SAMPLE_FIELDS if args.level == "topic" else CHANNEL_SAMPLE_FIELDS
-    source_paths = [p for p, _ in field_pairs]
-    samples = min(MAX_SAMPLES, max(0, args.samples))
-
-    candidates = normalize(collect_candidates(args.keywords), args.mode)
-    if not candidates:
-        sys.exit("provide at least one candidate (positional args or JSON array on stdin)")
-
-    recency = not args.no_recency
-    # Topic level needs a date cutoff; channel level uses a non-date sentinel so
-    # build_body emits the posts_per_90_days "active" agg instead.
-    recency_cutoff = None
-    if recency:
-        recency_cutoff = months_ago_iso(args.recency_months) if args.level == "topic" else "active"
-
-    results, failed = [], []
-    for cand in candidates:
-        body = build_body(cand, fields=fields, level=args.level, samples=samples,
-                          source_paths=source_paths, since=args.since, until=args.until,
-                          recency_cutoff=recency_cutoff, content_type=args.content_type)
-        try:
-            data = run_es(body)
-        except ProbeError as exc:
-            sys.stderr.write(f"probe failed for {cand['value']!r}: {exc}\n")
-            failed.append({"keyword": cand["value"], "label": cand["label"], "error": str(exc)})
-            continue
-        documents = extract_total(data)
-        channels = extract_distinct(data)
-        # `count` is the level-appropriate headline used for ranking/subsumption:
-        # videos at topic level, distinct channels at channel level (where the raw
-        # document total is inflated by index duplication). Both raw numbers are
-        # always emitted as `documents` and `channels`.
-        row = {
-            "keyword": cand["value"],
-            "label": cand["label"],
-            "count": documents if args.level == "topic" else channels,
-            "documents": documents,
-            "channels": channels,
-            "samples": extract_samples(data, field_pairs) if samples else [],
-            "_mode": cand["mode"],
-            "subsumed_by": [],
-        }
-        if recency:
-            annotate_recency(row, data, level=args.level,
-                             min_recent_channels=args.min_recent_channels,
-                             min_share=(args.min_recent_share if args.level == "topic"
-                                        else args.min_active_share))
-        results.append(row)
-
-    mark_subsumed(results, args.operator)
-
-    # `count` is 0 exactly when the document total is 0 (a non-empty match always
-    # reaches >=1 distinct channel), so it is the single no-match gate.
-    recency_keys = (("recent_documents", "recent_channels", "recent_channel_share")
-                    if args.level == "topic" else ("active_channels", "active_channel_share"))
-    survivors, dropped = [], []
-    for r in results:
-        if r["count"] == 0:
-            dropped.append({"keyword": r["keyword"], "count": 0, "reason": "no_matches"})
-            continue
-        kept = {"keyword": r["keyword"], "count": r["count"],
-                "documents": r["documents"], "channels": r["channels"],
-                "subsumed_by": r["subsumed_by"], "samples": r["samples"]}
-        if recency:
-            for k in (*recency_keys, "stale", "stale_reason", "thin"):
-                kept[k] = r[k]
-        survivors.append(kept)
-
-    survivors.sort(key=lambda r: r["count"], reverse=True)
-
-    # Echo the always-on scope so the caller (and user) sees what was filtered.
-    scope = {"format": "youtube"}
-    if args.level == "topic":
-        scope["content_type"] = args.content_type
-    out = {
-        "operator": args.operator,
-        "level": args.level,
-        "fields": fields,
-        "scope": scope,
-        "keywords": survivors,
-        "dropped": dropped,
-        "failed": failed,
-    }
-    if recency:
-        out["recency"] = ({"months": args.recency_months, "cutoff": recency_cutoff}
-                          if args.level == "topic" else {"signal": "posts_per_90_days>0"})
+    for f in out["failed"]:
+        sys.stderr.write(f"probe failed for {f['keyword']!r}: {f['error']}\n")
     print(json.dumps(out, ensure_ascii=False))
-    if failed and not results:
+    if out["failed"] and not out["keywords"] and not out["dropped"]:
         sys.exit(1)  # every candidate failed — the batch itself is broken
 
 
