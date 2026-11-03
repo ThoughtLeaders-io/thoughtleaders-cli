@@ -56,7 +56,7 @@ Maps business terms to database concepts.
 - A channel can have **multiple ad spots** because different people sell the same channel (talent manager, direct, multiple agencies)
 - Ad spots are the **catalogue** — adlinks are **instances** of catalogue items
 - Price/cost on adspot = list/catalog values; price/cost on adlink = actual deal values
-- **Only one active adspot with integration=mention per channel at any time** (MSN rule)
+- **Only one preferred adspot with integration=mention per channel at any time** (MSN rule)
 
 ## Ownership & Accountability
 
@@ -79,7 +79,7 @@ Maps business terms to database concepts.
 - Key data: **who is the contact** to buy the ad from
 - `thoughtleaders_channel.media_selling_network_join_date` = when channel joined MSN
 - `thoughtleaders_channel.is_tpp` = TPP channel — TL's closest partners, a strict subset of MSN. **Prefer when booking**: fastest response, easiest to close. Not a gating flag; not a process barrier.
-- **Rule:** Only one active adspot with `integration=mention` per channel at any time
+- **Rule:** Only one preferred adspot with `integration=mention` per channel at any time
 - MSN quality depends on having current, accurate contact info
 
 ## Channels & Audience

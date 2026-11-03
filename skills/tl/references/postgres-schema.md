@@ -165,8 +165,9 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `channel_id` | int FK | → `thoughtleaders_channel.id` |
 | `price` | numeric | List/catalogue price |
 | `cost` | numeric | List/catalogue cost |
-| `integration` | int | 1=YouTube Mentions (live reads). Only one active mention-type adspot per channel. |
-| `is_active` | boolean | Active flag |
+| `integration` | int | 1=YouTube Mentions (live reads). Only one preferred mention-type adspot per channel. |
+| `is_preferred` | boolean | The channel's preferred spot, the one new proposals are booked on |
+| `is_active` | boolean | False = deactivated, unusable, kept only for its AdLinks. Client sandboxes never show deactivated spots or their AdLinks |
 | `publisher_id` | int FK | → `auth_user.id` (NOT `thoughtleaders_profile.id` — see gotcha below) |
 
 ### Key columns for the `thoughtleaders_channel` table
