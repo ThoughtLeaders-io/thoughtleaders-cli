@@ -39,7 +39,15 @@ Input (stdin JSON):
     }
 
 Output (stdout): a single JSON object — see OUTPUT CONTRACT at the bottom.
+
+Library use: the file is import-safe (standard library only, nothing runs at import),
+so another Python program can load it by path and call `build(spec, *, app_url=...)`.
+`spec` is the parsed input object above; the return value is the object the command
+prints. `build` leaves `spec` untouched and returns fresh structures. A bad spec raises
+`ReportSpecError` (a `ValueError`). Library functions never print, read stdin or exit.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -114,6 +122,10 @@ DEFAULT_FIELDS = {
     "channels": ["title", "summary", "transcript", "channel_description", "channel_topic_description"],
     "brands": ["title", "summary", "transcript"],
 }
+
+
+class ReportSpecError(ValueError):
+    """The spec handed to `build` is unusable."""
 
 
 def tokens(text):
@@ -389,33 +401,23 @@ def build_report_config(filter_set, report_type_int, title, description):
     }
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Build the keyword-research deliverable (filter set + report link) from validated groups."
-    )
-    ap.add_argument("--app-url", default=DEFAULT_APP_URL, help=f"App base URL (default {DEFAULT_APP_URL})")
-    args = ap.parse_args()
-
-    if sys.stdin.isatty():
-        sys.exit("pipe a JSON spec on stdin (see module docstring)")
-    try:
-        spec = json.loads(sys.stdin.read())
-    except json.JSONDecodeError as exc:
-        sys.exit(f"invalid JSON on stdin: {exc}")
-
-    operator = (spec.get("operator") or "OR").upper()
+def build(spec, *, app_url=DEFAULT_APP_URL):
+    """Build the deliverable (filter set, report link, report config) from a spec; raises ReportSpecError."""
+    if not isinstance(spec, dict):
+        raise ReportSpecError("spec must be a JSON object")
+    operator = str(spec.get("operator") or "OR").upper()
     if operator not in ("AND", "OR"):
-        sys.exit("operator must be AND or OR")
-    report_type = (spec.get("report_type") or "channels").lower()
+        raise ReportSpecError("operator must be AND or OR")
+    report_type = str(spec.get("report_type") or "channels").lower()
     if report_type not in REPORT_TYPES:
-        sys.exit(f"report_type must be one of {sorted(REPORT_TYPES)}")
+        raise ReportSpecError(f"report_type must be one of {sorted(REPORT_TYPES)}")
     slug, report_type_int = REPORT_TYPES[report_type]
     default_fields = spec.get("default_content_fields") or DEFAULT_FIELDS[report_type]
 
     groups = spec.get("groups") or []
-    groups = [g for g in groups if isinstance(g, dict) and str(g.get("text", "")).strip()]
+    groups = [dict(g) for g in groups if isinstance(g, dict) and str(g.get("text", "")).strip()]
     if not groups:
-        sys.exit("provide at least one group with non-empty 'text'")
+        raise ReportSpecError("provide at least one group with non-empty 'text'")
     for g in groups:
         g["text"] = str(g["text"]).strip()
 
@@ -426,7 +428,7 @@ def main():
         used_fields.update(g.get("content_fields") or [])
     unknown = sorted(f for f in used_fields if f not in VALID_CONTENT_FIELDS)
     if unknown:
-        sys.exit(
+        raise ReportSpecError(
             f"unknown content_fields {unknown}; use recognized content field names "
             f"(e.g. title, summary, transcript, channel_description, "
             f"channel_topic_description) — not raw ES paths. Valid: {sorted(VALID_CONTENT_FIELDS)}"
@@ -443,18 +445,18 @@ def main():
         try:
             app_text = sqs_to_app_syntax(g["text"])
         except ValueError as exc:
-            sys.exit(f"group {g['text']!r}: {exc}")
+            raise ReportSpecError(f"group {g['text']!r}: {exc}")
         if app_text != g["text"]:
             translated.append({"from": g["text"], "to": app_text})
             g["text"] = app_text
 
     filter_set = build_filter_set(kept, operator, default_fields)
-    report_link = build_inline_link(kept, operator, slug, default_fields, args.app_url)
+    report_link = build_inline_link(kept, operator, slug, default_fields, app_url)
     title = spec.get("title") or f"{report_type.title()} — keyword search"
     description = spec.get("description") or ""
     report_config = build_report_config(filter_set, report_type_int, title, description)
 
-    print(json.dumps({
+    return {
         "report_type": report_type,
         "operator": operator,
         "expression": render_expression(kept, operator),
@@ -463,7 +465,28 @@ def main():
         "report_config": report_config,
         "pruned": pruned,
         "translated": translated,
-    }, ensure_ascii=False, indent=2))
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Build the keyword-research deliverable (filter set + report link) from validated groups."
+    )
+    ap.add_argument("--app-url", default=DEFAULT_APP_URL, help=f"App base URL (default {DEFAULT_APP_URL})")
+    args = ap.parse_args()
+
+    if sys.stdin.isatty():
+        sys.exit("pipe a JSON spec on stdin (see module docstring)")
+    try:
+        spec = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as exc:
+        sys.exit(f"invalid JSON on stdin: {exc}")
+
+    try:
+        out = build(spec, app_url=args.app_url)
+    except ReportSpecError as exc:
+        sys.exit(str(exc))
+    print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
 # OUTPUT CONTRACT (stdout, single JSON object):

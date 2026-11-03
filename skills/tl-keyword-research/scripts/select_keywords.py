@@ -26,13 +26,54 @@ Usage:
     python3 select_keywords.py --emit-batch < probe.json > batch.json
     # ...send batch.json (+ "intent: ..." line) to keyword-relevance-validator → verdict.json...
     python3 select_keywords.py --apply verdict.json < probe.json
+
+Library use: the file is import-safe (standard library only, nothing runs at import),
+so another Python program can load it by path and call `emit_batch(probe)` (the batch
+list) and `apply_verdict_maps(probe, verdict_maps, *, allow_missing=False)` (the
+`--apply` result). `probe` is the parsed `probe.py` output; `verdict_maps` is a list of
+`{i: bool}` maps, one per validator pass. Bad input raises `SelectInputError` (a
+`ValueError`); an incomplete verdict raises `IncompleteVerdictError` with `.missing`, the
+sorted indices without a verdict. With `allow_missing=True` the same gap is reported
+through `warnings.warn` (`MissingVerdictWarning`) instead. Library functions never print,
+read stdin or exit. `apply_verdicts` is the command's own layer (prints, exits).
 """
+from __future__ import annotations
+
 import argparse
 import json
 import sys
+import warnings
 
 # Friendly content keys shown to the validator, by probe level.
 BATCH_CONTENT_KEYS = {"topic": ["title", "summary"], "channel": ["name", "topic"]}
+
+
+class SelectInputError(ValueError):
+    """The probe output or verdicts handed to the selector are unusable."""
+
+
+class IncompleteVerdictError(SelectInputError):
+    """Some batch samples have no verdict in any pass; `.missing` lists their indices."""
+
+    def __init__(self, message, missing):
+        super().__init__(message)
+        self.missing = list(missing)
+
+
+class MissingVerdictWarning(UserWarning):
+    """Verdicts left some batch samples unjudged (allow_missing=True)."""
+
+
+def check_probe(probe):
+    """Raise SelectInputError unless `probe` has the shape probe.py prints."""
+    if not isinstance(probe, dict) or not isinstance(probe.get("keywords"), list):
+        raise SelectInputError("probe JSON must be an object with a 'keywords' list")
+    for kw in probe["keywords"]:
+        if not isinstance(kw, dict) or "keyword" not in kw:
+            raise SelectInputError("each probe keyword must be an object with a 'keyword'")
+        samples = kw.get("samples", [])
+        if not isinstance(samples, list) or not all(isinstance(smp, dict) for smp in samples):
+            raise SelectInputError("each probe keyword's 'samples' must be a list of objects")
 
 
 def load_probe():
@@ -42,8 +83,10 @@ def load_probe():
         probe = json.loads(sys.stdin.read())
     except json.JSONDecodeError as exc:
         sys.exit(f"invalid probe JSON on stdin: {exc}")
-    if not isinstance(probe, dict) or not isinstance(probe.get("keywords"), list):
-        sys.exit("probe JSON must be an object with a 'keywords' list")
+    try:
+        check_probe(probe)
+    except SelectInputError as exc:
+        sys.exit(str(exc))
     return probe
 
 
@@ -59,6 +102,8 @@ def build_index(probe):
 
 
 def emit_batch(probe):
+    """The flat validation batch the keyword-relevance-validator expects (what --emit-batch prints)."""
+    check_probe(probe)
     level = probe.get("level", "topic")
     keys = BATCH_CONTENT_KEYS.get(level, BATCH_CONTENT_KEYS["topic"])
     batch = []
@@ -67,7 +112,7 @@ def emit_batch(probe):
         for k in keys:
             item[k] = sample.get(k)
         batch.append(item)
-    print(json.dumps(batch, ensure_ascii=False))
+    return batch
 
 
 def load_verdicts(paths):
@@ -106,30 +151,47 @@ def check_completeness(index, verdict_maps, allow_missing):
     """Every batch sample must have a verdict in at least one pass.
 
     Cheap validators silently drop the tail of a long list, so a missing `i`
-    usually means truncation, not judgement. Default: fail loudly and list
-    the missing indices so the caller re-sends just those samples to a fresh
-    validator run. `--allow-missing` downgrades to a stderr warning (missing
-    samples then count as not-relevant, which biases toward dropping).
+    usually means truncation, not judgement. Default: raise IncompleteVerdictError
+    listing the missing indices so the caller re-sends just those samples to a
+    fresh validator run. With `allow_missing` the gap is returned as warning text
+    instead (missing samples then count as not-relevant, which biases toward
+    dropping). Returns None when every sample has a verdict.
     """
     covered = set()
     for vm in verdict_maps:
         covered.update(vm)
     missing = sorted(i for i, _, _ in index if i not in covered)
     if not missing:
-        return
+        return None
     msg = (f"{len(missing)} of {len(index)} batch samples have no verdict "
            f"(missing i: {missing[:20]}{'…' if len(missing) > 20 else ''}) — "
            f"the validator likely truncated; re-send those samples and merge.")
     if allow_missing:
-        sys.stderr.write(f"warning: {msg}\n")
-    else:
-        sys.exit(msg + " (or pass --allow-missing to treat them as not relevant)")
+        return msg
+    raise IncompleteVerdictError(msg, missing)
 
 
-def apply_verdicts(probe, verdict_maps, allow_missing=False):
+def apply_verdict_maps(probe, verdict_maps, *, allow_missing=False):
+    """Decide each keyword from the verdicts and return what --apply prints.
+
+    `verdict_maps` is a list of {i: bool} maps, one per validator pass. Raises
+    SelectInputError / IncompleteVerdictError; with `allow_missing` a gap is
+    announced through `warnings.warn` (MissingVerdictWarning) instead.
+    """
+    out, warning = _apply(probe, verdict_maps, allow_missing)
+    if warning:
+        warnings.warn(warning, MissingVerdictWarning, stacklevel=2)
+    return out
+
+
+def _apply(probe, verdict_maps, allow_missing):
+    """The decision itself: (result, gap-warning text or None)."""
+    check_probe(probe)
+    if not isinstance(verdict_maps, (list, tuple)) or not all(isinstance(vm, dict) for vm in verdict_maps):
+        raise SelectInputError("verdict_maps must be a list of {i: relevant} maps")
     index = build_index(probe)
     level = probe.get("level", "topic")
-    check_completeness(index, verdict_maps, allow_missing)
+    warning = check_completeness(index, verdict_maps, allow_missing)
     finals = {i: relevant_at(i, verdict_maps) for i, _, _ in index}
 
     per_kw = {}  # keyword -> {"relevant": n, "total": n, "samples":[(rel, sample)]}
@@ -188,6 +250,19 @@ def apply_verdicts(probe, verdict_maps, allow_missing=False):
     }
     if level != "channel":
         out["candidate_videos"] = candidate_videos
+    return out, warning
+
+
+def apply_verdicts(probe, verdict_maps, allow_missing=False):
+    """The command's --apply layer: print the result, exit on an incomplete verdict, warn on stderr."""
+    try:
+        out, warning = _apply(probe, verdict_maps, allow_missing)
+    except IncompleteVerdictError as exc:
+        sys.exit(f"{exc} (or pass --allow-missing to treat them as not relevant)")
+    except SelectInputError as exc:
+        sys.exit(str(exc))
+    if warning:
+        sys.stderr.write(f"warning: {warning}\n")
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
@@ -203,7 +278,7 @@ def main():
 
     probe = load_probe()
     if args.emit_batch:
-        emit_batch(probe)
+        print(json.dumps(emit_batch(probe), ensure_ascii=False))
     else:
         apply_verdicts(probe, load_verdicts(args.apply), allow_missing=args.allow_missing)
 
