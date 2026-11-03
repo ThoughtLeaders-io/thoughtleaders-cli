@@ -23,6 +23,33 @@ description: |
   common is X". Also invoke for HELP asks about this skill — "help", "how
   does keyword research work", "what are my options", "describe this skill" —
   answered free from the built-in guide, no queries run.
+output-schema:
+  type: object
+  required: [keyword_groups, keyword_operator, assumptions]
+  properties:
+    keyword_groups:
+      type: array
+      items:
+        type: object
+        required: [text]
+        properties:
+          text: {type: string}
+          content_fields:
+            type: array
+            items: {type: string}
+          exclude: {type: boolean}
+    keyword_operator: {type: string, enum: [OR, AND]}
+    assumptions:
+      type: array
+      items: {type: string}
+    dropped:
+      type: array
+      items:
+        type: object
+        required: [text, reason]
+        properties:
+          text: {type: string}
+          reason: {type: string}
 ---
 
 # tl-keyword-research — topic → validated filter set + the results you choose
@@ -68,6 +95,33 @@ verbatim via `search_channels.py --group` / `search_videos.py --group`.
 > samples (the CLI drops ES `highlight`).
 
 `<SKILL_DIR>` below is this skill's directory (the one holding `SKILL.md`).
+
+## On the ThoughtLeaders platform
+
+The same skill also runs on the ThoughtLeaders platform, when a user starts
+keyword research from their dashboard. You are on the platform when the tools
+`kw_probe` and `kw_validate` are available. The method in this file applies
+unchanged, with these differences:
+
+- **No shell and no sub-agents.** Stages that run a script or an agent carry
+  an *On the platform* note naming the tool to use instead.
+- **Nobody to ask.** The task gives you the path (quick or deep) and the
+  deliverable. Make every scope call yourself and record it in `assumptions`.
+  Run the deep path autonomously: no checkpoint after round 3.
+- **Titles and summaries only.** Search the `title` and `summary` fields,
+  never `transcript`.
+- **Stop after Stage 4.** The platform builds the trend data, channel tiers,
+  report link and previews from your final groups, so skip Stage 5 and the
+  scripts in Stage 6.
+- **Decide, don't count.** Finish with `submit_result`, shaped by this
+  skill's `output-schema`: the final keyword groups, the operator, your
+  assumptions, and the groups you dropped with a reason. Never put counts or
+  channel figures in the result.
+- **Narrate with `report_progress`.** Call it at the start of each stage with
+  the stage name exactly as the pipeline table writes it (`Set up`, `Expand`,
+  `Probe`, `Validate keywords`, `Refine`), instead of messaging the user.
+- **References.** Read `references/elasticsearch-content-search.md` with
+  `read_skill_file`.
 
 ## When to invoke / skip
 
@@ -234,6 +288,10 @@ index's samples, and every web-sourced name earns its place through the same
 probe + validation as any other candidate (no benefit of the doubt; a
 hallucinated name probes to `count: 0` and drops).
 
+*On the platform:* use `web_search` (at most two searches) in place of the
+`keyword-entity-resolver` agent, then add each name and its spelling variants
+to your candidates yourself, following Stage 1's rules.
+
 ### Stage 1 — Expand: go wide, go deep, go creative
 
 A shallow synonym list is the #1 failure mode. Coverage is won or lost here.
@@ -270,6 +328,11 @@ Rules:
   fine). **No specific channel names** (`tl channels find`). No random padding.
 
 ### Stage 2 — Probe (`probe.py`)
+
+*On the platform:* call `kw_probe` with the candidates and the same options
+`probe.py` takes (`level`, `mode`, `fields`, `samples`, `content_type`,
+`since`, `until`). It returns the counts; the samples stay with the platform
+for `kw_validate`.
 
 One ES query per candidate → counts + samples for validation:
 
@@ -321,6 +384,11 @@ surviving variants before delivery.
 
 This fixes "the word is there but the topic isn't" — the step that separates
 this skill from a free YouTube search.
+
+*On the platform:* call `kw_validate` on the probe with the verbatim intent. It
+runs the relevance check and the strict-majority rule, and returns the kept
+and dropped keywords. Scope calls are yours: decide them and record them in
+`assumptions`.
 
 **Inline (≤ ~15 candidates):** read each keyword's `samples` against the
 verbatim intent. Drop off-intent keywords, `count: 0`, and redundant
@@ -448,7 +516,13 @@ then fold the answers into the groups and the validators' TOPIC/NOT lines.
 run ≥3 rounds, stop when fitness stops improving (sane cap ~6 rounds), note
 that you ran autonomously.
 
+*On the platform:* always run autonomously, measuring with `kw_probe` (mode
+`sqs`) and re-validating with `kw_validate`.
+
 ### Stage 5 — Materialize the chosen deliverables
+
+*On the platform:* skip this stage. The platform builds the deliverables from
+your final groups.
 
 Everything here takes the final filter verbatim via `--group`, so what you
 deliver is exactly what the filter selects.
@@ -540,6 +614,11 @@ on-topic uploads. Tell the user when one channel dominates and offer
    unbookable matches.
 
 ### Stage 6 — Deliver (`build_report.py`)
+
+*On the platform:* don't run `build_report.py` and don't offer to save. Call
+`submit_result` with the groups in the same shape (`text`, plus
+`content_fields` / `exclude` where needed); the platform prunes them,
+translates them into the report grammar and builds the link.
 
 Hand the validated groups to the builder — start from `select_keywords.py
 --apply`'s `groups`, adding per-group `content_fields` / `exclude` as needed:
