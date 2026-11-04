@@ -209,14 +209,14 @@ tl balance                                 # Your credit balance
 
 ### Usage resets
 
-A usage reset refills your weekly credits to your plan's allotment and restarts your 5-hour session. You get a welcome reset when you sign up, one for each new organization that signs up with your invite link, and a bonus when that organization makes its first proposal or payment. Resets expire 90 days after they're granted, and you spend them only when you choose to.
+A usage reset refills your weekly credits to your plan's allotment and restarts your 5-hour session. You get one as a gift from ThoughtLeaders when you sign up, one for each new organization that signs up with your invite link, and a bonus when that organization makes its first proposal or payment. Resets expire 90 days after they're granted, and you spend them only when you choose to.
 
 ```bash
 tl resets                                  # Resets you have, recent history, your invite link
 tl resets use                              # Spend one (asks first; --yes skips the question)
 ```
 
-When a query is refused because you're out of credits or at your session limit and you have a reset, the error tells you so.
+When a query is refused because you're out of credits or at your session limit, the error tells you if you have a reset to spend, and gives your invite link: invite a friend outside your organization and you get a free reset when they join.
 
 `tl db pg` is priced **per-row**: the per-row rate is the **sum of the rates of the tables the query touches** (default 1.0/row; some tables are cheaper or dearer), plus a flat per-row charge for every expensive column read (demographics, channel outreach emails), all times the rows returned. Aggregate queries (`count`/`GROUP BY`) add a surcharge proportional to the rows they aggregate. Run `tl describe show db --json` to see the live `pg_pricing` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
