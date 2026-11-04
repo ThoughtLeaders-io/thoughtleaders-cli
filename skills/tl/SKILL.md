@@ -111,7 +111,7 @@ Other key concepts:
   - **`purchase_date`** — when the sponsorship was purchased (i.e. when the deal was made); These make up bookings.
   - **`scheduled_date`** — the date the video is/was expected to be published (scheduled)
   - **`publish_date`** — the date the video was actually published; These make up live ads.
-- **Credits** — every data query costs credits; use `tl describe` to see rates. Top up with `tl credits buy --amount-usd N` (free; opens a browser checkout). New accounts get a starter balance on first `tl auth login`; the rate is shown by `tl credits pricing`.
+- **Credits** — every data query costs credits; use `tl describe` to see rates. Top up with `tl credits buy --amount-usd N` (free; opens a browser checkout). New accounts get a starter balance on first `tl auth login`; the rate is shown by `tl credits pricing`. When a credits or session-limit refusal says the user has usage resets, a reset refills their weekly credits and restarts their 5-hour session; `tl resets` lists them. Spending one is the user's call: ask them first, and only then run `tl resets use --yes`.
 
 Users see data scoped by their organization and plan:
 - **Media buyers** see sponsorships where their org is the brand. They see `price` but never `cost`.
@@ -559,6 +559,8 @@ tl balance --json                      # Credit balance + recent usage (free)
 tl credits pricing                     # Current usd-per-credit rate (free, no auth)
 tl credits buy --amount-usd 10         # Start a top-up; opens browser checkout (free)
 tl credits history                     # Recent top-ups for the caller's org (free)
+tl resets --json                       # Usage resets, invite link, referrals (free)
+tl resets use --yes                    # Spend a usage reset — only after the user says so (free)
 tl whoami                              # Current user, org, brands (free)
 tl auth status                         # Auth check (free)
 tl changelog                           # Release notes — current version, or current..latest if behind (free)

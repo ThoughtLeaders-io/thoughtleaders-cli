@@ -207,6 +207,17 @@ tl describe show sponsorships --filters    # Available filters for sponsorships
 tl balance                                 # Your credit balance
 ```
 
+### Usage resets
+
+A usage reset refills your weekly credits to your plan's allotment and restarts your 5-hour session. You get a welcome reset when you sign up, one for each new organization that signs up with your invite link, and a bonus when that organization makes its first proposal or payment. Resets expire 90 days after they're granted, and you spend them only when you choose to.
+
+```bash
+tl resets                                  # Resets you have, recent history, your invite link
+tl resets use                              # Spend one (asks first; --yes skips the question)
+```
+
+When a query is refused because you're out of credits or at your session limit and you have a reset, the error tells you so.
+
 `tl db pg` is priced **per-row**: the per-row rate is the **sum of the rates of the tables the query touches** (default 1.0/row; some tables are cheaper or dearer), plus a flat per-row charge for every expensive column read (demographics, channel outreach emails), all times the rows returned. Aggregate queries (`count`/`GROUP BY`) add a surcharge proportional to the rows they aggregate. Run `tl describe show db --json` to see the live `pg_pricing` map, and check `usage.credit_rate` in the response envelope after a query to see what your query was actually charged.
 
 To preview a query's cost **before** running it, add `--pricing`: `tl db pg "SELECT … LIMIT 100" --pricing` runs only the planner's `EXPLAIN`, prints the cost breakdown and an upper-bound estimate (at the query's `LIMIT`), and costs a flat **1 credit** — the query itself never executes. Works with `--json` too. `--pricing` is also available on `tl db fb` and `tl db es`; those backends have no per-table or per-column charges, so the estimate is the flat per-row rate at the query's row ceiling (`LIMIT` for Firebolt, `size` — or the aggregation doc cap — for Elasticsearch).

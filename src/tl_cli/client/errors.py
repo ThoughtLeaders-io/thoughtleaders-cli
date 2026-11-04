@@ -66,6 +66,17 @@ def _print_hint(hint: str | None) -> None:
         err.print(f"[bold yellow]Hint:[/bold yellow] [yellow]{escape(hint)}[/yellow]")
 
 
+def _print_resets_hint(error: ApiError) -> None:
+    """On a credits or session refusal, tell a user who has banked usage
+    resets that they can spend one. Spending is always their own choice, so
+    this only names the command — it never spends a reset."""
+    raw = error.raw if isinstance(error.raw, dict) else {}
+    count = raw.get("_billing_resets_available")
+    if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+        noun = "usage reset" if count == 1 else "usage resets"
+        err.print(f"You have {count} {noun}. Spend one with: [bold]tl resets use[/bold]")
+
+
 def handle_api_error(error: ApiError) -> None:
     """Print a user-friendly error message and exit with the right code."""
     detail, hint = _split_hint(error)
@@ -95,6 +106,7 @@ def handle_api_error(error: ApiError) -> None:
             err.print("Or visit: https://app.thoughtleaders.io/billing")
         _print_hint(hint)
         err.print("Top up with: [bold]tl credits buy --amount-usd 10[/bold]")
+        _print_resets_hint(error)
         _print_debug(error)
         sys.exit(4)
     elif error.status_code == 403:
@@ -125,6 +137,7 @@ def handle_api_error(error: ApiError) -> None:
         else:
             err.print("[yellow]Rate limited.[/yellow] Please wait and try again.")
         _print_hint(hint)
+        _print_resets_hint(error)
         _print_debug(error)
         sys.exit(3)
     elif error.status_code >= 500:
