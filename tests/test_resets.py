@@ -68,13 +68,14 @@ class TestResetsList:
         resets_mod._render_resets(_resets_payload())
         out = _flat(capsys.readouterr().out)
         assert "Usage resets available: 2" in out
-        assert "Welcome reset" in out
+        assert "Gift from ThoughtLeaders" in out
         assert "Your invitee's first proposal or payment" in out
         assert "2026-12-30" in out
         assert "Your invite was accepted" in out
         assert "Used" in out and "2026-09-15" in out
         assert "Added by support" in out and "Over the limit" in out
-        assert "https://app.thoughtleaders.io/r/abc123" in out
+        assert ("Invite a friend outside your organization. You'll get a free reset when they join: "
+                "https://app.thoughtleaders.io/r/abc123") in out
         assert "4 users signed up with your link" in out
         assert "1 user earned you a reset" in out
         assert "tl resets use" in out
@@ -193,6 +194,23 @@ class TestRefusalHint:
         raw = {"detail": "Session limit reached.", "code": "quota_exhausted", "_billing_resets_available": 1}
         out = _render_error(ApiError(429, "Session limit reached.", raw=raw), capsys, code=3)
         assert "You have 1 usage reset. Spend one with: tl resets use" in out
+
+    @pytest.mark.parametrize("status,code", [(402, 4), (429, 3)])
+    def test_invite_link_follows_the_reset_offer(self, capsys, status, code):
+        raw = {"detail": "Refused.", "_billing_resets_available": 1,
+               "_billing_invite_link": "https://app.thoughtleaders.io/r/5jXOLpkmhx/",
+               "_billing_invite_url": "https://app.thoughtleaders.io/billing/?section=invite"}
+        out = _render_error(ApiError(status, "Refused.", raw=raw), capsys, code=code)
+        invite = ("Or invite a friend outside your organization. You'll get a free reset when they join: "
+                  "https://app.thoughtleaders.io/r/5jXOLpkmhx/")
+        assert invite in out
+        assert out.index("tl resets use") < out.index(invite)
+        assert "section=invite" not in out
+
+    def test_no_invite_line_without_link(self, capsys):
+        raw = {"detail": "Out of credits.", "code": "insufficient_credits", "_billing_resets_available": 1}
+        out = _render_error(ApiError(402, "Out of credits.", raw=raw), capsys, code=4)
+        assert "invite a friend" not in out
 
     @pytest.mark.parametrize("raw", [
         {"detail": "Out of credits.", "code": "insufficient_credits"},

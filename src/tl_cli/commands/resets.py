@@ -23,7 +23,7 @@ console = Console()
 err = Console(stderr=True)
 
 SOURCE_LABELS = {
-    "welcome": "Welcome reset",
+    "welcome": "Gift from ThoughtLeaders",
     "referred_bonus": "You were invited",
     "referral_signup": "Your invite was accepted",
     "referral_bonus": "Your invitee's first proposal or payment",
@@ -111,12 +111,16 @@ def _render_resets(data: dict) -> None:
 
     link = data.get("referral_link")
     if link:
-        console.print(f"\n[bold]Your invite link:[/bold] {escape(link)}")
+        console.print(
+            "\nInvite a friend outside your organization. "
+            f"You'll get a free reset when they join: {escape(link)}"
+        )
         bonus = data.get("bonus_resets")
-        earn = "You earn a reset for each new organization that signs up with it"
         if bonus:
-            earn += f", and {_plural(bonus, 'more reset')} when it makes its first proposal or payment"
-        console.print(f"[dim]{earn}.[/dim]")
+            console.print(
+                f"[dim]You get {_plural(bonus, 'more reset')} when their organization "
+                "makes its first proposal or payment.[/dim]"
+            )
 
     referrals = data.get("referrals") or {}
     made = referrals.get("made") or 0
