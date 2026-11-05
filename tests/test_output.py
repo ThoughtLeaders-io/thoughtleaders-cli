@@ -462,6 +462,50 @@ class TestPgPricingEstimate:
         assert "depends on rows returned" in out
 
 
+    def test_table_mode_shows_note_and_agg_bucket_fields(self, capsys):
+        from tl_cli.output.formatter import output_pricing_estimate
+        data = {
+            "pricing_estimate": {
+                "multiplier": 1.4, "per_row_extra": 0.0,
+                "table_rates": {}, "expensive_columns": {},
+                "limit": 10, "planner_estimated_rows": None,
+                "estimated_cost_at_limit": 3.8,
+                "max_agg_buckets": 2425, "agg_bucket_rate": 51.0,
+                "note": "Aggregation surcharge applies; histogram buckets not estimated.",
+            },
+            "results": [], "usage": {"credits_charged": 1},
+        }
+        output_pricing_estimate(data, "table")
+        out = capsys.readouterr().out
+        assert "Max aggregation buckets" in out
+        assert "2,425" in out
+        assert "51" in out
+        assert "Aggregation surcharge applies" in out
+        assert "histogram buckets not estimated" in out
+
+    def test_table_mode_shows_rate_when_buckets_unbounded(self, capsys):
+        from tl_cli.output.formatter import output_pricing_estimate
+        data = {
+            "pricing_estimate": {
+                "multiplier": 1.4, "per_row_extra": 0.0, "limit": 10,
+                "estimated_cost_at_limit": 3.8,
+                "max_agg_buckets": None, "agg_bucket_rate": 50.0,
+            },
+            "results": [], "usage": {"credits_charged": 1},
+        }
+        output_pricing_estimate(data, "table")
+        out = capsys.readouterr().out
+        assert "Max aggregation buckets" in out
+        assert "unbounded" in out
+        assert "50 credits/bucket" in out
+
+    def test_table_mode_omits_note_and_buckets_when_absent(self, capsys):
+        from tl_cli.output.formatter import output_pricing_estimate
+        output_pricing_estimate(self._SAMPLE, "table")
+        out = capsys.readouterr().out
+        assert "Max aggregation buckets" not in out
+        assert "Note:" not in out
+
 class TestServerWarnings:
     """Advisory `_warnings` from the response envelope render on stderr."""
 
