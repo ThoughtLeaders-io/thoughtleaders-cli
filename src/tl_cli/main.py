@@ -30,6 +30,7 @@ from tl_cli.commands.profiles import app as profiles_app
 from tl_cli.commands.proposals import app as proposals_app
 from tl_cli.commands.recommender import app as recommender_app
 from tl_cli.commands.reports import app as reports_app
+from tl_cli.commands.resets import app as resets_app
 from tl_cli.commands.schema import app as schema_app
 from tl_cli.commands.setup import app as setup_app
 from tl_cli.commands.skills import app as skills_app
@@ -124,6 +125,7 @@ app.add_typer(describe_app, name="describe")
 app.add_typer(schema_app, name="schema")
 app.add_typer(balance_app, name="balance")
 app.add_typer(credits_app, name="credits")
+app.add_typer(resets_app, name="resets")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(whoami_app, name="whoami")
 app.add_typer(agent_app, name="agent")
