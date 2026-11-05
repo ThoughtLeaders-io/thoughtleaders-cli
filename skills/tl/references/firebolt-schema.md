@@ -38,7 +38,23 @@ Drop to `tl db fb` only when you need a shape `tl snapshots` doesn't produce (cu
 - **Leading index column must be equality-or-IN-filtered with literals** (`channel_id = 1` or `channel_id IN (1,2,3)`). Without it: `MISSING_INDEXED_FILTER`.
 - **Trivial-aggregation exception:** a SELECT whose projected expressions are all aggregates and which has no GROUP BY / HAVING may omit WHERE entirely. Use only for tiny sanity checks.
 - **No mandatory LIMIT/OFFSET** — but Firebolt will time out on bad plans, so keep the leading-index filter selective.
+- **Functions are allowlisted.** Standard aggregates (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `STDDEV`, `PERCENTILE_CONT`, ...), window functions (`ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VALUE`), and common string / math / date (`DATE_TRUNC`, `EXTRACT`, ...) / conditional (`COALESCE`, `NULLIF`, `CASE`) builtins are accepted. Any other function returns a 400 naming it, including `MAX_BY` / `MIN_BY` / `ARG_MAX`. `QUALIFY`, `DISTINCT ON`, and `ORDER BY` inside `ARRAY_AGG` return a syntax error.
 - **Errors carry the real diagnostic.** A query that Firebolt itself rejects (unknown column, syntax error) comes back as a 400 with Firebolt's own error description, plus a rename hint where one is known. Common trap: `channel_metrics` has `subscribers`, not the older `reach`.
+
+### Latest row per video (or per channel)
+
+Subqueries are blocked, so `WHERE rn = 1` over a `ROW_NUMBER()` derived table is not available. Use window functions with `DISTINCT` in one flat SELECT instead:
+
+```sql
+SELECT DISTINCT id,
+       FIRST_VALUE(view_count) OVER (PARTITION BY id ORDER BY scrape_date DESC) AS view_count,
+       FIRST_VALUE(like_count) OVER (PARTITION BY id ORDER BY scrape_date DESC) AS like_count,
+       MAX(scrape_date)        OVER (PARTITION BY id)                           AS scrape_date
+FROM article_metrics
+WHERE channel_id = 12345
+```
+
+For several channels use `WHERE channel_id IN (1, 2, 3)`. If the counter alone is enough, `SELECT id, MAX(view_count) FROM article_metrics WHERE channel_id = 12345 GROUP BY id` is cheaper (view counts only grow, apart from rare YouTube corrections).
 
 ## Tables
 
