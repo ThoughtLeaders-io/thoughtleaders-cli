@@ -23,7 +23,7 @@ final = (A + B + C) / 3
 If either trigger fires, the verdict is forced to **FRAUD_LIKELY** and the
 score capped at 39 regardless of the mean:
 
-1. **Group C — non-organic audience:** Haiku classifier organic share
+1. **Group C — non-organic audience:** LLM classifier organic share
    **< 30%** (`group_c.hard_fail`), or an effectively dead comment section
    (<8-viewer-comment early exit). Fake comments are the most direct proof of
    a fake audience.

@@ -51,7 +51,7 @@ Benign (recorded in metrics, **not** penalized): removed ≤7d after publish,
 <5k views, non-sponsored (re-upload/mistake — e.g. a 713-view video pulled
 2 days after publish).
 
-## Group C — comment content (`comment_analyzer.py` + Haiku subagent)
+## Group C — comment content (`comment_analyzer.py` + classifier subagent)
 
 | code | trigger | why |
 |---|---|---|
@@ -66,7 +66,7 @@ Benign (recorded in metrics, **not** penalized): removed ≤7d after publish,
 | `C_no_creator_engagement` | creator hearts 0 comments | Creator ignores a section they know is fake. |
 | `C_commenter_churn` | <2% commenters appear on >1 video | No recurring fanbase; throwaway accounts. |
 | `C_time_clustered` | >50% of comments in first hour on a weeks-old video | Burst posting. |
-| `C_llm_not_organic` | Haiku classifier <50% organic | Catches subtle patterns rules miss. <30% ⇒ hard override → FRAUD_LIKELY. |
+| `C_llm_not_organic` | LLM classifier <50% organic | Catches subtle patterns rules miss. <30% ⇒ hard override → FRAUD_LIKELY. |
 
 ## Contributing new signals
 

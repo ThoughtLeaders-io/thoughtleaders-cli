@@ -7,7 +7,8 @@ description: >
   Use when you have a JSON array of per-channel snippet evidence and need a
   fast, cheap per-channel on_topic / mixed / off_topic verdict plus adjacent
   discovery terms. Returns strict JSON only.
-model: haiku
+model: sonnet
+effort: low
 tools: Read
 color: yellow
 ---

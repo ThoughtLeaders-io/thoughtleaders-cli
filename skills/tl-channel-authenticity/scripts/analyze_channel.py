@@ -8,7 +8,7 @@ Phase 1 (collect):
   telling the skill orchestrator where the batch is and what to do next.
 
   --> The skill (Claude) then sends the llm_batch to the
-      `youtube-comment-classifier` Haiku subagent and saves its JSON reply.
+      `youtube-comment-classifier` subagent and saves its JSON reply.
 
 Phase 2 (finalize):
     analyze_channel.py --finalize <state.json> <llm_classifications.json>

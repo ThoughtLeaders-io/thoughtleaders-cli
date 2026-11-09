@@ -5,7 +5,8 @@ description: >
   the tl-channel-authenticity skill's fake-engagement detection. Use when you
   have a JSON array of scraped comments and need a fast, cheap per-comment
   authenticity judgment. Returns strict JSON only.
-model: haiku
+model: sonnet
+effort: low
 tools: Read
 color: yellow
 ---

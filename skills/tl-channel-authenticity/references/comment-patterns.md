@@ -41,5 +41,5 @@ Real audiences on a tech channel reference specifics ("the 72→82 jump
 convinced me", "where is part 1 and 2a?"), ask operational questions, argue,
 and reply to each other. Padding is short, vague, off-language, emoji-heavy,
 or planted product mentions ("X was built specifically for…", "signed up just
-now with the launch code"). The Haiku classifier exists to catch the planted-
+now with the launch code"). The LLM classifier exists to catch the planted-
 promotional class that keyword rules miss.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch keyword-in-context evidence for candidate channels (for Haiku validation).
+"""Fetch keyword-in-context evidence for candidate channels (for classifier validation).
 
 For each channel, pulls its top-scoring matching videos and extracts the text
 window around each keyword occurrence, so a cheap classifier can judge whether

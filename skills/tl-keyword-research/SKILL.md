@@ -210,9 +210,9 @@ it happens, not just at the end.
 scripts (zero model tokens — tokenization variants, tier math, pruning, link
 building are all scripted). Judgment calls go to the **cheapest capable
 model** via the bundled agents: `keyword-relevance-validator` and
-`keyword-context-classifier` run on Haiku; only the web-reading
-`keyword-entity-resolver` runs on Sonnet. Don't do in your own context what a
-script or a Haiku batch can do.
+`keyword-context-classifier` run on a cheap pinned model (set in the agent
+definition); the web-reading `keyword-entity-resolver` pins its own model there too. Don't do in your own context what a
+script or a classifier batch can do.
 
 ### Stage 0 — Set up: intent, deliverable, operator, breadth, scope
 
@@ -597,7 +597,7 @@ on-topic uploads. Tell the user when one channel dominates and offer
    Extracts the text window around each keyword occurrence (transcript is
    caption XML — the script strips/unescapes it client-side).
 3. **Classify** with the **`keyword-context-classifier`** agent (Agent tool,
-   `subagent_type: keyword-context-classifier` — Haiku-cheap). Give each batch
+   `subagent_type: keyword-context-classifier` — cheap). Give each batch
    a `TOPIC:` line, usually a `NOT:` line, and the indexed evidence. Batch
    ≈50–100 channels, run batches in parallel. Returns per channel:
    `verdict on_topic|mixed|off_topic`, `confidence`, `evidence_quote`,
@@ -679,7 +679,7 @@ One `tl db es` query per candidate probe (~1–2 credits each); ~10 candidates �
 `--intensity` is 2–3 calls TOTAL for the whole tier table regardless of
 channel count (aggregations) — always run it before spending per-channel.
 `fetch_context.py` is 1 call per channel with priced fields — keep `--samples`
-small (default 4) and validate the top candidates, not the tail. Haiku validation is cheap by design;
+small (default 4) and validate the top candidates, not the tail. Classifier validation is cheap by design;
 batch and parallelize. `build_report.py` and `expand_entities.py` are free (no
 ES). The gated web step adds no credits — a few WebSearch/WebFetch calls inside
 the resolver's own context; it fires only on post-cutoff / renamed / trend /
