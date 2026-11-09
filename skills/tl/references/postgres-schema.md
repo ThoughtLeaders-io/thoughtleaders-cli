@@ -72,7 +72,7 @@ The profile table is tightly coupled with the brand table for media buyers, so m
 | 9 | REJECTED_AGENCY | Rejected by Agency | Closed-lost |
 | 10 | OPEN | Open | Active/in-negotiation deal; progress tracked via per-party approval fields |
 
-Live open deals are a single `OPEN` (10) status driven by three independent per-party approval fields: `brand_approval_status`, `channel_approval_status`, `agency_approval_status` (each `1 PENDING` / `2 APPROVED` / `3 FINISHED`, or NULL), plus `first_contacted_party` (`1 BRAND` / `2 CHANNEL`, or NULL).
+Live open deals are a single `OPEN` (10) status driven by three independent per-party approval fields: `brand_approval_status`, `channel_approval_status`, `agency_approval_status` (each `1 PENDING` / `2 APPROVED` / `3 FINISHED`, or NULL), plus `created_for_party` (`1 BRAND` / `2 CHANNEL`, or NULL), the side the deal was created on behalf of.
 
 A deal is **committed** when it is SOLD, or OPEN with `brand_approval_status` in (APPROVED, FINISHED). `weighted_price` is derived from the brand/channel approval combination on OPEN deals.
 

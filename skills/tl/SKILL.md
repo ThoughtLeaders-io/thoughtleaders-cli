@@ -365,7 +365,7 @@ The adlink is owned by the **brand's** advertiser profile (not the calling user'
 
 After a sponsorship exists, `tl sponsorships update <id> '<json>'` is the single CLI lever for moving it through the funnel. The interesting transitions for vetting are below — pass `publish_status` as a string label (the integer code also works but the label is clearer for both humans and the audit log).
 
-An `open` sponsorship in negotiation progresses through three independent per-party **approval** fields: `brand_approval_status`, `channel_approval_status`, and `agency_approval_status`, each accepting `pending` / `approved` / `finished` (or `null`). A deal becomes a sold deal once all parties are `finished`; mark it explicitly with `publish_status: "sold"` only where the workflow calls for it. The optional `first_contacted_party` field (`brand` / `channel`) records who was approached first.
+An `open` sponsorship in negotiation progresses through three independent per-party **approval** fields: `brand_approval_status`, `channel_approval_status`, and `agency_approval_status`, each accepting `pending` / `approved` / `finished` (or `null`). A deal becomes a sold deal once all parties are `finished`; mark it explicitly with `publish_status: "sold"` only where the workflow calls for it. The optional `created_for_party` field (`brand` / `channel`) records which party the proposal was created on behalf of.
 
 | Action | Command | What it means |
 |---|---|---|
