@@ -6,7 +6,8 @@ description: >
   tl-keyword-research skill's validation step. Use when you have a JSON array of
   sample docs (title/summary, or channel name/topic) and need a fast, cheap
   per-sample on-topic / off-topic verdict. Returns strict JSON only.
-model: haiku
+model: sonnet
+effort: low
 tools: Read
 color: cyan
 ---

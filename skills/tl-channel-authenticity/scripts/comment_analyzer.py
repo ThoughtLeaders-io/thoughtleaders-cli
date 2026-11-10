@@ -2,7 +2,7 @@
 """Group C — comment content analysis (the core of the skill).
 
 Scrapes >=10 latest longforms (+ highest-view + most-recently-sponsored),
-runs rule-based checks, and prepares a sampled batch for the Haiku
+runs rule-based checks, and prepares a sampled batch for the LLM
 `youtube-comment-classifier` subagent (the orchestrator performs the actual
 delegation via the Agent tool; this module just builds the batch and folds
 the verdict back in).
@@ -322,7 +322,7 @@ def apply_llm(result: dict, classifications) -> dict:
     result["metrics"]["llm_per_pass_organic_share"] = [round(s, 3) for s in per_pass]
     if share < 0.5:
         result["flags"].append(_f("C_llm_not_organic",
-            f"Haiku classifier ({len(passes)} pass(es), majority vote) judged "
+            f"LLM classifier ({len(passes)} pass(es), majority vote) judged "
             f"only {share*100:.0f}% of sampled comments organic "
             f"({dict(Counter(labels))})."))
         result["subscore"] = max(result["subscore"] - PENALTIES["C_llm_not_organic"][0], 0)

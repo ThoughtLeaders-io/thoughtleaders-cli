@@ -16,7 +16,7 @@ phrases subsume each candidate (an OR-union redundancy hint, NOT a drop), and
 prints a single JSON object with the survivors ranked by count.
 
 The samples feed `select_keywords.py` (which builds the validation batch for the
-`keyword-relevance-validator` Haiku sub-agent and applies its verdict) and the
+`keyword-relevance-validator` classifier sub-agent and applies its verdict) and the
 main agent's second-pass keyword discovery. We return `_source` fields rather
 than ES `highlight` because the `tl db es` CLI strips the `highlight` block.
 

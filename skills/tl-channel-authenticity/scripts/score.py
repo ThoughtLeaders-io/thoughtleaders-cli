@@ -4,7 +4,7 @@
 Three check groups (A engagement, B view-curves, C comments), each an
 independent 0-100 sub-score. Final = simple mean. No weighting matrix, no
 bonuses. One override: if Group C flags a hard fail (<30% organic from the
-Haiku pass, or an effectively dead comment section), the verdict is forced
+classifier pass, or an effectively dead comment section), the verdict is forced
 to "do not book" regardless of the mean.
 """
 from __future__ import annotations

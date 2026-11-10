@@ -4,8 +4,8 @@
 Two modes, both reading the `probe.py` output JSON on stdin:
 
   --emit-batch
-      Print the flat validation batch the `keyword-relevance-validator` Haiku
-      sub-agent expects: a JSON array of `{i, keyword, <content fields>}`, one
+      Print the flat validation batch the `keyword-relevance-validator` classifier sub-agent
+      expects: a JSON array of `{i, keyword, <content fields>}`, one
       item per sample, with a deterministic `i` ordering. Send this (with a
       leading `intent:` line) to the sub-agent via the Agent tool.
 

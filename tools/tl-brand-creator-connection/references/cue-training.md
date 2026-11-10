@@ -34,7 +34,7 @@ channel's improvement.
 3. **Label with bulk-classify**, never with per-window Claude agents:
 
        ~/.claude/bin/bulk-classify --in windows.jsonl --out labels.jsonl \
-         --prompt "$(cat label-prompt.txt)" --model deepseek/deepseek-v3.2 --concurrency 32
+         --prompt "$(cat label-prompt.txt)" --concurrency 32
 
    It is resumable — rerun the same command after any interruption. Shuffle the input
    first, so a partial run covers every channel evenly. Cost is about $0.01 per 100
