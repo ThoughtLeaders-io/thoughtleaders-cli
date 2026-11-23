@@ -55,7 +55,7 @@ ids; return paths, never content.
 | `sensitivity`, `sensitive` | the tier (`none`, `lifestyle`, `clinical`, `children`, `location`) and the derived boolean, true for `clinical`, `children`, `location`. Never set the boolean on its own |
 | `speaker` | `host`, `cohost` (the second named host), `shared` (a "we" line about the hosts' shared life), `either` (one of the named hosts on a video where only the hosts appear, not shown which) |
 | `speaker_name` | on a multi-host channel, the person: the host's or co-host's name, both names for `shared`, "<host> or <cohost>" for `either`. A fact filmed on a solo upload of the co-host is the co-host's (`speaker_relabelled` says so) |
-| `people` | the people and pets the quote names, `[{"name", "relation", "of"}]`; `of` is whose relation it is when the quote shows it is not the speaker's own ("Sam has Luna"); `<corpus>/people.json` rolls them up across the ledger |
+| `people` | the people and pets the quote names (on a web or social fact, the people its claim names), `[{"name", "relation", "of"}]`; `of` is whose relation it is when the quote shows it is not the speaker's own ("Sam has Luna"); `<corpus>/people.json` rolls them up across the ledger |
 | `superseded_by` | the newer fact's id when latest wins; the old fact stays as history |
 | `ended` | true when the merge shard found a claim stated as current is now over; never selected, on a page only as dated history in the map's About lines |
 | `staged`, `staged_only`, `probe` | the title read as a prank, challenge, stunt or skit; no non-staged upload confirms the claim (so `unconfirmed`, never selected, never on a page); what the search found |

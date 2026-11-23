@@ -639,6 +639,9 @@ _CAST_ROLE = {**{r: "family" for r in ("cousin", "sister", "brother", "mom", "mu
 # relations that never lapse: they carry no "as of" year
 _KIN = {"cousin", "sister", "brother", "mom", "mum", "mother", "dad", "father", "aunt", "uncle",
         "grandma", "grandpa", "grandmother", "grandfather", "son", "daughter"}
+# how far along a partner word is; the table keeps the furthest one
+_PARTNER_RANK = {"partner": 0, "girlfriend": 0, "boyfriend": 0, "fiance": 1, "fiancé": 1,
+                 "fiancee": 1, "fiancée": 1, "husband": 2, "wife": 2}
 _PARTNER_UP = re.compile(r"\b(fianc[eé]e?|engaged|wife|husband|married)\b", re.I)
 # owners that mean the creator themself
 _SELF_OWNERS = {"creator", "host", "self", "me", "her", "him", "them", "their", "own"}
@@ -751,6 +754,24 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
                               str(f.get("last_seen") or "")[:10])
             if rel:
                 row["said"] = max(row["said"], str(f.get("published") or "")[:10])
+                if str(f.get("provenance") or "transcript") != "transcript":
+                    row["web"] = True
+    # "Remy" in the creator's own words and "Remy Vale" on a web page are
+    # one person: a one-word name joins the only fuller name it starts
+    for short in [n for n in rows if " " not in n]:
+        full = [n for n in rows if " " in n and n.split()[0].lower() == short.lower()]
+        if len(full) == 1:
+            row, into = rows.pop(short), rows[full[0]]
+            into["rel"] += [r for r in row["rel"] if r not in into["rel"]]
+            into["last"] = max(into["last"], row["last"])
+            into["said"] = max(into["said"], row["said"])
+    # one partner word per person, the furthest along: a fiancé is no longer
+    # also the boyfriend, a husband no longer the fiancé
+    for row in rows.values():
+        ranks = [(_PARTNER_RANK.get(x.split(" (")[0].split()[-1].lower()), x) for x in row["rel"]] if row["rel"] else []
+        top = max((r for r, _ in ranks if r is not None), default=None)
+        if top is not None:
+            row["rel"] = [x for r, x in ranks if r is None or r == top]
     for name, row in rows.items():
         roles = {_CAST_ROLE.get(r.split(" (")[0].lower().split()[-1]) for r in row["rel"]} - {None}
         for day, role in (seen or {}).get(name.lower()) or []:
@@ -812,7 +833,7 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
         return ""
     trs = "".join(
         f'<tr><td>{html.escape(n)}</td><td>{html.escape(", ".join(r["rel"]))}</td>'
-        f'<td class="n">{html.escape(r["last"][:7])}</td></tr>'
+        f'<td class="n">{html.escape(r["last"][:7] or ("web" if r.get("web") else ""))}</td></tr>'
         for n, r in sorted(rows.items(), key=lambda kv: (kv[1]["last"], kv[0]), reverse=True))
     note = ('<p class="note">* From the videos\' titles, openings and descriptions, '
             'not from a quote.</p>') if any(r.get("from_cast") for r in rows.values()) else ""

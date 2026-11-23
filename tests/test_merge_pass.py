@@ -1750,3 +1750,18 @@ def test_a_person_an_open_fact_names_keeps_their_record_unless_a_children_fact_n
     claims = [f["claim"] for f in _facts(out).values()]
     assert any(c.startswith("partner is the boxer Remy") for c in claims)   # the partner's record stays open
     assert not any(c.startswith("Luna started") for c in claims)            # the child's is withheld
+
+
+def test_a_web_fact_keeps_the_people_it_names():
+    rec = _bio(provenance="web", claim="engaged to the boxer Remy Vale", domain="relationships",
+               people=[{"name": "Remy Vale", "relation": "fiancé"}, {"name": " ", "relation": "x"}, "bad"])
+    fact = merge_pass.identity_fact(rec, "f9")
+    assert fact["people"] == [{"name": "Remy Vale", "relation": "fiancé"}]
+    assert "people" not in merge_pass.identity_fact(_bio(provenance="web"), "f10")
+
+
+def test_the_web_lane_check_refuses_a_badly_shaped_people_list():
+    import identity_prompt
+    good = _bio(ref="s1", provenance="web", people=[{"name": "Remy Vale", "relation": None}])
+    bad = _bio(ref="s2", provenance="web", people="Remy Vale")
+    assert [b["ref"] for b in identity_prompt.validate_facts([good, bad])] == ["s2"]

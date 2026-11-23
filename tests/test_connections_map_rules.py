@@ -666,3 +666,24 @@ def test_months_ago_lands_on_a_real_day():
     assert br.months_ago("2028-02-29", 24) == "2026-02-28"
     assert br.months_ago("2026-03-31", 1) == "2026-02-28"
     assert br.months_ago("2026-11-16", 24) == "2024-11-16"
+
+
+def test_a_partner_a_confirmed_web_fact_names_is_in_the_people_table():
+    said = {"fact_id": "f1", "claim": "her boyfriend Remy came on holiday", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2021-06-01",
+            "people": [{"name": "Remy", "relation": "boyfriend"}]}
+    web = {"fact_id": "f2", "claim": "engaged to the boxer Remy Vale in 2023", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://en.wikipedia.org/wiki/X",
+           "seen_date": "2026-11-23", "people": [{"name": "Remy Vale", "relation": "fiancé"}]}
+    out = bh.people_section([said, web], {"f1": said, "f2": web})
+    assert "<td>Remy Vale</td><td>fiancé</td><td class=\"n\">2021-06</td>" in out   # one row, one partner word
+    assert "boyfriend" not in out and "<td>Remy</td>" not in out
+
+
+def test_a_web_only_partner_shows_web_and_an_unconfirmed_one_shows_nothing():
+    web = {"fact_id": "f1", "claim": "married to the chef Ada Quill", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://example.com/a",
+           "seen_date": "2026-11-23", "people": [{"name": "Ada Quill", "relation": "wife"}]}
+    assert "<td>Ada Quill</td><td>wife</td><td class=\"n\">web</td>" in bh.people_section([web], {"f1": web})
+    doubt = dict(web, confidence="unconfirmed")
+    assert bh.people_section([doubt], {"f1": doubt}) == ""

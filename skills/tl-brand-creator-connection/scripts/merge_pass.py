@@ -1145,6 +1145,13 @@ def identity_fact(rec: dict, fact_id: str) -> dict:
         fact["source_excerpt"] = str(rec["source_excerpt"]).strip()
     if str(rec.get("sensitivity_source") or "").strip():
         fact["sensitivity_source"] = str(rec["sensitivity_source"]).strip()
+    # the people the claim names, as the page says who they are, so the
+    # page's people table can show a partner a web page names
+    people = [{"name": str(p["name"]).strip(), "relation": (str(p["relation"]).strip() or None)
+               if p.get("relation") is not None else None}
+              for p in rec.get("people") or [] if isinstance(p, dict) and str(p.get("name") or "").strip()]
+    if people:
+        fact["people"] = people
     return fact
 
 

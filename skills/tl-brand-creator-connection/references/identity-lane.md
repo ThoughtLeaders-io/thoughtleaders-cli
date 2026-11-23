@@ -81,7 +81,8 @@ the one-line receipt. No prose, no code fence.
    {"ref": "s1", "provenance": "social", "claim": "runs a pottery studio in Lisbon",
     "domain": "work", "sensitivity": "none",
     "source_url": "https://instagram.com/martabuilds", "seen_date": "2026-09-17",
-    "source_excerpt": "Potter. Studio in Lisbon since 2019.", "corroborates": null}],
+    "source_excerpt": "Potter. Studio in Lisbon since 2019.", "corroborates": null,
+    "people": []}],
  "profile_bios": [
    {"platform": "instagram", "url": "https://instagram.com/martabuilds",
     "text": "Potter. Studio in Lisbon since 2019. New pieces every Friday.",
@@ -99,7 +100,11 @@ the one-line receipt. No prose, no code fence.
   words. `domain` and `sensitivity`: only the values the context block
   lists. `source_url`: the page; `seen_date`: today; `source_excerpt`: the
   passage that states it, as written. `corroborates` is always `null` here.
-  Never `quote`, `video`, `start` or `url`.
+  `people`: everyone the claim names, `[{"name": "<full name>", "relation":
+  "<who they are to the creator>"}]`, `[]` when it names nobody. The
+  relation is the page's own current word for them (partner, girlfriend,
+  boyfriend, fiancé, fiancée, husband, wife, sister, manager), `null` when
+  the page does not say. Never `quote`, `video`, `start` or `url`.
 - `profile_bios[]`: one per confirmed profile whose bio you read.
 - `read`, `unread`: every link opened, every listed link not opened.
 - `lookups`: page opens plus searches.

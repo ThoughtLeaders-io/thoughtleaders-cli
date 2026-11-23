@@ -177,6 +177,10 @@ def validate_facts(facts: list) -> list[dict]:
             why.append(f"sensitivity must be one of {sorted(merge_pass.SENSITIVITY)}")
         if rec.get("corroborates") is not None:
             why.append("corroborates is the merge shard's call; leave it null")
+        people = rec.get("people")
+        if people is not None and not (isinstance(people, list) and all(
+                isinstance(x, dict) and str(x.get("name") or "").strip() for x in people)):
+            why.append('people must be a list of {"name", "relation"} objects')
         if why:
             bad.append({"ref": label, "why": why})
     return bad
