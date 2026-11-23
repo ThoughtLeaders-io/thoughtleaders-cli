@@ -105,18 +105,28 @@ Exclude unconfirmed, ended, superseded, staged-only, hook-only, clinical, childr
 
 Respect stated no-gift policies and privacy boundaries. Do not use a spouse’s name, home location, or private milestone. A public professional interest may be the only suitable basis.
 
+**Size each idea to the budget.** With a budget, every idea aims at a landed total between 70% and 100% of it. Choose the three premises with that in mind: prefer a premise whose best-made version can reach the range, such as a craft or hobby with tools and gear, a collection, or their work setup. A premise whose fullest set stays well below the range, such as one book or one record, leads an idea only when fewer than three scalable premises pass every other check, and its budget line then says it could not scale. Before any supplier query, write each idea's target: the best-made version of it whose landed total falls in that range. Build it up on the idea's own premise, in this order:
+
+1. A finer version of the item: a better material, a better maker, a signed, limited or first edition.
+2. A fuller set: companion pieces on the same premise, given as one gift (both books of a series, the soundtrack with the game's art book, the journal cover with a pen and refills).
+3. Personalisation, then a gift box.
+
+Never reach the target with an item from another premise or a generic add-on. Never go over the limit. With no budget, skip this step; the ideas stay concepts.
+
 For each viable idea, verify a purchase and delivery route immediately.
 
+- Plan two supplier queries per idea. The first searches for the idea's target version, worded for the top of the range (handmade, premium, signed, limited edition, set) and the budget. The second is for a fallback or a missing set piece. Search for a cheaper version only when the target cannot be sourced.
 - Send all the candidate supplier URLs to `tl-cli:gift-page-reader` in one message, asking for the item name and code, every option with its values, personalisation fields with their character limits, whether a per-variant link exists, and the delivery, price and stock checks below.
 - Maximum: six supplier queries and twelve supplier pages that load, including revisits. A fetch that returns no page content does not count. On a block, try another seller of the same item.
-- Stop when sufficient feasible options are verified.
+- Stop when every idea is verified at its target, or its step-ups are exhausted.
 - Prefer a direct single-item maker or retailer with customization and a clear delivery route.
-- Compare alternatives only when they could materially improve personalization, price, or delivery feasibility.
+- Compare alternatives only when they could materially improve quality, personalization, price, or delivery feasibility.
 - Verify the exact variant, quantity-one availability, customization limits, proof approval, current price and currency, production, destination-specific transit, taxes/customs, packaging, and order route.
 - Do not treat platform-wide shipping statements as item-level eligibility.
 - Mark unknown shipping, customization charges, and taxes as unknown.
 - The budget is a hard limit on the landed total: item, personalisation, shipping, taxes and duty.
-- Use the budget for quality. For each idea, choose the best-made version that fits under the limit (a finer material, a better maker, a fuller set, a gift box), not the cheapest one that checks out, and say in one line what the price buys. An idea well under the limit is right only when no better-made version of it exists. A listing whose landed total is unknown remains a concept until a landed quote is available.
+- Use the budget for quality, not the cheapest version that checks out. Say in one line what the price buys. A listing whose landed total is unknown remains a concept until a landed quote is available.
+- Before writing an idea up, check its budget use: the landed total, or the item total plus "shipping unknown", as a share of the budget. Below 70%, take the next step-up from the target list and source it. When none can be sourced, the idea's budget line says so and names the step-up searches run and what each found. A blocked or failed search is not evidence that no better version exists: try another seller first.
 - Convert production and transit business-day ranges to an arrival estimate that accounts for weekends and holidays.
 - If availability, destination, or timing cannot be verified, drop the idea or mark it `Concept pending confirmation`.
 - Do not submit checkout or place an order.

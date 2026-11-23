@@ -18,6 +18,7 @@ For each of the three materially different ideas, provide:
 - Supplemental public evidence, separately labelled.
 - Creative inference, explicitly labelled as an inference rather than a creator preference.
 - Maker brief: material, dimensions or variant, exact text, artwork and placement, quantity, proof requirement, supplied assets, and rights requiring confirmation. Do not reproduce protected art or logos without permission.
+- Budget use: the landed total, or the item total plus "shipping unknown", against the budget, with the percentage. Then one line on what the price buys. Below 70%, name the step-ups searched and what each found.
 - Purchase route: supplier, exact URL, evidence for destination eligibility, quantity-one availability, customization, stock, price/currency, extras, production, transit, arrival range, buffer, taxes/customs, packaging, and source links for material claims.
 - Order card: the preloaded link, or the plain link marked "opens on the default". Then one row per choice, in the page's field order: the field as the page labels it, the chosen value, why (fact ID, inference from a fact ID, or neutral default), and whether that variant can be ordered. Give personalisation text exactly as it should be typed, with one alternative, only when the page has a personalisation field; otherwise write "Personalisation: none on this page". Never leave a choice for the buyer to decide when the page offers it; list a choice under buyer confirmations only when the page does not show it.
 - Buyer confirmations: ownership, preferences, art permissions, proof, landed quote, delivery address, PO-box compatibility, destination, and deadline.
@@ -35,6 +36,8 @@ State research limits, cost, and elapsed time separately from gift prices. Do no
 **Preselected:** A creator who says bedtime is their favourite thing and never wears colour can get a silk pillowcase whose order card already reads: colour Natural White (inference from the colour fact), size Standard, monogram their initials, thread white for a tonal finish, so the buyer only confirms the address.
 
 **Lasting favourite:** A creator who named a chocolate as a favourite three years ago, and never said otherwise, can get a hamper built around it, labelled "lasting favourite, last said 2022".
+
+**Budget:** With $400 and a creator who sketches in a paper notebook every day, a $30 notebook uses 8% of the budget. Step it up: a hand-bound leather sketchbook from a bookbinder, with a set of artist pencils and a monogram, lands near $350.
 
 **Public figure:** A creator who keeps returning to a favourite novelist can support a special edition of that author's book. It remains a concept until the edition, delivery, and landed cost are verified.
 
