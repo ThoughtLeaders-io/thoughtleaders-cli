@@ -1795,3 +1795,49 @@ def test_a_web_partner_record_a_shard_links_to_an_unnamed_boyfriend_line_confirm
     assert web[0]["confidence"] == "confirmed"
     assert web[0]["people"] == [{"name": "Remy Vale", "relation": "partner"}]
     assert facts["f001"]["confidence"] == "confirmed"
+
+
+def _staged_link(tmp_path, source_url):
+    lane = _bio(ref="s1", provenance="web", claim="lives in a store", domain="home",
+                source_url=source_url, corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster(
+        "lives in a store", domain="home", quote="I live in this store now",
+        video="stunt01", format_hint="staged",
+        title="How Long Can I Secretly Live In A Store?")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    web = next(f for f in facts.values() if f.get("provenance") == "web")
+    return facts["f001"], web, json.loads(proc.stdout)
+
+
+def test_an_outside_source_linked_to_a_staged_line_confirms_itself_but_not_the_bit(tmp_path):
+    line, web, summary = _staged_link(tmp_path, "https://example.com/profile")
+    assert line["staged_only"] and line["confidence"] == "unconfirmed"
+    assert web["confidence"] == "confirmed"
+    assert summary["web_staged_links"] == [[web["fact_id"], "f001"]]
+
+
+def test_a_youtube_page_linked_to_a_staged_line_confirms_nothing(tmp_path):
+    line, web, summary = _staged_link(tmp_path, "https://www.youtube.com/watch?v=other9")
+    assert line["confidence"] == "unconfirmed" and web["confidence"] == "unconfirmed"
+    assert summary["web_staged_refused"] == [[web["fact_id"], "f001"]]
+
+
+def test_an_article_naming_the_staged_upload_confirms_nothing(tmp_path):
+    _, web, summary = _staged_link(tmp_path, "https://news.example.com/stunt01-recap")
+    assert web["confidence"] == "unconfirmed"
+    assert summary["web_staged_refused"] == [[web["fact_id"], "f001"]]
+
+
+def test_a_web_link_to_an_ordinary_line_still_confirms_both(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="runs a pottery studio",
+                source_url="https://www.youtube.com/@example/about", corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster("runs a pottery studio")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert {f["confidence"] for f in _facts(out).values()} == {"confirmed"}

@@ -1226,6 +1226,18 @@ def corroboration_holds(target: dict | None) -> bool:
             and not target.get("retired_reason"))
 
 
+def web_repeats_upload(fact: dict, target: dict) -> bool:
+    """Whether a web or social record only repeats the upload it would
+    confirm: its page is on YouTube, or its address names one of the
+    target's videos."""
+    url = str(fact.get("source_url") or "")
+    if re.search(r"(^|[/.])(youtube\.com|youtu\.be)(/|$)", url, re.I):
+        return True
+    ids = {str(m).split(":")[0] for m in target.get("members") or []}
+    ids.add(str(target.get("video") or "").split(":")[-1])
+    return any(i and i in url for i in ids)
+
+
 def moment_key(fact: dict) -> tuple | None:
     """The passage a transcript fact quotes: video plus timestamp. None for a
     fact with no located moment (a bio or social record)."""
@@ -1749,6 +1761,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # each other to `confirmed`.
     corroborated: list[list[str]] = []
     bio_uncorroborated: list[list[str]] = []
+    web_staged_links: list[list[str]] = []
+    web_staged_refused: list[list[str]] = []
     for rec, fact_id in zip(identity, identity_ids):
         raw = rec.get("corroborates")
         if raw is None:
@@ -1762,6 +1776,18 @@ def cmd_expand(a: argparse.Namespace) -> int:
             # inside a staged premise (the confidence cap the transcript lane
             # already applied), and not one whose evidence was rejected.
             bio_uncorroborated.append([fact_id, target])
+            continue
+        if (fact_index[fact_id].get("provenance") in ("social", "web")
+                and fact_index[target].get("staged_only")):
+            # An outside source agreeing with a line said only inside a bit
+            # confirms the outside fact, never the bit: her staged line keeps
+            # its cap. A page that is the upload itself, or names it, only
+            # repeats the bit and confirms nothing.
+            if web_repeats_upload(fact_index[fact_id], fact_index[target]):
+                web_staged_refused.append([fact_id, target])
+            else:
+                fact_index[fact_id]["confidence"] = "confirmed"
+                web_staged_links.append([fact_id, target])
             continue
         fact_index[fact_id]["confidence"] = "confirmed"
         fact_index[target]["confidence"] = "confirmed"
@@ -2043,6 +2069,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "bio_expired": bio_expired,
         "bio_corroboration_refused": bio_uncorroborated,
         "bio_corroboration_lost": bio_corroboration_lost,
+        "web_staged_links": web_staged_links,
+        "web_staged_refused": web_staged_refused,
         "enum_aliases": enum_aliases,
         "corroborated": corroborated,
         "reconciled": reconciled,
