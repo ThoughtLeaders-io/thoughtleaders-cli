@@ -152,7 +152,7 @@ Every cluster in your shard appears exactly once in `decisions`.
  "facts": [{"ref": "s1", "provenance": "social", "claim": "runs a pottery studio",
             "domain": "work", "sensitivity": "none",
             "source_url": "https://instagram.com/…", "seen_date": "2026-09-02",
-            "corroborates": "c001"}]}
+            "corroborates": "c001", "people": []}]}
 ```
 
 - `selected`: clusters you kept at `confirmed` and not `ended`, from the
@@ -161,7 +161,7 @@ Every cluster in your shard appears exactly once in `decisions`.
   and fills to 40 by confidence, recency (`last_seen` inside 24 months) and
   recurrence, never with an unconfirmed fact.
 - `facts`: the identity lane's records when that lane ran, else `[]`. Each
-  keeps its `ref` and carries `sensitivity`. A `provenance: "bio"` record is
+  keeps its `ref` and `people` and carries `sensitivity`. A `provenance: "bio"` record is
   the creator's own About text, unverified until an upload says it: when a
   kept, non-staged transcript cluster in your shard states the same fact in
   the creator's voice, set `corroborates` to that cluster id; otherwise

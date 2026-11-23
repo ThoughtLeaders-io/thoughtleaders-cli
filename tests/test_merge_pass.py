@@ -1765,3 +1765,17 @@ def test_the_web_lane_check_refuses_a_badly_shaped_people_list():
     good = _bio(ref="s1", provenance="web", people=[{"name": "Remy Vale", "relation": None}])
     bad = _bio(ref="s2", provenance="web", people="Remy Vale")
     assert [b["ref"] for b in identity_prompt.validate_facts([good, bad])] == ["s2"]
+
+
+def test_a_shard_reply_without_people_keeps_the_lane_records_people(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="engaged to the boxer Remy Vale",
+                domain="relationships", people=[{"name": "Remy Vale", "relation": "fiancé"}])
+    (tmp_path / "identity-facts-s1.json").write_text(json.dumps([lane]))
+    reply = {k: v for k, v in lane.items() if k != "people"}
+    clustered = _write_clusters(tmp_path, [_cluster("moved to Lisbon")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[reply])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    web = [f for f in _facts(out).values() if f.get("provenance") == "web"]
+    assert web and web[0]["people"] == [{"name": "Remy Vale", "relation": "fiancé"}]

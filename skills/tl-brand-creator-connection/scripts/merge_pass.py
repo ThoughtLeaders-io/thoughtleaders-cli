@@ -1115,6 +1115,25 @@ def fail(violations: dict[str, list[str]]) -> int:
     return 3
 
 
+def fill_lane_people(identity: list[dict], corpus: pathlib.Path) -> None:
+    """A merge shard re-sends each lane record; one that leaves out `people`
+    takes it from the lane's own record (the ``identity-facts-sN.json`` slices
+    ``identity_prompt.py`` wrote beside the output), so a partner the web lane
+    named is not lost on the way. Only `people` is filled, never a claim."""
+    lane: dict[str, list] = {}
+    for path in sorted(corpus.glob("identity-facts-s*.json")):
+        try:
+            recs = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for r in recs if isinstance(recs, list) else []:
+            if isinstance(r, dict) and r.get("ref") and isinstance(r.get("people"), list):
+                lane.setdefault(str(r["ref"]), r["people"])
+    for rec in identity:
+        if "people" not in rec and str(rec.get("ref") or "") in lane:
+            rec["people"] = lane[str(rec["ref"])]
+
+
 def identity_fact(rec: dict, fact_id: str) -> dict:
     """A social/web fact: its source and seen-date stand where the transcript
     lane's quote, video and start would be. Alone it is never `confirmed`: only cross-lane corroboration lifts it, and that is applied once both
@@ -1442,6 +1461,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
     by_c = {r["c"]: r for r in records}
 
     decisions, agent_selected, identity, problems = load_decisions(a.decisions)
+    fill_lane_people(identity, out_path.parent)
     enum_aliases = alias_enums(decisions, identity)
     violations, folds, fallbacks = validate(records, clusters, decisions,
                                             existing_by_id, identity,
