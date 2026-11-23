@@ -662,9 +662,11 @@ def own_partner_word(claim: str) -> str | None:
             continue  # someone else's partner
         if word in ("engaged", "married"):
             after = claim[m.end():m.end() + 8]
+            if re.search(r"\b(?:get|getting|to)\s*$", before):
+                continue  # a wish or a plan: "pictured getting married", "wants to marry"
             if not (re.search(r"\b(?:got|is|are|was|now|just|recently|became|been)\s*$", before)
-                    or re.match(r"\s+(?:(?:to|in)\b|[A-Z])", after)):
-                continue  # "never wanted to get married", "married abroad"
+                    or re.match(r"\s+(?:to\b|[A-Z])", after)):
+                continue  # "married abroad", "married in the UK" with no one marrying
         return word
     return None
 def relation_owner(fact: dict, person: dict, hosts: dict | None) -> str | None:
@@ -750,6 +752,9 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
                 rel = f"{rel} ({str(f.get('published') or '')[:4]})"
             if rel and rel not in row["rel"]:
                 row["rel"].append(rel)
+            if rel:   # when each word was said: a web page's is the day it was read
+                day = str(f.get("last_seen") or f.get("published") or f.get("seen_date") or "")[:10]
+                row.setdefault("rel_day", {})[rel] = max(row.get("rel_day", {}).get(rel, ""), day)
             row["last"] = max(row["last"], str(f.get("published") or "")[:10],
                               str(f.get("last_seen") or "")[:10])
             if rel:
@@ -763,15 +768,10 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
         if len(full) == 1:
             row, into = rows.pop(short), rows[full[0]]
             into["rel"] += [r for r in row["rel"] if r not in into["rel"]]
+            for r, d in (row.get("rel_day") or {}).items():
+                into.setdefault("rel_day", {})[r] = max(into.get("rel_day", {}).get(r, ""), d)
             into["last"] = max(into["last"], row["last"])
             into["said"] = max(into["said"], row["said"])
-    # one partner word per person, the furthest along: a fiancé is no longer
-    # also the boyfriend, a husband no longer the fiancé
-    for row in rows.values():
-        ranks = [(_PARTNER_RANK.get(x.split(" (")[0].split()[-1].lower()), x) for x in row["rel"]] if row["rel"] else []
-        top = max((r for r, _ in ranks if r is not None), default=None)
-        if top is not None:
-            row["rel"] = [x for r, x in ranks if r is None or r == top]
     for name, row in rows.items():
         roles = {_CAST_ROLE.get(r.split(" (")[0].lower().split()[-1]) for r in row["rel"]} - {None}
         for day, role in (seen or {}).get(name.lower()) or []:
@@ -829,6 +829,15 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
             row["rel"] = list(dict.fromkeys(
                 (x.split(" (")[0].rsplit(" ", 1)[0] + " " + up if " " in x.split(" (")[0] else up)
                 if _rel_word(x) in ("girlfriend", "boyfriend") else x for x in row["rel"]))
+    # one partner word per person, the furthest along: a fiancé is no longer
+    # also the boyfriend, a husband no longer the fiancé
+    for row in rows.values():
+        ranks = [(_PARTNER_RANK.get(x.split(" (")[0].split()[-1].lower()), x) for x in row["rel"]] if row["rel"] else []
+        top = max((r for r, _ in ranks if r is not None), default=None)
+        if top is not None:
+            days = row.get("rel_day") or {}
+            last = max((x for r, x in ranks if r == top), key=lambda x: days.get(x, ""))   # the newest word
+            row["rel"] = [x for r, x in ranks if r is None or x == last]
     if not rows:
         return ""
     trs = "".join(

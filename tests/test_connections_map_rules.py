@@ -636,6 +636,9 @@ def test_partner_word_is_the_creators_own():
     assert b.own_partner_word("their dad's wife came along") is None
     assert b.own_partner_word("got engaged in the summer") == "engaged"
     assert b.own_partner_word("her fiancé planned the trip") == "fiancé"
+    assert b.own_partner_word("has always pictured getting married in the UK") is None
+    assert b.own_partner_word("wants to get engaged next year") is None
+    assert b.own_partner_word("got married in the UK last spring") == "married"
 
 
 def test_relation_word_alone_names_nobody():
@@ -687,3 +690,18 @@ def test_a_web_only_partner_shows_web_and_an_unconfirmed_one_shows_nothing():
     assert "<td>Ada Quill</td><td>wife</td><td class=\"n\">web</td>" in bh.people_section([web], {"f1": web})
     doubt = dict(web, confidence="unconfirmed")
     assert bh.people_section([doubt], {"f1": doubt}) == ""
+
+
+def test_a_wish_to_marry_never_makes_the_partner_a_husband():
+    said = {"fact_id": "f1", "claim": "has a boyfriend named Remy", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2021-07-09",
+            "people": [{"name": "Remy", "relation": "boyfriend"}]}
+    web = {"fact_id": "f2", "claim": "is with the boxer Remy Vale", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://example.com/a",
+           "seen_date": "2026-11-23", "people": [{"name": "Remy Vale", "relation": "partner"}]}
+    wish = {"fact_id": "f3", "claim": "has always pictured getting married in the UK", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2023-04-26", "people": []}
+    facts = [said, web, wish]
+    out = bh.people_section(facts, {f["fact_id"]: f for f in facts})
+    assert "<td>Remy Vale</td><td>partner</td><td class=\"n\">2021-07</td>" in out
+    assert "husband" not in out and "boyfriend" not in out
