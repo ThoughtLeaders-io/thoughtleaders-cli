@@ -1719,3 +1719,34 @@ def test_a_partner_the_children_fact_names_does_not_pass_the_tier_on(tmp_path):
     claims = [f["claim"] for f in _facts(out).values()]
     assert not any(c.startswith("Luna started") for c in claims)   # the child's record is withheld
     assert any(c.startswith("met Sam Reed") for c in claims)       # the partner's is not
+
+
+def test_a_person_an_open_fact_names_keeps_their_record_unless_a_children_fact_names_them(tmp_path):
+    """A health fact names her partner and her daughter, with no relation for
+    either. An open fact also names the partner, so web records about him keep
+    their own tier. The daughter is open in one fact too, but a children fact
+    names her, so her record is withheld."""
+    health = _cluster("is pregnant and feels close to Remy and Luna", tier="clinical", domain="family",
+                      video="v1", start=10, quote="i'm pregnant and so close to remy and luna")
+    health["verdict"]["people"] = [{"name": "Remy", "relation": None}, {"name": "Luna", "relation": None}]
+    safety = _cluster("says house tours are a no-go for her and Remy's safety", domain="other",
+                      video="v2", start=50, quote="no house tours for me and remy's safety")
+    safety["verdict"]["people"] = [{"name": "Remy", "relation": None}]
+    arms = _cluster("lost love for her arms since having Luna", domain="habits", video="v3", start=90,
+                    quote="i lost love for my arms since having luna")
+    arms["verdict"]["people"] = [{"name": "Luna", "relation": None}]
+    birth = _cluster("gave birth to Luna", tier="children", domain="family", video="v4", start=130,
+                     quote="i gave birth to luna")
+    birth["verdict"]["people"] = [{"name": "Luna", "relation": None}]
+    clustered = _write_clusters(tmp_path, [health, safety, arms, birth])
+    dpath = _envelope(tmp_path, {f"c00{i}": {"action": "keep"} for i in range(1, 5)},
+                      facts=[_bio(claim="partner is the boxer Remy Vale, engaged in 2023",
+                                  domain="relationships", sensitivity="none"),
+                             _bio(ref="b2", claim="Luna started nursery", domain="family",
+                                  sensitivity="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    claims = [f["claim"] for f in _facts(out).values()]
+    assert any(c.startswith("partner is the boxer Remy") for c in claims)   # the partner's record stays open
+    assert not any(c.startswith("Luna started") for c in claims)            # the child's is withheld

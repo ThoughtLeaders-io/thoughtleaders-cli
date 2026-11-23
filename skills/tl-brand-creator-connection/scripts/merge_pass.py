@@ -1751,19 +1751,28 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # facts and `none` on the bio-page record that names them, and the two
     # records are one person.
     tier_rank = {"none": 0, "lifestyle": 1, "clinical": 2, "children": 3, "location": 3}
-    # Only the person a withheld fact is about passes the tier on. A partner
-    # the children fact also names ("a daughter with Sam") is someone an open
-    # fact names with an adult relation (boyfriend, husband, friend), so a
-    # record about that partner keeps its own tier.
+    # Only the person a withheld fact is about passes the tier on. Someone an
+    # open transcript fact also names ("a daughter with Sam", "her and Remy's
+    # safety") is open, so a record about them keeps its own tier, whether or
+    # not the fact says who they are. A child never is: a name any fact gives a
+    # child relation, or a `children` fact names without an adult relation
+    # (the boyfriend in "a daughter with Sam" is an adult), stays withheld.
     child_rel = re.compile(r"\b(son|daughter|child|kid|baby|newborn|toddler|stepson|stepdaughter)\b", re.I)
+    child_names: set[str] = set()
     open_names: set[str] = set()
     for f in facts:
-        if f.get("provenance") == "transcript" and f.get("sensitivity") not in WITHHELD:
-            for p in f.get("people") or []:
-                rel = str(p.get("relation") or "")
-                first = _first_name_token(str(p.get("name") or ""))
-                if first and rel and not child_rel.search(rel):
-                    open_names.add(first)
+        if f.get("provenance") != "transcript":
+            continue
+        for p in f.get("people") or []:
+            first = _first_name_token(str(p.get("name") or ""))
+            if not first:
+                continue
+            rel = str(p.get("relation") or "")
+            if child_rel.search(rel) or (f.get("sensitivity") == "children" and not rel):
+                child_names.add(first)
+            elif f.get("sensitivity") not in WITHHELD:
+                open_names.add(first)
+    open_names -= child_names
     withheld_names: dict[str, str] = {}
     for f in facts:
         if f.get("provenance") == "transcript" and f.get("sensitivity") in WITHHELD:
