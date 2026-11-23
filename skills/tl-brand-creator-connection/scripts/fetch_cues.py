@@ -51,6 +51,8 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import gzip
+import hashlib
+import os
 import html
 import json
 import math
@@ -68,6 +70,10 @@ from channel_context import TITLE_HINTS, channel_row  # noqa: E402  sibling scri
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_PHRASES = HERE.parent / "references" / "cue-phrases.txt"
+DEFAULT_INTEREST_PHRASES = HERE.parent / "references" / "interest-cues.txt"
+INTEREST_SEATS = 50           # reserved seats for interest, hobby, style, pet, milestone and family passages
+INTEREST_RECENT_DAYS = 730    # an interest said in the last two years ranks ahead of an old one
+INTEREST_RECENT_BONUS = 1.5
 SPONSOR_RX = re.compile(
     r"\b(sponsored by|sponsor(?:ing)? (?:of )?(?:this|today'?s) (?:video|episode)|"
     r"use (?:my |the )?code|promo code|link in (?:the|my) description|"
@@ -234,6 +240,33 @@ def load_phrases(path: pathlib.Path) -> tuple[list[str], set[str], dict[str, flo
         if g not in out:
             out.append(g)
     return out, recurring, weights
+
+
+def from_main_sections(path: pathlib.Path) -> list[str]:
+    """The main-list sections an interest file borrows: its ``@from-main
+    <section>`` lines, lower-cased."""
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.lower().startswith("@from-main "):
+            out.append(line[len("@from-main "):].strip().lower())
+    return out
+
+
+def main_section_phrases(path: pathlib.Path, section: str) -> list[str]:
+    """The phrases under one ``# <section>`` header of the main cue list,
+    lower-cased, without their weights or the recurring-bit mark."""
+    out, current = [], ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            current = line[1:].strip().lower()
+            continue
+        if current.startswith(section):
+            out.append(line.split("|")[0].strip().lstrip("~").lower())
+    return out
 
 
 def phrase_weight(phrase: str, weights: dict[str, float] | None) -> float:
@@ -522,8 +555,11 @@ IDS_CHUNK = 1000
 ES_CONCURRENCY = 4    # parallel id-chunk fetches for the sponsor-span lookup
 
 
-def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
-    """One id-chunk's spans. Any query failure propagates to the caller."""
+def sponsor_chunk(chunk: list[str], sponsors: dict[str, set[str]] | None = None
+                   ) -> dict[str, list[tuple[float, float]]]:
+    """One id-chunk's spans. Any query failure propagates to the caller.
+    When ``sponsors`` is given, it also collects, per video, the ids of every
+    brand that sponsored it (any field)."""
     rows = tl_data.db_es({
         "size": len(chunk),
         "query": {"ids": {"values": chunk}},
@@ -535,7 +571,11 @@ def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
         if isinstance(mentions, dict):
             mentions = [mentions]
         for m in mentions:
-            if m.get("type") != "sponsored" or m.get("field") != "transcript":
+            if m.get("type") != "sponsored":
+                continue
+            if sponsors is not None and m.get("id", m.get("brand_id")) is not None:
+                sponsors.setdefault(str(row.get("id")), set()).add(str(m.get("id", m.get("brand_id"))))
+            if m.get("field") != "transcript":
                 continue
             start, end = m.get("start_ts"), m.get("end_ts")
             if not isinstance(start, (int, float)):
@@ -554,6 +594,15 @@ def _sponsor_chunk(chunk: list[str]) -> dict[str, list[tuple[float, float]]]:
 
 
 def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """Cached per video for the run (see ``cached``); the lookup is below."""
+    def live(missing: list[str]) -> dict:
+        res = _sponsor_segments_live(missing)
+        return {r: res.get(r, []) for r in missing}
+    found = cached_per_ref("sponsor-spans", refs, live)
+    return {r: [tuple(x) for x in v] for r, v in found.items() if v}
+
+
+def _sponsor_segments_live(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     """Spoken sponsored segments per video, batched over the id list.
 
     Every mention is re-checked individually: only ``type == "sponsored"`` AND
@@ -570,7 +619,7 @@ def sponsor_segments(refs: list[str]) -> dict[str, list[tuple[float, float]]]:
     out: dict[str, list[tuple[float, float]]] = defaultdict(list)
     with cf.ThreadPoolExecutor(max_workers=min(ES_CONCURRENCY,
                                             len(chunks))) as pool:
-        for part in pool.map(_sponsor_chunk, chunks):
+        for part in pool.map(sponsor_chunk, chunks):
             for ref, spans in part.items():
                 out[ref].extend(spans)
     return dict(out)
@@ -768,6 +817,11 @@ def _transcript_chunk(chunk: list[str]) -> dict[str, list[tuple[float, str]]]:
 
 def fetch_transcripts(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
     """Timed cues per video for the kept windows' videos. A failure raises."""
+    found = cached_per_ref("transcripts", refs, _fetch_transcripts_live)
+    return {r: [tuple(c) for c in cues] for r, cues in found.items()}
+
+
+def _fetch_transcripts_live(refs: list[str]) -> dict[str, list[tuple[float, str]]]:
     chunks = [refs[i:i + TRANSCRIPT_CHUNK] for i in range(0, len(refs), TRANSCRIPT_CHUNK)]
     if not chunks:
         return {}
@@ -789,6 +843,10 @@ def _summary_chunk(chunk: list[str]) -> dict[str, str]:
 
 def fetch_summaries(refs: list[str]) -> dict[str, str]:
     """The creator-written description per video. A failure raises."""
+    return cached_per_ref("summaries", refs, _fetch_summaries_live)
+
+
+def _fetch_summaries_live(refs: list[str]) -> dict[str, str]:
     chunks = [refs[i:i + SUMMARY_CHUNK] for i in range(0, len(refs), SUMMARY_CHUNK)]
     out: dict[str, str] = {}
     for chunk in chunks:
@@ -1021,19 +1079,65 @@ def select_windows(windows: list[dict], limit: int, *, per_video: dict[str, int]
     return kept
 
 
+
+# --------------------------------------------------------------------------- #
+# One download per run. start_run.py may call this script twice in one build
+# (the second time with the host's name it found on camera). The name only
+# relabels passages already downloaded; it never changes a query. So when
+# TL_FETCH_CACHE_DIR is set (start_run.py sets it for the life of one call),
+# every lookup keeps its answer there and the second call reads it back
+# instead of paying for the same search again.
+# --------------------------------------------------------------------------- #
+def _cache_file(name: str, key) -> pathlib.Path | None:
+    root = os.environ.get("TL_FETCH_CACHE_DIR")
+    if not root:
+        return None
+    digest = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    return pathlib.Path(root) / f"{name}-{digest}.json"
+
+
+def cached(name: str, key, compute):
+    """``compute()``'s answer, kept under TL_FETCH_CACHE_DIR when it is set."""
+    path = _cache_file(name, key)
+    if path and path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    value = compute()
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    return value
+
+
+def cached_per_ref(name: str, refs: list[str], compute) -> dict:
+    """Like ``cached`` for lookups keyed by video: only the videos not yet
+    looked up in this run are fetched."""
+    path = _cache_file(name, "per-ref")
+    have: dict = {}
+    if path and path.exists():
+        have = json.loads(path.read_text(encoding="utf-8"))
+    missing = [r for r in refs if r not in have]
+    if missing:
+        fresh = compute(missing)
+        for r in missing:
+            have[r] = fresh.get(r)
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(have, ensure_ascii=False), encoding="utf-8")
+    return {r: have[r] for r in refs if have.get(r) is not None}
+
 DEFAULT_AGENT_CAP = 20      # extractor agents assumed to run at once: the standard on every host
 MIN_BATCH_SIZE = 5          # below this the per-agent overhead outweighs the parallelism
 MAX_BATCH_SIZE = 15         # above this an extractor's reply hits its output limit and is cut off
 
 
-def derived_batch_size(windows: int, agent_cap: int) -> int:
-    """The batch size that spreads the kept windows over every agent the host
-    allows in one wave: ceil(windows / cap), never below MIN_BATCH_SIZE and
-    never above MAX_BATCH_SIZE (a 19-window batch cut 4 of 16 extractors off
-    at their output limit; a second wave is cheaper than a re-ask)."""
+def derived_batch_size(windows: int) -> int:
+    """Windows per extractor. Each extractor re-reads the whole rubric before
+    its windows, so every one is filled to MAX_BATCH_SIZE (above it a reply is
+    cut off at the output limit): the same windows, fewer rubric reads. A run
+    with more windows than cap x maximum runs a second wave."""
     if windows <= 0:
         return MIN_BATCH_SIZE
-    return min(MAX_BATCH_SIZE, max(MIN_BATCH_SIZE, -(-windows // max(1, agent_cap))))
+    return min(MAX_BATCH_SIZE, max(MIN_BATCH_SIZE, windows))
 
 
 def main() -> int:
@@ -1044,6 +1148,10 @@ def main() -> int:
                          "so the run writes <out>/<channel>/. Passing a path that already "
                          "ends in the channel id nests it twice")
     ap.add_argument("--phrases", default=str(DEFAULT_PHRASES))
+    ap.add_argument("--interest-phrases", default=str(DEFAULT_INTEREST_PHRASES),
+                    help="interest, hobby, style and pet cues for the reserved seats")
+    ap.add_argument("--interest-seats", type=int, default=INTEREST_SEATS,
+                    help="seats reserved for interest passages after the main ranking; 0 turns them off")
     ap.add_argument("--host-names", default="",
                     help="comma-separated person-name aliases for the host, e.g. "
                          "'Kate,Kate Hayes'. Used only for speaker attribution; "
@@ -1110,23 +1218,45 @@ def main() -> int:
         ap.error(str(exc))
 
     phrases, recurring, weights = load_phrases(pathlib.Path(a.phrases))
+    # Interest cues join the search on the default cue list only (never a
+    # corroboration round's own list). A phrase new to the main list ranks
+    # there as weak framing; its own weight ranks the reserved interest seats.
+    interest_weights: dict[str, float] = {}
+    if (a.interest_seats > 0 and a.interest_phrases
+            and pathlib.Path(a.phrases).resolve() == DEFAULT_PHRASES.resolve()
+            and pathlib.Path(a.interest_phrases).exists()):
+        i_phrases, _, i_w = load_phrases(pathlib.Path(a.interest_phrases))
+        for ph in i_phrases:
+            if ph.startswith("@"):
+                continue  # a directive, not a phrase
+            interest_weights[ph.lower()] = i_w.get(ph.lower(), PHRASE_WEIGHT_DEFAULT)
+            if ph.lower() not in {x.lower() for x in phrases}:
+                phrases.append(ph)
+                weights[ph.lower()] = WEAK_WEIGHT
+        # "@from-main <section>": that section of the main cue list also counts
+        # for the reserved seats, at its main weights, without being repeated
+        for section in from_main_sections(pathlib.Path(a.interest_phrases)):
+            for ph in main_section_phrases(DEFAULT_PHRASES, section):
+                interest_weights.setdefault(ph, phrase_weight(ph, weights))
     host_names = [t.strip() for t in a.host_names.split(",") if t.strip()]
     host_lc = {t.lower() for t in host_names}
     # Host names are read off the window text (host_naming), never queried:
     # a fragment cut around a bare name carried no cue and no disclosure
     all_phrases = list(phrases)
 
-    docs = fetch_all_years(a.channel, all_phrases, a, since, weights)
+    docs = cached("years", [a.channel, all_phrases, since, weights, a.page_size,
+                                 a.fragment_size, a.fragments_per_doc],
+                  lambda: fetch_all_years(a.channel, all_phrases, a, since, weights))
     queries_note = f"{len(YEARS)} year buckets"
     try:
-        videos_with_transcript, langs = census(a.channel)
+        videos_with_transcript, langs = cached("census", [a.channel], lambda: list(census(a.channel)))
     except tl_data.IncompleteDataError:
         raise
     except Exception as exc:  # census is reporting, never a gate
         videos_with_transcript, langs = 0, {}
         print(f"census failed: {exc}", file=sys.stderr)
     try:
-        latest_video_date = latest_upload(a.channel)
+        latest_video_date = cached("latest", [a.channel], lambda: latest_upload(a.channel))
     except tl_data.IncompleteDataError:
         raise
     except Exception as exc:  # reporting, never a gate
@@ -1144,7 +1274,7 @@ def main() -> int:
     # non-English track is excluded here and counted, never sampled. A
     # non-English channel keeps the sampling: there the source language IS
     # the creator's voice.
-    chan_lang = channel_language(a.channel)
+    chan_lang = cached("language", [a.channel], lambda: channel_language(a.channel))
     dubbed_excluded: dict[str, int] = {}
     if non_en_total and chan_lang and is_english(chan_lang):
         dubbed_excluded = {k: n for k, n in langs.items() if not is_english(k)}
@@ -1226,6 +1356,37 @@ def main() -> int:
                           per_video_cap=a.per_video_cap, phrase_cap=phrase_cap,
                           min_score=a.min_score, min_count=a.min_windows,
                           dupes=dupes, stats=selection)
+    # The reserved interest seats: filled after the main ranking, from the
+    # passages it left, ranked by the interest cues' own weights plus density,
+    # recent ones first. They never displace a main-ranking window.
+    interest_kept: list[dict] = []
+    if interest_weights and a.interest_seats > 0:
+        kept_ids = {id(w) for w in kept}
+        today = date.today()
+        pool = []
+        for w in windows:
+            if id(w) in kept_ids or w.get("duplicate_of"):
+                continue
+            hits = [c for c in (w.get("_specific") or []) if c.lower() in interest_weights]
+            if not hits:
+                continue
+            try:
+                age = (today - date.fromisoformat(w["published"][:10])).days
+            except ValueError:
+                age = 10 ** 6
+            w["_main_rank"] = w["rank_score"]
+            w["rank_score"] = round(w["rank_score"] - min(sum(phrase_weight(h, weights) for h in w["_specific"]), RANK_CAP)
+                                    + min(sum(interest_weights[h.lower()] for h in hits), RANK_CAP)
+                                    + (INTEREST_RECENT_BONUS if age <= INTEREST_RECENT_DAYS else 0), 2)
+            pool.append(w)
+        interest_kept = select_windows(pool, a.interest_seats, per_video=per_video,
+                                       per_phrase=per_phrase, per_video_cap=a.per_video_cap,
+                                       phrase_cap=phrase_cap, dupes=dupes)
+        for w in pool:
+            w["rank_score"] = w.pop("_main_rank")
+        for w in interest_kept:
+            w["retrieval"] = "interest"
+        kept.extend(interest_kept)
     phrase_kept = len(kept)
     phrase_videos = len(corpus)
 
@@ -1245,7 +1406,9 @@ def main() -> int:
     stopped_on_floor = (a.generic_floor is None
                         and selection.get("stop_reason") == "score_floor")
     if floor > 0 and len(kept) < floor and not stopped_on_floor:
-        gdocs = fetch_all_years(a.channel, GENERIC_TERMS, a, since)
+        gdocs = cached("generic", [a.channel, list(GENERIC_TERMS), since, a.page_size,
+                                    a.fragment_size, a.fragments_per_doc],
+                       lambda: fetch_all_years(a.channel, GENERIC_TERMS, a, since))
         if dubbed_excluded:
             # The fallback's bare "I" can match words in an auto-dubbed track
             # even when no English cue phrase did. Apply the same exclusion to
@@ -1354,7 +1517,7 @@ def main() -> int:
     # 20 and the socials lane running, the 20th extractor was rejected and
     # relaunched a wave later. Size the batches against what is actually free.
     usable_cap = max(1, agent_cap - max(0, a.reserve))
-    batch_size = a.batch_size or derived_batch_size(len(kept), usable_cap)
+    batch_size = a.batch_size or derived_batch_size(len(kept))
     batches = []
     for i in range(0, len(kept), batch_size):
         p = bdir / f"batch-{i // batch_size:03d}.json"
@@ -1371,7 +1534,8 @@ def main() -> int:
         "non_english_videos_sampled": len(non_en_docs),
         "videos_matched": len(corpus), "passages": len(windows),
         "windows_batched": len(kept), "videos_in_batches": len(per_video),
-        "phrase_windows_kept": phrase_kept, "generic_fallback": fallback,
+        "phrase_windows_kept": phrase_kept, "interest_windows_kept": len(interest_kept),
+        "generic_fallback": fallback,
         "selection": {"min_score": a.min_score, "min_windows": a.min_windows,
                       "max_windows": a.max_windows,
                       "stop_reason": selection.get("stop_reason"),

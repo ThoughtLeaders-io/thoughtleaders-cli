@@ -1695,3 +1695,27 @@ def test_people_rollup_lists_the_split_names_not_the_run_together_one(tmp_path):
     split = [f for f in _facts(out).values() if f.get("two_names")]
     assert split and split[0]["confidence"] == "unconfirmed"
     assert sorted(p["name"] for p in split[0]["people"]) == ["Juno", "Pell"]
+
+
+def test_a_partner_the_children_fact_names_does_not_pass_the_tier_on(tmp_path):
+    """"a daughter with Sam" is about the daughter: a web record about Sam,
+    whom an open fact names as the boyfriend, keeps its own tier."""
+    kid = _cluster("has a daughter, Luna Reed, with Sam", tier="children", domain="family",
+                   video="v1", start=10)
+    kid["verdict"]["people"] = [{"name": "Luna Reed", "relation": None},
+                                {"name": "Sam", "relation": "boyfriend"}]
+    bf = _cluster("has a boyfriend, Sam", domain="relationships", video="v2", start=50,
+                  quote="my boyfriend sam is coming with me")
+    bf["verdict"]["people"] = [{"name": "Sam", "relation": "boyfriend"}]
+    clustered = _write_clusters(tmp_path, [kid, bf])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}, "c002": {"action": "keep"}},
+                      facts=[_bio(claim="met Sam Reed on a TV show in July 2019",
+                                  domain="relationships", sensitivity="none"),
+                             _bio(ref="b2", claim="Luna started nursery", domain="family",
+                                  sensitivity="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    claims = [f["claim"] for f in _facts(out).values()]
+    assert not any(c.startswith("Luna started") for c in claims)   # the child's record is withheld
+    assert any(c.startswith("met Sam Reed") for c in claims)       # the partner's is not

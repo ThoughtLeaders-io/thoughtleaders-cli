@@ -88,6 +88,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import tier_hint  # sibling module  # noqa: E402
 from store_io import read_ledger  # sibling module  # noqa: E402
 from verify_quotes import locate  # sibling module; the one quote matcher  # noqa: E402
+from merge_pass import names_nobody  # sibling module; the one relation-word list  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "_shared"))
 import tl_data  # noqa: E402
 
@@ -112,6 +113,7 @@ BADGES = {
     "unconfirmed": "unconfirmed",
     "co-host": "confirmed",
     "shared": "confirmed",
+    "one of the hosts": "confirmed",
     "lifestyle": "lifestyle",
     "clinical": "clinical",
     "children": "withheld",
@@ -604,7 +606,7 @@ def confidence_badge(fact: dict) -> str:
 def speaker_badge(fact: dict) -> str:
     """Who said it on a multi-host channel: the second host or both."""
     who = str(fact.get("speaker") or "host")
-    return "" if who == "host" else (badge("co-host" if who == "cohost" else "shared") or "")
+    return "" if who == "host" else (badge({"cohost": "co-host", "either": "one of the hosts"}.get(who, "shared")) or "")
 
 
 RECENT_MONTHS = 24
@@ -638,11 +640,80 @@ _CAST_ROLE = {**{r: "family" for r in ("cousin", "sister", "brother", "mom", "mu
 _KIN = {"cousin", "sister", "brother", "mom", "mum", "mother", "dad", "father", "aunt", "uncle",
         "grandma", "grandpa", "grandmother", "grandfather", "son", "daughter"}
 _PARTNER_UP = re.compile(r"\b(fianc[eé]e?|engaged|wife|husband|married)\b", re.I)
+# owners that mean the creator themself
+_SELF_OWNERS = {"creator", "host", "self", "me", "her", "him", "them", "their", "own"}
+
+
+def own_partner_word(claim: str) -> str | None:
+    """The partner word when the claim says the creator's own partner moved
+    on ("got engaged", "her fiancé", "his wife", "Sam's husband", "married
+    Alex"), whatever the creator's gender, never a relative's or friend's
+    partner ("her dad's wife", "his brother's fiancée") or a wish ("never
+    wanted to get married")."""
+    claim = str(claim or "")
+    for m in _PARTNER_UP.finditer(claim):
+        word = m.group(1).lower()
+        before = claim[max(0, m.start() - 40):m.start()].lower()
+        if re.search(r"\b(?:dad|mum|mom|mother|father|brother|sister|friend|cousin|uncle|aunt|"
+                     r"grand\w*|son|daughter)['’]s\s*$", before):
+            continue  # someone else's partner
+        if word in ("engaged", "married"):
+            after = claim[m.end():m.end() + 8]
+            if not (re.search(r"\b(?:got|is|are|was|now|just|recently|became|been)\s*$", before)
+                    or re.match(r"\s+(?:(?:to|in)\b|[A-Z])", after)):
+                continue  # "never wanted to get married", "married abroad"
+        return word
+    return None
+def relation_owner(fact: dict, person: dict, hosts: dict | None) -> str | None:
+    """Whose relation a person is on a multi-host channel: the quote's own
+    ``of`` when the reader gave one, else the host the claim names as having
+    them ("Sam has Luna and Pip"), else the fact's speaker. None on a
+    single-host channel, where every relation is the creator's own."""
+    names = [str(v) for v in (hosts or {}).values() if v]
+    of = str(person.get("of") or "").strip()
+    if len(names) < 2:
+        # a relative's relative ("dad's wife", "mom's partner") keeps its owner
+        # even on a single-host channel; the creator's own relations carry none
+        if of and of.lower() not in _SELF_OWNERS | {n.lower() for n in names}:
+            return of
+        return None
+    if of:
+        return of
+    claim = str(fact.get("claim") or "")
+    target = str(person.get("name") or "")
+    for host in names:
+        m = re.search(rf"\b{re.escape(host)}\s+(?:has|have|had|owns)\b", claim, re.I)
+        if m and target and claim.lower().find(target.lower(), m.end()) >= 0:
+            return host
+    who = str(fact.get("speaker") or "host")
+    if who in ("host", "cohost"):
+        return str(fact.get("speaker_name") or (hosts or {}).get(who) or "") or None
+    if who == "shared":
+        return "their"
+    return "one host's" if who == "either" else None
+
+
+# kin the hosts share when they are siblings themselves:
+# a sister of one is a sister of the other
+_SHARED_KIN = {"sister", "brother", "sibling", "mom", "mum", "mother", "dad", "father",
+               "grandma", "grandpa", "grandmother", "grandfather", "aunt", "uncle", "cousin",
+               "little sister", "little brother", "older sister", "older brother"}
+
+
+def hosts_are_siblings(cast_rel: dict[str, dict] | None) -> bool:
+    """True when the cast sheets show the hosts sharing a parent or a sibling
+    ("our mom, Rosa", "our little sister"): then one host's sister or mom is
+    both hosts'."""
+    for c in (cast_rel or {}).values():
+        if str(c.get("of") or "").lower() == "both" and str(c.get("rel") or "").lower() in _SHARED_KIN:
+            return True
+    return False
 
 
 def people_section(facts: list[dict] | None, index: dict[str, dict],
                    heading: str = "People in their videos",
-                   seen: dict[str, str] | None = None) -> str:
+                   seen: dict[str, str] | None = None, hosts: dict | None = None,
+                   cast_rel: dict[str, dict] | None = None) -> str:
     """The people the creator's quotes name, from facts the page may use:
     one row per exact spelling with its relation words, and the newest upload
     that shows them: the fact's own upload, a later one the probe found saying
@@ -657,11 +728,21 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
             continue
         for p in f.get("people") or []:
             name = str(p.get("name") or "").strip()
-            if not name:
-                continue
+            if not name or names_nobody(name, p.get("relation")):
+                continue  # "my sister" with no name is not a person in the table
+            if name.islower():
+                name = " ".join(w[:1].upper() + w[1:] for w in name.split())  # captions lower-case names
             row = rows.setdefault(name, {"rel": [], "last": "", "said": ""})
+            if name.lower() in {str(v).lower() for v in (hosts or {}).values() if v}:
+                continue  # the hosts themselves are not people in their videos
             rel = str(p.get("relation") or "")
-            if rel and rel.lower() not in _KIN and str(f.get("claim") or "").lower().startswith("as of this video") \
+            owner = relation_owner(f, p, hosts) if rel else None
+            if owner and owner not in ("their", "one host's") and rel.lower() in _SHARED_KIN \
+                    and hosts_are_siblings(cast_rel):
+                owner = "their"
+            if owner:
+                rel = f"{owner} {rel}" if owner in ("their", "one host's") else f"{owner}'s {rel}"
+            if rel and rel.lower().split()[-1] not in _KIN and str(f.get("claim") or "").lower().startswith("as of this video") \
                     and not is_recent({"last_seen": f.get("last_seen") or f.get("published")}):
                 rel = f"{rel} ({str(f.get('published') or '')[:4]})"
             if rel and rel not in row["rel"]:
@@ -671,42 +752,81 @@ def people_section(facts: list[dict] | None, index: dict[str, dict],
             if rel:
                 row["said"] = max(row["said"], str(f.get("published") or "")[:10])
     for name, row in rows.items():
-        roles = {_CAST_ROLE.get(r.split(" (")[0].lower()) for r in row["rel"]} - {None}
+        roles = {_CAST_ROLE.get(r.split(" (")[0].lower().split()[-1]) for r in row["rel"]} - {None}
         for day, role in (seen or {}).get(name.lower()) or []:
             if role in roles:
                 row["last"] = max(row["last"], str(day)[:10])
+    # a relation the creators' quotes do not state, but a title, opening or
+    # description does (the cast sheets): added with its source marked
+    host_lc = {str(v).lower() for v in (hosts or {}).values() if v}
+    for key, c in (cast_rel or {}).items():
+        if key in host_lc:
+            continue
+        existing = next((n for n in rows if n.lower() == key or n.lower() in {a.lower() for a in c["aliases"]}), None)
+        if existing and rows[existing]["rel"]:
+            continue
+        owner = c.get("of") or ""
+        if c["rel"].lower() in _SHARED_KIN and hosts_are_siblings(cast_rel):
+            owner = "both"
+        label = (f"their {c['rel']}" if owner.lower() in ("both", "their", "them")
+                 else f"{owner}'s {c['rel']}" if owner and len(host_lc) > 1 else c["rel"])
+        seen_lc, also = {key}, []
+        for a in sorted(c["aliases"], key=lambda x: (x.lower(), x)):
+            if a.lower() not in seen_lc:
+                seen_lc.add(a.lower())
+                also.append(a)
+        row = rows.setdefault(existing or c["name"], {"rel": [], "last": "", "said": ""})
+        row["rel"].append(label + " *" + (f" (also {', '.join(also)})" if also else ""))
+        row["last"] = max(row["last"], c["said"])
+        row["from_cast"] = True
+    for r in rows.values():
+        # "Sam's pet" adds nothing beside "Sam's dog"
+        animal = [x for x in r["rel"] if x.split(" (")[0].split()[-1] in ("dog", "puppy", "cat", "kitten")]
+        if animal:
+            r["rel"] = [x for x in r["rel"] if x.split(" (")[0].split()[-1] != "pet"]
     rows = {n: r for n, r in rows.items() if r["rel"]}
+    def _rel_word(x: str) -> str:
+        return x.split(" (")[0].split()[-1] if x.split(" (")[0].split() else ""   # "boyfriend (2021)" is a boyfriend
+
     partners = [n for n, r in rows.items()
-                if any(x in ("girlfriend", "boyfriend") for x in r["rel"])]
+                if any(_rel_word(x) in ("girlfriend", "boyfriend") for x in r["rel"])]
     if len(partners) == 1:
         row = rows[partners[0]]
         newer = sorted((f for f in facts or [] if angle_ineligible_reason(f, index) is None
-                        and not f.get("people") and _PARTNER_UP.search(str(f.get("claim") or ""))
+                        and not f.get("people") and own_partner_word(str(f.get("claim") or ""))
                         and str(f.get("last_seen") or f.get("published") or "")[:10] > row["said"]),
                        key=lambda f: str(f.get("last_seen") or f.get("published") or ""))
         if newer:
-            word = _PARTNER_UP.search(str(newer[-1].get("claim"))).group(1).lower()
-            her = "girlfriend" in row["rel"]
+            word = own_partner_word(str(newer[-1].get("claim")))
+            her = any(_rel_word(x) == "girlfriend" for x in row["rel"])
             up = {"fiance": "fiancée" if her else "fiancé", "fiancé": "fiancée" if her else "fiancé",
                   "fiancee": "fiancée", "fiancée": "fiancée", "engaged": "fiancée" if her else "fiancé",
                   "married": "wife" if her else "husband"}.get(word, word)
-            row["rel"] = [up if x in ("girlfriend", "boyfriend") else x for x in row["rel"]]
+            # the newer word replaces the old one, and the old one's year goes with it;
+            # the newer fact is a mention of the same partner, so it dates the row too
+            row["last"] = max(row["last"], str(newer[-1].get("last_seen") or newer[-1].get("published") or "")[:10])
+            row["rel"] = list(dict.fromkeys(
+                (x.split(" (")[0].rsplit(" ", 1)[0] + " " + up if " " in x.split(" (")[0] else up)
+                if _rel_word(x) in ("girlfriend", "boyfriend") else x for x in row["rel"]))
     if not rows:
         return ""
     trs = "".join(
         f'<tr><td>{html.escape(n)}</td><td>{html.escape(", ".join(r["rel"]))}</td>'
         f'<td class="n">{html.escape(r["last"][:7])}</td></tr>'
         for n, r in sorted(rows.items(), key=lambda kv: (kv[1]["last"], kv[0]), reverse=True))
+    note = ('<p class="note">* From the videos\' titles, openings and descriptions, '
+            'not from a quote.</p>') if any(r.get("from_cast") for r in rows.values()) else ""
     return (f'<h3>{html.escape(heading)}</h3><div class="tablewrap"><table class="people"><thead><tr>'
             '<th>Name</th><th>Who</th><th>Seen in</th></tr></thead>'
-            f'<tbody>{trs}</tbody></table></div>')
+            f'<tbody>{trs}</tbody></table></div>{note}')
 
 
-def cast_appearances(corpus_dir: pathlib.Path | None) -> dict[str, list[tuple[str, str]]]:
-    """Every upload each person appears in, by the cast sheets: name or
-    alias, lower-cased, to (publish date, the sheet's role)."""
+def cast_sheets(corpus_dir: pathlib.Path | None) -> tuple[dict, dict[str, str]] | None:
+    """The cast sheets and each upload's publish date, read once per build
+    for ``cast_appearances`` and ``cast_relations``; None when either file is
+    missing or unreadable."""
     if corpus_dir is None:
-        return {}
+        return None
     try:
         cast = json.loads((corpus_dir / "cast.json").read_text(encoding="utf-8"))
         dates = {}
@@ -715,7 +835,16 @@ def cast_appearances(corpus_dir: pathlib.Path | None) -> dict[str, list[tuple[st
                 r = json.loads(line)
                 dates[str(r.get("id") or "").split(":")[-1]] = str(r.get("publication_date") or "")[:10]
     except (OSError, ValueError):
+        return None
+    return cast or {}, dates
+
+
+def cast_appearances(sheets: tuple[dict, dict[str, str]] | None) -> dict[str, list[tuple[str, str]]]:
+    """Every upload each person appears in, by the cast sheets: name or
+    alias, lower-cased, to (publish date, the sheet's role)."""
+    if not sheets:
         return {}
+    cast, dates = sheets
     out: dict[str, list[tuple[str, str]]] = {}
     for vid, sheet in (cast or {}).items():
         day = dates.get(str(vid), "")
@@ -727,6 +856,56 @@ def cast_appearances(corpus_dir: pathlib.Path | None) -> dict[str, list[tuple[st
                 if key:
                     out.setdefault(key, []).append((day, str(g.get("role") or "")))
     return out
+
+
+def cast_relations(sheets: tuple[dict, dict[str, str]] | None) -> dict[str, dict]:
+    """How family and friends are related to the hosts, as the cast sheets
+    read it from titles, openings and descriptions (``relation`` and ``of``):
+    one entry per person, the newest upload's wording, with their aliases."""
+    if not sheets:
+        return {}
+    cast, dates = sheets
+    out: dict[str, dict] = {}
+    for vid, sheet in (cast or {}).items():
+        day = dates.get(str(vid), "")
+        for g in (sheet or {}).get("guests") or []:
+            rel = str(g.get("relation") or "").strip()
+            name = str(g.get("name") or "").strip()
+            if not rel or not name or names_nobody(name):
+                continue  # "mom" or "dad" written as a name is a role, not a person
+            key = name.lower()
+            row = out.setdefault(key, {"name": name, "aliases": set(), "said": "", "rel": "", "of": "",
+                                       "_rank": ("", "")})
+            row["aliases"].update(a for a in g.get("aliases") or []
+                                  if a and a.lower() != key and not names_nobody(a))
+            owner = str(g.get("of") or "").strip()
+            # a relation that says whose it is (one host's, or both) beats one that
+            # does not (the grandma of a new baby); then the newest wins
+            rank = ("1" if owner else "0", day)
+            if rank >= row["_rank"]:
+                row.update(said=day, rel=rel, of=owner, _rank=rank)
+    for row in out.values():
+        row.pop("_rank", None)
+    # one person under two spellings of one name: keep one row, and "of
+    # both" wins over one host
+    for key in list(out):
+        row = out.get(key)
+        if row is None:
+            continue
+        for other in list(out):
+            if other != key and other in {a.lower() for a in row["aliases"]}:
+                dup = out.pop(other)
+                row["aliases"].add(dup["name"])
+                row["aliases"].update(dup["aliases"])
+                if dup["of"].lower() == "both" and row["of"].lower() != "both":
+                    row["of"] = "both"
+    # a relation that names nobody (an "aunt" of a new baby) says nothing about
+    # the creators, and a past boyfriend or girlfriend gives way once that host
+    # has a husband or wife
+    out = {k: r for k, r in out.items() if r["of"]}
+    married = {r["of"].lower() for r in out.values() if r["rel"].lower() in ("husband", "wife")}
+    return {k: r for k, r in out.items()
+            if not (r["rel"].lower() in ("boyfriend", "girlfriend") and r["of"].lower() in married)}
 
 
 def built_footer(meta: dict) -> str:
@@ -886,13 +1065,25 @@ def display_name(fm: dict, meta: dict, creator: str) -> str:
     return str(fm.get("creator_name") or meta.get("creator_name") or creator or "the creator").strip()
 
 
-def who_intro(about_html: str, name: str) -> str:
-    """"Who <name> is": the ``## About <creator>`` prose, at the top of the
-    page, without its fact lines (those are the story, lower down)."""
+def names_two_or_more(name: str, meta: dict | None = None) -> bool:
+    """True when the page's name is more than one person ("Sam and
+    Alex", "Sam & Alex") or the ledger names a host and a co-host, so the
+    headings take a plural verb."""
+    if re.search(r"\s(and|&)\s|\+", str(name or ""), re.I):
+        return True
+    hosts = (meta or {}).get("hosts") or {}
+    return bool(hosts.get("host") and hosts.get("cohost")) and str(name or "").strip() not in hosts.values()
+
+
+def who_intro(about_html: str, name: str, plural: bool = False) -> str:
+    """"Who <name> is" (or "are" for two or more people): the ``## About
+    <creator>`` prose, at the top of the page, without its fact lines (those
+    are the story, lower down)."""
     prose, _lines = who_lines(about_html)
     if not prose:
         return ""
-    return f'<h2>Who {html.escape(name)} is</h2><div class="intro">{prose}</div>'
+    verb = "are" if plural else "is"
+    return f'<h2>Who {html.escape(name)} {verb}</h2><div class="intro">{prose}</div>'
 
 
 def _years(rows: list[dict]) -> str:
@@ -910,6 +1101,9 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "",
     ranked picks, each line its own claim."""
     index = {str(f.get("fact_id")): f for f in facts}
     prose, lines = who_lines(about_html)
+    # the map's own lines are the creator's story: one list, in the order the
+    # creator said each thing, newest first (SKILL.md, CONNECT step 3)
+    story_order = bool(lines)
     if not lines:
         lines = [([str(f.get("fact_id"))], html.escape(str(f.get("claim") or "")))
                  for f in pick_who_flat(facts)]
@@ -922,10 +1116,13 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "",
     recent = [it for it in items if it["date"] and is_recent({"published": it["date"]})]
     older = [it for it in items if it not in recent]
 
-    def group(title: str, rows: list[dict]) -> str:
+    def group(title: str, rows: list[dict], keep_order: bool = False) -> str:
         if not rows:
             return ""
-        rows = sorted(rows, key=lambda it: it["date"], reverse=True)
+        if keep_order:
+            rows = sorted(rows, key=lambda it: it["date"] or "", reverse=True)  # newest said first
+        else:
+            rows = sorted(rows, key=lambda it: it["date"], reverse=True)
         lis = []
         for it in rows:
             q = (f'<span class="q">“{html.escape(short_quote(it["quote"]))}”</span>'
@@ -934,11 +1131,17 @@ def who_they_are(facts: list[dict], meta: dict, about_html: str = "",
             # a clinical one keeps its warning
             badges = "".join(speaker_badge(f) + (tier_badge(f) if tier_of(f) != "lifestyle" else "")
                              for f in it["facts"][:1])
-            lis.append(f'<li><span class="date">{html.escape(it["date"][:4] or "web")}</span>'
+            when = it["date"][:4] or "web"
+            if keep_order and it["date"]:
+                when = f"said {when}"
+            lis.append(f'<li><span class="date">{html.escape(when)}</span>'
                        f'<span class="claim">{it["line"]}{badges}{q}</span>'
                        f'<span class="src">{" · ".join(it["sources"])}</span></li>')
-        return f'<div class="group"><h3>{title}</h3><ul class="who-run">{"".join(lis)}</ul></div>'
+        heading_html = f'<h3>{title}</h3>' if title else ""
+        return f'<div class="group">{heading_html}<ul class="who-run">{"".join(lis)}</ul></div>'
 
+    if story_order:
+        return head + '<div class="facts">' + group("", items, keep_order=True) + '</div>'
     return (head + '<div class="facts">'
             + group(f"Recent, {_years(recent)}" if _years(recent) else "Recent", recent)
             + group(f"Background, {_years(older)}" if _years(older) else "Background", older)
@@ -1056,14 +1259,17 @@ def render_connections(md_text: str, facts: list[dict] | None, meta: dict) -> tu
     index = {str(f.get("fact_id")): f for f in (facts or [])}
     name = display_name(fm, meta, creator)
     if facts is not None:
-        top = who_intro(creator_intro, name)
+        plural = names_two_or_more(name, meta)
+        top = who_intro(creator_intro, name, plural)
         story = (who_they_are(facts, {**meta, "channel_name": creator}, creator_intro,
                               heading=f"{name}'s story so far", with_prose=False)
                  + people_section(facts, index, heading=f"Who shows up in {name}'s videos",
-                                  seen=meta.get("_seen")))
+                                  seen=meta.get("_seen"), hosts=meta.get("hosts"),
+                                  cast_rel=meta.get("_cast_relations")))
     else:
         top, story = about_block(creator_about), ""
-    done = "".join(f'<h2>{html.escape(name)} has done this before</h2><div class="onchannel">{rest}</div>'
+    have = "have" if names_two_or_more(name, meta) else "has"
+    done = "".join(f'<h2>{html.escape(name)} {have} done this before</h2><div class="onchannel">{rest}</div>'
                    for _, rest in on_channel)
     body_out = (top + done
                 + verdict_panel(thesis, conns, brand_about)
@@ -1360,6 +1566,19 @@ _OVERCLAIM = re.compile(r"(\b100 ?%|\bfully verified\b|\bverified facts?\b|\bgua
 
 # a link may open this many seconds before the quote's first word
 LINK_LEAD_SECONDS = 3
+# Captions with no full stop, question or exclamation mark anywhere (older
+# auto-captions): a quote this long counts as whole, since no sentence can
+# ever be seen to end.
+UNPUNCTUATED_MIN_WORDS = 8
+
+
+def _in_moment(start: int, moment: dict, t: int) -> bool:
+    """A link belongs to a checked moment when it falls anywhere inside it:
+    from 20 s before its start to 3 s after its last caption, never less
+    than 20 s after its start. Brand-moment windows run 35 s or longer."""
+    times = [float(c[0]) for c in moment.get("cues") or [] if c]
+    end = max(times) if times else start
+    return start - 20 <= t <= max(start + 20, end + 3)
 
 
 def _spoken_at(cues: list[tuple[float, str]], hit: dict, quote: str) -> int:
@@ -1390,6 +1609,9 @@ def _quote_timing(moment: dict, quote: str, link_t: int) -> str | None:
     if begins - link_t > LINK_LEAD_SECONDS:
         return f"the link starts {begins - link_t} s before the quote; link &t={begins}s"
     q = quote.strip().rstrip("\"”")
+    unpunctuated = not any(ch in ".?!" for _t, x in cues for ch in x)
+    if unpunctuated and len(_norm_words(quote).split()) >= UNPUNCTUATED_MIN_WORDS:
+        return None
     if q and q[-1] not in ".?!":
         # a caption tag ([Music]) between the quote and the next words is not punctuation
         nxt = re.sub(r"^(?:\s*\[[^\]]*\])+", "", _after_quote(cues, hit, quote)).lstrip()
@@ -1464,7 +1686,7 @@ def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]
                     vid, t = _video_and_time(url)
                     if not vid or t is None:
                         continue
-                    ok = next((m for v, st, m in usable if v == vid and abs(st - t) <= 20), None)
+                    ok = next((m for v, st, m in usable if v == vid and _in_moment(st, m, t)), None)
                     why = _quote_timing(ok, raw_q, t) if ok is not None and raw_q else None
                     if why:
                         out.append(f"{why}: {raw_q[:40]!r} in {name}")
@@ -1473,7 +1695,7 @@ def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]
             vid, t = _video_and_time(url)
             if not vid or t is None:
                 continue
-            ok = next((m for v, st, m in usable if v == vid and abs(st - t) <= 20), None)
+            ok = next((m for v, st, m in usable if v == vid and _in_moment(st, m, t)), None)
             if ok is not None:
                 # the quote this link carries: the blockquote, or the list item's words
                 block = rest[max(0, rest.find(url) - 600): rest.find(url) + 400]
@@ -1483,7 +1705,7 @@ def moment_problems(sections: list[tuple[str, str]], moments: dict) -> list[str]
                         out.append(f"{why}: {q[:40]!r} in {name}")
                         break
             if ok is None:
-                bad = next((m for v, st, m in rejected if v == vid and abs(st - t) <= 20), None)
+                bad = next((m for v, st, m in rejected if v == vid and _in_moment(st, m, t)), None)
                 why = "; ".join(bad.get("reasons") or []) if bad else "not among the checked moments"
                 out.append(f"concept links a moment that did not pass moment_check ({why}): "
                            f"{vid}&t={t}s in {name}")
@@ -1797,6 +2019,23 @@ def md_quote_blocks(md: str) -> list[tuple[str, list[str]]]:
     return out
 
 
+_MOMENT_LINE = re.compile(r"(?m)^\s*[-*]\s*\[[^\]]*\]\((https?://[^)\s]*[?&]t=\d+s?)\)(.*)$")
+
+
+def md_moment_lines(md: str) -> list[tuple[str, list[str]]]:
+    """``(normalised text, [link])`` of every further-moment line of the map,
+    ``- [YYYY-MM-DD](<url>&t=<N>s) <what happens>: "<their words>"``: the
+    concept's supporting moments, which the map quotes inline, not in a
+    ``>`` block. Each passed moment_check when the map was built."""
+    out = []
+    for m in _MOMENT_LINE.finditer(md):
+        words = _INLINE_QUOTE.findall(html.unescape(m.group(2)))
+        text = _norm_words(" ".join(words))
+        if text:
+            out.append((text, [m.group(1)]))
+    return out
+
+
 def md_precedent_quotes(md: str) -> set[str]:
     """The normalised text of every `>` block under a category-precedent
     heading of the map: the probe windows the map argued, which are the
@@ -1903,8 +2142,11 @@ def check_mirror(body: str, facts: list[dict] | None, map_md: str, inp: dict,
         problems.append("no For you block under any of the brand's talking points; write "
                         "the creator's version of each point a gem of theirs backs")
     supplied_norm = [_norm_words(tp) for tp in inp.get("talking_points", []) if tp]
-    map_blocks = md_quote_blocks(map_md)
-    precedent_blocks = md_precedent_quotes(map_md)
+    # the map's lead quotes and its further moments; a further moment in
+    # the creator's own first person counts as their moment, like a precedent
+    moment_lines = md_moment_lines(map_md)
+    map_blocks = md_quote_blocks(map_md) + moment_lines
+    precedent_blocks = md_precedent_quotes(map_md) | {t for t, _links in moment_lines}
     index = {str(f.get("fact_id")): f for f in (facts or [])}
     flagged: set[str] = set()
     personal: list[dict] = []
@@ -2177,8 +2419,11 @@ def check_brief(md_text: str, facts: list[dict] | None, map_md: str,
     # key talking points: each is written for this creator, built on a moment
     # of their own, with the brand's line it covers kept verbatim beneath it;
     # what no moment carries waits in one closing "Also from <brand>" list
-    map_blocks = md_quote_blocks(map_md)
-    precedent_blocks = md_precedent_quotes(map_md)
+    # the map's lead quotes and its further moments; a further moment in
+    # the creator's own first person counts as their moment, like a precedent
+    moment_lines = md_moment_lines(map_md)
+    map_blocks = md_quote_blocks(map_md) + moment_lines
+    precedent_blocks = md_precedent_quotes(map_md) | {t for t, _links in moment_lines}
     index = {str(f.get("fact_id")): f for f in (facts or [])}
     flagged: set[str] = set()          # fact ids already reported as ineligible
     points = found.get("points", "")
@@ -2512,7 +2757,8 @@ def main() -> None:
 
     out_path = (pathlib.Path(a.out) if a.out
                 else default_out(in_path, facts_path, parse_frontmatter(text)[0]))
-    meta = {**meta, "_seen": cast_appearances(in_path.parent)}
+    sheets = cast_sheets(in_path.parent)
+    meta = {**meta, "_seen": cast_appearances(sheets), "_cast_relations": cast_relations(sheets)}
     title, (page, fragment) = render_connections(text, facts, meta)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(page, encoding="utf-8")

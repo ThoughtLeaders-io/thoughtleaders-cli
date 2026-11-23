@@ -63,8 +63,8 @@ from store_io import open_corpus  # noqa: E402  sibling: the corpus reader
 DOMAINS = {"origin", "family", "pets", "home", "work", "money", "health", "habits",
            "tastes", "beliefs", "relationships", "other"}
 # `shared` is a "we" line about the hosts' shared life on a multi-host channel
-SPEAKERS = {"host", "guest", "cohost", "shared", "narration", "unclear"}
-KEPT_SPEAKERS = ("host", "cohost", "shared", "unclear")     # whose gems reach the ledger
+SPEAKERS = {"host", "guest", "cohost", "shared", "either", "narration", "unclear"}
+KEPT_SPEAKERS = ("host", "cohost", "shared", "either", "unclear")     # whose gems reach the ledger
 SENSITIVITY = {"none", "lifestyle", "clinical", "children", "location"}
 WITHHELD = {"clinical", "children", "location"}   # excluded from connection angles by default
 DEFAULT_MIN_COVERAGE = 0.95
@@ -336,7 +336,11 @@ def people_in_quote(people, quote: str) -> list[dict]:
         if name and all(_lc(re.sub(r"['’]s$", "", w)) in q
                         for w in name.split() if _lc(w)):
             rel = str(p.get("relation") or "").strip().lower() or None
-            out.append({"name": name, "relation": rel})
+            entry = {"name": name, "relation": rel}
+            of = str(p.get("of") or "").strip()
+            if of and of.lower() != name.lower():
+                entry["of"] = of
+            out.append(entry)
     return out
 
 

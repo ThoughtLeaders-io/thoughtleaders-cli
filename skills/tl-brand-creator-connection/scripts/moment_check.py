@@ -121,7 +121,9 @@ def rival_pattern(rivals: list[str], brand_names: list[str]) -> re.Pattern | Non
     if not names:
         return None
     alts = [r"\s*".join(re.escape(part) for part in n.split()) for n in names]
-    return re.compile(r"(?<![a-z])(" + "|".join(alts) + r")", re.I)
+    # a whole word ("blur" is not Blu), or run into a partner hashtag
+    # (#fizzcobrandpartner)
+    return re.compile(r"(?<![a-z])(" + "|".join(alts) + r")(?=(?:brand)?(?:partner|ad\b|sponsor)|[^a-z]|$)", re.I)
 
 
 # rival names that are also everyday words: near a link they count only as a
@@ -130,6 +132,19 @@ COMMON_WORDS = {"prime", "cure", "ghost", "propel", "monster", "hydrant", "bloom
                 "core", "body", "liquid", "spark", "pure", "fuel", "vital", "zero"}
 DRINK_CONTEXT = ("drink|drinks|drinking|bottle|bottles|can|cans|sip|lukewarm|cold|ice|iced|"
                  "flavor|flavour|energy drink|hydration")
+
+
+# a sponsor cue right beside the word: "use code haven", "haven link below"
+SPONSOR_CONTEXT = r"sponsor\w*|code|codes|link|links|discount|promo|partner\w*|ad|ads"
+# names the run marked as everyday words (``--rivals "~Haven"``), read from
+# brand-tl.json ``rivals_everyday``; they get the same care as COMMON_WORDS
+EVERYDAY_RIVALS: set[str] = set()
+
+
+def everyday(word: str) -> bool:
+    """A rival name that is also an ordinary word or an easy mishearing of one."""
+    w = word.lower()
+    return w in COMMON_WORDS or w in EVERYDAY_RIVALS
 
 
 GENERIC_BRAND_WORDS = {"hydration", "drink", "drinks", "energy", "nutrition", "beverage", "beverages",
@@ -161,13 +176,18 @@ def near_rival(text: str, rivals: list[str], brand_names: list[str]) -> str | No
             continue
         words = name.split()
         body = r"\s*".join(re.escape(w) for w in words)
-        if len(words) == 1 and words[0].lower() in COMMON_WORDS:
+        if len(words) == 1 and everyday(words[0]):
             w = re.escape(words[0].lower())
-            # the drink, not the word: capitalised in cased captions, or with a
-            # drink word right beside it ("a cold spark", "a can of spark")
+            drink = words[0].lower() in COMMON_WORDS
+            near = SPONSOR_CONTEXT + (f"|{DRINK_CONTEXT}" if drink else "")
+            # the brand, not the word: a sponsor word right beside it ("use code
+            # haven"), and for a drink name also a drink word ("a cold spark") or
+            # a capital in cased captions. A name the run marked as everyday
+            # gets no capital rule: captions capitalise people ("my friend
+            # Lucy") and mishear product names
             m = (re.search(rf"(?<![A-Za-z]){re.escape(words[0][:1].upper() + words[0][1:].lower())}(?![A-Za-z])", text)
-                 if cased else None) or \
-                re.search(rf"\b(?:{DRINK_CONTEXT})\W+(?:\w+\W+){{0,2}}{w}\b|\b{w}\W+(?:\w+\W+){{0,2}}(?:{DRINK_CONTEXT})\b",
+                 if cased and drink else None) or \
+                re.search(rf"\b(?:{near})\W+(?:\w+\W+){{0,2}}{w}(?![a-z])|(?<![a-z]){w}\W+(?:\w+\W+){{0,2}}(?:{near})\b",
                           text, re.I)
         else:
             m = re.search(rf"(?<![a-z]){body}(?![a-z])", text, re.I)
@@ -204,7 +224,7 @@ def sponsor_rival(summary: str, rx: re.Pattern | None) -> str | None:
                 hit = m.group(0)
                 # on a line that is only hashtags, "prime time" is not Prime: a
                 # rival that is also a word counts only as a name or a hashtag
-                if not said and hit.lower() in COMMON_WORDS and not hit[:1].isupper() \
+                if not said and everyday(hit) and not hit[:1].isupper() \
                         and line[max(0, m.start() - 1):m.start()] != "#":
                     continue
                 return hit
@@ -467,6 +487,7 @@ def main() -> None:
                              *[h.get("brand") for h in tl.get("category_history") or [] if isinstance(h, dict)]]
                    if r]
     own_names = [str(brand.get("name") or ""), *[str(x) for x in brand.get("aliases") or []]]
+    EVERYDAY_RIVALS.update(str(r).lower() for r in tl.get("rivals_everyday") or [] if r)
     rx = rival_pattern(rival_names, own_names)
 
     index = {str(f.get("fact_id")): f for f in facts}

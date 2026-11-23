@@ -341,6 +341,69 @@ def _cast_counts(cast: dict) -> tuple[dict[str, int], dict[str, int], dict[str, 
     return formats, hosts, best
 
 
+def co_hosts(cast: dict, host: str | None) -> dict[str, int]:
+    """Names the cast sheets list as a host in the same video as ``host``,
+    with the number of such videos. Two names listed side by side as hosts
+    are two people (twins, a couple, a duo), so a co-host is never an alias
+    of the host."""
+    out: dict[str, int] = {}
+    own = str(host or "").lower().split()
+    if not own:
+        return out
+
+    def is_host(low: str) -> bool:
+        # the whole name or the same first name ("Rosa" is "Rosa Vale"); a
+        # shared surname is not the same person ("Mia Vale" is not "Rosa Vale")
+        return low.split()[:1] == own[:1] or low == " ".join(own)
+
+    for v in (cast or {}).values():
+        if not isinstance(v, dict):
+            continue
+        names = {str(h).strip() for h in v.get("hosts") or [] if str(h).strip()}
+        if not any(is_host(n.lower()) for n in names):
+            continue
+        for n in names:
+            low = n.lower()
+            if low == "host" or is_host(low):
+                continue
+            out[n] = out.get(n, 0) + 1
+    return out
+
+
+def name_speakers(facts: list[dict], cast: dict | None, host: str | None) -> dict | None:
+    """On a multi-host channel, put the person's name on every transcript fact
+    (``speaker_name``) and return ``{"host": …, "cohost": …}`` for the ledger
+    header. ``host`` and ``cohost`` are channel-wide roles: on a solo upload
+    whose cast sheet lists only the co-host, a fact the extractor called
+    ``host`` (the one person on camera) is the co-host's, and the other way
+    round."""
+    pairs = co_hosts(cast or {}, host)
+    if not host or not pairs:
+        return None
+    cohost = max(pairs, key=pairs.get)
+    if pairs[cohost] < ALIAS_VIDEOS_MIN:
+        return None
+    host_lc, co_lc = host.lower(), cohost.lower()
+    for fact in facts:
+        if fact.get("provenance") != "transcript":
+            continue
+        vid = str(fact.get("video") or "").split(":", 1)[-1]
+        sheet = (cast or {}).get(vid) or {}
+        listed = {str(h).strip().lower() for h in sheet.get("hosts") or []}
+        solo = listed - {"host"}
+        speaker = fact.get("speaker")
+        if speaker == "host" and solo == {co_lc}:
+            fact["speaker"] = speaker = "cohost"
+            fact["speaker_relabelled"] = "solo upload of the co-host"
+        elif speaker == "cohost" and solo == {host_lc}:
+            fact["speaker"] = speaker = "host"
+            fact["speaker_relabelled"] = "solo upload of the host"
+        fact["speaker_name"] = {"host": host, "cohost": cohost,
+                                "shared": f"{host} and {cohost}",
+                                "either": f"{host} or {cohost}"}.get(speaker, host)
+    return {"host": host, "cohost": cohost}
+
+
 def cache_run_attributes(channel: int, context: dict, *, fmt: str | None,
                          cast: dict | None, host_names: list[str], writer=None) -> dict:
     """Cache ``format_label``, ``host_aliases`` and ``sibling_channels`` on the
@@ -379,7 +442,13 @@ def cache_run_attributes(channel: int, context: dict, *, fmt: str | None,
                   if int(r.get("said_outright_videos") or 0) >= ALIAS_VIDEOS_MIN]
         # no part of the host's own name is an alias of it: a surname is not a nickname
         own = {host.lower(), *host.lower().split()}
-        aliases = list(dict.fromkeys(a for a in found if a and a.lower() not in own))
+        # a name listed as a host beside the host in the same video is a second
+        # person (a co-host), never another name for the host
+        # (by full name or first name)
+        others = {part for n in co_hosts(cast or {}, host)
+                  for part in (n.lower(), n.lower().split()[0])}
+        aliases = list(dict.fromkeys(a for a in found
+                                     if a and a.lower() not in own and a.lower() not in others))
         if not aliases:
             out["host_aliases"] = "skipped: no alias with evidence"
         else:
@@ -416,10 +485,25 @@ def cmd_write(a: argparse.Namespace) -> int:
         store_io.write_ledger(path, None, facts)      # counted, then headed below
     else:
         facts = store_io.read_ledger(path)[1] if path.exists() else []
+    cast = None
+    if a.cast and pathlib.Path(a.cast).exists():
+        try:
+            cast = json.loads(pathlib.Path(a.cast).read_text(encoding="utf-8"))
+        except ValueError:
+            cast = None
+    host_list = [x.strip() for x in (a.host_names or "").split(",") if x.strip()]
+    hosts = None
+    if (a.format or (previous or {}).get("format")) == "multi_host":
+        host = host_list[0] if host_list else ((previous or {}).get("hosts") or {}).get("host")
+        hosts = name_speakers(facts, cast, host)
     meta = build_meta(a.channel, profiles, corpus_dir, channel_name=a.channel_name,
                       fmt=a.format, format_evidence=a.format_evidence, rounds=a.rounds,
                       lanes=a.lanes,
                       context=load_context(a.context), previous=previous)
+    if hosts:
+        meta["hosts"] = hosts
+    elif (previous or {}).get("hosts"):
+        meta["hosts"] = previous["hosts"]
     store_io.write_ledger(path, meta, facts)
     cache = None
     if a.context:
@@ -427,12 +511,6 @@ def cmd_write(a: argparse.Namespace) -> int:
             full = json.loads(pathlib.Path(a.context).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             full = {}
-        cast = None
-        if a.cast and pathlib.Path(a.cast).exists():
-            try:
-                cast = json.loads(pathlib.Path(a.cast).read_text(encoding="utf-8"))
-            except ValueError:
-                cast = None
         cache = cache_run_attributes(a.channel, full, fmt=a.format,
                                      cast=cast, host_names=[x.strip() for x in (a.host_names or "").split(",")
                                                             if x.strip()])

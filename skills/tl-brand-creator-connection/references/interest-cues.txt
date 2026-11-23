@@ -1,0 +1,99 @@
+# Interest cues: what the creator loves, collects and makes, their pets, the
+# milestones of their life and the family around them. Same format as
+# cue-phrases.txt ("phrase | weight", multi-word only).
+#
+# Every phrase is general framing that works on any channel: it says HOW a
+# person talks about an interest ("I collect", "I'm obsessed with"), never WHAT
+# the interest is. Never add a topic, product or name from one creator here.
+#
+# These phrases join the transcript search, so the download already holds the
+# passages they find. They do NOT re-weight the main ranking: a phrase new to
+# the main list ranks there as weak framing (0.5). Their weight here ranks the
+# reserved interest seats (fetch_cues.py --interest-seats), a separate set of
+# seats filled after the main ranking, so interest passages are read without
+# pushing out the life-story passages the main list chooses.
+#   3   names a lasting interest, a collection, a pet, something they made,
+#       a milestone or a family member
+#   2   usually carries one
+#   1   sometimes carries one
+#
+# A phrase already in cue-phrases.txt is never repeated here. Instead, the
+# "@from-main" lines below make a whole section of that list count for the
+# reserved seats too, at the weights it has there. That way a passage that
+# only says "my dog" or "my husband", which the main ranking may leave unread,
+# still gets a chance at an interest seat.
+@from-main pets
+@from-main family
+@from-main habits / tastes / style
+
+# collecting
+i've been collecting | 3
+love collecting | 3
+my collection | 3
+started collecting | 3
+
+# hobbies and passions
+my hobbies | 3
+new hobby | 3
+passionate about | 3
+so obsessed with | 2
+i'm really into | 3
+i'm so into | 2
+i've always loved | 3
+in my free time | 3
+my favorite thing to do | 3
+
+# favourites
+my favorite thing | 2
+my all time favorite | 3
+my absolute favorite | 2
+
+# style
+my style | 2
+my wardrobe | 2
+my closet | 2
+my everyday look | 2
+
+# pets
+my dogs | 3
+our dog | 3
+our dogs | 3
+our cat | 3
+
+# their own work and ventures
+designed my own | 3
+i designed | 3
+we designed | 3
+my own line | 3
+our own line | 3
+my own brand | 3
+our own brand | 3
+our shop | 2
+our business | 2
+
+# life milestones, in their own words
+started our channel | 3
+started my channel | 3
+started youtube | 3
+our first video | 3
+first youtube video | 3
+we got engaged | 3
+got engaged | 3
+our wedding | 3
+got married | 3
+we launched | 3
+launched our | 3
+launched my | 3
+we opened | 2
+we moved to | 2
+
+# family: who the people in the videos are to the creator
+our mom | 3
+our dad | 3
+our sisters | 3
+my sisters | 3
+our brothers | 3
+my brothers | 3
+our siblings | 3
+our little sister | 3
+our little brother | 3

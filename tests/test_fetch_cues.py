@@ -552,7 +552,7 @@ def test_sponsor_chunk_records_an_unlocated_read_instead_of_dropping_it(monkeypa
         {"id": "7:vid1", "brand_mentions": [
             {"type": "sponsored", "field": "transcript", "start_ts": 0, "end_ts": 0},
             {"type": "sponsored", "field": "transcript", "start_ts": 100, "end_ts": 140}]}])
-    assert fetch_cues._sponsor_chunk(["7:vid1"]) == {"7:vid1": [fetch_cues.UNLOCATED, (100.0, 140.0)]}
+    assert fetch_cues.sponsor_chunk(["7:vid1"]) == {"7:vid1": [fetch_cues.UNLOCATED, (100.0, 140.0)]}
 
 
 def test_a_failed_span_lookup_falls_back_to_the_regex_and_says_so(
@@ -792,12 +792,15 @@ def test_refresh_since_backfills_for_late_arriving_captions():
 # --------------------------------------------------------------------------- #
 # batch size follows the documented cross-host cap
 # --------------------------------------------------------------------------- #
-def test_derived_batch_size_spreads_the_windows_over_the_agent_cap():
-    assert fetch_cues.derived_batch_size(500, 20) == fetch_cues.MAX_BATCH_SIZE   # 25 would cut extractors off
-    assert fetch_cues.derived_batch_size(500, 40) == 13        # 39 batches, one wave of 40
-    assert fetch_cues.derived_batch_size(300, 40) == 8         # from the windows kept, not the cap
-    assert fetch_cues.derived_batch_size(30, 40) == fetch_cues.MIN_BATCH_SIZE
-    assert fetch_cues.derived_batch_size(0, 40) == fetch_cues.MIN_BATCH_SIZE
+def test_derived_batch_size_fills_each_agent_to_the_maximum():
+    """Each extractor re-reads the whole rubric before its windows, so every
+    agent is filled to the maximum: the same windows, fewer rubric reads."""
+    assert fetch_cues.derived_batch_size(500) == fetch_cues.MAX_BATCH_SIZE
+    assert fetch_cues.derived_batch_size(12) == 12          # a small run is one agent
+    assert fetch_cues.derived_batch_size(3) == fetch_cues.MIN_BATCH_SIZE
+    assert fetch_cues.derived_batch_size(0) == fetch_cues.MIN_BATCH_SIZE
+    # 200 windows still fit one wave with a lane holding a slot
+    assert -(-200 // fetch_cues.derived_batch_size(200)) <= fetch_cues.DEFAULT_AGENT_CAP - 1
 
 
 def test_agent_cap_is_the_documented_cross_host_standard():
@@ -809,31 +812,13 @@ def test_run_derives_the_batch_size_from_the_standard_unless_the_flag_is_given(
     docs = [_doc(f"7:v{i}", [_frag("i grew up", 100), _frag("my dad", 400)])
             for i in range(6)]                                   # 12 windows
     summary, kept = _run(tmp_path, monkeypatch, docs, census_total=6, langs={"en": 6})
-    assert len(kept) == 12 and summary["batch_size"] == 5 and summary["agent_cap"] == 20
-    assert len(summary["batches"]) == 3
+    assert len(kept) == 12 and summary["batch_size"] == 12 and summary["agent_cap"] == 20
+    assert len(summary["batches"]) == 1
     summary, _ = _run(tmp_path, monkeypatch, docs, argv=("--batch-size", "5"),
                       census_total=6, langs={"en": 6})
     assert summary["batch_size"] == 5 and len(summary["batches"]) == 3
 
 
-def test_reserve_leaves_room_for_lanes_running_beside_the_fan_out():
-    """A lane in flight during the fan-out costs one extractor slot, so the
-    batches are sized against what is actually free. 20 batches for a cap of
-    20 with the socials lane running meant the 20th extractor was rejected and
-    relaunched a wave later."""
-    cap = 20
-    assert fetch_cues.derived_batch_size(200, cap) == 10            # 20 batches
-    assert fetch_cues.derived_batch_size(200, cap - 1) == 11        # 19 batches
-    assert -(-200 // fetch_cues.derived_batch_size(200, cap - 1)) == 19
-    # and a batch never grows past what an extractor can answer in full
-    assert fetch_cues.derived_batch_size(500, cap) == fetch_cues.MAX_BATCH_SIZE
-    # reserving more than the cap can never produce zero or negative batches
-    assert fetch_cues.derived_batch_size(500, max(1, cap - 99)) >= 1
-
-
-# --------------------------------------------------------------------------- #
-# the generic fallback: a second pass, report-level, fills only the shortfall
-# --------------------------------------------------------------------------- #
 def _pronoun_frag(start: int, hits: int = 1) -> str:
     """A fallback-pass fragment: bare first-person hits, no cue phrase. Like
     ``_frag``, its words differ on every call so no two are one passage."""
@@ -1447,3 +1432,65 @@ def test_turns_counts_the_captions_speaker_change_marks(tmp_path, monkeypatch):
                            (183.0, "yes really >> ok")]}
     summary, kept = _run(tmp_path, monkeypatch, [_doc("7:v1", [frag])], transcripts=transcript)
     assert kept[0]["turns"] == 3
+
+
+def test_interest_list_never_repeats_the_main_list_and_borrows_sections():
+    """Each cue phrase appears once. The interest list borrows whole sections
+    of the main list for the reserved seats with "@from-main" lines instead of
+    repeating their phrases."""
+    def plain(path):
+        return [line.split("|")[0].strip().lstrip("~").lower()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith(("#", "@"))]
+    main = set(plain(fetch_cues.DEFAULT_PHRASES))
+    interest = plain(fetch_cues.DEFAULT_INTEREST_PHRASES)
+    assert not [p for p in interest if p in main]
+    assert len(interest) == len(set(interest))
+    sections = fetch_cues.from_main_sections(fetch_cues.DEFAULT_INTEREST_PHRASES)
+    assert "pets" in sections and "family" in sections
+    assert "my dog" in fetch_cues.main_section_phrases(fetch_cues.DEFAULT_PHRASES, "pets")
+
+
+def test_interest_seats_take_passages_the_main_ranking_left(tmp_path, monkeypatch):
+    """The reserved seats hold interest passages the main ranking did not
+    keep, never displace a main window, and leave the main ranking's scores
+    as they were."""
+    main = ["i grew up", "my dad", "my mom", "when i was a kid", "my wife", "my brother"]
+    docs = [_doc(f"7:m{i}", [_frag(c, 100)]) for i, c in enumerate(main)]
+    docs += [_doc(f"7:c{i}", [_frag(c, 200)])
+             for i, c in enumerate(["i've been collecting", "my collection", "new hobby"])]
+    interest = tmp_path / "interest.txt"
+    interest.write_text("i've been collecting | 3\nmy collection | 3\n")
+    monkeypatch.setattr(fetch_cues, "DEFAULT_PHRASES", tmp_path / "phrases.txt")
+    summary, kept = _run(tmp_path, monkeypatch, docs, phrases="\n".join(main) + "\n",
+                         argv=("--max-windows", "5", "--interest-seats", "2",
+                               "--interest-phrases", interest), census_total=9, langs={"en": 9})
+    seats = [w for w in kept if w["retrieval"] == "interest"]
+    assert sorted(w["video_id"] for w in seats) == ["c0", "c1"]   # "new hobby" is not an interest cue
+    assert len([w for w in kept if w["retrieval"] == "phrase"]) == 5
+    assert summary["interest_windows_kept"] == 2
+
+
+def test_the_run_cache_fetches_each_video_once(tmp_path, monkeypatch):
+    """start_run.py may run the fetch twice in one build; with
+    TL_FETCH_CACHE_DIR set, the second run reads the first run's answers and
+    fetches only videos it has not seen. Without it nothing is kept."""
+    asked = []
+
+    def live(refs):
+        asked.append(list(refs))
+        return {r: [[1.0, f"words of {r}"]] for r in refs if r != "7:gone"}
+
+    monkeypatch.delenv("TL_FETCH_CACHE_DIR", raising=False)
+    fetch_cues.cached_per_ref("transcripts", ["7:a"], live)
+    assert not list(tmp_path.iterdir())
+    monkeypatch.setenv("TL_FETCH_CACHE_DIR", str(tmp_path))
+    asked.clear()
+    first = fetch_cues.cached_per_ref("transcripts", ["7:a", "7:b", "7:gone"], live)
+    again = fetch_cues.cached_per_ref("transcripts", ["7:a", "7:b", "7:c", "7:gone"], live)
+    assert asked == [["7:a", "7:b", "7:gone"], ["7:c"]]          # a video with no answer is not re-asked
+    assert set(first) == {"7:a", "7:b"} and set(again) == {"7:a", "7:b", "7:c"}
+    calls = []
+    assert fetch_cues.cached("census", {"channel": 7}, lambda: calls.append(1) or {"n": 3}) == {"n": 3}
+    assert fetch_cues.cached("census", {"channel": 7}, lambda: calls.append(1) or {"n": 9}) == {"n": 3}
+    assert calls == [1]

@@ -53,8 +53,9 @@ ids; return paths, never content.
 | `recurrence` | distinct videos or sources, never snippet count |
 | `confidence` | `confirmed` or `unconfirmed` (`evidence-rules.md`). Dropped facts never enter |
 | `sensitivity`, `sensitive` | the tier (`none`, `lifestyle`, `clinical`, `children`, `location`) and the derived boolean, true for `clinical`, `children`, `location`. Never set the boolean on its own |
-| `speaker` | `host`, `cohost` (the second named host), `shared` (a "we" line about the hosts' shared life) |
-| `people` | the people the quote names, `[{"name", "relation"}]`; `<corpus>/people.json` rolls them up across the ledger |
+| `speaker` | `host`, `cohost` (the second named host), `shared` (a "we" line about the hosts' shared life), `either` (one of the named hosts on a video where only the hosts appear, not shown which) |
+| `speaker_name` | on a multi-host channel, the person: the host's or co-host's name, both names for `shared`, "<host> or <cohost>" for `either`. A fact filmed on a solo upload of the co-host is the co-host's (`speaker_relabelled` says so) |
+| `people` | the people and pets the quote names, `[{"name", "relation", "of"}]`; `of` is whose relation it is when the quote shows it is not the speaker's own ("Sam has Luna"); `<corpus>/people.json` rolls them up across the ledger |
 | `superseded_by` | the newer fact's id when latest wins; the old fact stays as history |
 | `ended` | true when the merge shard found a claim stated as current is now over; never selected, on a page only as dated history in the map's About lines |
 | `staged`, `staged_only`, `probe` | the title read as a prank, challenge, stunt or skit; no non-staged upload confirms the claim (so `unconfirmed`, never selected, never on a page); what the search found |
@@ -81,7 +82,10 @@ refuses (exit 2) a transcript fact whose `verify.match` is not `exact`.
 `coverage` is counted from the build's own files; `lanes` is `transcripts`
 or `transcripts+socials`; `latest_video_date` is what the reuse check counts
 uploads after. On a refresh the header's descriptive fields carry over
-unless passed again.
+unless passed again. On a multi-host channel the header also carries `hosts`,
+`{"host": <name>, "cohost": <name>}`: the host is the name the run used, the
+co-host the name the cast sheets list beside the host in the most videos. A
+co-host is never saved as an alias of the host.
 
 ## Reuse
 
@@ -106,7 +110,18 @@ tl-creator-connections/v2`, `channel_id`, `channel_name`, `creator_name`,
 rules in SKILL.md, CONNECT step 3; `build_html.py` sets the page order, so
 only the concepts' order, strongest first, matters):
 
-1. `## About <creator name>`
+1. `## About <creator name>`: rendered as "Who <creator> is" (or "are"
+   for two or more people), the prose, then "<creator>'s story so far": the
+   About lines in the order the creator said them, newest first, each
+   labelled "said YYYY". Under it, "Who shows up in <creator>'s videos": every
+   person the quotes name with a relation, as whose relation they are
+   ("Sam's husband", "their mom"), plus relations the cast sheets read from
+   titles, openings and descriptions, marked * with a note. When the hosts
+   share a parent, one host's sibling or parent is "their". A relation that
+   names nobody ("my sister" with no name) is left out. When a newer fact
+   says that host is engaged or married and the table has one partner, the
+   partner's row shows the newer word (fiancé, wife), not the older
+   boyfriend or girlfriend, whatever year the older one carries.
 2. `## Done this before`, only when the lanes found any.
 3. `## Verdict`
 4. `## About <brand name>`: one or two neutral sentences from the brand-site

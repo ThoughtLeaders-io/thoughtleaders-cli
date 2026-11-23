@@ -491,3 +491,11 @@ def test_write_reports_the_cache_outcomes_when_given_the_context(tmp_path, capsy
     assert out["cache"] == {"format_label": "set", "host_aliases": "skipped: host name not cached",
                             "sibling_channels": "set"}
     assert [c[1] for c in _no_real_cache_writes] == ["format_label", "sibling_channels"]
+
+
+def test_co_host_sharing_the_hosts_surname_is_a_second_person():
+    cast = {v: {"hosts": ["Rosa Vale", "Mia Vale"]} for v in ("a", "b", "c")}
+    assert ledger_meta.co_hosts(cast, "Rosa Vale") == {"Mia Vale": 3}
+    assert ledger_meta.co_hosts(cast, "Rosa") == {"Mia Vale": 3}
+    first_names = {v: {"hosts": ["Rosa", "Mia"]} for v in ("a", "b")}
+    assert ledger_meta.co_hosts(first_names, "Rosa Vale") == {"Mia": 2}

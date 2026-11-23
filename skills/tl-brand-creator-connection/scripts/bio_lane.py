@@ -604,11 +604,16 @@ def cmd_terms(a: argparse.Namespace) -> int:
         "# --append is REQUIRED: without it the round replaces classified.jsonl "
         "and round 1's ledger is lost.",
     ]
+    if not all_terms:
+        # nothing to corroborate: a search with no terms would spend credits
+        # finding nothing, so the round is skipped (SKILL.md, corroboration round)
+        recipe = []
     summary = {"channel": a.channel, "round": a.round, "facts": len(per_fact),
                "with_terms": len(per_fact) - len(no_terms), "no_terms": no_terms,
                "window_cap": window_cap,
                "terms": all_terms, "per_fact": per_fact,
-               "phrases_file": str(phrases_path), "recipe": recipe}
+               "phrases_file": str(phrases_path), "recipe": recipe,
+               **({"skip": "no terms: the bio lane found nothing to corroborate"} if not recipe else {})}
     print(json.dumps(summary, indent=1, ensure_ascii=False))
     print(f"FUNNEL stage=bio_terms channel={a.channel} round={a.round} "
           f"facts={len(per_fact)} with_terms={summary['with_terms']} "

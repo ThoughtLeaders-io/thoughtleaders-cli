@@ -219,6 +219,14 @@ def db_es(body: dict, *, timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
                           input_text=json.dumps(body), timeout=timeout))
 
 
+def db_es_with_aggs(body: dict, *, timeout: int = DEFAULT_TIMEOUT) -> tuple[list[dict], dict]:
+    """Like ``db_es``, but also returns the reply's ``aggregations``, which
+    ``db_es`` drops. The same checks apply to the rows."""
+    data = _tl_json(["db", "es", "-", "--json"], input_text=json.dumps(body), timeout=timeout)
+    aggs = data.get("aggregations") if isinstance(data, dict) else None
+    return _rows(data), aggs if isinstance(aggs, dict) else {}
+
+
 def cli_rows(args: list[str], *, input_text: str | None = None,
              timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
     """Run any ``tl`` command with ``--json`` and return unwrapped rows."""

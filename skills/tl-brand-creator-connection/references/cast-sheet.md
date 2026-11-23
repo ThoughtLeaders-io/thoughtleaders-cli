@@ -50,6 +50,13 @@ inside it.
   description, with no sign of being in the video, is not a guest.
 - `role`: `guest` (an interviewee or invited speaker), `cohost`, `collab`
   (another creator), `friend`, `family`, `crew`, `other`.
+- `relation` and `of`, only for `family` and `friend` guests and only when
+  the title, the opening or the description says it: `relation` is the word
+  they use (`husband`, `wife`, `mom`, `dad`, `sister`, `brother`, `best
+  friend`), `of` is the host it belongs to ("both of our husbands" gives each
+  husband `of` his own host when the video says whose; "our mom" gives `of:
+  "both"`). Leave both out when nothing in the video says it; never infer a
+  relation from a shared surname or from who appears together.
 - `format`: `solo` (the host alone, or others present who never speak),
   `interview` (a guest answers the host's questions; a podcast episode),
   `collab` (other creators present and speaking), `multi_host` (two or more
@@ -74,14 +81,16 @@ Produce one JSON object and nothing else: no prose, no code fence.
  "videos": [
    {"i": 0, "video_id": "abc123", "format": "collab",
     "hosts": ["Eric"],
-    "guests": [{"name": "Gavin", "aliases": ["groovygavin"], "role": "friend"}],
+    "guests": [{"name": "Gavin", "aliases": ["groovygavin"], "role": "friend",
+                "relation": "best friend", "of": "Eric"}],
     "evidence": "opening: 'my friends and I'; description: 'Gavin: @GroovyGavin'"}]}
 ```
 
 - `i` and `video_id` exactly as given. Every video of the message appears
   exactly once; a missing or duplicated video is unjudged.
 - `hosts` is a list of names (or `host`); `guests` a list of objects with
-  `name`, `aliases` and `role`; `format` one of the seven values above.
+  `name`, `aliases` and `role` (and `relation`, `of` when said); `format`
+  one of the seven values above.
 
 **One message, one Write.** Write the JSON object to the path the OUTPUT
 section gives, then reply with the one line `cast=NNN videos=<n>`. No Bash,

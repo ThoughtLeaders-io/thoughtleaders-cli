@@ -1077,7 +1077,7 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         "confidence": confidence,
         "sensitivity": tier,
         "sensitive": tier in WITHHELD,
-        "speaker": v.get("speaker_guess") if v.get("speaker_guess") in ("cohost", "shared") else "host",
+        "speaker": v.get("speaker_guess") if v.get("speaker_guess") in ("cohost", "shared", "either") else "host",
         "people": v.get("people") or [],
         "superseded_by": None,
         "selected": False,
@@ -1276,6 +1276,18 @@ _NOT_NAME_WORDS = frozenset("""
     """.split())
 
 
+_CALENDAR_WORDS = frozenset(
+    "january february march april may june july august september october november december "
+    "monday tuesday wednesday thursday friday saturday sunday christmas easter".split())
+
+
+def _first_name_token(name: str) -> str | None:
+    for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", name or ""):
+        if t not in _NOT_NAME_WORDS:
+            return t.lower()
+    return None
+
+
 def _name_tokens(text: str) -> set[str]:
     return {t.lower() for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", text or "")
             if t not in _NOT_NAME_WORDS}
@@ -1343,6 +1355,30 @@ def first_upload_date(channel: str | None) -> str | None:
         return None
 
 
+# words that say how someone is related, never who they are: a "name" made
+# only of one of these ("sister", "my cats") names nobody. build_html reads
+# the same list through names_nobody.
+RELATION_WORDS = {
+    "sister", "brother", "sibling", "mom", "mum", "mother", "mommy", "mummy", "dad", "daddy", "father",
+    "parent", "aunt", "uncle", "cousin", "grandma", "grandpa", "grandmother", "grandfather", "nana", "nan",
+    "granny", "grandad", "son", "daughter", "baby", "kid", "child", "girlfriend", "boyfriend", "partner",
+    "fiance", "fiancee", "fiancé", "fiancée", "wife", "husband", "friend", "roommate", "pet", "dog",
+    "puppy", "cat", "kitten"}
+
+
+def names_nobody(name: str, relation: str | None = None) -> bool:
+    """True when a people entry's name is only a relation word ("sister",
+    "my cats", "her mum", "great-grandma"), or the relation itself: it names
+    no one."""
+    words = re.sub(r"[^\w\s]", " ", str(name or "").lower()).split()
+    words = [w for w in words if w not in ("my", "our", "her", "his", "their", "the", "little", "big",
+                                           "older", "younger", "baby", "best", "great")] or words[-1:]
+    if len(words) != 1:
+        return not words
+    w, rel = words[0], str(relation or "").lower().strip()
+    return w in RELATION_WORDS or w.rstrip("s") in RELATION_WORDS or bool(rel and w.rstrip("s") == rel.rstrip("s"))
+
+
 def people_list(facts: list[dict]) -> dict:
     """One row per exact spelling across the active ledger: the relation
     words seen, the facts, the videos and the last mention. ``two_names``
@@ -1354,8 +1390,8 @@ def people_list(facts: list[dict]) -> dict:
             continue
         for p in f.get("people") or []:
             name = str(p.get("name") or "").strip()
-            if not name:
-                continue
+            if not name or names_nobody(name, p.get("relation")):
+                continue  # "my sister" with no name is not a person
             row = rows.setdefault(name, {"relations": [], "facts": [], "videos": set(),
                                          "last_mention": None})
             rel = p.get("relation")
@@ -1715,10 +1751,34 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # facts and `none` on the bio-page record that names them, and the two
     # records are one person.
     tier_rank = {"none": 0, "lifestyle": 1, "clinical": 2, "children": 3, "location": 3}
+    # Only the person a withheld fact is about passes the tier on. A partner
+    # the children fact also names ("a daughter with Sam") is someone an open
+    # fact names with an adult relation (boyfriend, husband, friend), so a
+    # record about that partner keeps its own tier.
+    child_rel = re.compile(r"\b(son|daughter|child|kid|baby|newborn|toddler|stepson|stepdaughter)\b", re.I)
+    open_names: set[str] = set()
+    for f in facts:
+        if f.get("provenance") == "transcript" and f.get("sensitivity") not in WITHHELD:
+            for p in f.get("people") or []:
+                rel = str(p.get("relation") or "")
+                first = _first_name_token(str(p.get("name") or ""))
+                if first and rel and not child_rel.search(rel):
+                    open_names.add(first)
     withheld_names: dict[str, str] = {}
     for f in facts:
         if f.get("provenance") == "transcript" and f.get("sensitivity") in WITHHELD:
-            for tok in _name_tokens(str(f.get("claim") or "")):
+            people = f.get("people") or []
+            if people:
+                # the people the fact names, by first name: a surname is shared
+                # with the rest of the family ("Rio Vance" is not her father)
+                toks = set()
+                for p in people:
+                    first = _first_name_token(str(p.get("name") or ""))
+                    if first and (first not in open_names or child_rel.search(str(p.get("relation") or ""))):
+                        toks.add(first)
+            else:
+                toks = {t for t in _name_tokens(str(f.get("claim") or "")) if t not in open_names}
+            for tok in toks - _CALENDAR_WORDS:
                 withheld_names.setdefault(tok, str(f["sensitivity"]))
     tier_inherited: list[list[str]] = []
     for rec, fact_id in zip(identity, identity_ids):
