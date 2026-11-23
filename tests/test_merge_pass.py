@@ -1779,3 +1779,19 @@ def test_a_shard_reply_without_people_keeps_the_lane_records_people(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     web = [f for f in _facts(out).values() if f.get("provenance") == "web"]
     assert web and web[0]["people"] == [{"name": "Remy Vale", "relation": "fiancé"}]
+
+
+def test_a_web_partner_record_a_shard_links_to_an_unnamed_boyfriend_line_confirms_both(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="has been with the boxer Remy Vale since 2019",
+                domain="relationships", people=[{"name": "Remy Vale", "relation": "partner"}],
+                corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster("has a boyfriend", domain="relationships")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    web = [f for f in facts.values() if f.get("provenance") == "web"]
+    assert web[0]["confidence"] == "confirmed"
+    assert web[0]["people"] == [{"name": "Remy Vale", "relation": "partner"}]
+    assert facts["f001"]["confidence"] == "confirmed"

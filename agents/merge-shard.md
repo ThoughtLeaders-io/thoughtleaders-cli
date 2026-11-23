@@ -169,3 +169,13 @@ Every cluster in your shard appears exactly once in `decisions`.
   corroborated only for the items the cluster says: narrow its `claim` to
   those items. Never point a bio record at another bio or social record, or
   at a staged cluster.
+- A `web` or `social` record is linked the same way: when a kept, non-staged
+  transcript cluster in your shard states the same fact, or part of it, in
+  the creator's voice, set `corroborates` to that cluster id and narrow the
+  `claim` to the part the cluster says; otherwise `null`. A record that names
+  a person in a role (partner, sister, manager) is corroborated by a cluster
+  that names that person in the same role, or by a cluster that states the
+  role without a name ("has a boyfriend") when no cluster in your shard names
+  someone else in that role. Partner, girlfriend, boyfriend, fiancé, husband
+  and wife are one role here. A cluster that only names the person, with no
+  role, corroborates nothing.
