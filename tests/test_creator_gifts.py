@@ -291,3 +291,15 @@ def test_unrelated_name_is_a_pet_only_when_the_claim_says_so():
     fact = {**PET, "claim": "adopted a rescue dog named Luna", "people": [{"name": "Luna", "relation": None}]}
     result = gifts.candidates(META, [fact], 42, TODAY, "host")
     assert result["candidates"][0]["pet_names"] == ["Luna"]
+
+
+def test_older_favourite_public_figure_keeps_its_name():
+    fact = {**FAN, "claim": "favourite author is Ingrid Solvang", "last_seen": "2022-04-07",
+            "people": [{"name": "Ingrid Solvang", "relation": "favourite author"}]}
+    result = gifts.candidates(META, [fact], 42, TODAY, "host")
+    assert result["lasting_favourites"][0]["public_figures"] == ["Ingrid Solvang"]
+
+
+def test_malformed_hosts_header_does_not_crash():
+    result = gifts.candidates({**META, "hosts": ["Ana"]}, [PET], 42, TODAY, "host")
+    assert result["candidates"][0]["pet_names"] == ["Luna"]

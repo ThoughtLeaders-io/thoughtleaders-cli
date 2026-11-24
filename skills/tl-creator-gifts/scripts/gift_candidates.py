@@ -327,6 +327,9 @@ def candidates(meta, facts, channel, as_of, recipient_role):
             candidate = {key: fact[key] for key in fields if key in fact}
             candidate["speaker"] = speaker_of(fact, multi_host)
             candidate["lasting"] = why_lasting
+            figures = public_figures(fact)
+            if figures:
+                candidate["public_figures"] = figures
             lasting.append(candidate)
         elif reason:
             counts[reason] += 1
@@ -335,7 +338,8 @@ def candidates(meta, facts, channel, as_of, recipient_role):
             candidate["speaker"] = speaker_of(fact, multi_host)
             names = pet_names(fact)
             # a host named in a pets fact ("Sam has Luna") is a person, not a pet
-            host_names = {str(v).lower() for v in (meta.get("hosts") or {}).values()}
+            hosts = meta.get("hosts")
+            host_names = {str(v).lower() for v in hosts.values()} if isinstance(hosts, dict) else set()
             names = [n for n in (names or []) if n.lower() not in host_names]
             if names:
                 candidate["pet_names"] = names
