@@ -114,15 +114,24 @@ def pet_names(fact):
     if fact.get("domain") != "pets" or not isinstance(people, list):
         return None
     names = []
+    claimed = {n.lower() for n in claim_pet_names(fact)}
     for entry in people:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not entry["name"].strip():
+            return None
+        # "of" says the pet is someone else's ("Sam has Luna"), not the speaker's
+        if entry.get("of"):
             return None
         relation = entry.get("relation")
         words = set(str(relation).lower().replace("-", " ").split()) if relation else set()
         if words and not words & PET_WORDS:
             return None
-        if not is_pet_type(entry["name"]):
-            names.append(entry["name"].strip())
+        if is_pet_type(entry["name"]):
+            continue
+        # a name with no relation is a pet only when the claim calls it one
+        # ("a dog named Luna"); otherwise it may be a person
+        if not words and entry["name"].strip().lower() not in claimed:
+            return None
+        names.append(entry["name"].strip())
     return names
 
 
@@ -137,7 +146,7 @@ def public_figures(fact):
             return None
         relation = entry.get("relation")
         words = set(re.findall(r"[a-z]+", str(relation).lower())) if relation else set()
-        if not words & PUBLIC_WORDS or words & PRIVATE_WORDS:
+        if entry.get("of") or not words & PUBLIC_WORDS or words & PRIVATE_WORDS:
             return None
         names.append(entry["name"].strip())
     return names

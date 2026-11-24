@@ -134,6 +134,9 @@ def test_unnamed_pet_type_reaches_the_gift_without_names():
     {"domain": "habits", "people": [{"name": "PRIVATE NAME", "relation": None}]},
     {"domain": "habits", "people": [{"name": "PRIVATE NAME", "relation": "dog"}]},
     {"people": [{"name": "", "relation": "dog"}]}, {"people": "PRIVATE NAME"},
+    {"people": [{"name": "Luna", "relation": "dog", "of": "PRIVATE OWNER"}]},
+    {"people": [{"name": "PRIVATE NAME", "relation": None}, {"name": "Luna", "relation": "dog"}]},
+    {"claim": "walks PRIVATE NAME every morning", "people": [{"name": "PRIVATE NAME", "relation": None}]},
     {"ended": True}, {"last_seen": "2024-01-01"},
 ])
 def test_pet_facts_naming_a_person_or_no_longer_current_never_appear(changes):
@@ -263,6 +266,7 @@ def test_public_figures_reach_the_gift_with_their_names(people):
     {"people": [{"name": "PRIVATE NAME", "relation": "wife's favourite author"}]},
     {"people": [{"name": "PRIVATE NAME", "relation": None}]},
     {"people": [{"name": "PRIVATE NAME", "relation": "hero"}]},
+    {"people": [{"name": "PRIVATE NAME", "relation": "favourite author", "of": "PRIVATE FRIEND"}]},
     {"people": [{"name": "Ingrid Solvang", "relation": "author"}, {"name": "PRIVATE NAME", "relation": "friend"}]},
     {"domain": "family", "people": [{"name": "PRIVATE NAME", "relation": "actor"}]},
     {"domain": "pets", "people": [{"name": "PRIVATE NAME", "relation": "author"}]},
@@ -272,3 +276,18 @@ def test_private_people_never_pass_as_public_figures(changes):
     assert result["candidates"] == []
     assert not result.get("lasting_favourites")
     assert "PRIVATE" not in json.dumps(result)
+
+
+def test_a_host_gift_never_carries_the_cohosts_pet():
+    meta = {**META, "format": "multi_host", "hosts": {"host": "Ana", "cohost": "Ben"}}
+    fact = {**PET, "claim": "PRIVATE Ben has a dog named Rex",
+            "people": [{"name": "Rex", "relation": "dog", "of": "Ben"}]}
+    result = gifts.candidates(meta, [fact], 42, TODAY, "host")
+    assert result["candidates"] == []
+    assert "PRIVATE" not in json.dumps(result)
+
+
+def test_unrelated_name_is_a_pet_only_when_the_claim_says_so():
+    fact = {**PET, "claim": "adopted a rescue dog named Luna", "people": [{"name": "Luna", "relation": None}]}
+    result = gifts.candidates(META, [fact], 42, TODAY, "host")
+    assert result["candidates"][0]["pet_names"] == ["Luna"]

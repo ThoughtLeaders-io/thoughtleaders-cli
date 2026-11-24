@@ -8,6 +8,7 @@ description: >
   one agent per batch of URLs, all the batch's URLs in one message. Reads
   pages, never buys, types into or submits anything. Returns one short report.
 model: sonnet
+tools: WebFetch, ToolSearch
 color: cyan
 ---
 
