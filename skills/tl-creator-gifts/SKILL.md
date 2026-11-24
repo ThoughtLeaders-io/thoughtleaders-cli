@@ -154,3 +154,5 @@ Save outputs outside the skill and source repository. Return absolute paths. Do 
 Report creator and supplier query/page counts, elapsed research time, actual TL credits from receipts, and exposed model/search cost. Report unavailable monetary cost as `unreported`. Keep profile-build and gift-research costs separate.
 
 Recommendations do not authorize purchases, messages, partner terms, releases, or checkout.
+
+As the last step, run `tl agent complete tl-creator-gifts`, so a run opened from a ThoughtLeaders surface is counted; one started by hand gets a short note and nothing else. Run it with `--outcome no_results` when the result is `No good fit`, and `--outcome failed` when the profile could not be built or the run stopped on an error. It replaces PROFILE's own `tl agent complete tl-brand-creator-connection`: a gift run never sends that one.
