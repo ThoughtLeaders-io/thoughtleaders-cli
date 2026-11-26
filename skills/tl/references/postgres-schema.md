@@ -178,7 +178,7 @@ A channel can have multiple adspots (different sellers: talent manager, direct, 
 | `channel_name` | varchar | Display name. ⚠️ The column is `channel_name`, NOT `name`. |
 | `external_channel_id` | varchar | YouTube channel ID (e.g., `UCxxxxxx`). ⚠️ There is NO `youtube_id` column — use this one. |
 | `url` | varchar | Channel URL (external — usually the YouTube URL). |
-| `slug` | varchar | TL-platform-specific slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any user-facing surface (reports, samples, Slack posts). Fall back to an ID-based TL path if `slug` is NULL; never fall back to the external YouTube URL. |
+| `slug` | varchar | TL-platform-specific slug. Used to build the canonical TL channel URL: `https://app.thoughtleaders.io/youtube/<slug>`. Prefer this over `url` when linking to a channel from any user-facing surface (reports, samples, Slack posts). Only YouTube channels (`format` = 4) with a slug have this page; any other channel has no TL page, so name it without a TL link — never build an ID-based TL path, and never fall back to the external YouTube URL. |
 | `total_views` | int | Total views for the entire channel |
 | `subscribers` | bigint | Subscriber count. |
 | `media_selling_network_join_date` | date/timestamptz | When the channel joined the MSN. **MSN membership = this column IS NOT NULL.** |
