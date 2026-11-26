@@ -89,9 +89,7 @@ Other key concepts:
 - **Profiles** — actors that own sponsorship records on behalf of either side of a deal. A profile is either buyer-side or seller-side:
   - *Buyer-side (brand) profiles* — represent a sponsoring brand. Each brand profile has an M2M link to at most one `Brand` record (which are the actual advertiser identities). On a sponsorship, `advertiser_profile` is the buyer-side profile, and `advertiser_id` is the buyer-side user who created the record — the advertiser is always the buyer/brand side, never the YouTube creator (the channel hangs off `ad_spot_id`).
   - *Seller-side (publisher) profiles* — represent one or more `Channel` records through the `thoughtleaders_profile_channels` link. Representation is not deal ownership: each adspot names its own seller (`ad_spot.publisher`, a user), so a channel's deals belong to whoever sold them, not to everyone who represents the channel.
-  - **How to tell them apart** — three signals on the `thoughtleaders_profile` row, used in this order:
-    1. **`persona`** (canonical) — `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
-    2. **`is_advertiser` / `is_publisher`** booleans — feature flags; either or both can be true for staff-style profiles, but on normal user profiles they reliably mark side.
+  - **How to tell them apart** — `persona` on the `thoughtleaders_profile` row: `1=Brand`, `4=Media Agency`, `3=Talent Manager` are buyer-side; `2=Creator`, `5=Creator Service` are seller-side. May be null on legacy rows.
   - Org scoping for sponsorships is profile-mediated: a sponsorship belongs to your org if **either** `advertiser_profile.organization` (brand side) **or** the adspot seller's organization — `ad_spot.publisher` → that user's profile → `organization` (publisher side) — matches yours. Representing the channel does not surface its deals.
 - **MSN** (Media Selling Network) — the ~12k YouTube channels that have opted in to receive sponsorship offers. A channels is in the MSN group if the `channel.media_selling_network_join_date` field is not null.
 - **MBN** (Media Buying Network) — the brand-side counterpart to MSN: brand profiles that have opted in to receive proposed sponsorships. A profile is in the MBN group if the `profile.media_buying_network_join_date` field is not null.
@@ -116,7 +114,6 @@ Other key concepts:
 Users see data scoped by their organization and plan:
 - **Media buyers** see sponsorships where their org is the brand. They see `price` but never `cost`.
 - **Media sellers** see sponsorships where their org is the publisher. They see `cost` but never `price`.
-- **Intelligence plan** is required for accessing information not strictly related to the user's organisation.
 
 When querying sponsorship bookings, filter the rows with `publish_status = 3` (sold) and use `purchase_date` for the date range. For all-flow / not-yet-sold inclusive queries, drop the `publish_status` predicate and filter by `created_at` instead.
 
@@ -199,19 +196,19 @@ tl uploads show <id>                   # Upload detail
 tl channels show <id-or-name>          # Channel detail (accepts numeric ID or name) — for channel search use raw SQL on thoughtleaders_channel
 tl channels find <query>               # Resolve a string to {id, name}; accepts name/slug, YouTube URL/handle/ID, video URL (queues a scrape if no match)
 tl channels update <id> '<json>'       # Update a channel
-tl channels similar <id-or-name>       # Similarity recommender (Intelligence plan)
+tl channels similar <id-or-name>       # Similarity recommender
 tl brands show <id-or-name>            # Brand detail
 tl brands find <query>                 # Resolve a string to {id, name}; matches name, slug, domain, or keyword
 tl brands similar <id-or-name>         # Find similar brands via similarity search
 tl recommender tags [query]            # List similarity tag names — categories, demographics, formats
-tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag (Intelligence)
+tl recommender top-channels "<tag>"    # Top channels loaded on a similarity tag
 tl recommender top-brands "<tag>"      # Top brands (deduped from profiles) loaded on a similarity tag
-tl recommender channels-with-tag "<tag>" [--min <v>] # ALL channel IDs scoring >= v on a tag (--min default 0.00001 drops zero-loading channels; paged, enumerates the full set; 1 credit/result; Intelligence)
-tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown (Intelligence)
-tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown (Intelligence)
-tl recommender channels-for-profile <id> # Find channels closest to a brand profile's ideal profile (Intelligence)
-tl recommender channels-for-brand <ref>  # Same as above but takes a brand ref; uses the brand's newest profile with a vector (Intelligence)
-tl recommender brands-for-channel <ref>  # Brands most likely to sponsor a channel; runs the channel's vector against the brand-profile index (Intelligence)
+tl recommender channels-with-tag "<tag>" [--min <v>] # ALL channel IDs scoring >= v on a tag (--min default 0.00001 drops zero-loading channels; paged, enumerates the full set; 1 credit/result)
+tl recommender inspect-channel <ref>   # Show a channel's similarity-profile breakdown
+tl recommender inspect-brand <ref>     # Show a brand profile's ideal similarity-profile breakdown
+tl recommender channels-for-profile <id> # Find channels closest to a brand profile's ideal profile
+tl recommender channels-for-brand <ref>  # Same as above but takes a brand ref; uses the brand's newest profile with a vector
+tl recommender brands-for-channel <ref>  # Brands most likely to sponsor a channel; runs the channel's vector against the brand-profile index
 tl snapshots channel <id>              # Channel metrics over time (Firebolt-backed)
 tl snapshots video <id> --channel <id> # Video view curve (--channel required!)
 tl reports                             # List saved reports
@@ -606,7 +603,7 @@ tl recommender tags cooking
 # Discover tag names containing the substring
 tl recommender tags crypto
 
-# Top channels & brands loaded on a similarity tag (Intelligence)
+# Top channels & brands loaded on a similarity tag
 tl recommender top-channels "Cooking" msn:yes --limit 50
 tl recommender top-channels "Tech" --limit 30
 tl recommender top-brands "USA share" mbn:yes --limit 50
@@ -701,7 +698,6 @@ Every query costs credits. Before running expensive queries:
 Users only see data their plan allows:
 - **Media buyers** see deals where their org is the brand. They see `price` but never `cost`.
 - **Media sellers** see deals where their org is the publisher. They see `cost` but never `price`.
-- **Intelligence plan** required for `tl brands`, the full `tl recommender` surface, and `tl db es` access to full transcript / brand-mention data.
 - **Paid plan** required for `tl snapshots`.
 
 ## Important: Firebolt Snapshots

@@ -147,13 +147,13 @@ tl brands find nike.com
 tl channels show 12345
 tl channels show "Economics Explained"
 
-# Find similar channels (recommender, 25 credits, Intelligence plan).
+# Find similar channels (recommender, 25 credits).
 # msn: tri-state (default yes): yes = MSN only, no = non-MSN only, both = no filter.
 # tpp: tri-state (default both): yes = TPP only, no = non-TPP only, both = no filter.
 tl channels similar 12345 --limit 10
 tl channels similar "Tremending girls" min-score:0.85 --limit 5
 
-# Recommender — discovery by category/demographic tag (Intelligence plan).
+# Recommender — discovery by category/demographic tag.
 # `tags` is free; everything else costs 25 credits flat.
 tl recommender tags                              # List every tag (free)
 tl recommender tags cooking                      # Search tag names by substring

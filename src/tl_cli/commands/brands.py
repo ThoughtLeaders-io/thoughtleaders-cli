@@ -114,7 +114,7 @@ def history_cmd(
     Prefer a raw `tl db es` probe on `sponsored_brand_mentions` (joined to
     `thoughtleaders_channel` via `tl db pg` for channel names). See
     `skills/tl/SKILL.md` → "Brand sponsorship history" for the canonical
-    pattern. Requires an Intelligence plan.
+    pattern.
     """
     _warn_deprecated(_HISTORY_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
@@ -153,8 +153,7 @@ def history_stats_cmd(
     """Deprecated. Aggregate roll-up of a brand's sponsorship history (no per-row output).
 
     Prefer a `tl db es` aggregation over `sponsored_brand_mentions: <brand_id>`
-    for totals / per-year buckets / top channels. Requires an Intelligence
-    plan. Costs 5 credits flat.
+    for totals / per-year buckets / top channels. Costs 5 credits flat.
     """
     _warn_deprecated(_HISTORY_STATS_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
@@ -277,7 +276,7 @@ def similar_cmd(
 ) -> None:
     """Find brands similar to a given one (by ID or name).
 
-    Costs 25 credits per call. Intelligence plan required.
+    Costs 25 credits per call.
 
     Examples:
         tl brands similar Nike
@@ -342,7 +341,7 @@ def winner_channels_cmd(
     Returns channels this brand sponsored at least 5 times within the lookback
     window (default 2 years), subscribers ≥ 10k, ranked by renewal count. These winners
     seed the look-alike expansion (`tl channels look-alike <id>`). Costs 5 credits
-    per result. Intelligence plan required.
+    per result.
 
     Filters:
         tpp:<yes|no|both>       TL Partner Program (default: both)

@@ -517,7 +517,7 @@ Map the visible code + detail to the likely cause:
 - **`Error (400): …filterset…`** (Path B only) → the config has a key the platform doesn't recognise in `filterset`. Re-check against the matching schema (`intelligence_filterset_schema.json` or `sponsorship_filterset_schema.json`) and remove invented fields.
 - **`Error (400): …columns…`** (Path B only) → the config references a column display-name the platform doesn't recognise. Re-check against the type's `columns_<type>.md` catalogue; display names are case-sensitive and preserve spaces.
 - **`Error (400): …`** (any other detail) → read the detail; it usually names the offending field or value. Fix and retry.
-- **`Access denied: …`** (HTTP 403) → the user lacks the plan required for this report type (Intelligence for 1/2/3 in some orgs; confirm with `tl whoami`).
+- **`Access denied: …`** (HTTP 403) → the user lacks the plan required for this report type (confirm with `tl whoami`).
 - **`Insufficient credits.`** (HTTP 402) → the org is out of credits; tell the user to top up.
 
 The above maps the visible CLI output to the underlying cause — match on a substring of the detail rather than the exact string, since the platform's wording may evolve.

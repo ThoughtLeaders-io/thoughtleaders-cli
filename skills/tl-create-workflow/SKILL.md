@@ -70,9 +70,6 @@ A workflow is **not a new kind of object** — every stage IS a saved Report
 tl whoami        # confirms the CLI is authed and shows plan/limits
 ```
 If this errors, tell the user to run `tl auth login` (or set `TL_API_KEY`).
-Sourcing stages needs intelligence access on the org's plan; if `tl whoami`
-shows no intelligence flag, say so — you can still design the funnel, but you
-can't populate it from the index.
 
 ## When to invoke / skip
 

@@ -324,8 +324,6 @@ The profile is the account record for a person/company on the platform. Every br
 | `organization_id` | int FK | → `thoughtleaders_organization.id` |
 | `organization_name` | varchar | Denormalized company/organization display name |
 | `persona` | int | Account persona (see constants below) |
-| `is_advertiser` | boolean | Buyer (brand) side capability flag |
-| `is_publisher` | boolean | Seller (channel) side capability flag |
 | `owner_sales_id` | int FK | → `auth_user.id` — TL-side sales owner for this profile |
 | `owner_advertiser_id` | int FK | → `auth_user.id` — TL-side brand account owner |
 | `owner_publisher_id` | int FK | → `auth_user.id` — on advertiser profiles: the adops user in charge |

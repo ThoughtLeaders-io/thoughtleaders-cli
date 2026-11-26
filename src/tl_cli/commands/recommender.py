@@ -139,7 +139,7 @@ def top_channels_cmd(
 ) -> None:
     """Top channels scoring high on a single similarity tag.
 
-    Costs 25 credits per call. Intelligence plan required.
+    Costs 25 credits per call.
 
     Filters:
         msn:<yes|no|all>            MSN membership (default: all)
@@ -166,7 +166,7 @@ def top_profiles_cmd(
 ) -> None:
     """Top brand profiles scoring high on a single similarity tag.
 
-    Costs 25 credits per call. Intelligence plan required. Profiles can
+    Costs 25 credits per call. Profiles can
     represent the same brand more than once (one brand → multiple
     profiles); use `top-brands` for brand-deduplicated results.
 
@@ -194,7 +194,7 @@ def top_brands_cmd(
 ) -> None:
     """Top brands scoring high on a single similarity tag (deduplicated from profiles).
 
-    Costs 25 credits per call. Intelligence plan required. Server-side
+    Costs 25 credits per call. Server-side
     aggregates the underlying profile rows by brand, keeping the
     highest-scoring profile per brand.
 
@@ -233,7 +233,7 @@ def channels_with_tag_cmd(
     every channel with any loading on the tag and drops the zero-fill rest.
     Raise it for a stricter cutoff.
 
-    Costs 1 credit per channel ID returned. Intelligence plan required.
+    Costs 1 credit per channel ID returned.
 
     Examples:
         tl recommender channels-with-tag "Cooking"
@@ -268,7 +268,7 @@ def inspect_channel_cmd(
 ) -> None:
     """Show a channel's similarity profile grouped by category.
 
-    Costs 25 credits per call. Intelligence plan required. Returns the
+    Costs 25 credits per call. Returns the
     active similarity tags grouped by category, plus the overall strength.
 
     Examples:
@@ -297,7 +297,7 @@ def inspect_brand_cmd(
 ) -> None:
     """Show a brand profile's ideal similarity profile grouped by category.
 
-    Costs 25 credits per call. Intelligence plan required. Resolves the
+    Costs 25 credits per call. Resolves the
     brand to its (preferred MBN) profile and inspects that profile's
     aggregated similarity tags.
 
@@ -329,7 +329,7 @@ def channels_for_profile_cmd(
 ) -> None:
     """Channels closest to a brand profile's ideal similarity profile.
 
-    Costs 25 credits per call. Intelligence plan required. Channels the
+    Costs 25 credits per call. Channels the
     brand has already worked with or been proposed are excluded.
 
     Filters:
@@ -378,9 +378,8 @@ def channels_for_brand_cmd(
 
     Resolves the brand to its most-recently-created profile that has an
     indexed search vector and runs the same KNN that
-    `channels-for-profile` uses. Costs 25 credits per call. Intelligence
-    plan required. Channels the brand has already worked with or been
-    proposed are excluded.
+    `channels-for-profile` uses. Costs 25 credits per call. Channels the
+    brand has already worked with or been proposed are excluded.
 
     Filters:
         language:<iso>      Content language (default: en)
@@ -433,7 +432,6 @@ def brands_for_channel_cmd(
 
     Compares the channel's similarity profile against brand similarity
     profiles and dedupes the results by brand. Costs 25 credits per call.
-    Intelligence plan required.
 
     Filters:
         mbn:<yes|no|all>    MBN membership of the underlying profile (default: all)

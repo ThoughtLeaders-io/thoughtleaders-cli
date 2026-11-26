@@ -255,7 +255,7 @@ def similar_cmd(
 ) -> None:
     """Find channels similar to a given one (by id or name).
 
-    Costs 25 credits per call. Intelligence plan required. Results are
+    Costs 25 credits per call. Results are
     ranked by similarity and enriched with subscribers, projected_views,
     total_views, category, and the channel's representative CPM.
 
@@ -293,7 +293,7 @@ def history_cmd(
 
     Prefer `tl db es` with `channel.id: <id>` + non-empty
     `sponsored_brand_mentions`, joined to `thoughtleaders_brand` via
-    `tl db pg` for brand names. Requires an Intelligence plan.
+    `tl db pg` for brand names.
     """
     _warn_deprecated(_HISTORY_DEPRECATION)
     fmt = detect_format(json_output, csv_output, md_output, toon_output)
@@ -456,7 +456,7 @@ def look_alike_cmd(
     demographics, posting cadence, video duration, …). This is the exact primitive the
     brand→channel matcher uses for its look-alike tiers — distinct from
     `tl channels similar` (the generic feature-vector KNN). Costs 25 credits per
-    result. Intelligence plan required.
+    result.
 
     Server-side filters:
         msn:<yes|no|both>       Restrict to Media Selling Network (default: both)
