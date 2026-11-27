@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -454,7 +455,10 @@ def cached_attributes(row: dict) -> dict:
 def set_cached(channel_id: int, key: str, value) -> str:
     """Set one ``ai_description`` key on the channel record through the
     internal CLI (``--json`` for anything but a string). Returns ``set`` or
-    ``skipped: <why>``; never raises."""
+    ``skipped: <why>``; never raises. With ``TL_CREATOR_NO_CACHE_WRITES`` set
+    (a test run), nothing is written to the channel record."""
+    if os.environ.get("TL_CREATOR_NO_CACHE_WRITES"):
+        return "skipped: test mode, TL_CREATOR_NO_CACHE_WRITES is set"
     args = ["tl-internal", "channels", "ai-description", "set", str(channel_id), key]
     args += [value] if isinstance(value, str) else [json.dumps(value, ensure_ascii=False), "--json"]
     try:

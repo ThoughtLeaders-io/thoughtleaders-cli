@@ -158,9 +158,18 @@ def test_run_brief_refuses_another_creators_name(tmp_path):
                                                         "top_channels": [{"name": "The Creator"}]}))
     names = bh.other_creator_names(tmp_path / "connections-1.md", "The Creator")
     assert names == ["Other Person"]
-def test_run_round_two_recipe_carries_host_names_and_the_prompt_step(tmp_path, capsys):
+def test_run_round_two_recipe_skips_when_there_is_nothing_to_corroborate(tmp_path, capsys):
     facts = tmp_path / "bio-facts.json"
     facts.write_text(json.dumps({"facts": []}))
+    bl.main(["terms", "--facts", str(facts), "--channel", "1", "--out", str(tmp_path), "--host-names", "Dana"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["recipe"] == [] and "skip" in out
+
+
+def test_run_round_two_recipe_carries_host_names_and_the_prompt_step(tmp_path, capsys):
+    facts = tmp_path / "bio-facts.json"
+    facts.write_text(json.dumps({"facts": [{"ref": "b1", "claim": "grew up in Millbrook and loves sourdough baking",
+                                            "source_excerpt": "Grew up in Millbrook, sourdough baking forever"}]}))
     try:
         bl.main(["terms", "--facts", str(facts), "--channel", "1", "--out", str(tmp_path), "--host-names", "Dana"])
     except SystemExit:

@@ -56,7 +56,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
+import shutil
+import tempfile
 import re
 import subprocess
 import sys
@@ -427,6 +430,12 @@ def main(argv: list[str] | None = None) -> int:
                 stdout_to=context_full)
             return "context stats" if rc != 0 else None
 
+        # one download per build: a second fetch below (with the host's name
+        # found on camera) reads this call's answers back instead of searching
+        # again; the cache lives only for this call
+        corpus.mkdir(parents=True, exist_ok=True)
+        fetch_cache = tempfile.mkdtemp(prefix=".fetch-cache-", dir=corpus)
+        os.environ["TL_FETCH_CACHE_DIR"] = fetch_cache
         failed = fetch_and_stats(fetch_args)
         if failed:
             print(json.dumps({**out, "exit": 3, "failed": failed}, indent=1))
@@ -454,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
                 out["host_names_found"] = found
                 out["host_names_source"] = source
                 out["ran"].append("refetch_with_found_name")
+        os.environ.pop("TL_FETCH_CACHE_DIR", None)
+        shutil.rmtree(fetch_cache, ignore_errors=True)
         out["ran"].append("context_stats")
         # the cast sheet's prompts, one per 25 kept videos, so the next
         # message can spawn the sheet agents without a render turn of its own

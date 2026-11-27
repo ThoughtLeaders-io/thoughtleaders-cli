@@ -1077,7 +1077,7 @@ def fact_from_cluster(line: dict, fact_id: str, dec: dict, fmt: str, channel: st
         "confidence": confidence,
         "sensitivity": tier,
         "sensitive": tier in WITHHELD,
-        "speaker": v.get("speaker_guess") if v.get("speaker_guess") in ("cohost", "shared") else "host",
+        "speaker": v.get("speaker_guess") if v.get("speaker_guess") in ("cohost", "shared", "either") else "host",
         "people": v.get("people") or [],
         "superseded_by": None,
         "selected": False,
@@ -1115,6 +1115,25 @@ def fail(violations: dict[str, list[str]]) -> int:
     return 3
 
 
+def fill_lane_people(identity: list[dict], corpus: pathlib.Path) -> None:
+    """A merge shard re-sends each lane record; one that leaves out `people`
+    takes it from the lane's own record (the ``identity-facts-sN.json`` slices
+    ``identity_prompt.py`` wrote beside the output), so a partner the web lane
+    named is not lost on the way. Only `people` is filled, never a claim."""
+    lane: dict[str, list] = {}
+    for path in sorted(corpus.glob("identity-facts-s*.json")):
+        try:
+            recs = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for r in recs if isinstance(recs, list) else []:
+            if isinstance(r, dict) and r.get("ref") and isinstance(r.get("people"), list):
+                lane.setdefault(str(r["ref"]), r["people"])
+    for rec in identity:
+        if "people" not in rec and str(rec.get("ref") or "") in lane:
+            rec["people"] = lane[str(rec["ref"])]
+
+
 def identity_fact(rec: dict, fact_id: str) -> dict:
     """A social/web fact: its source and seen-date stand where the transcript
     lane's quote, video and start would be. Alone it is never `confirmed`: only cross-lane corroboration lifts it, and that is applied once both
@@ -1145,6 +1164,13 @@ def identity_fact(rec: dict, fact_id: str) -> dict:
         fact["source_excerpt"] = str(rec["source_excerpt"]).strip()
     if str(rec.get("sensitivity_source") or "").strip():
         fact["sensitivity_source"] = str(rec["sensitivity_source"]).strip()
+    # the people the claim names, as the page says who they are, so the
+    # page's people table can show a partner a web page names
+    people = [{"name": str(p["name"]).strip(), "relation": (str(p["relation"]).strip() or None)
+               if p.get("relation") is not None else None}
+              for p in rec.get("people") or [] if isinstance(p, dict) and str(p.get("name") or "").strip()]
+    if people:
+        fact["people"] = people
     return fact
 
 
@@ -1198,6 +1224,18 @@ def corroboration_holds(target: dict | None) -> bool:
             and target.get("provenance") == "transcript"
             and not target.get("staged_only")
             and not target.get("retired_reason"))
+
+
+def web_repeats_upload(fact: dict, target: dict) -> bool:
+    """Whether a web or social record only repeats the upload it would
+    confirm: its page is on YouTube, or its address names one of the
+    target's videos."""
+    url = str(fact.get("source_url") or "")
+    if re.search(r"(^|[/.])(youtube\.com|youtu\.be)(/|$)", url, re.I):
+        return True
+    ids = {str(m).split(":")[0] for m in target.get("members") or []}
+    ids.add(str(target.get("video") or "").split(":")[-1])
+    return any(i and i in url for i in ids)
 
 
 def moment_key(fact: dict) -> tuple | None:
@@ -1276,6 +1314,18 @@ _NOT_NAME_WORDS = frozenset("""
     """.split())
 
 
+_CALENDAR_WORDS = frozenset(
+    "january february march april may june july august september october november december "
+    "monday tuesday wednesday thursday friday saturday sunday christmas easter".split())
+
+
+def _first_name_token(name: str) -> str | None:
+    for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", name or ""):
+        if t not in _NOT_NAME_WORDS:
+            return t.lower()
+    return None
+
+
 def _name_tokens(text: str) -> set[str]:
     return {t.lower() for t in re.findall(r"\b[A-Z][a-zA-Z'’-]{2,}\b", text or "")
             if t not in _NOT_NAME_WORDS}
@@ -1343,6 +1393,30 @@ def first_upload_date(channel: str | None) -> str | None:
         return None
 
 
+# words that say how someone is related, never who they are: a "name" made
+# only of one of these ("sister", "my cats") names nobody. build_html reads
+# the same list through names_nobody.
+RELATION_WORDS = {
+    "sister", "brother", "sibling", "mom", "mum", "mother", "mommy", "mummy", "dad", "daddy", "father",
+    "parent", "aunt", "uncle", "cousin", "grandma", "grandpa", "grandmother", "grandfather", "nana", "nan",
+    "granny", "grandad", "son", "daughter", "baby", "kid", "child", "girlfriend", "boyfriend", "partner",
+    "fiance", "fiancee", "fiancé", "fiancée", "wife", "husband", "friend", "roommate", "pet", "dog",
+    "puppy", "cat", "kitten"}
+
+
+def names_nobody(name: str, relation: str | None = None) -> bool:
+    """True when a people entry's name is only a relation word ("sister",
+    "my cats", "her mum", "great-grandma"), or the relation itself: it names
+    no one."""
+    words = re.sub(r"[^\w\s]", " ", str(name or "").lower()).split()
+    words = [w for w in words if w not in ("my", "our", "her", "his", "their", "the", "little", "big",
+                                           "older", "younger", "baby", "best", "great")] or words[-1:]
+    if len(words) != 1:
+        return not words
+    w, rel = words[0], str(relation or "").lower().strip()
+    return w in RELATION_WORDS or w.rstrip("s") in RELATION_WORDS or bool(rel and w.rstrip("s") == rel.rstrip("s"))
+
+
 def people_list(facts: list[dict]) -> dict:
     """One row per exact spelling across the active ledger: the relation
     words seen, the facts, the videos and the last mention. ``two_names``
@@ -1354,8 +1428,8 @@ def people_list(facts: list[dict]) -> dict:
             continue
         for p in f.get("people") or []:
             name = str(p.get("name") or "").strip()
-            if not name:
-                continue
+            if not name or names_nobody(name, p.get("relation")):
+                continue  # "my sister" with no name is not a person
             row = rows.setdefault(name, {"relations": [], "facts": [], "videos": set(),
                                          "last_mention": None})
             rel = p.get("relation")
@@ -1399,6 +1473,7 @@ def cmd_expand(a: argparse.Namespace) -> int:
     by_c = {r["c"]: r for r in records}
 
     decisions, agent_selected, identity, problems = load_decisions(a.decisions)
+    fill_lane_people(identity, out_path.parent)
     enum_aliases = alias_enums(decisions, identity)
     violations, folds, fallbacks = validate(records, clusters, decisions,
                                             existing_by_id, identity,
@@ -1686,6 +1761,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # each other to `confirmed`.
     corroborated: list[list[str]] = []
     bio_uncorroborated: list[list[str]] = []
+    web_staged_links: list[list[str]] = []
+    web_staged_refused: list[list[str]] = []
     for rec, fact_id in zip(identity, identity_ids):
         raw = rec.get("corroborates")
         if raw is None:
@@ -1699,6 +1776,18 @@ def cmd_expand(a: argparse.Namespace) -> int:
             # inside a staged premise (the confidence cap the transcript lane
             # already applied), and not one whose evidence was rejected.
             bio_uncorroborated.append([fact_id, target])
+            continue
+        if (fact_index[fact_id].get("provenance") in ("social", "web")
+                and fact_index[target].get("staged_only")):
+            # An outside source agreeing with a line said only inside a bit
+            # confirms the outside fact, never the bit: her staged line keeps
+            # its cap. A page that is the upload itself, or names it, only
+            # repeats the bit and confirms nothing.
+            if web_repeats_upload(fact_index[fact_id], fact_index[target]):
+                web_staged_refused.append([fact_id, target])
+            else:
+                fact_index[fact_id]["confidence"] = "confirmed"
+                web_staged_links.append([fact_id, target])
             continue
         fact_index[fact_id]["confidence"] = "confirmed"
         fact_index[target]["confidence"] = "confirmed"
@@ -1715,10 +1804,43 @@ def cmd_expand(a: argparse.Namespace) -> int:
     # facts and `none` on the bio-page record that names them, and the two
     # records are one person.
     tier_rank = {"none": 0, "lifestyle": 1, "clinical": 2, "children": 3, "location": 3}
+    # Only the person a withheld fact is about passes the tier on. Someone an
+    # open transcript fact also names ("a daughter with Sam", "her and Remy's
+    # safety") is open, so a record about them keeps its own tier, whether or
+    # not the fact says who they are. A child never is: a name any fact gives a
+    # child relation, or a `children` fact names without an adult relation
+    # (the boyfriend in "a daughter with Sam" is an adult), stays withheld.
+    child_rel = re.compile(r"\b(son|daughter|child|kid|baby|newborn|toddler|stepson|stepdaughter)\b", re.I)
+    child_names: set[str] = set()
+    open_names: set[str] = set()
+    for f in facts:
+        if f.get("provenance") != "transcript":
+            continue
+        for p in f.get("people") or []:
+            first = _first_name_token(str(p.get("name") or ""))
+            if not first:
+                continue
+            rel = str(p.get("relation") or "")
+            if child_rel.search(rel) or (f.get("sensitivity") == "children" and not rel):
+                child_names.add(first)
+            elif f.get("sensitivity") not in WITHHELD:
+                open_names.add(first)
+    open_names -= child_names
     withheld_names: dict[str, str] = {}
     for f in facts:
         if f.get("provenance") == "transcript" and f.get("sensitivity") in WITHHELD:
-            for tok in _name_tokens(str(f.get("claim") or "")):
+            people = f.get("people") or []
+            if people:
+                # the people the fact names, by first name: a surname is shared
+                # with the rest of the family ("Rio Vance" is not her father)
+                toks = set()
+                for p in people:
+                    first = _first_name_token(str(p.get("name") or ""))
+                    if first and (first not in open_names or child_rel.search(str(p.get("relation") or ""))):
+                        toks.add(first)
+            else:
+                toks = {t for t in _name_tokens(str(f.get("claim") or "")) if t not in open_names}
+            for tok in toks - _CALENDAR_WORDS:
                 withheld_names.setdefault(tok, str(f["sensitivity"]))
     tier_inherited: list[list[str]] = []
     for rec, fact_id in zip(identity, identity_ids):
@@ -1947,6 +2069,8 @@ def cmd_expand(a: argparse.Namespace) -> int:
         "bio_expired": bio_expired,
         "bio_corroboration_refused": bio_uncorroborated,
         "bio_corroboration_lost": bio_corroboration_lost,
+        "web_staged_links": web_staged_links,
+        "web_staged_refused": web_staged_refused,
         "enum_aliases": enum_aliases,
         "corroborated": corroborated,
         "reconciled": reconciled,

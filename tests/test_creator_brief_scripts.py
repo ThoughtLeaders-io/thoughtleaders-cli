@@ -1967,9 +1967,10 @@ def test_who_they_are_dates_each_line_by_its_upload_and_joins_its_sources():
     who = build_html.who_they_are(facts, _META, about)
     assert who.count("From Millbrook.") == 1 and "Millbrook, Ohio" not in who
     assert ">Watch</a> · <a href=\"https://en.wikipedia.org/wiki/X\">Wikipedia</a>" in who
-    recent, background = who.split("Background")
-    assert "Loves hiking." in recent and "From Millbrook." in background
-    assert '<span class="date">2021</span>' in background
+    # the map's lines are the creator's story, newest said first
+    assert who.index("Loves hiking.") < who.index("From Millbrook.")
+    assert "Background" not in who
+    assert '<span class="date">said 2021</span>' in who
     assert "Robin runs the channel." in who and "f1+f2" not in who
 
 

@@ -341,6 +341,27 @@ def test_a_newer_engagement_makes_the_girlfriend_a_fiancee():
     assert "fiancée" in out and "girlfriend" not in out
 
 
+def test_a_dated_boyfriend_becomes_the_fiance_a_newer_fact_names():
+    old = {"fact_id": "f1", "claim": "as of this video, her boyfriend Remy liked hiking", "confidence": "confirmed",
+           "sensitivity": "none", "published": "2019-05-02", "people": [{"name": "Remy", "relation": "boyfriend"}]}
+    fiance = {"fact_id": "f2", "claim": "has a fiance and a new house", "confidence": "confirmed",
+              "sensitivity": "none", "published": "2026-07-27", "people": []}
+    out = bh.people_section([old, fiance], {"f1": old, "f2": fiance})
+    assert "fiancé" in out and "boyfriend" not in out and "(2019)" not in out and "2026-07" in out
+
+
+def test_a_relation_with_no_name_is_not_a_row():
+    named = {"fact_id": "f1", "claim": "has a sister named Ines", "confidence": "confirmed", "sensitivity": "none",
+             "published": "2025-03-03", "people": [{"name": "Ines", "relation": "sister"}]}
+    unnamed = {"fact_id": "f2", "claim": "her sister is a nurse", "confidence": "confirmed", "sensitivity": "none",
+               "published": "2025-08-01", "people": [{"name": "sister", "relation": "sister"}]}
+    pets = {"fact_id": "f3", "claim": "loves her cats", "confidence": "confirmed", "sensitivity": "none",
+            "published": "2025-06-01", "people": [{"name": "cats", "relation": "cat"}]}
+    facts = [named, unnamed, pets]
+    out = bh.people_section(facts, {f["fact_id"]: f for f in facts})
+    assert "Ines" in out and "<td>Sister</td>" not in out and "<td>Cats</td>" not in out
+
+
 def test_a_crew_member_with_the_same_name_does_not_date_the_cousin():
     facts = _people_facts()
     seen = {"theo": [("2025-03-22", "crew"), ("2021-12-27", "family")]}
@@ -524,3 +545,163 @@ def test_a_caption_tag_after_a_cut_quote_does_not_hide_the_cut():
 def test_a_short_host_name_does_not_claim_the_brands_about():
     assert not bh.names_creator("<b>About Samsung</b>", "Tech Lab", "Sam")
     assert bh.names_creator("About Sam", "Tech Lab", "Sam")
+
+
+def test_the_tl_data_lane_script_writes_the_lane_file(monkeypatch):
+    import brand_reads as br
+    uploads = [
+        {"id": "9:v1", "title": "Trip vlog", "publication_date": "2026-05-01",
+         "summary": "Thanks to Roamly for sponsoring\nmore text", "sponsored_brand_mentions": ["11"]},
+        {"id": "9:v2", "title": "Old haul", "publication_date": "2020-01-01",
+         "summary": "#glowpartner", "sponsored_brand_mentions": ["12", "77"]},
+    ]
+    monkeypatch.setattr(br, "brand_show", lambda b: {"name": "Brandco", "brand_id": b})
+    monkeypatch.setattr(br, "collect_reads", lambda ids, n, ch: {"reads": [{"id": "x"}] if ch is None else []})
+    monkeypatch.setattr(br, "mentions_by_year_and_channel", lambda ids: ({"2026": 3}, [{"id": 5, "name": "C", "count": 3}]))
+    monkeypatch.setattr(br, "channel_uploads", lambda ch: uploads)
+    monkeypatch.setattr(br, "brand_names", lambda ids: {"11": "Roamly", "12": "Glowco"})
+    out = br.lane([77], 9, ["Roamly", " "], "2026-11-16")
+    assert out["brand"]["name"] == "Brandco" and out["reads"] == [{"id": "x"}]
+    assert {s["name"]: s["videos_24m"] for s in out["all_sponsors"]} == {"Roamly": 1, "Glowco": 0}  # not the brand itself
+    assert out["category_history"][0]["brand"] == "Roamly" and out["rivals"] == ["Roamly"]
+    assert out["description_tags"][0]["line"].startswith("Thanks to Roamly")
+
+
+def test_a_rival_marked_as_an_everyday_word_needs_a_sponsor_cue():
+    mc.EVERYDAY_RIVALS.update({"haven", "rally", "lucy"})
+    try:
+        assert mc.near_rival("a safe haven for the night", ["Haven"], ["Acme"]) is None
+        assert mc.near_rival("my Haven era is over", ["Haven"], ["Acme"]) is None
+        assert mc.near_rival("we went to a rally downtown", ["Rally"], ["Acme"]) is None
+        assert mc.near_rival("my friend Lucy came round", ["Lucy"], ["Acme"]) is None
+        assert mc.near_rival("use code sam at haven for money off", ["Haven"], ["Acme"])
+        assert mc.near_rival("rally pouches, link in my bio", ["Rally"], ["Acme"])
+        # an unmarked name still matches as a whole word
+        assert mc.near_rival("i've been using tunnelo on holiday", ["Tunnelo"], ["Acme"])
+        rx = mc.rival_pattern(["Haven"], ["Acme"])
+        assert mc.sponsor_rival("#haven #glow", rx) == "haven"
+        assert mc.sponsor_rival("my haven this week #vlog", rx) is None
+        assert mc.sponsor_rival("Thanks to haven for sponsoring", rx)
+    finally:
+        mc.EVERYDAY_RIVALS.clear()
+
+
+def test_the_everyday_marker_is_stripped_for_category_history():
+    import brand_reads as br
+    clean, everyday = br.split_rivals(["Tunnelo", "~Haven", " ~ Go! ", "", "~"])
+    assert clean == ["Tunnelo", "Haven", "Go!"]
+    assert everyday == ["Go!", "Haven"]
+
+
+def test_a_rival_in_a_description_is_a_whole_word():
+    # "one blur" in a "NOT sponsored" note is not a sponsorship by Blu
+    rx = mc.rival_pattern(["Blu"], ["Acme"])
+    assert mc.sponsor_rival("This video is NOT sponsored! PS I know we are missing one blur", rx) is None
+
+
+def test_unpunctuated_captions_accept_a_long_enough_stretch():
+    m = {"cues": [[10.0, "so we got to the airport and the wifi"], [14.0, "was completely open so i turned my vpn on"]]}
+    assert bh._quote_timing(m, "so we got to the airport and the wifi", 10) is None
+    # a short stretch of unpunctuated captions is still refused
+    m2 = {"cues": [[10.0, "the wifi was completely"], [12.0, "open so i turned it on"]]}
+    assert "mid-sentence" in bh._quote_timing(m2, "the wifi was completely", 10)
+
+
+def test_a_link_anywhere_inside_a_long_window_belongs_to_it():
+    window = {"cues": [[963.0, "first line"], [990.0, "middle line"], [1010.0, "last line"]]}
+    assert bh._in_moment(963, window, 984)
+    assert bh._in_moment(963, window, 1012)
+    assert not bh._in_moment(963, window, 1020)
+    assert not bh._in_moment(963, window, 940)
+    assert bh._in_moment(100, {"cues": []}, 118)
+
+
+def test_brief_checker_reads_the_maps_further_moments():
+    md = ("## Concept\n\n> lead words here\n\n"
+          '- [2026-02-01](https://www.youtube.com/watch?v=sD1&t=406s) at home: "I\'m always so careful with my passwords"\n')
+    lines = bh.md_moment_lines(md)
+    assert lines == [(bh._norm_words("I'm always so careful with my passwords"),
+                      ["https://www.youtube.com/watch?v=sD1&t=406s"])]
+    assert bh.md_moment_lines("- [2026-02-01](https://example.com/page) no timestamp: \"words here that are long\"") == []
+
+
+def test_partner_word_is_the_creators_own():
+    import build_html as b
+    assert b.own_partner_word("loves her dad's wife, who is an important part of her life") is None
+    assert b.own_partner_word("never wanted to get married abroad") is None
+    assert b.own_partner_word("his wife came along") == "wife"
+    assert b.own_partner_word("married Alex in a small ceremony") == "married"
+    assert b.own_partner_word("Sam's fiancé planned the trip") == "fiancé"
+    assert b.own_partner_word("his brother's fiancée joined the trip") is None
+    assert b.own_partner_word("their dad's wife came along") is None
+    assert b.own_partner_word("got engaged in the summer") == "engaged"
+    assert b.own_partner_word("her fiancé planned the trip") == "fiancé"
+    assert b.own_partner_word("has always pictured getting married in the UK") is None
+    assert b.own_partner_word("wants to get engaged next year") is None
+    assert b.own_partner_word("got married in the UK last spring") == "married"
+
+
+def test_relation_word_alone_names_nobody():
+    import build_html as b
+    for name in ("my cats", "cousin", "the baby", "sister", "her mum", "our dog"):
+        assert b.names_nobody(name), name
+    for name in ("Luna", "Sam Smith"):
+        assert not b.names_nobody(name), name
+
+
+def test_relatives_relative_keeps_owner_on_solo_channel():
+    import build_html as b
+    facts = [{"claim": "mom's partner is John, dad's wife is Carla", "published": "2021-01-02",
+              "people": [{"name": "John", "relation": "partner", "of": "mom"},
+                         {"name": "Carla", "relation": "wife", "of": "dad"}]},
+             {"claim": "has a boyfriend, Sam", "published": "2021-07-09",
+              "people": [{"name": "Sam", "relation": "boyfriend"}]},
+             {"claim": "loves her dad's wife", "published": "2024-02-14", "people": []}]
+    for f in facts:
+        f.update(confidence="confirmed", sensitivity="none", provenance="transcript", speaker="host")
+    html = b.people_section(facts, {}, hosts={})
+    assert "dad&#x27;s wife" in html and "mom&#x27;s partner" in html
+    assert "<td>Sam</td><td>boyfriend</td>" in html
+
+
+def test_months_ago_lands_on_a_real_day():
+    import brand_reads as br
+    assert br.months_ago("2028-02-29", 24) == "2026-02-28"
+    assert br.months_ago("2026-03-31", 1) == "2026-02-28"
+    assert br.months_ago("2026-11-16", 24) == "2024-11-16"
+
+
+def test_a_partner_a_confirmed_web_fact_names_is_in_the_people_table():
+    said = {"fact_id": "f1", "claim": "her boyfriend Remy came on holiday", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2021-06-01",
+            "people": [{"name": "Remy", "relation": "boyfriend"}]}
+    web = {"fact_id": "f2", "claim": "engaged to the boxer Remy Vale in 2023", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://en.wikipedia.org/wiki/X",
+           "seen_date": "2026-11-23", "people": [{"name": "Remy Vale", "relation": "fiancé"}]}
+    out = bh.people_section([said, web], {"f1": said, "f2": web})
+    assert "<td>Remy Vale</td><td>fiancé</td><td class=\"n\">2021-06</td>" in out   # one row, one partner word
+    assert "boyfriend" not in out and "<td>Remy</td>" not in out
+
+
+def test_a_web_only_partner_shows_web_and_an_unconfirmed_one_shows_nothing():
+    web = {"fact_id": "f1", "claim": "married to the chef Ada Quill", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://example.com/a",
+           "seen_date": "2026-11-23", "people": [{"name": "Ada Quill", "relation": "wife"}]}
+    assert "<td>Ada Quill</td><td>wife</td><td class=\"n\">web</td>" in bh.people_section([web], {"f1": web})
+    doubt = dict(web, confidence="unconfirmed")
+    assert bh.people_section([doubt], {"f1": doubt}) == ""
+
+
+def test_a_wish_to_marry_never_makes_the_partner_a_husband():
+    said = {"fact_id": "f1", "claim": "has a boyfriend named Remy", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2021-07-09",
+            "people": [{"name": "Remy", "relation": "boyfriend"}]}
+    web = {"fact_id": "f2", "claim": "is with the boxer Remy Vale", "confidence": "confirmed",
+           "sensitivity": "none", "provenance": "web", "source_url": "https://example.com/a",
+           "seen_date": "2026-11-23", "people": [{"name": "Remy Vale", "relation": "partner"}]}
+    wish = {"fact_id": "f3", "claim": "has always pictured getting married in the UK", "confidence": "confirmed",
+            "sensitivity": "none", "provenance": "transcript", "published": "2023-04-26", "people": []}
+    facts = [said, web, wish]
+    out = bh.people_section(facts, {f["fact_id"]: f for f in facts})
+    assert "<td>Remy Vale</td><td>partner</td><td class=\"n\">2021-07</td>" in out
+    assert "husband" not in out and "boyfriend" not in out

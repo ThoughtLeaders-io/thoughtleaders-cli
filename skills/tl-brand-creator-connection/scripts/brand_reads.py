@@ -22,6 +22,7 @@ Output (stdout): one JSON object.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import pathlib
 import re
@@ -142,19 +143,10 @@ def funnel_fields(summary: dict, elapsed: float) -> dict:
     }
 
 
-def main() -> None:
-    t0 = time.monotonic()
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--brand", type=int, action="append", required=True,
-                    help="brand id from `tl brands find`; repeat for a rebrand")
-    ap.add_argument("--max", type=int, default=10,
-                    help="reads returned, newest descriptive first (default 10)")
-    ap.add_argument("--channel", type=int, default=None,
-                    help="only this channel's reads: the creator's own past reads")
-    a = ap.parse_args()
-
-    videos = mention_videos(a.brand, max(a.max * 3, 30), a.channel)
-    snippets = mention_snippets(a.brand, max(a.max * 3, 30), a.channel)
+def collect_reads(brand_ids: list[int], max_reads: int, channel: int | None) -> dict:
+    """The brand's sponsored reads (or this channel's), newest descriptive first."""
+    videos = mention_videos(brand_ids, max(max_reads * 3, 30), channel)
+    snippets = mention_snippets(brand_ids, max(max_reads * 3, 30), channel)
 
     chan_ids = [s.get("channel_id") for s in snippets.values() if s.get("channel_id")]
     for v in videos:
@@ -220,12 +212,12 @@ def main() -> None:
     # within each group.
     reads.sort(key=lambda r: r["published"] or "", reverse=True)
     reads.sort(key=lambda r: 0 if r["read_words"] else 1)
-    kept = reads[:a.max]
+    kept = reads[:max_reads]
     with_words = sum(1 for r in kept if r["read_words"])
 
-    summary = {
-        "brand_ids": a.brand,
-        "channel": a.channel,
+    return {
+        "brand_ids": brand_ids,
+        "channel": channel,
         "mention_videos_found": len(videos),
         "reads_returned": len(kept),
         "reads_with_spoken_words": with_words,
@@ -238,6 +230,181 @@ def main() -> None:
                                "performance grades"],
         "reads": kept,
     }
+
+
+
+
+# ---------------------------------------------------------------------------
+# The TL-data lane: every query the lane runs, as one script (no agent)
+# ---------------------------------------------------------------------------
+
+SHOW_FIELDS = ("name", "website", "description", "company_description", "what_it_does", "offer",
+               "type", "sponsored_topics", "ideal_customers")
+# a description line that says the upload was sponsored: a sponsor word, or a
+# hashtag ending in partner or ad (#brandpartner, #ad)
+SPONSOR_LINE = re.compile(r"(partner|sponsor|thank you to|thanks to|#\w*partner\b|#\w*ad\b|#ad\b)", re.I)
+MAX_UPLOADS = 600
+
+
+def brand_show(brand_id: int) -> dict:
+    rows = tl_data.cli_rows(["brands", "show", str(brand_id), "--json"])
+    rec = rows[0] if rows and isinstance(rows[0], dict) else {}
+    out = {k: rec.get(k) for k in SHOW_FIELDS if k in rec}
+    out["brand_id"] = brand_id
+    return out
+
+
+def brand_names(ids: list) -> dict[str, str]:
+    """Brand id to name, one Postgres lookup; unknown ids (``-1``) stay unnamed."""
+    clean = sorted({int(i) for i in ids if str(i).lstrip("-").isdigit() and int(i) > 0})
+    if not clean:
+        return {}
+    rows = tl_data.db_pg(f"SELECT id, name FROM thoughtleaders_brand WHERE id IN ({','.join(map(str, clean))}) "
+                         f"LIMIT {len(clean)}")
+    return {str(r["id"]): r.get("name") for r in rows if r.get("id")}
+
+
+def mentions_by_year_and_channel(brand_ids: list[int]) -> tuple[dict, list[dict]]:
+    """The brand's sponsored mentions by publication year, and its top 20 channels."""
+    q = {"bool": {"should": [{"term": {"sponsored_brand_mentions": str(b)}} for b in brand_ids],
+                  "minimum_should_match": 1}}
+    _, aggs = tl_data.db_es_with_aggs({"size": 0, "query": q, "aggs": {
+        "year": {"date_histogram": {"field": "publication_date", "calendar_interval": "year",
+                                    "format": "yyyy", "min_doc_count": 1}},
+        "chan": {"terms": {"field": "channel.id", "size": 20}}}})
+    by_year = {str(b.get("key_as_string")): b.get("doc_count") for b in (aggs.get("year") or {}).get("buckets") or []}
+    buckets = (aggs.get("chan") or {}).get("buckets") or []
+    names = channel_names([b.get("key") for b in buckets])
+    top = [{"id": int(b["key"]), "name": names.get(int(b["key"])), "count": b.get("doc_count")}
+           for b in buckets if str(b.get("key", "")).lstrip("-").isdigit()]
+    return by_year, top
+
+
+def channel_uploads(channel: int) -> list[dict]:
+    """This channel's uploads, newest first: title, date, description, sponsors."""
+    return tl_data.db_es({
+        "size": MAX_UPLOADS,
+        "query": {"bool": {"filter": [{"term": {"doc_type": "article"}}, {"term": {"channel.id": int(channel)}}]}},
+        "_source": ["id", "title", "publication_date", "summary", "sponsored_brand_mentions"],
+        "sort": [{"publication_date": "desc"}]})
+
+
+def sponsor_line(summary: str) -> str | None:
+    for line in str(summary or "").splitlines():
+        if SPONSOR_LINE.search(line):
+            return line.strip()[:300]
+    return None
+
+
+def months_ago(today: str, months: int) -> str:
+    """The same day ``months`` earlier, moved back to the month's last day
+    when that month is shorter (29 February to 28 February)."""
+    y, m = int(today[:4]), int(today[5:7]) - months
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}-{min(int(today[8:10]), calendar.monthrange(y, m)[1]):02d}"
+
+
+def split_rivals(rivals: list[str]) -> tuple[list[str], list[str]]:
+    """``--rivals`` names, and the ones marked ``~`` as also an everyday word
+    ("~Haven"). The marker only tells moment_check to read that name in
+    captions with care; the name itself matches sponsor records as usual."""
+    clean, everyday = [], []
+    for r in rivals:
+        r = (r or "").strip()
+        name = r.lstrip("~").strip()
+        if not name:
+            continue
+        clean.append(name)
+        if r.startswith("~"):
+            everyday.append(name)
+    return clean, sorted(set(everyday))
+
+
+def lane(brand_ids: list[int], channel: int, rivals: list[str], today: str) -> dict:
+    """Everything the TL-data lane writes to ``brand-tl.json``. ``rivals`` are
+    the category's best-known names the orchestrator is certain of; a channel
+    sponsor whose name matches one is the category history."""
+    brand = brand_show(brand_ids[0])
+    reads = collect_reads(brand_ids, 10, None)["reads"]
+    own_reads = collect_reads(brand_ids, 50, channel)["reads"]
+    by_year, top = mentions_by_year_and_channel(brand_ids)
+    uploads = channel_uploads(channel)
+    since = months_ago(today, 24)
+    own_ids = {str(b) for b in brand_ids}
+    ids = {str(i) for u in uploads for i in (u.get("sponsored_brand_mentions") or [])}
+    names = brand_names(list(ids))
+    sponsors: dict[str, dict] = {}       # all years, for the map writer to judge
+    tags, history = [], []
+    rivals, everyday = split_rivals(rivals)
+    rival_lc = {r.lower() for r in rivals}
+    for u in uploads:
+        day = str(u.get("publication_date") or "")[:10]
+        vid = str(u.get("id") or "").split(":")[-1]
+        line = sponsor_line(u.get("summary"))
+        if day >= since and line:
+            tags.append({"video_id": str(u.get("id")), "published": day, "title": u.get("title"), "line": line})
+        for b in u.get("sponsored_brand_mentions") or []:
+            b = str(b)
+            if b in own_ids:
+                continue
+            row = sponsors.setdefault(b, {"id": int(b) if b.lstrip("-").isdigit() else b, "name": names.get(b),
+                                          "videos": 0, "videos_24m": 0, "last_seen": ""})
+            row["videos"] += 1
+            row["videos_24m"] += 1 if day >= since else 0
+            row["last_seen"] = max(row["last_seen"], day)
+            name = str(names.get(b) or "")
+            if name and name.lower() in rival_lc:
+                history.append({"brand": name, "video_id": vid, "published": day,
+                                "title": u.get("title"), "line": line})
+    all_years = sorted(sponsors.values(), key=lambda r: (-r["videos"], r["last_seen"]))
+    return {
+        "brand": brand, "reads": reads, "this_channel_reads": own_reads, "by_year": by_year,
+        "top_channels": top, "description_tags": tags,
+        "rivals": sorted(set(rivals)),
+        "rivals_everyday": everyday,
+        "category_history": sorted(history, key=lambda h: h["published"], reverse=True),
+        "all_sponsors": all_years,
+        "notes": (f"{len(uploads)} uploads read. A detection is a tag, not a deal. category_history holds "
+                  "the channel's sponsors whose names are in rivals; all_sponsors lists every sponsor "
+                  "across all years for the map writer to judge complements. Unknown ids (-1) carry no name."),
+    }
+
+
+def main() -> None:
+    t0 = time.monotonic()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--brand", type=int, action="append", required=True,
+                    help="brand id from `tl brands find`; repeat for a rebrand")
+    ap.add_argument("--max", type=int, default=10,
+                    help="reads returned, newest descriptive first (default 10)")
+    ap.add_argument("--channel", type=int, default=None,
+                    help="only this channel's reads: the creator's own past reads")
+    ap.add_argument("--lane", type=pathlib.Path, default=None,
+                    help="run the whole TL-data lane for --channel and write brand-tl.json here")
+    ap.add_argument("--rivals", default="",
+                    help="with --lane: the category's best-known brand names, comma-separated; "
+                         "prefix a name that is also an everyday word with ~ (~Haven)")
+    a = ap.parse_args()
+    if a.lane:
+        if not a.channel:
+            ap.error("--lane needs --channel")
+        today = time.strftime("%Y-%m-%d")
+        out = lane(a.brand, a.channel, [r for r in a.rivals.split(",")], today)
+        a.lane.parent.mkdir(parents=True, exist_ok=True)
+        a.lane.write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        summary = {"file": str(a.lane), "reads": len(out["reads"]),
+                   "this_channel_reads": len(out["this_channel_reads"]), "years": len(out["by_year"]),
+                   "top_channels": len(out["top_channels"]), "all_sponsors": len(out["all_sponsors"]),
+                   "description_tags": len(out["description_tags"]), "rivals": len(out["rivals"]),
+                   "rivals_everyday": len(out["rivals_everyday"]),
+                   "category_history": len(out["category_history"]), "all_sponsors": len(out["all_sponsors"])}
+        print(json.dumps(summary, indent=1))
+        funnel(stage="brand_tl_lane", **{k: v for k, v in summary.items() if k != "file"},
+               elapsed_s=round(time.monotonic() - t0, 1))
+        return
+    summary = collect_reads(a.brand, a.max, a.channel)
     print(json.dumps(summary, indent=1, default=str))
     funnel(**funnel_fields(summary, round(time.monotonic() - t0, 1)))
 

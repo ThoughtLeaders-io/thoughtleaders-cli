@@ -221,8 +221,14 @@ def validate_sheet(data, expected: list[str]) -> tuple[dict[str, dict], list[str
             if not isinstance(aliases, list) or not all(isinstance(x, str) for x in aliases):
                 bad = "guest aliases must be strings"
                 break
-            clean_guests.append({"name": g["name"].strip(), "aliases": [x.strip() for x in aliases if x.strip()],
-                                 "role": g["role"]})
+            guest = {"name": g["name"].strip(), "aliases": [x.strip() for x in aliases if x.strip()],
+                     "role": g["role"]}
+            # how a family member or friend is related, and to which host,
+            # when the video itself says it (cast-sheet.md)
+            for key in ("relation", "of"):
+                if isinstance(g.get(key), str) and g[key].strip():
+                    guest[key] = g[key].strip()
+            clean_guests.append(guest)
         if bad:
             problems.append(f"{vid}: {bad}")
             continue

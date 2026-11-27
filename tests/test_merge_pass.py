@@ -1695,3 +1695,149 @@ def test_people_rollup_lists_the_split_names_not_the_run_together_one(tmp_path):
     split = [f for f in _facts(out).values() if f.get("two_names")]
     assert split and split[0]["confidence"] == "unconfirmed"
     assert sorted(p["name"] for p in split[0]["people"]) == ["Juno", "Pell"]
+
+
+def test_a_partner_the_children_fact_names_does_not_pass_the_tier_on(tmp_path):
+    """"a daughter with Sam" is about the daughter: a web record about Sam,
+    whom an open fact names as the boyfriend, keeps its own tier."""
+    kid = _cluster("has a daughter, Luna Reed, with Sam", tier="children", domain="family",
+                   video="v1", start=10)
+    kid["verdict"]["people"] = [{"name": "Luna Reed", "relation": None},
+                                {"name": "Sam", "relation": "boyfriend"}]
+    bf = _cluster("has a boyfriend, Sam", domain="relationships", video="v2", start=50,
+                  quote="my boyfriend sam is coming with me")
+    bf["verdict"]["people"] = [{"name": "Sam", "relation": "boyfriend"}]
+    clustered = _write_clusters(tmp_path, [kid, bf])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}, "c002": {"action": "keep"}},
+                      facts=[_bio(claim="met Sam Reed on a TV show in July 2019",
+                                  domain="relationships", sensitivity="none"),
+                             _bio(ref="b2", claim="Luna started nursery", domain="family",
+                                  sensitivity="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    claims = [f["claim"] for f in _facts(out).values()]
+    assert not any(c.startswith("Luna started") for c in claims)   # the child's record is withheld
+    assert any(c.startswith("met Sam Reed") for c in claims)       # the partner's is not
+
+
+def test_a_person_an_open_fact_names_keeps_their_record_unless_a_children_fact_names_them(tmp_path):
+    """A health fact names her partner and her daughter, with no relation for
+    either. An open fact also names the partner, so web records about him keep
+    their own tier. The daughter is open in one fact too, but a children fact
+    names her, so her record is withheld."""
+    health = _cluster("is pregnant and feels close to Remy and Luna", tier="clinical", domain="family",
+                      video="v1", start=10, quote="i'm pregnant and so close to remy and luna")
+    health["verdict"]["people"] = [{"name": "Remy", "relation": None}, {"name": "Luna", "relation": None}]
+    safety = _cluster("says house tours are a no-go for her and Remy's safety", domain="other",
+                      video="v2", start=50, quote="no house tours for me and remy's safety")
+    safety["verdict"]["people"] = [{"name": "Remy", "relation": None}]
+    arms = _cluster("lost love for her arms since having Luna", domain="habits", video="v3", start=90,
+                    quote="i lost love for my arms since having luna")
+    arms["verdict"]["people"] = [{"name": "Luna", "relation": None}]
+    birth = _cluster("gave birth to Luna", tier="children", domain="family", video="v4", start=130,
+                     quote="i gave birth to luna")
+    birth["verdict"]["people"] = [{"name": "Luna", "relation": None}]
+    clustered = _write_clusters(tmp_path, [health, safety, arms, birth])
+    dpath = _envelope(tmp_path, {f"c00{i}": {"action": "keep"} for i in range(1, 5)},
+                      facts=[_bio(claim="partner is the boxer Remy Vale, engaged in 2023",
+                                  domain="relationships", sensitivity="none"),
+                             _bio(ref="b2", claim="Luna started nursery", domain="family",
+                                  sensitivity="none")])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    claims = [f["claim"] for f in _facts(out).values()]
+    assert any(c.startswith("partner is the boxer Remy") for c in claims)   # the partner's record stays open
+    assert not any(c.startswith("Luna started") for c in claims)            # the child's is withheld
+
+
+def test_a_web_fact_keeps_the_people_it_names():
+    rec = _bio(provenance="web", claim="engaged to the boxer Remy Vale", domain="relationships",
+               people=[{"name": "Remy Vale", "relation": "fiancé"}, {"name": " ", "relation": "x"}, "bad"])
+    fact = merge_pass.identity_fact(rec, "f9")
+    assert fact["people"] == [{"name": "Remy Vale", "relation": "fiancé"}]
+    assert "people" not in merge_pass.identity_fact(_bio(provenance="web"), "f10")
+
+
+def test_the_web_lane_check_refuses_a_badly_shaped_people_list():
+    import identity_prompt
+    good = _bio(ref="s1", provenance="web", people=[{"name": "Remy Vale", "relation": None}])
+    bad = _bio(ref="s2", provenance="web", people="Remy Vale")
+    assert [b["ref"] for b in identity_prompt.validate_facts([good, bad])] == ["s2"]
+
+
+def test_a_shard_reply_without_people_keeps_the_lane_records_people(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="engaged to the boxer Remy Vale",
+                domain="relationships", people=[{"name": "Remy Vale", "relation": "fiancé"}])
+    (tmp_path / "identity-facts-s1.json").write_text(json.dumps([lane]))
+    reply = {k: v for k, v in lane.items() if k != "people"}
+    clustered = _write_clusters(tmp_path, [_cluster("moved to Lisbon")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[reply])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    web = [f for f in _facts(out).values() if f.get("provenance") == "web"]
+    assert web and web[0]["people"] == [{"name": "Remy Vale", "relation": "fiancé"}]
+
+
+def test_a_web_partner_record_a_shard_links_to_an_unnamed_boyfriend_line_confirms_both(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="has been with the boxer Remy Vale since 2019",
+                domain="relationships", people=[{"name": "Remy Vale", "relation": "partner"}],
+                corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster("has a boyfriend", domain="relationships")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    web = [f for f in facts.values() if f.get("provenance") == "web"]
+    assert web[0]["confidence"] == "confirmed"
+    assert web[0]["people"] == [{"name": "Remy Vale", "relation": "partner"}]
+    assert facts["f001"]["confidence"] == "confirmed"
+
+
+def _staged_link(tmp_path, source_url):
+    lane = _bio(ref="s1", provenance="web", claim="lives in a store", domain="home",
+                source_url=source_url, corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster(
+        "lives in a store", domain="home", quote="I live in this store now",
+        video="stunt01", format_hint="staged",
+        title="How Long Can I Secretly Live In A Store?")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    facts = _facts(out)
+    web = next(f for f in facts.values() if f.get("provenance") == "web")
+    return facts["f001"], web, json.loads(proc.stdout)
+
+
+def test_an_outside_source_linked_to_a_staged_line_confirms_itself_but_not_the_bit(tmp_path):
+    line, web, summary = _staged_link(tmp_path, "https://example.com/profile")
+    assert line["staged_only"] and line["confidence"] == "unconfirmed"
+    assert web["confidence"] == "confirmed"
+    assert summary["web_staged_links"] == [[web["fact_id"], "f001"]]
+
+
+def test_a_youtube_page_linked_to_a_staged_line_confirms_nothing(tmp_path):
+    line, web, summary = _staged_link(tmp_path, "https://www.youtube.com/watch?v=other9")
+    assert line["confidence"] == "unconfirmed" and web["confidence"] == "unconfirmed"
+    assert summary["web_staged_refused"] == [[web["fact_id"], "f001"]]
+
+
+def test_an_article_naming_the_staged_upload_confirms_nothing(tmp_path):
+    _, web, summary = _staged_link(tmp_path, "https://news.example.com/stunt01-recap")
+    assert web["confidence"] == "unconfirmed"
+    assert summary["web_staged_refused"] == [[web["fact_id"], "f001"]]
+
+
+def test_a_web_link_to_an_ordinary_line_still_confirms_both(tmp_path):
+    lane = _bio(ref="s1", provenance="web", claim="runs a pottery studio",
+                source_url="https://www.youtube.com/@example/about", corroborates="c001")
+    clustered = _write_clusters(tmp_path, [_cluster("runs a pottery studio")])
+    dpath = _envelope(tmp_path, {"c001": {"action": "keep"}}, facts=[lane])
+    out = tmp_path / "facts.jsonl"
+    proc = _expand(clustered, dpath, out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert {f["confidence"] for f in _facts(out).values()} == {"confirmed"}

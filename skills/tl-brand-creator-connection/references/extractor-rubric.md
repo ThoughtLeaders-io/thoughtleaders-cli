@@ -95,6 +95,19 @@ Flags and hints are inputs, never verdicts.
   used.
 - When unsure whose voice it is, say `unclear`. Never say `host` to save a
   gem.
+- On a multi-host channel, when the window's `cast` lists only the named
+  hosts (no guests) and the line is plainly one of those hosts speaking about
+  themselves, but the window does not show which one, say `either`
+  and keep the gem. Never `either` on a window with a guest, a crowd or
+  footage of someone else: there it is `unclear`.
+- A family member the creator names is a `family` gem when the window or the
+  title also shows how they are related: a relation word near the name ("I
+  was the oldest of five kids … when we had Rosa", "one of my siblings … that
+  was Theo", "our little sister Nina"), or a title that says so ("Meet Nina,
+  Our Little Sister!"). The claim states the relation ("has a sister named
+  Rosa"; sibling when the window does not say which), and `people` lists the
+  name with that relation. A name with no relation cue in the window or title
+  is not a family fact.
 
 ## Output: one JSON object
 
@@ -128,8 +141,9 @@ it as your whole reply.
 - `anchor`: the window text's first five words, verbatim.
 - `life_domain`: one of `origin`, `family`, `pets`, `home`, `work`, `money`,
   `health`, `habits`, `tastes`, `beliefs`, `relationships`, `other`.
-- `speaker_guess`: `host`, `guest`, `cohost`, `shared`, `narration` or
-  `unclear`. `cohost` is the second named creator of a two-host channel,
+- `speaker_guess`: `host`, `guest`, `cohost`, `shared`, `either`, `narration`
+  or `unclear`. `either` is one of the named hosts, not shown which (see Rules).
+  `cohost` is the second named creator of a two-host channel,
   judged like the host; `shared` is a "we" line about the hosts' shared life
   on a multi-host channel (a guest's "we" is the guest's); `guest` is anyone
   else, whose facts never reach the ledger. On a multi-host channel name the
@@ -156,7 +170,15 @@ it as your whole reply.
   leaves the window unjudged.
 - `people`: the people the quote names, `[{"name": "…", "relation": "…"}]`,
   the relation word as the quote says it (`cousin`, `friend`, `wife`) or
-  null; `[]` when none. A name the quote does not hold is removed.
+  null; `[]` when none. A name the quote does not hold is removed. `name` is
+  always a name: a relation the quote gives without one ("my sister", "our
+  cats") stays in the claim and is left out of `people`. A pet the
+  quote names goes here too, with the animal word as its relation (`dog`,
+  `puppy`, `cat`) or `pet`.
+  Add `of` when the quote shows whose relation it is and it is not the
+  speaker's own: on a two-host channel, "Sam has Luna and Pip" said by the
+  other host gives Luna and Pip `"of": "Sam"`. Leave `of` out when the relation is the speaker's own
+  ("my husband").
 - `confidence`: `confirmed`, or `likely` only when `speaker_evidence` names
   the reason: a staged premise, a line that contradicts the channel's
   description, or doubt about the voice. Any other `likely` is read as

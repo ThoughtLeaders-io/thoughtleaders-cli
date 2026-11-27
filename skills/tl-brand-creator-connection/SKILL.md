@@ -49,7 +49,7 @@ Do not use for: channel discovery, performance or authenticity analysis, a brand
 - `<skill>` = this skill's directory. Run every script as `python3 <skill>/scripts/<name>.py`. Never `cd`.
 - `<profiles>` = `tl-creator-profiles/` in the invocation directory, never inside the skill. IF the user names another folder, `<profiles>` = `<folder>/tl-creator-profiles`. Pass `--profiles-dir <profiles>` to `start_run.py` and `ledger_meta.py`, and write every path and link as an absolute path. At run start, print `<profiles>` as an absolute path once. IF it is inside a git checkout, say once that outputs must not be committed.
 - `<corpus>` = `<profiles>/.corpus/<channel_id>/`.
-- Resolve channel and brand names only with `tl channels find` / `tl brands find`. Never match a name inside a query.
+- Resolve channel and brand names only with `tl channels find` / `tl brands find`. Never match a name inside a query. Pass the creator's name, handle or URL exactly as the user gave it, the full name and never a shortened form. IF the resolved channel's name, About text or size in `start_run.py`'s summary shows a different creator from the one the user named, stop and resolve again with their YouTube handle or URL before any paid step.
 - Every script prints one JSON summary on stdout and a `FUNNEL` line on stderr. Read results from that output, not from the files written. Chain scripts with `&&` in one command.
 - IF a script exits 3 because an agent return failed validation: re-ask the agent for exactly the listed items. Never edit a return, decision or rejected-quote file by hand.
 - References, open when the step names them: `transcript-mining.md` (script flags, extractor and merge contracts, incremental and corroboration rounds), `profile-spec.md` (ledger format, reuse thresholds, connection-map sections, page), `evidence-rules.md` (attribution, staged premises, sensitivity), `creator-brief-template.md` (creator brief layout).
@@ -58,10 +58,12 @@ Do not use for: channel discovery, performance or authenticity analysis, a brand
 
 | Tier | Model | Used by |
 |---|---|---|
-| Extraction | provider's fast mid-tier (Sonnet) | `tl-cli:cast-sheet`, `tl-cli:gem-classifier`, bio lane, identity lane, three brand lanes |
+| Extraction | provider's fast mid-tier (Sonnet) | `tl-cli:cast-sheet`, `tl-cli:gem-classifier` (also the bio lane), `tl-cli:identity-lane`, `tl-cli:brand-site`, `tl-cli:brand-moments` |
 | Judgment | provider's strongest (Opus) | `tl-cli:merge-shard` only |
 
-Every generic subagent (bio, identity and brand lanes) is pinned to the extraction model explicitly, never the inherited model. These choices are fixed: never ask the user which agents or models to use. IF an agent name does not resolve, spawn the host's generic subagent pinned to the same tier's model and say so. Never use the cheapest model for extraction. Never downgrade the judgment tier; add shards instead.
+Every agent above carries its model in its own definition. A generic subagent standing in for one is pinned to that tier's model explicitly, never the inherited model.
+
+**Agent waves.** The host runs at most 20 agents at once. Before a spawn message, count the agents still running; spawn only as many as the free slots allow, in one message. IF more are waiting, spawn the next waiting one in the same message that reads each returning receipt, until none wait. Never spawn past the limit: a refused agent is a lost slot, not a queued one. These choices are fixed: never ask the user which agents or models to use. IF an agent name does not resolve, spawn the host's generic subagent pinned to the same tier's model and say so; for `tl-cli:identity-lane`, `tl-cli:brand-site` or `tl-cli:brand-moments`, its message starts with "Read `<skill>/../../agents/<name>.md` and follow it." Never use the cheapest model for extraction. Never downgrade the judgment tier; add shards instead.
 
 ## 1. Open the run
 
@@ -80,10 +82,10 @@ Handle the summary in this order:
 2. **`plan`:** `Intelligence` or `Superuser` → continue. Known lower tier → stop with a message. Unrecognised value → name it and continue. `plan gate: unreachable, continued` → continue.
 3. **`announcement`:** repeat it to the user verbatim. It is empty on a first build (no ledger yet): say "No ledger yet: building from scratch." `decision` is `reuse`, `refresh` or `build`. Never reuse silently. Never refuse `--rebuild`.
 4. **Ask the open choices** (next section) in ONE message, unless already decided or the run is autonomous/fast.
-5. **Host names from `identity`:** IF `identity.cached_host_name` is set, that is the host's name: pass it (first name and full name) plus `identity.cached_host_aliases` as `--host-names` and skip the rest of this point. Otherwise take person-name aliases only: first name, full name, unambiguous surname, stated nickname, from the About text, the generated profile or `description_anchors.names` (what a recurring line of the channel's own upload descriptions calls the host). Never a brand, company, role, employer, product, topic, handle, promo code or the bare channel name (these drive speaker attribution and create false second-speaker hints). IF nothing names a person, pass `--host-names ""`: on a build, `start_run.py` then takes the name the host says on camera ("my name is …") in two or more uploads, or in one upload when the descriptions' promo codes and vanity links spell the same name, or the name a recurring description line gives the host; it fetches again with it and reports `host_names_found` with `host_names_source`. Pass those names as `--host-names` to every later command. IF still none, step 1b may report `host_names_from_cast` (a name the openings give the host in two or more videos): use it the same way. Never supply a name from memory.
+5. **Host names from `identity`:** On `reuse`, skip this point: the ledger already knows the host. IF `identity.cached_host_name` is set, that is the host's name: pass it (first name and full name) plus `identity.cached_host_aliases` as `--host-names` and skip the rest of this point. Otherwise take person-name aliases only: first name, full name, unambiguous surname, stated nickname, from the About text, the generated profile or `description_anchors.names` (what a recurring line of the channel's own upload descriptions calls the host). Never a brand, company, role, employer, product, topic, handle, promo code or the bare channel name (these drive speaker attribution and create false second-speaker hints). IF nothing names a person, pass `--host-names ""`: on a build, `start_run.py` then takes the name the host says on camera ("my name is …") in two or more uploads, or in one upload when the descriptions' promo codes and vanity links spell the same name, or the name a recurring description line gives the host; it fetches again with it and reports `host_names_found` with `host_names_source`. Pass those names as `--host-names` to every later command. IF still none, step 1b may report `host_names_from_cast` (a name the openings give the host in two or more videos): use it the same way. Never supply a name from memory.
 6. **Second call** with `--host-names`, `--reserve`, `--lanes` and any brief flags. On `build`/`refresh` it runs the fetch and context stats and renders the cast-sheet prompts (see `ran` and `cast.prompts`); it adds the refresh round flags itself. On `reuse` it fetches nothing: CONNECT goes to CONNECT step 1, PROFILE reports the ledger as it is.
 
-   `--reserve` = 1 (bio lane) + 3 on a CONNECT build (brand lanes) + 1 if socials ON.
+   `--reserve` = 1 (bio lane) + 2 on a CONNECT build (brand site and brand moments lanes) + 1 if socials ON.
 
    IF the second call exits 3 with `failed: fetch_cues` and the fetch reported `videos_with_transcript=0`: report a corpus gap (not a failure) and stop. Do not build a socials-only ledger.
 
@@ -112,7 +114,7 @@ IF Yes: one follow-up only: "Paste the brand's brief or talking points (or a fil
 IF `decision` is `refresh`: the steps below run as one incremental round (`transcript-mining.md`, "Incremental round"). Render and spawn only `<corpus>/batches-rN` into `returns-rN`/`prompts-rN`; pass `--append` to `assemble_extracts.py`; pass `--existing <profiles>/<id>-facts.jsonl --state <corpus>/merge-state.json` to `merge_pass.py prepare` and `expand`; pass `--rounds N` to `ledger_meta.py write`. Never run the build commands as written on a refresh: they rebuild the ledger from the new uploads alone.
 
 **Step 1. Fetch.** Done by the second `start_run.py` call. IF it did not run (check `ran`), run `fetch_cues.py --channel <id> --host-names "…" --reserve <N> --out <profiles>/.corpus` with the round flags from `check` on a refresh (`transcript-mining.md`, "Incremental round").
-- CONNECT build: spawn the three brand lanes (CONNECT step 1) in the same message as the fetch.
+- CONNECT build: start the brand lanes (CONNECT step 1) in the same message as the fetch.
 - Report second channels (`identity.second_channel_candidates`; the ones an earlier run cached carry source `cached`); never mine them unless asked. Never start an entity-expansion round on your own initiative.
 
 **Step 1b. Cast sheet.** Who is on each video, from its own opening. In ONE message (the one that reads the second call's result), spawn one `tl-cli:cast-sheet` (extraction tier) per file in `cast.prompts`, each with the two-line prompt of step 3. When every receipt is in:
@@ -161,9 +163,9 @@ IF refresh AND `<corpus>/socials-bio.json` exists, add `--socials-bio <corpus>/s
 **Step 3. Fan-out.** In ONE message, spawn at extraction tier:
 - one `tl-cli:gem-classifier` per `<corpus>/prompts/batch-NNN.md`;
 - one `tl-cli:gem-classifier` for `<corpus>/prompts/bio.md`;
-- IF socials ON: one generic subagent for `<corpus>/prompts/identity.md`.
+- IF socials ON: one `tl-cli:identity-lane` for `<corpus>/prompts/identity.md`.
 
-Each agent's prompt is exactly: read `<file>` and follow it; one Write; reply with the one-line receipt. Never paste the file content, never two files per agent, never spawn one at a time, never poll or sleep. The merge uses whatever the identity lane has written when the extractors finish; the rest is reported "linked but unread".
+Each agent's prompt is exactly: read `<file>` and follow it; one Write; reply with the one-line receipt. Never paste the file content, never two files per agent, never poll or sleep. Spawn every agent the free slots allow in that one message; any left waiting go out by the agent-waves rule (Conventions). The merge uses whatever the identity lane has written when the extractors finish; the rest is reported "linked but unread".
 
 **Step 4. Assemble, cluster, prepare.**
 
@@ -184,7 +186,7 @@ IF socials ON, append: `&& python3 <skill>/scripts/identity_prompt.py slice --re
 - Assemble exit 3: for each batch in `respawn.json`, re-run `extractor_prompt.py --indexes … --write-to <corpus>/returns/batch-NNN.extract.r2.json`, one agent per batch, then re-run the chain.
 - Slice exit 3: re-ask the identity lane for the listed refs.
 
-**Corroboration round** (build only; skip on fast runs and when the bio lane had no batches, and say which): run `python3 <skill>/scripts/bio_lane.py terms --facts <corpus>/bio-facts.json --channel <id> --out <profiles>/.corpus --round 2 --host-names "<host_names from <corpus>/context.json>"`, then every line of the `recipe` it prints, prefixing each script with `<skill>/scripts/`. `--append` is required. Then re-run `cluster_gems.py`, `merge_pass.py prepare` and `bio_lane.py facts --prepare` before step 5.
+**Corroboration round** (build only; skip on fast runs, when the bio lane had no batches, and when `bio_lane.py terms` reports `facts: 0` or an empty `recipe`, and say which): run `python3 <skill>/scripts/bio_lane.py terms --facts <corpus>/bio-facts.json --channel <id> --out <profiles>/.corpus --round 2 --host-names "<host_names from <corpus>/context.json>"`, then every line of the `recipe` it prints, prefixing each script with `<skill>/scripts/`. `--append` is required. Then re-run `cluster_gems.py`, `merge_pass.py prepare` and `bio_lane.py facts --prepare` before step 5.
 
 **Step 5. Merge.** In ONE message (the same one that reads the step 4 result), spawn one `tl-cli:merge-shard` (judgment tier) per shard file listed in `prepare.json`. Each message names its `<corpus>/bio-facts-sN.json` (omitted when the bio lane had no batches) and, IF socials ON, its `<corpus>/identity-facts-sN.json`. A line with `speaker: cohost` is the second host's fact and `shared` is both hosts'; they are judged like the host's, never folded into one person. Write each shard's reply, unchanged, to `<corpus>/merge-decisions-r1-sN.json` with one Write.
 
@@ -231,22 +233,30 @@ A PROFILE-only run (no brand) is finished here: run `tl agent complete tl-brand-
 
 ## 4. CONNECT pipeline
 
-**Step 1. Brand lanes.** Spawn three generic subagents in ONE message, pinned to the extraction tier. Build: in the fetch message. Reuse: immediately. Each writes one file under `<corpus>/` and returns one line. Pass every brand id.
+**Step 1. Brand lanes.** One script and two agents, all in ONE message. Build: in the fetch message. Reuse: immediately. Pass every brand id. Read the brand record first (`tl brands show <id>`): its `website`, description, what it sells and its category.
 
-- **TL data** → `brand-tl.json` (target < 60 s). Run exactly:
-  - `tl brands show <id> --json` per id. Use `company_description`, `what_it_does`, `offer`, `ideal_customers`, `type`, `website`, `sponsored_topics` (`sponsored_topics` is a hint to check against the reads, not a fact).
-  - `python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>]` (the brand's newest sponsored reads) and `python3 <skill>/scripts/brand_reads.py --brand <id> --channel <channel_id> --max 50` (this creator's own past reads).
-  - One `tl db es` aggregation with `"size": 0` over the brand's sponsored mentions: bucket by publication year, then by channel (top 20). Every `tl db es` call in this lane takes its field names and query shape from `<plugin>/skills/tl/references/elasticsearch-schema.md` (the sponsored-mention patterns and the aggregation example), never from memory. Resolve the channel ids to names with one lookup written from `<plugin>/skills/tl/references/postgres-schema.md` (the channel table), via `tl db pg`.
-  - This channel's sponsors, last 24 months: one `tl db es` aggregation (`"size": 0`) over the channel's sponsored mentions, bucketed by brand (top 50), names resolved with `tl brands show`; and one `tl db es` search of the channel's uploads in the same window whose description has a sponsor line ("partner", "sponsor", "thank you to", or a hashtag ending in `partner` or `ad`), returning title, publication date and the line. A detection is a tag, not a deal: report it as tagged, with its line when there is one.
-  - `rivals`: up to 30 brands in the brand's product category: brands TL data shows sponsoring the brand's `sponsored_topics`, plus the category's best-known names you are certain of.
-  - `category_history`: the same description search and sponsored-mention aggregation over all years. Keep every sponsor whose product substitutes for or complements the brand's, not only `rivals`.
-  - Never `tl brands history`. No web lookups.
-  - Write `{"brand": {<the show fields>}, "reads": [<rows of the first brand_reads.py call, unchanged>], "this_channel_reads": [<rows of the second, unchanged>], "by_year": {"<year>": <n>}, "top_channels": [{"id", "name", "count"}], "channel_sponsors": [{"id", "name", "videos", "last_seen"}], "description_tags": [{"video_id", "published", "title", "line"}], "rivals": ["…"], "category_history": [{"brand", "video_id", "published", "title", "line"}], "notes": "…"}`. `--check` refuses the other channels' names in the creator brief, and any talking point inside a `this_channel_reads` read or within 45 seconds of it.
-- **Brand site** → `brand-site.json`, `{"status": "read | fallback | unreachable", "urls_read": […], "positioning", "product_lines": […], "use_occasions": […], "stated_audience", "cause", "campaign_themes": […], "creator_use", "competitors": […], "notes"}` (target < 90 s). Read the `website` from `tl brands show` and only socials linked from that site: positioning, product lines, the occasions the brand says the product is for (`use_occasions`), stated audience, founder story or cause, campaign themes, creator use, and any competitor the site names. One WebFetch per URL; stop at the first failure per host. IF unreachable: use the platform brand record, then ONE WebFetch of `https://en.wikipedia.org/wiki/<brand>` labelled `[web: wikipedia]`. Never search the web for the brand.
-- **Brand moments** → `category-probe.json` (target < 120 s). Channel-scoped transcript search for the creator's own moments, in two lists:
-  - `windows`: the creator using the product, or doing what it enables (thirst during a challenge, for a drinks brand). One query per occasion in the brand record and `use_occasions`, tagged with its `occasion`. Search the last 24 months first; older uploads only for an occasion with no recent window.
-  - `brand_windows`: the creator naming the brand or its products, from uploads the brand did not sponsor.
-  Return term counts and the strongest windows with `&t=` links, each with the upload's title and views. The `transcript` field is timed-text XML (`<text start="…">`, HTML entities escaped twice); a window is consecutive cues' text, `start` the first cue's seconds. Keep only the creator's own lines: first person, or their narration of their own stunt. Drop a line said by a friend, guest, contestant or commentator, a window that does not show who is speaking, a window with a discount code or a link, and any window within 60 seconds of a `sponsored` `brand_mentions` span on that video (any brand). Max 16 ES queries, `size` ≤ 20, foreground only, no deepening. Write the file when the last query returns: `{"terms": {"<term>": <n>}, "windows": [{"video_id", "start", "published", "url", "title", "views", "text", "occasion"}], "brand_windows": [<same shape>], "coverage": {"note": "…"}}`. `text` is the window's words. A window quote that becomes a talking point contains a first-person word (I, my, we, our).
+- **TL data** → `brand-tl.json`, a script, no agent (about 10 s):
+  ```bash
+  python3 <skill>/scripts/brand_reads.py --brand <id> [--brand <id2>] --channel <channel_id> \
+    --lane <corpus>/brand-tl.json --rivals "<name>,<name>,…"
+  ```
+  `--rivals`: up to 30 of the brand's product category's best-known brand names you are certain of (direct competitors: the same kind of product). For a brand that sells several products, rivals are brands selling any of the same products. Never the brand's own products or sub-brands. Put `~` before a name that is also an everyday word or an easy mishearing of one (`~Haven`): captions then count it only beside a sponsor word ("use code", "link"), while description sponsor lines and hashtags match it as usual. The script writes the brand record, the brand's newest sponsored reads, this creator's own past reads of it, its sponsored mentions by year and top 20 channels, this channel's sponsor-tagged descriptions of the last 24 months, `category_history` (this channel's sponsors, any year, whose names are in `--rivals`) and `all_sponsors` (every sponsor of this channel, any year, with `videos_24m` for the last 24 months). A detection is a tag, not a deal. `sponsored_topics` in the brand record is a hint to check against the reads, not a fact. When writing the map, a sponsor in `all_sponsors` whose product complements the brand's counts as category history too. `--check` refuses the other channels' names in the creator brief, and any talking point inside a `this_channel_reads` read or within 45 seconds of it.
+- **Brand site** → `<corpus>/brand-site.json`: one `tl-cli:brand-site`. Its message is exactly these lines, filled in:
+  ```
+  Brand: <name> (ThoughtLeaders brand id <id>[, <id2>])
+  Website: <website from the brand record>
+  Platform record: "<the brand record's description>"
+  Write to: <corpus>/brand-site.json
+  ```
+- **Brand moments** → `<corpus>/category-probe.json`: one `tl-cli:brand-moments`. Its message is exactly these lines, filled in:
+  ```
+  Creator: <channel name> (ThoughtLeaders channel id <channel_id>)
+  Brand: <name> (ThoughtLeaders brand id <id>[, <id2>]), <what it sells, from the brand record>
+  Occasions: <4 to 8 occasions the product is for, from the brand record and what the brand sells, separated by ";". Each is a situation where the product is used ("travelling", "cooking dinner"), never a group of people ("family", "kids")>
+  Skill directory: <skill>
+  Corpus: <corpus>
+  Command prefix: <the environment prefix the run uses for every command, or "none">
+  ```
 
 **Step 2. Check the moments.** When the ledger is saved and the lanes have written, run:
 
@@ -273,11 +283,11 @@ Concepts:
   4. `The concept:` the content they could make.
   5. At most one `Sample line (illustration only): "…"`.
   6. `Do:` and `Don't:`, both concrete.
-- A strong concept's lead quote and further moments are `recent`. An older moment appears only as dated backstory with its year.
+- A strong concept's lead quote is always `recent`. A thin concept may lead with an older moment, written with its year. Any concept may carry one older moment among its further moments, written with its year ("in 2021, …").
 - A fact told against what the brand sells, or a video mocking or undercutting the brand, is never a concept or precedent; it shapes the guardrails. IF every fact naming the product is of that kind → no fit.
 
 Quotes and descriptions, every section:
-- Quote whole sentences, verbatim. Link the second the quote's first word is said (`--check` allows three seconds).
+- Quote whole sentences, verbatim. Link the second the quote's first word is said (`--check` allows three seconds). A quote may start anywhere inside its moment. On captions with no punctuation at all (older auto-captions), a stretch of at least eight words counts as whole.
 - Name the place the captions name at the linked second, not the one in the title. Two uploads with one title: add the year.
 - Describe a moment only with what its quote, title or captions show; add no circumstances (time of day, "off camera", "hidden", a routine).
 - `premise` set: describe the moment as the video's premise ("in a video built on <premise>"), never as real life. `label` set: include it as written.
@@ -286,7 +296,7 @@ Quotes and descriptions, every section:
 
 Sections:
 - `## Verdict` opens with `**Strong fit.**` (any strong concept), `**Thin fit.**` (only thin concepts) or `**No fit.**` (no concepts; nothing in the moments meets what the brand sells). Then three or four sentences arguing the fit from the creator's moments, with two or three short quotes and the concepts' routes, not a list of videos. Then `Best-fit products: …`. Claim only what the quoted moments show.
-- `## About <creator>` (the channel name or `creator_name`): two or three sentences on who they are now, then up to 10 lines `- <fact ids joined by +>: <line>` about the person, one line per fact or group of facts saying the same thing. A fact about the person outranks one the channel page already shows (schedule, format). A past phase, a `superseded_by` or an `ended` fact is dated history with its span, never current. Date the saying, not the event ("said in <Month YYYY> that …"), unless the quote dates it; a lapsed habit uses its `said` span. Leave out a fact whose own moment failed moment_check for its words, its voice (an ad read) or its surroundings.
+- `## About <creator>` (the channel name or `creator_name`): two or three sentences on who they are now, then up to 10 lines `- <fact ids joined by +>: <line>` about the person, one line per fact or group of facts saying the same thing. The lines are the creator's story so far: milestones (starting the channel, school, moves, engagements and marriages, children, businesses or product lines they launched, big career moments) and the people closest to them. The page lists them in the order the creator said them, newest first, so write each line to stand on its own; a small taste (a favourite colour, a food) only when it connects to the brand. On a multi-host channel each line names whose milestone it is. A fact about the person outranks one the channel page already shows (schedule, format). A past phase, a `superseded_by` or an `ended` fact is dated history with its span, never current. Date the saying, not the event ("said in <Month YYYY> that …"), unless the quote dates it; a lapsed habit uses its `said` span. Leave out a fact whose own moment failed moment_check for its words, its voice (an ad read) or its surroundings.
 - `## Done this before`: `category_history` partnerships older than 24 months and the brand's unpaid moments, one dated, linked line each.
 - `## Good to know when booking`: a rival's partnership inside 24 months, a direct competitor's (the same kind of business) at any age, and a brand the creator launched in the category. Name a brand only when a `line` in `category_history` or `description_tags`, or a read in the video, shows the deal.
 - Sample and `Do:` lines follow the guardrails: no coverage, speed, health or performance claims; no filming or tracking people who have not agreed.

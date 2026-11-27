@@ -33,19 +33,27 @@ one passage; the kept copy's `recurrence_videos` counts the uploads.
 | `--anchor-before` / `--anchor-after` | 30 / 15 | extra reach around the window's heaviest cue phrase |
 | `--max-windows` | 300 | ceiling per round |
 | `--min-score` / `--min-windows` | 8.0 / 150 | the selection stops below the score once this many are kept |
-| `--batch-size` | derived | windows per extractor; `ceil(kept / agent cap)`, 5 to 15 |
+| `--batch-size` | derived | windows per extractor: each agent filled to 15 (fewer agents re-reading the rubric), at least 5 |
 | `--per-video-cap` | 8 | windows one video may own |
 | `--generic-floor` | `--max-windows` | run the first-person fallback only below this many phrase windows; 0 never |
-| `--reserve` | 0 | agent slots other lanes hold during the fan-out; batches are sized against `cap - reserve` |
+| `--reserve` | 0 | agent slots other lanes hold during the fan-out; the summary reports `usable_cap` = `cap - reserve` |
 | `--exclude` | none | a `classified.jsonl`; passages already judged (same video, start within 30 s) are skipped |
 | `--round` / `--since` | 1 / none | an incremental round: batches go to `batches-rN/`; `--since` is the ledger's `latest_video_date`, backfilled 90 days |
 | `--phrases` | `references/cue-phrases.txt` | the cue list; a corroboration round passes its own |
+| `--interest-phrases` | `references/interest-cues.txt` | interests, collecting, style, pets, the creator's own work, milestones and family; joins the search on the default cue list only, ranks weak in the main ranking, and its `@from-main` lines borrow whole main-list sections for the reserved seats |
+| `--interest-seats` | 50 | seats filled after the main ranking from the passages it left that fired an interest cue, recent ones first; 0 turns them off |
 | `--out` | `<profiles>/.corpus` | corpus root |
 
 On an English-language channel a non-English transcript is an auto-dubbed
 track: excluded, reported as `dubbed_excluded`. `in_sponsor_read` comes from
 the platform's sponsored spans when the lookup succeeds (`sponsor_source`),
 else from a regex.
+
+Within one `start_run.py` call every lookup is kept for the call
+(`TL_FETCH_CACHE_DIR`), so the second fetch with a host name found on camera
+relabels the passages already downloaded instead of searching again. With
+`TL_CREATOR_NO_CACHE_WRITES` set (a test run), nothing is written to the
+channel record.
 
 Each window also carries `turns`, how many times the captions mark a change
 of speaker (`>>`) inside it.

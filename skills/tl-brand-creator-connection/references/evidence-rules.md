@@ -124,7 +124,10 @@ Rules the scripts and the merge shard apply to what the extractor returned.
   back. That line, found nowhere else: kept in the ledger at
   `unconfirmed`, marked `staged_only`, never on a brand-facing page. A claim
   found only in a staged upload's first 60 seconds, and in no other video, is
-  the opening hook: `unconfirmed`.
+  the opening hook: `unconfirmed`. A web or social record a shard links to a
+  `staged_only` line is `confirmed` on its own, with its source, and the
+  staged line stays `unconfirmed`; a record whose page is on YouTube or names
+  one of the line's videos only repeats the bit and stays `unconfirmed`.
 - **Contradictions are settled on dated evidence, not on the two lines in
   view.** Two facts in one domain that cannot both be current (two homes, a
   husband and a boyfriend) are probed the same way, and the newest dated
