@@ -151,9 +151,13 @@ Unless the user specifically asks for running a specific report or showing the r
 4. **Always use --json**: Parse JSON output for multi-step analysis.
 5. **Chain commands**: For complex questions, chain multiple `tl` commands, shell commands, and other tools.
 6. **Format results**: When the user asks for a list or tabular data, present the results as a well-formatted markdown table. Pick the most relevant columns and use clear headers. Sort the result by relevant criteria - if the user asked for "top performers", order by the performance metric; if the user asked for "most recent", sort by the pertinent date desc.
+
+   **Internal IDs are for commands only.** In replies, never show the ID of a channel, brand, video or sponsorship — no ID column, no "channel 50538". Name it instead, and link a channel to its YouTube page (its `url`) when a link helps. Show an ID only when the user asks for one.
+
+   **Write for marketers and creators, not developers.** Say "search" or "look up", never "query"; don't mention tables, columns, schemas, commands or cost previews; describe what you found, not how you fetched it. Explain a credit limit in plain words: what it would cost, what they have left, and when it resets. Technical detail is for when the user asks for it.
 7. **Always offer to save the result as a report — if the rows fit a report type.** A "fits a report type" result is a table whose rows are **channels**, **brands**, **videos / uploads**, or **sponsorships / deals**. When that's the case, after the table close the reply with a save offer — don't wait for the user to ask. Suggested phrasing (adapt the noun to the entity):
 
-   > *Want me to save this as a saved TL report you can come back to? Say "save it as a report" and I'll ask whether you want a filter-style report (predicates re-evaluated on every run) or a list-style report (these exact IDs frozen).*
+   > *Want me to save this as a saved TL report you can come back to? Say "save it as a report" and I'll ask whether you want a filter-style report (predicates re-evaluated on every run) or a list-style report (these exact rows frozen).*
 
    If the user says yes (or uses any of the save-trigger phrases, like `save it`, `save the list`, `make a report`, `persist this`, `turn this into a campaign`, `I want to come back to this`), invoke the `tl-save-report` skill — it owns the filter-vs-list decision flow, the FilterSet mapping, and the `tl reports create` / `tl reports save-list` save call. **Don't try to compose the report config yourself**; hand off to the skill.
 
